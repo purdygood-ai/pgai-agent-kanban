@@ -1,0 +1,53 @@
+# shell-env_example — shell environment sourced before each wake firing.
+#
+# Copy to "shell-env" in the kanban root and edit:
+#
+#   cp shell-env_example "$PGAI_AGENT_KANBAN_ROOT_PATH/shell-env"
+#
+# This file is shell-sourced by wake_common.sh. Put PATH adjustments,
+# virtualenv activation, and any other non-secret shell environment here.
+# For sensitive credentials (OAuth tokens, API keys), use "secrets" instead
+# — see secrets_example.
+#
+# Notes:
+#   - This file is OPTIONAL — wake scripts work without it as long as the
+#     cron environment inherits a usable PATH and KANBAN_ROOT is exported
+#     from the operator's ~/.bashrc or equivalent.
+#   - The file is shell-sourced — any syntax error halts the wake firing.
+#     Test edits with: bash -n $PGAI_AGENT_KANBAN_ROOT_PATH/shell-env
+#   - For wake-loop tunables (max_tasks_per_wake, etc.), edit kanban.cfg
+#     [wake] instead. For per-agent model overrides, edit kanban.cfg
+#     [models.<provider>] (e.g., [models.claude], [models.codex]) — the
+#     active provider is resolved from [providers] active at wake startup.
+#     This file is shell-only — no INI translation happens here.
+#
+# All lines below are commented out by default. Uncomment to use.
+
+
+# --- Kanban root (typically set in ~/.bashrc, but can live here) ---
+# Cron jobs invoking the wake scripts need KANBAN_ROOT to find the
+# installation. Most operators set this once in their ~/.bashrc; you can
+# also set it here so the wake script is self-contained.
+# No default — required for any cron-driven operation.
+#
+# export PGAI_AGENT_KANBAN_ROOT_PATH="$HOME/pgai_agent_kanban"
+# export KANBAN_ROOT_PATH="$PGA_AGENT_KANBAN_ROOT_PATH"
+
+
+# --- PATH ---
+# Cron jobs run with a minimal PATH and won't find tools in $HOME without
+# this. Uncomment if `claude` or `codex` CLIs aren't on the default cron PATH.
+# Default: not modified (uses whatever PATH cron provides)
+# export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
+
+
+# --- Python virtualenv (optional) ---
+# Activate a Python virtualenv if your system Python is too old.
+# pm_materialize.py and pm_status.py require Python 3.10+.
+# No default — leave commented unless system Python is unsuitable.
+# source "$HOME/py3.12/bin/activate"
+
+
+# --- Other ---
+# export EDITOR=vim
+

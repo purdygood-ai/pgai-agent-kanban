@@ -1,0 +1,293 @@
+# kanban.cfg_example
+#
+# INI-format configuration for the pgai-agent-kanban framework. This file is
+# the single source of truth for framework operational settings.
+#
+# Copy to "kanban.cfg" in the kanban root:
+#   cp kanban.cfg_example "$PGAI_AGENT_KANBAN_ROOT_PATH/kanban.cfg"
+#
+# Format: standard INI. Comments start with # or ; — both are ignored.
+# Values don't need quotes. Parsed by team/scripts/lib/ini_parser.sh::read_ini.
+#
+# Every key shown below is set to its current default. Edit any line to
+# override; lines you remove or comment out fall back to the same default
+# value baked into the framework.
+#
+# Companion files at the kanban root:
+#   secrets         Sensitive credentials (OAuth tokens, API keys). Gitignored.
+#                   See secrets_example.
+#   shell-env       Shell environment (PATH, venv activation). Optional.
+#                   See shell-env_example.
+
+
+# ---------------------------------------------------------------------------
+# [dashboard] — display and layout settings
+# ---------------------------------------------------------------------------
+[dashboard]
+
+# Total rows rendered per dashboard column. Floor and ceiling for sparse-
+# vs full-column layouts; the framework picks somewhere in this range based
+# on how many projects are registered.
+min_rows_per_column = 13
+max_rows_per_column = 34
+
+# Per-project row allocation within a column. With many projects the
+# allocation shrinks from the ceiling toward the floor.
+min_rows_per_project = 3
+max_rows_per_project = 13
+
+# Global fallback for the per-project "items shown per column" cap. The
+# corresponding per-project override lives in projects.cfg [project:NAME].
+# When the queue is longer than this, the last visible row reads
+# "... and N more".
+max_rows = 20
+
+
+# ---------------------------------------------------------------------------
+# [chain] — pipeline and chain-execution settings
+# ---------------------------------------------------------------------------
+[chain]
+
+# PM autonomous scan mode.
+#   automatic: PM creates self-tickets from requirements docs when its
+#              backlog is empty.
+#   manual:    autonomous scan disabled; PM only processes tickets already
+#              in pm_backlog.md.
+# Default: automatic
+pm_mode = automatic
+
+# Seconds before an agent lock is considered stale and eligible for
+# cleanup.
+# Default: 3600
+agent_lock_timeout_seconds = 3600
+
+
+# ---------------------------------------------------------------------------
+# [paths] — directory layout and filesystem paths
+# ---------------------------------------------------------------------------
+[paths]
+
+# Dev tree: the local git dev tree of the pgai-agent-kanban.
+# OPTIONAL:  only need to use when running "scripts/upgrade.sh"
+# A missing or empty value is NOT an error — it simply means no global dev tree
+# is configured. Scripts that genuinely need a dev tree call require_dev_tree()
+# from scripts/lib/dev_tree.sh and report a clear per-consumer error.
+# Default: empty (no global dev tree)
+dev_tree_path =
+
+# Base directory for all framework temp space. Override when /tmp is
+# constrained (small tmpfs, noexec, locked-down). Default: /tmp
+tmp_root = /tmp
+# Framework's temp subdirectory under tmp_root. Full temp path is
+# ${tmp_root}/${tmp_subdir}. Default: pgai_kanban_tmp
+tmp_subdir = pgai_kanban_tmp
+# Per-project temp directory NAMING (the subdirectory name nested under the
+# framework temp root above) is configured per-project in project.cfg via the
+# `temp_dir` key, not here. See project.cfg_example [project] temp_dir.
+
+# Worktree base directory: the parent directory under which ALL task worktrees
+# are created. The full path for a task is <worktree_base>/<task_id>.
+#
+# Resolution order (highest precedence first):
+#   1. PGAI_WORKTREE_BASE env var — direct override.
+#   2. This key (worktree_base) — config-driven override.
+#   3. Default: ${tmp_root}/${tmp_subdir}/worktrees
+#      (i.e. the "worktrees" subdirectory under the framework temp root).
+#
+# Override when you want worktrees on a separate volume (e.g. a faster disk,
+# a larger partition, or outside /tmp). Must be an absolute path.
+# If left empty or absent, the framework uses the default above.
+# Default: (empty — use ${tmp_root}/${tmp_subdir}/worktrees)
+# worktree_base =
+
+
+
+# ---------------------------------------------------------------------------
+# [providers] — multi-provider LLM configuration
+# ---------------------------------------------------------------------------
+[providers]
+
+# Active provider — which provider's wake script does work each firing.
+# The wake scripts read this on every firing and fast-exit if they are
+# not the active one. To switch, edit this value OR run:
+#   scripts/switch-provider.sh <provider>
+# Valid: claude, codex
+# Default: claude
+active = claude
+
+# Initial provider value written by install.sh on a fresh install
+# (when no kanban.cfg exists yet). After install, the "active" key
+# above is the canonical runtime source.
+# Valid: claude, codex
+# Default: claude
+initial = claude
+
+# Providers whose role files install.sh deploys to ~/.<provider>/agents/.
+# Providers whose CLI binary is not on PATH are skipped with a log line —
+# install.sh never errors out for a missing CLI.
+# Valid values: claude, codex (space or comma separated).
+# Default: claude codex
+available = claude codex
+
+# Authentication mode used by wake scripts when sourcing credentials.
+#   oauth:  Claude Code OAuth credentials (from `claude login` or
+#           CLAUDE_CODE_OAUTH_TOKEN). API-key variables are unset so they
+#           don't accidentally override OAuth flows.
+#   apikey: A traditional API key (ANTHROPIC_API_KEY) is expected in the
+#           secrets file. OAuth token variables are left untouched.
+# Default: oauth `claude login`
+# continue to work without any change to their secrets file).
+# Note: for codex you need to logout and log back in to switch between
+#       ai_auth_mode because codex will not just look for the API key
+#       env variable when switching to "apikey mode"
+ai_auth_mode = oauth
+
+
+# ---------------------------------------------------------------------------
+# [wake] — wake-script tunables (loaded into env vars at wake startup)
+# ---------------------------------------------------------------------------
+# These keys are loaded into uppercase env vars (max_tasks_per_wake →
+# MAX_TASKS_PER_WAKE) by wake_common.sh::load_kanban_cfg_to_env at startup,
+# then consumed by the existing wake-loop code paths.
+[wake]
+
+# Max tasks the wake loop will process in one firing before exiting.
+# Prevents one agent from monopolizing the cron slot.
+# Default: 5
+max_tasks_per_wake = 5
+
+# Max walltime (seconds) before the wake loop exits even if tasks remain.
+# Default: 14400 (4 hours)
+max_runtime_seconds = 14400
+
+# Sleep this many seconds between consecutive tasks in a single firing.
+# Lets a SIGTERM land cleanly between tasks rather than mid-task.
+# Default: 5
+pause_between_tasks = 5
+
+# Halt the wake loop when a task finishes in BLOCKED state.
+# Subsequent tasks usually depend on the blocked one, so this is the
+# safer default.
+# Default: true
+stop_on_blocked = true
+
+# Touch this file to gracefully stop the current wake batch after the
+# in-flight task completes; one-shot — the file self-deletes once consumed.
+# Default: <framework temp root>/wakeup/stop  (under PGAI_AGENT_KANBAN_TEMP_DIR)
+# stop_file =
+
+# Maximum tasks the PM agent will generate from a single requirements doc.
+# Sweet spot is 5–15: too few makes each task too big for one Claude session;
+# too many adds coordination overhead.
+# Default: 15
+pm_max_tasks = 15
+
+# Hard per-task wall-clock timeout (seconds). When the provider CLI (claude,
+# codex, etc.) has been running for this many seconds without completing, the
+# wake script sends SIGTERM.  If the process does not exit within
+# kill_grace_seconds, SIGKILL is sent.  After the kill, the existing
+# agent-exit path marks the task BLOCKED with the reason:
+#   "exceeded max_task_seconds (<N>s)"
+# so operators can distinguish a stuck-agent kill from an ordinary crash.
+# The worktree is torn down and the lock is released normally.
+#
+# Set to 0 to disable the hard timeout (rely on MAX_RUNTIME_SECONDS alone).
+# Override at invocation: MAX_TASK_SECONDS=<N> wake-batch.sh ...
+# Default: 5400 (90 minutes)
+max_task_seconds = 5400
+
+# Per-project runtime cap (seconds).
+# Each project in the multi-project iteration gets its own elapsed clock that
+# resets at the start of run_project_chain.  When the project's elapsed time
+# exceeds max_project_seconds the project task loop exits and the next project
+# gets its own fresh clock.  This prevents a stalled project 1 from consuming
+# the entire batch budget and starving projects 2..N.
+#
+# The wake log names the bound that tripped — "(task)", "(project)", or
+# "(batch)" — so operators can tell which limit fired at a glance.
+#
+# Three bounds nest: task <= project <= batch.  A WARNING is logged at startup
+# if this invariant is violated by the configured values.
+#
+# Set to 0 to disable the per-project cap (each project can run up to the full
+# batch budget).
+# Override at invocation: MAX_PROJECT_SECONDS=<N> wake-batch.sh ...
+# Default: 14400 (same as max_runtime_seconds for single-project backward compat)
+max_project_seconds = 14400
+
+# Seconds between SIGTERM and SIGKILL when the per-task timeout fires.
+# Gives the provider CLI time to flush logs and clean up temp state before
+# the hard kill.
+# Override at invocation: KILL_GRACE_SECONDS=<N> wake-batch.sh ...
+# Default: 30
+kill_grace_seconds = 30
+
+
+# ---------------------------------------------------------------------------
+# [models.<provider>] — per-role, per-provider model overrides
+# ---------------------------------------------------------------------------
+# Each role's tasks invoke the model configured for the ACTIVE provider
+# ([providers] active). Loaded as PGAI_<ROLE>_MODEL env vars at wake startup.
+# Selection precedence (highest first):
+#   1. ## Model Override field in the task README
+#   2. PGAI_<ROLE>_MODEL env var (populated from the active provider's section here)
+#      - role-specific key wins over the provider-level default below
+#      - provider default fills in for any role left unset
+#   3. Provider CLI built-in default (a warning is logged when this path is taken)
+# All keys ship empty — model names change over time; set during configuration.
+# Model IDs are PROVIDER-SPECIFIC.
+
+[models.claude]
+# default = model used for any role below left unset.
+#   Leave blank to let the provider CLI choose its own default (a warning is
+#   logged when a role has no model). Set to your provider's current model.
+#   Model names change over time, so this is intentionally unset at install.
+#   Example (verify the current name for your CLI): claude-sonnet-4-6
+default =
+# Per-role overrides (optional). Unset roles fall back to default above.
+# Example: pm = claude-opus-4-8
+pm =
+coder =
+writer =
+tester =
+cm =
+po =
+
+[models.codex]
+# default = model used for any role below left unset.
+#   Leave blank to let the provider CLI choose its own default (a warning is
+#   logged when a role has no model). Set to your provider's current model.
+#   Model names change over time, so this is intentionally unset at install.
+#   Example (verify the current name for your CLI): gpt-5.4
+default =
+# Per-role overrides (optional). Unset roles fall back to default above.
+# Example: gpt-5.5
+pm =
+coder =
+writer =
+tester =
+cm =
+po =
+
+
+# ---------------------------------------------------------------------------
+# [cleanup] — cleanup.sh retention tunables
+# ---------------------------------------------------------------------------
+[cleanup]
+
+# Days to keep archived task folders and log files before cleanup.sh
+# removes them. Set to 0 to disable automatic retention sweep.
+# Default: 30
+retention_days = 30
+
+# Byte threshold below which a wake batch log is considered "trivial"
+# (i.e. an agent-had-nothing-to-do log, ~800B–1.7KB). Used by Step 0 of
+# cleanup.sh / --trivial-only. Substantive logs (≥ this size) are kept
+# for the normal retention window.
+# Default: 1700
+trivial_log_bytes = 1700
+
+# Age threshold (hours) for the trivial-purge sweep. Logs younger than
+# this are always preserved, even if below the byte threshold.
+# Default: 6
+trivial_log_hours = 6

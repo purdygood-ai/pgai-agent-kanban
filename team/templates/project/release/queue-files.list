@@ -1,0 +1,11 @@
+# Workflow: release
+# Queue files to seed for a release-workflow project.
+# Format: <filename>:<title>:<description>
+
+coder_backlog.md:Coder Backlog:coder agent
+pm_backlog.md:PM Backlog:pm agent
+writer_backlog.md:Writer Backlog:writer agent
+tester_backlog.md:Tester Backlog:tester agent
+cm_backlog.md:CM Backlog:cm agent
+bug_backlog.md:Bug Backlog:bug triage
+priority_backlog.md:Priority Backlog:priority intake

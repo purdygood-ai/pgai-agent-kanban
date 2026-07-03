@@ -1,0 +1,61 @@
+{
+  "_comment": "Fallback pricing only. Authoritative cost source is the CLI's total_cost_usd field. This table is used when tokens.json lacks total_cost_usd (legacy data) or when an unknown model is encountered.",
+  "providers": {
+    "claude": {
+      "models": {
+        "claude-opus-4-8":            {"input_per_1m":  5.00, "output_per_1m": 25.00, "cache_creation_per_1m":  6.25, "cache_read_per_1m": 0.50},
+        "claude-opus-4-7":            {"input_per_1m": 15.00, "output_per_1m": 75.00, "cache_creation_per_1m": 18.75, "cache_read_per_1m": 1.50},
+        "claude-sonnet-4-6":          {"input_per_1m":  3.00, "output_per_1m": 15.00, "cache_creation_per_1m":  3.75, "cache_read_per_1m": 0.30},
+        "claude-haiku-4-5":           {"input_per_1m":  1.00, "output_per_1m":  5.00, "cache_creation_per_1m":  1.25, "cache_read_per_1m": 0.10},
+        "claude-haiku-4-5-20251001":  {"input_per_1m":  1.00, "output_per_1m":  5.00, "cache_creation_per_1m":  1.25, "cache_read_per_1m": 0.10},
+        "opus":                        {"input_per_1m": 15.00, "output_per_1m": 75.00, "cache_creation_per_1m": 18.75, "cache_read_per_1m": 1.50},
+        "sonnet":                      {"input_per_1m":  3.00, "output_per_1m": 15.00, "cache_creation_per_1m":  3.75, "cache_read_per_1m": 0.30},
+        "haiku":                       {"input_per_1m":  1.00, "output_per_1m":  5.00, "cache_creation_per_1m":  1.25, "cache_read_per_1m": 0.10}
+      }
+    },
+    "codex": {
+      "_comment": "Codex CLI pricing (OpenAI API rates). metering field: 'per_token' = charged per token via API; 'per_message' = flat rate per invocation (e.g. ChatGPT subscription). Probe task BUG-0115 confirmed: model is 'gpt-5.3-codex' from ~/.codex/config.toml; model identifier absent from JSONL stream. Source: https://openrouter.ai/openai/gpt-5.3-codex (2026-05-20). Cache fields: only cached_input_tokens present (no cache_creation_input_tokens per BUG-0114).",
+      "models": {
+        "gpt-5.3-codex": {
+          "_comment": "Observed model on this host (BUG-0115). Rates: $1.75/$14.00 per 1M in/out. Cached reads ~90% off input rate. No cache_creation billing observed (BUG-0114). Source: https://openrouter.ai/openai/gpt-5.3-codex",
+          "input_per_1m":            1.75,
+          "output_per_1m":          14.00,
+          "cache_creation_per_1m":   0.00,
+          "cache_read_per_1m":       0.175,
+          "metering":               "per_token"
+        },
+        "gpt-5.5": {
+          "_comment": "Placeholder — not observed in probe. Source: https://openai.com/api/pricing/",
+          "input_per_1m":            5.00,
+          "output_per_1m":          30.00,
+          "cache_creation_per_1m":   0.00,
+          "cache_read_per_1m":       0.50,
+          "metering":               "per_token"
+        },
+        "gpt-5.4": {
+          "_comment": "Placeholder — not observed in probe. Source: https://openai.com/api/pricing/",
+          "input_per_1m":            2.50,
+          "output_per_1m":          15.00,
+          "cache_creation_per_1m":   0.00,
+          "cache_read_per_1m":       0.25,
+          "metering":               "per_token"
+        },
+        "gpt-5-mini": {
+          "_comment": "Placeholder — not observed in probe. Source: https://openai.com/api/pricing/",
+          "input_per_1m":            0.50,
+          "output_per_1m":           2.50,
+          "cache_creation_per_1m":   0.00,
+          "cache_read_per_1m":       0.05,
+          "metering":               "per_token"
+        }
+      }
+    }
+  },
+  "subscriptions": {
+    "claude_pro_programmatic_credit": 20.00,
+    "claude_max_programmatic_credit": 200.00,
+    "chatgpt_plus": 20.00,
+    "chatgpt_pro": 200.00
+  },
+  "updated": "2026-05-30"
+}

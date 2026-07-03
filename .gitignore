@@ -1,0 +1,67 @@
+# Personal configuration — should never be committed
+# v0.28.0 layout: shell-env (non-secret) and secrets (sensitive credentials)
+shell-env
+secrets
+# Legacy v0.27.x files (still ignored if present from old installs)
+bashrc
+env
+.env
+.env.local
+# Legacy v0.27.x runtime state file (v0.28.0: replaced by kanban.cfg [providers] active)
+active-provider
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# Coverage
+team/.coverage
+team/coverage-baseline.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Runtime data — these are created at install time in the kanban root,
+# not in the repo. But just in case someone runs the wake scripts from
+# inside the repo directory, keep them out of version control.
+tasks/queues/logs/
+tasks/queues/locks/
+tasks/queues/plans/
+tasks/CLAUDE-*/
+tasks/HUMAN-*/
+# Multi-queue runtime artifacts (team/ layout)
+team/tasks/queues/claude/logs/
+team/tasks/queues/claude/locks/
+
+# Temp
+/tmp/
+*.tmp
+*.bak
+
+# Runtime task data - belongs in live install, not dev tree
+tasks/
+projects/
+
+# Generated agent output and published deliverables - must not be committed.
+# Task artifacts (CODER/TESTER/etc.) and document-workflow publishes are
+# runtime output, not source. They belong in the live install under
+# projects/<name>/artifacts/, never in the dev tree.
+artifacts/
+tester-reports/

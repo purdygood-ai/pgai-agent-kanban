@@ -1,0 +1,57 @@
+[project]
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+markers = [
+    "dashboard_layout: tests that assert on rendered visual output (column counts, pane widths, character counts)",
+]
+
+# Basetemp retention policy (CODER-20260608-012)
+# ------------------------------------------------
+# tmp_path_retention_policy = "failed"
+#   Pytest removes the tmp_path directory for every test that *passes*
+#   immediately after that test finishes, rather than accumulating all
+#   per-test directories until the session ends.  Failed tests keep their
+#   directory so the developer can inspect artifacts after the run.
+#
+# tmp_path_retention_count = "1"
+#   When --basetemp is given explicitly (as run-unit-tests.sh and
+#   run-integration-tests.sh do), pytest removes and recreates the basetemp
+#   directory at session start, so this value controls how many numbered
+#   subdirectory generations pytest keeps inside that basetemp.  Setting it
+#   to 1 retains only the most recent generation for each named test.
+#
+# Combined effect: a 1000-test integration run that fully passes leaves
+# zero per-test directories at session end instead of ~1000 directories.
+# A failed run keeps exactly one directory per failing test (the last attempt).
+# The post-suite pgai_temp_cleanup_tests call in run-*.sh scripts removes the
+# tests/ subtree after a successful session (BUG-0296 scoped cleanup).
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = "1"
+
+# ---------------------------------------------------------------------------
+# Coverage configuration (v0.102.0 verification — CODER-20260628-047)
+# ---------------------------------------------------------------------------
+# These settings match the sources instrumented by run-unit-tests.sh --coverage.
+# Recording them here makes the coverage surface explicit and machine-readable,
+# so future invocations of `pytest --cov` without the shell runner still measure
+# the same surface.
+#
+# Verified baseline (v0.102.0 unit suite):
+#   line%:   57%   (percent_statements_covered)
+#   branch%: 46%   (percent_branches_covered)
+#   combined (line+branch): 54%
+#
+# Coverage is informational — it is never a ship gate (never-block policy).
+
+[tool.coverage.run]
+branch = true
+source = [
+    "pgai_agent_kanban",
+    "pm-agent",
+    "scripts/lib",
+]
+
+[tool.coverage.report]
+# Show only files with less than 100% coverage.
+skip_covered = false

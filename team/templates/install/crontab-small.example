@@ -1,0 +1,69 @@
+# pgai-agent-kanban: crontab-small.example
+#
+# Hardware assumption: 1 core / <=8 GB RAM, or shared/low-resource host.
+#
+# Tier: small
+# Design choice: three separate tier files (small/medium/large) rather than a
+#   parameterized template.  Each file is self-contained and flows through the
+#   existing __KANBAN_ROOT__ / __CLAUDE_PATH__ substitution and
+#   safe_overwrite_crontab mechanism in install-crontab.sh unchanged.
+#   Install with: team/scripts/install-crontab.sh  (after pointing it at this
+#   file, or by substituting manually as shown below).
+#
+# Cadence: every 5 minutes per agent, with per-phase integer-minute offsets.
+#   - Even minutes (*/5):        PM fires first.
+#   - 1 minute later (1-59/5):   CM fires.
+#   - 2 minutes later (2-59/5):  TESTER fires.
+#   - 3 minutes later (3-59/5):  CODER fires.
+#   - 4 minutes later (4-59/5):  WRITER fires.
+# No --sleep sub-minute stagger is used; the full-minute offsets are sufficient
+# on a single-core or shared host where parallel wake processes would contend.
+#
+# Maximum agent-to-agent handoff latency: ~5 minutes.
+# Recommended for: single-core VMs, shared CI runners, low-budget hosts.
+#
+# IMPORTANT: Replace __KANBAN_ROOT__ and __CLAUDE_PATH__ with real values
+# before installing.  install-crontab.sh performs these substitutions
+# automatically.
+#
+# Manual install:
+#   sed -e "s|__KANBAN_ROOT__|/your/kanban/root|g" \
+#       -e "s|__CLAUDE_PATH__|/usr/local/bin|g" \
+#     team/templates/install/crontab-small.example | crontab -
+
+# --- Environment ---
+PGAI_AGENT_KANBAN_ROOT_PATH=__KANBAN_ROOT__
+PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
+
+# =============================================================================
+# SMALL-TIER PATTERN — every-5-minutes with integer-minute phase offsets
+# =============================================================================
+# Maximum wait between agent firings: 5 minutes
+# No sub-minute stagger; one phase per minute to avoid resource contention.
+
+# --- Release-phase agents: PM, CM, TESTER ---
+# PM fires at :00 past every 5 minutes
+*/5 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0  >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+
+# CM fires at :01 past every 5 minutes (1-minute offset)
+1-59/5 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0  >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+
+# TESTER fires at :02 past every 5 minutes (2-minute offset)
+2-59/5 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0  >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+
+# --- Work-producer agents: CODER, WRITER ---
+# CODER fires at :03 past every 5 minutes (3-minute offset)
+3-59/5 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0  >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+
+# WRITER fires at :04 past every 5 minutes (4-minute offset)
+4-59/5 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0  >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+
+# --- Cleanup Script (weekly, Sundays at 4:00 AM) ---
+0 4 * * 0 __KANBAN_ROOT__/scripts/cleanup/cleanup.sh >> __KANBAN_ROOT__/logs/cron-cleanup.log 2>&1
+
+# --- Trivial-log purge (daily at 04:15, opt-in) ---
+# Uncomment to enable daily purge of small stale batch logs:
+# 15 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup.sh --trivial-only >> __KANBAN_ROOT__/logs/cron-cleanup-trivial.log 2>&1
+
+# --- Log Cleanup (daily at 04:30) ---
+30 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup_logs.sh >> __KANBAN_ROOT__/logs/cron-cleanup-logs.log 2>&1

@@ -1,0 +1,12 @@
+# pgai-agent-kanban — runtime dependencies
+#
+# Python packages the running kanban imports. The framework is otherwise
+# standard-library only.
+#
+# Install (into the venv the agents run under):
+#   pip install -r requirements.txt --break-system-packages
+#
+# Note: the kanban targets Python >= 3.12 (see team/pyproject.toml).
+
+# Workflow YAML parsing (team/pm-agent/lib/workflow_loader.py).
+PyYAML>=6.0

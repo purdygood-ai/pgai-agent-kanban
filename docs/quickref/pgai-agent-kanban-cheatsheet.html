@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pgai-agent-kanban — Operator Cheat Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f5f4ef; --ink:#1c1c1a; --muted:#6a6a63; --rule:#d9d7cd; --card:#fffefb;
+    --cmd-bg:#1c1c1a; --cmd-ink:#eceae2; --cmd-flag:#9ecbff; --cmd-arg:#e6c07b;
+    /* zone accents */
+    --z-cmd:#2f4b8f; --z-state:#2e7d52; --z-danger:#b3402e; --z-file:#1f7a82;
+    --z-proj:#6b4a9c; --z-ref:#5a5a52;
+  }
+  *{box-sizing:border-box;}
+  html{font-size:14px;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:'IBM Plex Sans',system-ui,sans-serif; line-height:1.4;
+    -webkit-font-smoothing:antialiased;
+  }
+  code,kbd,.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+
+  /* ---- masthead ---- */
+  header.mast{
+    padding:18px 22px 14px; border-bottom:3px solid var(--ink);
+    display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 16px;
+  }
+  .mast h1{font-size:1.9rem; font-weight:700; letter-spacing:-.01em; margin:0; line-height:1;}
+  .mast h1 .mono{font-weight:600;}
+  .mast .tag{font-size:.82rem; color:var(--muted); font-weight:500;}
+  .mast .ver{margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:.72rem;
+    color:var(--muted); border:1px solid var(--rule); border-radius:4px; padding:3px 8px; align-self:center;}
+
+  .wrap{padding:14px 18px 40px;}
+  .cols{column-count:3; column-gap:14px;}
+  @media (max-width:1100px){.cols{column-count:2;}}
+  @media (max-width:680px){.cols{column-count:1;} html{font-size:13.5px;}}
+
+  /* ---- cards ---- */
+  .card{
+    background:var(--card); border:1px solid var(--rule); border-radius:7px;
+    margin:0 0 14px; padding:0; break-inside:avoid; overflow:hidden;
+    box-shadow:0 1px 0 rgba(0,0,0,.03);
+  }
+  .card > h2{
+    font-size:.74rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em;
+    color:#fff; margin:0; padding:6px 11px; display:flex; align-items:center; gap:8px;
+  }
+  .card > h2 .sub{font-weight:500; text-transform:none; letter-spacing:0; opacity:.85; font-size:.7rem; margin-left:auto;}
+  .card .body{padding:9px 11px 11px;}
+  .z-cmd>h2{background:var(--z-cmd);} .z-state>h2{background:var(--z-state);}
+  .z-danger>h2{background:var(--z-danger);} .z-file>h2{background:var(--z-file);}
+  .z-proj>h2{background:var(--z-proj);} .z-ref>h2{background:var(--z-ref);}
+  .z-cmd{border-color:var(--z-cmd);} .z-danger{border-width:2px;}
+
+  /* sub-headers inside a card */
+  .grp{font-size:.66rem; font-weight:700; text-transform:uppercase; letter-spacing:.07em;
+    color:var(--muted); margin:9px 0 4px;}
+  .grp:first-child{margin-top:0;}
+
+  /* command lines */
+  .cmd{
+    background:var(--cmd-bg); color:var(--cmd-ink); border-radius:4px;
+    font-family:'IBM Plex Mono',monospace; font-size:.72rem; line-height:1.5;
+    padding:5px 8px; margin:3px 0; white-space:pre-wrap; word-break:break-word;
+  }
+  .cmd .f{color:var(--cmd-flag);} .cmd .a{color:var(--cmd-arg);} .cmd .c{color:#7f8a7f;}
+  .desc{font-size:.76rem; color:var(--ink); margin:1px 0 7px; padding-left:2px;}
+  .desc .muted{color:var(--muted);}
+
+  /* compact definition rows */
+  dl.rows{margin:0; display:grid; grid-template-columns:auto 1fr; gap:2px 9px; align-items:baseline;}
+  dl.rows dt{font-family:'IBM Plex Mono',monospace; font-size:.73rem; font-weight:500; white-space:nowrap;}
+  dl.rows dd{margin:0; font-size:.76rem; color:var(--muted);}
+
+  /* state / marker chips */
+  .chip{font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:.72rem;
+    border:1px solid var(--rule); border-radius:4px; padding:1px 5px; background:#f0efe8;}
+  table.states{width:100%; border-collapse:collapse; font-size:.75rem;}
+  table.states td{padding:3px 4px; border-bottom:1px solid var(--rule); vertical-align:top;}
+  table.states tr:last-child td{border-bottom:none;}
+  table.states td:first-child{white-space:nowrap;}
+  .marker{display:inline-block; font-family:'IBM Plex Mono',monospace; font-weight:600;
+    width:1.9em; text-align:center; color:var(--z-cmd);}
+
+  /* numbered procedure */
+
+  .note{font-size:.72rem; color:var(--muted); margin:7px 0 0; padding-top:6px; border-top:1px solid var(--rule);}
+  .warn{color:var(--z-danger); font-weight:600;}
+  ul.tight{margin:3px 0; padding-left:16px; font-size:.76rem;}
+  ul.tight li{margin:2px 0;}
+  .kv{font-size:.76rem;}
+  .kv b{font-family:'IBM Plex Mono',monospace; font-weight:600;}
+  .arrow{color:var(--z-file); font-weight:600;}
+
+  footer{padding:8px 20px 24px; font-size:.7rem; color:var(--muted); border-top:1px solid var(--rule); margin-top:6px;}
+
+  @media print{
+    :root{--bg:#fff; --card:#fff;}
+    body{font-size:8.6pt;}
+    .wrap{padding:8px;} .cols{column-count:3; column-gap:9px;}
+    .card{box-shadow:none; margin-bottom:8px;}
+    .cmd{background:#f1f0ea; color:#1c1c1a;}
+    .cmd .f{color:#234;} .cmd .a{color:#7a5; } .cmd .c{color:#999;}
+    .mast .ver{display:none;}
+    @page{margin:9mm;}
+  }
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <h1><span class="mono">pgai-agent-kanban</span></h1>
+  <span class="tag">Operator quick reference — autonomous multi-agent build kanban</span>
+  <span class="ver">v0.91.x · commands · states · procedure</span>
+</header>
+
+<div class="wrap">
+<div class="cols">
+
+  <!-- ============ OPERATOR COMMANDS (HERO) ============ -->
+  <section class="card z-cmd">
+    <h2>Operator commands <span class="sub">act on items by --key</span></h2>
+    <div class="body">
+      <p class="desc"><span class="muted">Every command is a thin wrapper that does its one job. It refuses only when the <b>--key</b> can't be resolved to a single item. The operator decides; the command obeys.</span></p>
+
+      <div class="grp">Items — resolve & retire</div>
+      <div class="cmd">show <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span></div>
+      <p class="desc">Print an item's status / details. Read-only.</p>
+      <div class="cmd">reset <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span> <span class="f">[--keep-artifacts]</span></div>
+      <p class="desc">Task <span class="arrow">→</span> BACKLOG + unchecked marker, blockers cleared. Requirement <span class="arrow">→</span> clears materialize marker (PM re-decomposes). Intake <span class="arrow">→</span> re-opened. <span class="warn">Refuses a WORKING task.</span></p>
+      <div class="cmd">close <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span> <span class="f">[--state</span> <span class="a">done|wont-do|superseded]</span> <span class="f">[--note</span> <span class="a">…]</span> <span class="f">[--dry-run]</span></div>
+      <p class="desc">Intake item <span class="arrow">→</span> sets terminal Status (default <code>done</code>). Agent task <span class="arrow">→</span> always closed as <b>DONE</b> (<code>--state</code> is intake-only). Marker <span class="arrow">→</span> <span class="mono">[x]</span>.</p>
+      <div class="cmd">wontdo <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span></div>
+      <p class="desc">Set <b>WONT-DO</b> + marker <span class="mono">[x]</span>. The honest "abandon" verb.</p>
+      <div class="cmd">delete <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span> <span class="f">[--force] [--dry-run]</span></div>
+      <p class="desc">Remove the item + its queue line. <span class="muted">Guarded to terminal items.</span></p>
+
+      <div class="grp">Halt — pause dispatch</div>
+      <div class="cmd">halt <span class="f">--project</span> <span class="a">&lt;name&gt;</span>   <span class="c"># pause one project</span></div>
+      <div class="cmd">unhalt <span class="f">--project</span> <span class="a">&lt;name&gt;</span></div>
+      <div class="cmd">halt-after <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span></div>
+      <p class="desc">Graceful HALT — stops after the named work finishes (not a kill).</p>
+      <div class="cmd">halt-global       <span class="c"># pause ALL projects</span>
+unhalt-global</div>
+
+      <div class="grp">Intake — deposit work (dumb router)</div>
+      <div class="cmd">intake <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="a">&lt;file&gt;</span></div>
+      <p class="desc">Routes by filename, copies, chmod 644. Does <b>not</b> validate contents.</p>
+
+      <div class="grp">RC lifecycle</div>
+      <div class="cmd">ship-rc <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">vX.Y.Z</span></div>
+      <p class="desc">Finalize + tag + merge a ready RC (operator stands in for CM).</p>
+      <div class="cmd">unwind-rc <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">vX.Y.Z</span> <span class="f">[--dry-run] [--force]</span></div>
+      <p class="desc">Abort an in-flight RC: backup <span class="arrow">→</span> delete RC branch <span class="arrow">→</span> tasks to WONT-DO <span class="arrow">→</span> reset state. <span class="warn">Cannot unwind a shipped tag.</span></p>
+    </div>
+  </section>
+
+  <!-- ============ KEY FORMATS + EXIT CODES ============ -->
+  <section class="card z-cmd">
+    <h2>--key formats <span class="sub">self-identifying · resolve by prefix</span></h2>
+    <div class="body">
+      <dl class="rows">
+        <dt>BUG-NNNN</dt><dd>bug intake item</dd>
+        <dt>PRIORITY-NNNN</dt><dd>priority intake item</dd>
+        <dt>vX.Y.Z</dt><dd>requirement (version target)</dd>
+        <dt>ROLE-YYYYMMDD-NNN</dt><dd>agent task (e.g. <span class="mono">CODER-20260626-001</span>)</dd>
+      </dl>
+      <p class="note">The slug tail is optional — the prefix resolves the item. Write commands refuse on an ambiguous match.</p>
+    </div>
+  </section>
+
+  <section class="card z-cmd">
+    <h2>Exit codes <span class="sub">resolving commands</span></h2>
+    <div class="body">
+      <dl class="rows">
+        <dt>0</dt><dd>done (or --dry-run / --help)</dd>
+        <dt>1</dt><dd>usage error / missing arg</dd>
+        <dt>2</dt><dd>ambiguous key (0 or many matches)</dd>
+        <dt>3</dt><dd>key not found</dd>
+        <dt>4</dt><dd>state mutation failed</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ============ THE SIX STATES ============ -->
+  <section class="card z-state">
+    <h2>The six states <span class="sub">no REVIEW state</span></h2>
+    <div class="body">
+      <table class="states">
+        <tr><td><span class="marker">[ ]</span></td><td><b>BACKLOG</b></td><td>queued, prereqs unmet</td></tr>
+        <tr><td><span class="marker">[W]</span></td><td><b>WAITING</b></td><td>prereqs unmet, parked</td></tr>
+        <tr><td><span class="marker">[A]</span></td><td><b>WORKING</b></td><td>an agent holds it now</td></tr>
+        <tr><td><span class="marker">[B]</span></td><td><b>BLOCKED</b></td><td>agent stopped, needs input</td></tr>
+        <tr><td><span class="marker">[x]</span></td><td><b>DONE</b></td><td>completed</td></tr>
+        <tr><td><span class="marker">[x]</span></td><td><b>WONT-DO</b></td><td>abandoned</td></tr>
+      </table>
+      <p class="note"><b>Agents</b> set DONE / BLOCKED / WONT-DO. <b>No "needs human review" state.</b> A human can assert completion via <code>close</code> — rarely.</p>
+    </div>
+  </section>
+
+  <!-- ============ DESTRUCTIVE-OP PROCEDURE ============ -->
+  <section class="card z-danger">
+    <h2>⚠ Before a destructive op <span class="sub">reset · delete · unwind</span></h2>
+    <div class="body">
+      <p class="desc">The scripts are power tools — they do exactly what you tell them. Safety lives in the operator's routine, not in the command. <span class="warn">Never let an agent wake mid-operation.</span></p>
+      <div class="grp">do this by hand first</div>
+      <ul class="tight">
+        <li>Back up the project dir (<span class="mono">tar</span>)</li>
+        <li>Wait until no task is <b>WORKING</b> (check the dashboard)</li>
+      </ul>
+      <div class="grp">the commands</div>
+      <div class="cmd">halt <span class="f">--project</span> <span class="a">&lt;name&gt;</span>     <span class="c"># pause first</span>
+<span class="c"># … run reset / delete / unwind-rc …</span>
+unhalt <span class="f">--project</span> <span class="a">&lt;name&gt;</span>   <span class="c"># resume</span></div>
+      <div class="grp">then by hand</div>
+      <ul class="tight">
+        <li>Verify on-disk state changed correctly</li>
+        <li>Watch the next wake on the dashboard</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ INTAKE ROUTING + FILE NAMING ============ -->
+  <section class="card z-file">
+    <h2>Intake routing &amp; file names</h2>
+    <div class="body">
+      <div class="grp">filename prefix → destination</div>
+      <p class="kv"><b>BUG-*</b> <span class="arrow">→</span> projects/&lt;name&gt;/bugs/<br>
+      <b>PRIORITY-*</b> <span class="arrow">→</span> projects/&lt;name&gt;/priority/<br>
+      <b>vX.Y.*</b> <span class="arrow">→</span> projects/&lt;name&gt;/requirements/</p>
+      <div class="grp">naming conventions</div>
+      <ul class="tight">
+        <li>Requirement: <span class="mono">vX.Y.0-&lt;slug&gt;.md</span></li>
+        <li>Bug: <span class="mono">BUG-NNNN-YYYYMMDD-&lt;slug&gt;.md</span> — needs the date segment <em>and</em> an internal <span class="mono"># BUG-NNNN</span> heading or intake rejects it</li>
+        <li>Priority: <span class="mono">PRIORITY-NNNN-&lt;slug&gt;.md</span></li>
+      </ul>
+      <p class="note">Confirm the high-water before numbering:<br><span class="mono" style="font-size:.68rem;">ls projects/&lt;p&gt;/bugs/ | grep -oE 'BUG-[0-9]+' | sort -V | tail -1</span></p>
+    </div>
+  </section>
+
+  <!-- ============ DISPATCH vs OPERATOR ============ -->
+  <section class="card z-danger">
+    <h2>⚠ Dispatch ≠ operator commands</h2>
+    <div class="body">
+      <p class="desc"><b>Dispatch</b> (cron) uses <code>--agent</code> — load-bearing, never remove:</p>
+      <div class="cmd">wake-batch.sh <span class="f">--agent=</span><span class="a">&lt;role&gt;</span>
+wake.sh · wake-now.sh
+pm-agent.sh · po-agent.sh</div>
+      <p class="note"><b>Operator</b> commands use <code>--key</code> and never take <code>--agent</code>. Don't confuse the two families.</p>
+    </div>
+  </section>
+
+  <!-- ============ PROJECTS + PROVIDER + CONFIG ============ -->
+  <section class="card z-proj">
+    <h2>Projects · provider · config</h2>
+    <div class="body">
+      <div class="grp">project lifecycle</div>
+      <div class="cmd">create-project <span class="f">--project</span> <span class="a">&lt;name&gt;</span>
+add-project <span class="f">--project</span> <span class="a">&lt;name&gt;</span>      <span class="c"># register existing</span>
+remove-project <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">[--force]</span></div>
+      <p class="desc"><span class="muted"><code>remove</code> unregisters by default; <code>--force</code> also rm -rf the dir.</span></p>
+      <div class="cmd">set-version-ceiling <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--show</span>
+set-version-ceiling <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--minor</span> <span class="a">&lt;N&gt;</span></div>
+
+      <div class="grp">provider</div>
+      <div class="cmd">switch-provider <span class="f">--provider</span> <span class="a">&lt;claude|codex&gt;</span></div>
+      <p class="desc"><span class="muted">Use this, not hand-edits. The <span class="mono">wake-*</span> log prefix is ground-truth for which provider is live.</span></p>
+
+      <div class="grp">portability</div>
+      <div class="cmd">export-project <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">[--out</span> <span class="a">&lt;file&gt;]</span>
+import-project <span class="f">--archive</span> <span class="a">&lt;path&gt;</span> <span class="f">[--name] [--register] [--force]</span>
+export-kanban-config <span class="f">[--file] [--include-secrets]</span>
+import-kanban-config <span class="f">--file</span> <span class="a">&lt;archive&gt;</span> <span class="f">[--force]</span></div>
+    </div>
+  </section>
+
+  <!-- ============ ROLES + WORKFLOWS ============ -->
+  <section class="card z-ref">
+    <h2>Agents &amp; workflow types</h2>
+    <div class="body">
+      <div class="grp">the chain</div>
+      <dl class="rows">
+        <dt>PM</dt><dd>decomposes requirements → tasks</dd>
+        <dt>CODER</dt><dd>implements code tasks</dd>
+        <dt>WRITER</dt><dd>prose / docs deliverables</dd>
+        <dt>TESTER</dt><dd>verifies, files bugs (reports, never blocks on findings)</dd>
+        <dt>CM</dt><dd>release manager — sole origin-toucher; defaults to ship</dd>
+        <dt>PO</dt><dd>human-invoked product owner</dd>
+        <dt class="muted">OVERWATCH</dt><dd class="muted">auto-recovery — dormant (post-1.0)</dd>
+      </dl>
+      <div class="grp">workflow types</div>
+      <p class="kv"><b>release</b> — software, git RC branch lifecycle<br>
+      <b>document</b> — prose, publishes to <span class="mono">artifacts/v&lt;ver&gt;-&lt;name&gt;.&lt;ext&gt;</span></p>
+    </div>
+  </section>
+
+  <!-- ============ READ ORDER + LAYOUT ============ -->
+  <section class="card z-ref">
+    <h2>Governance read order</h2>
+    <div class="body">
+      <p class="kv">Every agent reads top-down:</p>
+      <ol class="tight" style="padding-left:18px;">
+        <li>DIRECTIVES.md <span class="muted">— top rules</span></li>
+        <li>OVERVIEW.md <span class="muted">— autonomy principle</span></li>
+        <li>SOP.md <span class="muted">— how the kanban operates</span></li>
+        <li>README.md <span class="muted">— entry point</span></li>
+        <li>roles/&lt;ROLE&gt;.md</li>
+        <li>task README.md</li>
+        <li>task status.md</li>
+        <li>requirement / context</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="card z-ref">
+    <h2>Repo layout</h2>
+    <div class="body">
+      <p class="kv"><b>Dev tree</b> <span class="muted">(edit + commit)</span><br>
+      <span class="mono" style="font-size:.72rem;">~/develop/pgai-agent-kanban</span> — <span class="mono">team/</span>-prefixed source</p>
+      <p class="kv" style="margin-top:6px;"><b>Live install</b> <span class="muted">(cron runs here)</span><br>
+      <span class="mono" style="font-size:.72rem;">~/pgai_agent_kanban</span> — <span class="mono">team/</span> prefix dropped</p>
+      <p class="note"><code>install.sh</code> / <code>upgrade.sh</code> copy <span class="mono">team/X</span> <span class="arrow">→</span> <span class="mono">$KANBAN_ROOT/X</span>.</p>
+    </div>
+  </section>
+
+  <!-- ============ OPERATING MODEL ============ -->
+  <section class="card z-state">
+    <h2>The operating model</h2>
+    <div class="body">
+      <ul class="tight">
+        <li><b>Files on disk are truth;</b> git is the safety net.</li>
+        <li><b>Single-threaded by design</b> — one RC at a time per repo (the Active-RC gate). Stacking requirements is the intended use.</li>
+        <li><b>Take a few minutes to drop requirements;</b> the chain runs the rest autonomously.</li>
+        <li><b>CM defaults to ship</b> — it rarely blocks (only on TESTER-BLOCKED, a missing prerequisite, or a script failure).</li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+</div>
+
+<footer>
+  pgai-agent-kanban operator cheat sheet · commands &amp; contracts verified against v0.91.x · pair with the Operator Commands reference (<span class="mono">docs/operator-commands.md</span>) for full detail.
+</footer>
+
+</body>
+</html>

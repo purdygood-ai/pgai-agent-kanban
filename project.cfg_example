@@ -1,0 +1,202 @@
+# project.cfg.example
+#
+# INI-format per-project configuration template for the pgai-agent-kanban
+# framework. Each registered project has its own project.cfg under:
+#   $KANBAN_ROOT/projects/<project-name>/project.cfg
+#
+# Copy this file to your project's config location and customize:
+#   cp team/templates/project.cfg.example \
+#      "$KANBAN_ROOT/projects/<project-name>/project.cfg"
+#
+# Format: standard INI with [section] headers and key = value pairs.
+# Comments begin with # or ; and are ignored by the parser.
+# Values do NOT need to be quoted.
+#
+# Parsed by: team/scripts/lib/ini_parser.sh::read_ini
+# Usage:
+#   source "$KANBAN_ROOT/team/scripts/lib/ini_parser.sh"
+#   value=$(read_ini "$project_cfg" project project_name "")
+
+
+# ---------------------------------------------------------------------------
+# [project] — Core project identity and git settings
+# ---------------------------------------------------------------------------
+[project]
+
+# project_name: Canonical name for this project. Must match the directory
+# name under projects/ and the entry in projects.cfg.
+# Example: pgai-agent-kanban
+project_name = my-project
+
+# dev_tree_path: Absolute path to the git checkout where CODER agents do
+# their source-tree work. Distinct from the kanban's live install.
+# Example: $HOME/develop/my-project
+dev_tree_path = $HOME/develop/my-project
+
+# git_repo_url: Remote repository URL for CM to push tags and releases.
+# Example: git@github.com:myorg/my-project.git
+git_repo_url = git@github.com:myorg/my-project.git
+
+# git_remote_name: Name of the git remote to use for push/pull operations.
+# Default: origin
+git_remote_name = origin
+
+# workflow_type: Release workflow type for this project.
+# Allowed values: release, feature, prose
+# Default: release
+workflow_type = release
+
+# --- Git branch topology (release workflow only; ignored for document) -----
+# Before this project's FIRST release, the chain's two base branches must
+# exist: <prefix>main and <prefix>develop. With the default prefix that is
+# ai_main and ai_develop; with an empty prefix, main and develop. Your
+# repo's own default branch (e.g. main) is untouched and coexists.
+#   push_to_remote = true  -> both must also exist ON ORIGIN: CM pulls
+#                             <prefix>develop at RC-open and pushes releases.
+#   push_to_remote = false -> local branches in dev_tree_path suffice.
+# For push_to_remote = true, one idempotent command creates and pushes both:
+#   init-project-git-repo.sh --project <name>
+# For push_to_remote = false, create them locally instead (the init script
+# ALWAYS pushes — wrong for local-only mode):
+#   git branch <prefix>main main && git branch <prefix>develop main
+# branch_prefix: Optional prefix prepended to every AI-generated branch name.
+#
+# Hybrid-shop use case: teams where human developers and AI agents share the
+# same repository may want AI-generated branches to be visually distinct.
+# Setting branch_prefix to a short identifier (e.g. "ai_" or "team-") means
+# every branch the kanban creates will start with that string, making them
+# easy to filter in the git log, pull-request list, or branch protection rules.
+#
+# Pure-AI shops (or any install where the distinction is not needed) can
+# clear this value or set it to empty (branch_prefix =) — an empty prefix
+# produces no behavioral change versus the unset default.
+#
+# Allowed characters: letters (a-z, A-Z), digits (0-9), underscore (_), hyphen (-).
+# Values containing spaces, slashes, dots, or any other character are rejected.
+#
+# Examples that are valid: ai_, team-, MyOrg_
+# Examples that are invalid: my prefix, feat/, v1.0
+#
+# Default: ai_  (hybrid-shop default; clear or set empty for pure-AI installs)
+branch_prefix = ai_
+
+# push_to_remote: Controls whether CM pushes branches and tags to origin during
+# ship.  Set to false for developer-workstation installs where a human controls
+# when work reaches the company remote, or shops that require a human approval
+# gate between local merge and origin push.
+#
+# When false: CM completes the full local release (squash to develop, squash to
+# main, git tag) but skips every git push origin call.  The operator pushes
+# manually when ready (git push origin main && git push origin <VERSION>).
+# When true (or absent): CM pushes develop, main, and the version tag to origin
+# automatically, which is the standard behavior for fully-autonomous installs.
+#
+# Default: true
+push_to_remote = true
+
+# temp_dir: Per-project temp directory name, nested under the framework temp
+# root (${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}/<temp_dir>).
+# Resolved absolute path: <framework_temp_root>/<temp_dir>.
+#
+# This value is exported as PP_TEMP_DIR by pp_load_config so that agents and
+# scripts can route all transient files for this project to one predictable,
+# per-project location — isolating temp output per project and making it
+# cleanly sweepable.
+#
+# Default when absent: tmp.<project_name>
+# Example: for project "my-project" the default resolves to
+#   /tmp/pgai_kanban_tmp/tmp.my-project
+#
+# To use a custom name set temp_dir to any short identifier (no path
+# separators, no leading slash — the INI reader does not expand ~ and
+# absolute paths are disallowed for this field):
+#   temp_dir = my-project-tmp
+#
+# Default: tmp.<project_name>
+# temp_dir = tmp.my-project
+
+
+# ---------------------------------------------------------------------------
+# [versioning] — Version ceiling constraints
+# ---------------------------------------------------------------------------
+[versioning]
+
+# max_patch: Cap on the patch VERSION COMPONENT (Z in vX.Y.Z) of an eligible
+# target version. A project at v0.5.25 with max_patch=21 is gated (25 > 21);
+# raise the ceiling on mature or imported projects.
+# Set to 0 to disable automatic patch releases entirely.
+# Default: 21
+max_patch = 21
+
+# max_minor: Cap on the minor VERSION COMPONENT (Y in vX.Y.Z) of an eligible
+# target version. A project already at minor 59 with max_minor=13 is gated
+# (59 > 13); raise the ceiling on mature or imported projects.
+# These are NOT increment counters — they cap the component value in the
+# version number, not how many times that component has incremented.
+# Set to 0 to disable automatic minor releases.
+# Default: 13
+max_minor = 13
+
+# max_major: Cap on the major VERSION COMPONENT (X in vX.Y.Z). Kept at 0 by
+# default so major releases always require operator action (raising this ceiling).
+# Set to 0 to disable automatic major releases (recommended operator gate).
+# Default: 0
+max_major = 0
+
+# max_priorities_per_run: Maximum number of priority intake files the discovery
+# pipeline processes in a single PM invocation. Controls how many operator-
+# authored priority files are bundled into one requirements document per run.
+#
+# Operators can set this lower to throttle ingest (e.g., 1 means one priority
+# file per cron wake, giving the operator a chance to review each bundle before
+# the next fires). Set higher (e.g., 5) to drain a backlog faster.
+#
+# Empty / absent: callers apply a default of 1 (one file per run).
+# 0 is valid (disables automatic priority ingest entirely for this project).
+#
+# Default: 1
+# max_priorities_per_run = 1
+
+
+# ---------------------------------------------------------------------------
+# [hooks] — Optional CM release lifecycle hooks
+# ---------------------------------------------------------------------------
+# Hook scripts are called by cm-release.sh at specific phases.
+# Paths: leading '/' = absolute; no leading '/' = relative to dev_tree_path.
+# Failure behavior: pre_squash and pre_tag block the release; post_tag is logged only.
+[hooks]
+
+# cm_release_pre_squash_hook: Runs before RC branch is squashed to develop.
+# Hook commits become part of the squash. Failure BLOCKS the release.
+# Example: scripts/release-version-bump.sh
+# cm_release_pre_squash_hook =
+
+# cm_release_pre_tag_hook: Runs after squash to main, before git tag is created.
+# Use for final consistency checks. Failure BLOCKS the release.
+# Example: hooks/cm-release-pre-tag.sh
+# cm_release_pre_tag_hook =
+
+# cm_release_post_tag_hook: Runs after git tag is created (before push).
+# Use for notifications or asset uploads. Failure is LOGGED but does NOT block.
+# Example: /absolute/path/to/post-tag.sh
+# cm_release_post_tag_hook =
+
+
+# ---------------------------------------------------------------------------
+# [debug] — Diagnostic and introspection settings
+# ---------------------------------------------------------------------------
+[debug]
+
+# verbose_mode: When true, agents emit additional diagnostic output during
+# their run (expanded INI reads, queue scans, git operations). Useful for
+# troubleshooting agent behavior or validating a new install.
+# Set to false (or leave absent) for normal production operation.
+# Default: false
+verbose_mode = false
+
+# verbose_agents: Comma-separated list of agent roles that have debug/verbose
+# output enabled when verbose_mode = true. Only roles listed here emit debug
+# logs. Use a subset (e.g. coder,writer) to limit noise to specific agents.
+# Allowed values: pm, coder, writer, tester, cm (any subset, comma-separated)
+# Default: pm,coder,writer,tester,cm
+verbose_agents = pm,coder,writer,tester,cm

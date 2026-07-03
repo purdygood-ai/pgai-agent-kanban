@@ -1,0 +1,84 @@
+# projects.cfg_example
+#
+# Reference INI file for the projects.cfg registry.
+#
+# You normally never create projects.cfg by hand: create-project.sh
+# generates and maintains it. This file documents the format for reference
+# (and for hand-adjusting fields like priority on an existing registry).
+#
+# This file is for documentation and reference only. It is never sourced by
+# install.sh or any runtime script. Edits here have no effect on a live
+# installation until you copy the file to the kanban root.
+#
+# -----------------------------------------------------------------------
+# Format: INI-style with one [project:NAME] section per project.
+#
+# Section header:
+#   [project:NAME]
+#   where NAME matches [a-zA-Z0-9_-]+ and corresponds to a directory
+#   under $KANBAN_ROOT/projects/<NAME>/.
+#
+# Supported fields per section:
+#
+#   priority
+#     Integer. Lower value = higher priority for wake-script iteration.
+#     The wake script iterates projects in ascending priority order.
+#     Required field; projects without a priority are treated as lowest.
+#     Example: priority=1
+#
+#   description
+#     Free-text description of the project. Used for documentation and
+#     display only; no effect on runtime behavior.
+#     Optional. Default: empty.
+#     Example: description=Self-build kanban framework
+#
+#   enabled
+#     Boolean (true|false). When false, the project is excluded from the
+#     wake-script iteration loop entirely, equivalent to halting without
+#     a HALT file. Useful for temporarily pausing a project.
+#     Optional. Default: true.
+#     Example: enabled=false
+#
+#   dashboard_color
+#     Hex color string (#RRGGBB) for the project's color tag on the unified
+#     visibility dashboard. Controls the small colored square at the left
+#     edge of each project row. When absent, a deterministic palette color
+#     is assigned based on the project's registration order.
+#     Accepted format:  #RRGGBB  (e.g. #378ADD)
+#     Rejected formats: 0xRRGGBB (use # not 0x), #RGB (short form unsupported)
+#     Optional. Default: palette fallback.
+#     Example: dashboard_color=#378ADD
+#
+#   dashboard_max_rows
+#     Integer. Maximum number of task rows displayed per visibility column
+#     for this project in the dashboard. When the task count exceeds this
+#     value, the last visible row is replaced with '... and N more'.
+#     Valid range: 5–100. Values outside this range are clamped with a warning.
+#     Optional. Default: 20 (or DASHBOARD_MAX_ROWS env var if set).
+#     Example: dashboard_max_rows=25
+#
+# -----------------------------------------------------------------------
+# Comments start with '#'. Blank lines are ignored.
+# Edit by hand or via the operator scripts:
+#   scripts/create-project.sh <name>      — bootstrap a new project directory
+#   scripts/add-project.sh <name>         — register an existing project directory
+#   scripts/remove-project.sh <name>      — unregister a project
+#
+# Restart the tmux dashboard session after editing this file to pick up
+# color or row-count changes.
+# -----------------------------------------------------------------------
+
+# Example 1: Full-featured project with all fields specified.
+[project:pgai-chomp-man]
+priority=1
+description=Release-workflow demo project (see demos/chomp-man-demo/)
+enabled=true
+dashboard_color=#378ADD
+dashboard_max_rows=20
+
+# Example 2: Minimal project — only priority set; all other fields use
+# defaults: enabled=true, description empty, dashboard_max_rows=20, and
+# dashboard_color assigned from the palette by registration order.
+[project:pgai-three-bears]
+priority=2
+

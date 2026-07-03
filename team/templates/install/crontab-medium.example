@@ -1,0 +1,76 @@
+# pgai-agent-kanban: crontab-medium.example
+#
+# Hardware assumption: 2-4 cores / 8-16 GB RAM, dedicated or semi-dedicated host.
+#
+# Tier: medium
+# Design choice: three separate tier files (small/medium/large) rather than a
+#   parameterized template.  Each file is self-contained and flows through the
+#   existing __KANBAN_ROOT__ / __CLAUDE_PATH__ substitution and
+#   safe_overwrite_crontab mechanism in install-crontab.sh unchanged.
+#   Install with: team/scripts/install-crontab.sh  (after pointing it at this
+#   file, or by substituting manually as shown below).
+#
+# Cadence: every 2 minutes per agent-pair with sub-minute sleep stagger.
+#   - Even minutes (*/2):      PM@sleep=0, CM@sleep=21, TESTER@sleep=42
+#   - Odd minutes (1-59/2):    CODER@sleep=0, WRITER@sleep=21
+# The --sleep=N parameter delays N seconds after cron fires before acquiring
+# the work-queue lock, so concurrent slots in the same minute don't collide.
+#
+# Maximum agent-to-agent handoff latency: ~60 seconds.
+# Best-case handoff (same minute, adjacent slot): 21 seconds.
+# Recommended for: developer workstations, small team VMs, 2-4 core servers.
+#
+# IMPORTANT: Replace __KANBAN_ROOT__ and __CLAUDE_PATH__ with real values
+# before installing.  install-crontab.sh performs these substitutions
+# automatically.
+#
+# Manual install:
+#   sed -e "s|__KANBAN_ROOT__|/your/kanban/root|g" \
+#       -e "s|__CLAUDE_PATH__|/usr/local/bin|g" \
+#     team/templates/install/crontab-medium.example | crontab -
+
+# --- Environment ---
+PGAI_AGENT_KANBAN_ROOT_PATH=__KANBAN_ROOT__
+PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
+
+# =============================================================================
+# MEDIUM-TIER PATTERN — every-2-minutes with sub-minute stagger
+# =============================================================================
+# Maximum wait between agent firings: ~60 seconds (within the 2-minute cycle)
+# Best-case agent-to-agent handoff: 21 seconds (same minute, adjacent slot)
+#
+# How the stagger works:
+#   - Even minutes (*/2):     PM fires at :00, CM at :00+21s, TESTER at :00+42s
+#   - Odd minutes (1-59/2):   CODER fires at :01, WRITER at :01+21s
+#
+# Operator tuning:
+#   - Swap CODER/WRITER to even minutes and PM/CM/TESTER to odd if preferred.
+#   - Adjust sleep offsets (0, 21, 42) for different stagger rhythms.
+#   - Use 0-59 for N in --sleep=N; values >= 60 trigger a warning.
+
+# --- Even-minute agents (release-side: pm, cm, tester) ---
+# PM fires every 2 minutes, starting at minute 0: :00, :02, :04, ...
+*/2 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0  >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+
+# CM fires every 2 minutes with 21-second sub-minute delay: :00+21s, :02+21s, ...
+*/2 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=21 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+
+# TESTER fires every 2 minutes with 42-second sub-minute delay: :00+42s, :02+42s, ...
+*/2 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=42 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+
+# --- Odd-minute agents (work-producers: coder, writer) ---
+# CODER fires every 2 minutes, starting at minute 1: :01, :03, :05, ...
+1-59/2 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0  >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+
+# WRITER fires every 2 minutes, starting at minute 1, with 21-second delay: :01+21s, :03+21s, ...
+1-59/2 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=21 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+
+# --- Cleanup Script (weekly, Sundays at 4:00 AM) ---
+0 4 * * 0 __KANBAN_ROOT__/scripts/cleanup/cleanup.sh >> __KANBAN_ROOT__/logs/cron-cleanup.log 2>&1
+
+# --- Trivial-log purge (daily at 04:15, opt-in) ---
+# Uncomment to enable daily purge of small stale batch logs:
+# 15 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup.sh --trivial-only >> __KANBAN_ROOT__/logs/cron-cleanup-trivial.log 2>&1
+
+# --- Log Cleanup (daily at 04:30) ---
+30 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup_logs.sh >> __KANBAN_ROOT__/logs/cron-cleanup-logs.log 2>&1

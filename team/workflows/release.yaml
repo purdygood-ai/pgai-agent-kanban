@@ -1,0 +1,42 @@
+name: release
+description: Software release with git RC branch lifecycle (open-rc -> implement -> verify -> release)
+
+inputs:
+  required:
+    - requirements.md
+  context:
+    - dev_tree_path
+    - git_repo_url
+
+agents:
+  primary: CODER
+  documentation: WRITER
+  review: TESTER
+  manage: CM
+
+pipeline:
+  - role: CM
+    name: open-rc
+    operation: create_branch
+    branch_pattern: rc/{version}
+
+  - role: CODER
+    name: implement
+    foreach: requirements.tickets
+    branch: feature/{task_id}
+
+  - role: TESTER
+    name: verify
+    deliverable: report.md
+    autonomous_criterion: required
+
+  - role: CM
+    name: release
+    operation: tag_and_push
+    target_branch: main
+
+outputs:
+  format: git_tag
+  location: refs/tags/
+
+versioning: from_requirements

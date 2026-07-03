@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pgai-agent-kanban — Demo: Document Workflow (pgai-three-bears)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f5f4ef; --ink:#1c1c1a; --muted:#6a6a63; --rule:#d9d7cd; --card:#fffefb;
+    --z-doc:#1f7a82; --z-cmd:#2f4b8f; --z-step:#6b4a9c; --z-note:#5a5a52;
+    /* terminal palette (matches the tmux dashboard) */
+    --term-bg:#0e0e0d; --term-ink:#d7d5cc; --term-cyan:#39c5cf; --term-green:#74b84a;
+    --term-orange:#d9772e; --term-blue:#4a90d9; --term-yellow:#d2b54a; --term-red:#cf5b48;
+    --term-dim:#6f6f68; --term-magenta:#b07cc6;
+  }
+  *{box-sizing:border-box;}
+  html{font-size:14px;}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:'IBM Plex Sans',system-ui,sans-serif; line-height:1.5;
+    -webkit-font-smoothing:antialiased;}
+  code,kbd,.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+
+  header.mast{padding:20px 26px 16px; border-bottom:3px solid var(--ink);}
+  .mast .kicker{font-size:.72rem; font-weight:600; letter-spacing:.13em; text-transform:uppercase; color:var(--z-doc);}
+  .mast h1{font-size:1.95rem; font-weight:700; letter-spacing:-.01em; margin:3px 0 4px; line-height:1.05;}
+  .mast h1 .mono{font-weight:600;}
+  .mast .tag{font-size:.86rem; color:var(--muted);}
+
+  main{max-width:1180px; margin:0 auto; padding:22px 26px 60px;}
+  .lede{font-size:1.02rem; color:var(--ink); max-width:64ch; margin:6px 0 26px;}
+
+  section.block{margin:0 0 30px;}
+  h2.sec{font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.09em;
+    color:#fff; background:var(--z-doc); display:inline-block; padding:5px 12px; border-radius:5px 5px 0 0; margin:0;}
+  h2.sec.cmd-h{background:var(--z-cmd);} h2.sec.step-h{background:var(--z-step);} h2.sec.note-h{background:var(--z-note);}
+  .panel{background:var(--card); border:1px solid var(--rule); border-top:3px solid var(--z-doc);
+    border-radius:0 7px 7px 7px; padding:16px 18px;}
+  .panel.cmd-p{border-top-color:var(--z-cmd);} .panel.step-p{border-top-color:var(--z-step);} .panel.note-p{border-top-color:var(--z-note);}
+  .panel p{margin:0 0 10px;} .panel p:last-child{margin-bottom:0;}
+  .panel h3{font-size:.95rem; font-weight:600; margin:16px 0 6px;}
+  .panel h3:first-child{margin-top:0;}
+
+  .two{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media (max-width:820px){.two{grid-template-columns:1fr;}}
+
+  .cmd{background:#1c1c1a; color:#eceae2; border-radius:5px; font-family:'IBM Plex Mono',monospace;
+    font-size:.8rem; line-height:1.6; padding:10px 13px; margin:8px 0; white-space:pre-wrap; word-break:break-word; position:relative;}
+  .cmd .f{color:#9ecbff;} .cmd .a{color:#e6c07b;} .cmd .c{color:#7f8a7f;} .cmd .p{color:#74b84a;}
+  .cmd .lbl{display:block; color:#7f8a7f; font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; margin-bottom:5px;}
+
+  dl.rows{margin:6px 0; display:grid; grid-template-columns:auto 1fr; gap:4px 12px; align-items:baseline;}
+  dl.rows dt{font-family:'IBM Plex Mono',monospace; font-size:.82rem; font-weight:500; white-space:nowrap; color:var(--z-cmd);}
+  dl.rows dd{margin:0; font-size:.88rem; color:var(--muted);}
+  ul.tight{margin:8px 0; padding-left:20px;} ul.tight li{margin:4px 0; font-size:.92rem;}
+  .arrow{color:var(--z-doc); font-weight:600;}
+  .pill{display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:.74rem; font-weight:500;
+    background:#eef3f3; color:var(--z-doc); border:1px solid #cfe0e0; border-radius:4px; padding:1px 6px;}
+
+  /* numbered step markers */
+  .step{display:flex; gap:13px; align-items:flex-start; margin:0 0 18px;}
+  .step .n{flex:none; width:26px; height:26px; border-radius:50%; background:var(--z-step); color:#fff;
+    font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:.85rem; text-align:center; line-height:26px;}
+  .step .sc{flex:1; min-width:0;}
+  .step .sc h3{margin:2px 0 5px; font-size:1rem;}
+  .step .sc p{margin:0 0 7px; font-size:.92rem;}
+
+  /* ---- terminal "screenshot" frame ---- */
+  .term{background:var(--term-bg); border-radius:8px; overflow:hidden; margin:10px 0 4px;
+    box-shadow:0 2px 14px rgba(0,0,0,.18); border:1px solid #2a2a28;}
+  .term .bar{background:#26261f; padding:6px 12px; display:flex; align-items:center; gap:7px;}
+  .term .bar .dot{width:11px; height:11px; border-radius:50%;}
+  .term .bar .dot.r{background:#e0584a;} .term .bar .dot.y{background:#dab84a;} .term .bar .dot.g{background:#69b34a;}
+  .term .bar .ttl{color:#9a9a90; font-family:'IBM Plex Mono',monospace; font-size:.72rem; margin-left:8px;}
+  .term pre{margin:0; padding:13px 15px; font-family:'IBM Plex Mono',monospace; font-size:.7rem;
+    line-height:1.5; color:var(--term-ink); overflow-x:auto; white-space:pre;}
+  .cap{font-size:.78rem; color:var(--muted); margin:5px 2px 0; font-style:italic;}
+  .cy{color:var(--term-cyan);} .gn{color:var(--term-green);} .og{color:var(--term-orange);}
+  .bl{color:var(--term-blue);} .yl{color:var(--term-yellow);} .rd{color:var(--term-red);}
+  .dm{color:var(--term-dim);} .mg{color:var(--term-magenta);} .wt{color:#e9e7df;} .bold{font-weight:600;}
+  .statusbar{color:#cfcfc6;} .statusbar .hl{color:var(--term-yellow); font-weight:600;}
+
+  /* window-1 bordered column board (green vertical rules, left-justified) */
+  .w1{background:var(--term-bg); font-family:'IBM Plex Mono',monospace; font-size:.66rem; line-height:1.7; color:var(--term-ink);}
+  .w1 .grid{display:grid; grid-template-columns:repeat(8,1fr); padding:10px 0 12px;}
+  .w1 .col{padding:0 10px; border-left:1px solid #2f6b2f; min-width:0;}
+  .w1 .col:first-child{border-left:none;}
+  .w1 .col .hd{color:#e9e7df; font-weight:600; white-space:nowrap; margin-bottom:3px;}
+  .w1 .col .row{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .w1 .col .sq{display:inline-block; width:.62em; height:.62em; margin-right:5px; vertical-align:baseline; border-radius:1px;}
+  .w1 .sq.og{background:var(--term-orange);} .w1 .sq.bl{background:var(--term-blue);} .w1 .sq.gn{background:var(--term-green);}
+  .w1 .legend{border-top:1px solid #2f6b2f; padding:7px 12px 0;}
+
+  .callout{background:#fbf7ee; border:1px solid #e6dcc2; border-left:4px solid var(--z-step); border-radius:5px;
+    padding:11px 14px; font-size:.9rem; margin:14px 0;}
+  .callout b{color:var(--z-step);}
+  footer{border-top:1px solid var(--rule); padding:16px 26px 40px; font-size:.8rem; color:var(--muted); max-width:1180px; margin:0 auto;}
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="kicker">pgai-agent-kanban · Demo</div>
+  <h1>The document workflow — <span class="mono">pgai-three-bears</span></h1>
+  <div class="tag">Drop a requirement, walk away, come back to a versioned, published artifact.</div>
+</header>
+
+<main>
+
+  <p class="lede">This walkthrough runs an <b>autonomous document build</b> end to end: you drop a plain-text
+  requirement into a project, and the agent chain plans it, writes it, and publishes a versioned artifact —
+  no further input. Every command below is copy-paste ready and scoped to the managed demo project
+  <span class="pill">pgai-three-bears</span>.</p>
+
+  <!-- ============ INTRO 1: WORKFLOWS ============ -->
+  <section class="block">
+    <h2 class="sec">1 · How the kanban uses workflows</h2>
+    <div class="panel">
+      <p>A <b>project</b> declares a <b>workflow type</b> in its <span class="mono">project.cfg</span>. The same
+      agent chain — PM, WRITER, TESTER, CM (and CODER, for software) — runs every project, but the
+      <i>lifecycle</i> they follow is set by the workflow type. The kanban ships two:</p>
+      <div class="two">
+        <div>
+          <h3>release</h3>
+          <p style="font-size:.9rem; margin:0;">Software. Drives a git release-candidate branch lifecycle (open RC <span class="arrow">→</span> code <span class="arrow">→</span> test <span class="arrow">→</span> ship + tag). The managed demo project is <span class="mono">pgai-chomp-man</span>.</p>
+        </div>
+        <div>
+          <h3>document <span class="pill">this demo</span></h3>
+          <p style="font-size:.9rem; margin:0;">Prose deliverables. Drives off the requirement's version number and publishes a versioned artifact file. The managed demo project is <span class="mono">pgai-three-bears</span>.</p>
+        </div>
+      </div>
+      <p style="margin-top:12px;">You drive both the same way: drop a requirement file, and the chain runs on its own. The
+      operator's whole job is dropping requirements and occasionally glancing at the dashboard.</p>
+    </div>
+  </section>
+
+  <!-- ============ INTRO 2: DOCUMENT WORKFLOW ============ -->
+  <section class="block">
+    <h2 class="sec">2 · The document workflow, specifically</h2>
+    <div class="panel">
+      <p>In the document workflow, each requirement targets a <b>semantic version</b> (<span class="mono">v0.0.1</span>,
+      <span class="mono">v0.0.2</span>, …). WRITER produces the prose; CM finalizes it and publishes a versioned copy to:</p>
+      <div class="cmd">projects/pgai-three-bears/artifacts/v<span class="a">&lt;semver&gt;</span>-<span class="a">&lt;artifact-name&gt;</span>.<span class="a">&lt;ext&gt;</span></div>
+      <p>The artifact name and output format come from the requirement's <span class="mono">## Artifact Name</span> and
+      <span class="mono">## Output Formats</span> fields. Two properties make it powerful:</p>
+      <ul class="tight">
+        <li><b>Versioned snapshots.</b> Each version is its own file in <span class="mono">artifacts/</span>. They accumulate — <span class="mono">v0.0.1</span>, <span class="mono">v0.0.2</span>, … — so you keep a full history of the document as it evolves.</li>
+        <li><b>Extend, don't just create.</b> A later version can instruct WRITER to <i>read the prior artifact</i> and modify it (add a scene, remove a character), rather than write from scratch. The requirement file says which prior version to start from.</li>
+      </ul>
+      <p>It has full <b>metrics and wall-time parity</b> with the release workflow — the same dashboards (progress,
+      logs, metrics) work identically.</p>
+    </div>
+  </section>
+
+  <!-- ============ THE EXAMPLE ARC ============ -->
+  <section class="block">
+    <h2 class="sec note-h">3 · The example: a bedtime story that evolves</h2>
+    <div class="panel note-p">
+      <p>We'll build a children's bedtime story and then evolve it across versions — the exact arc that
+      exercises every document-workflow capability:</p>
+      <dl class="rows">
+        <dt>v0.0.1</dt><dd>The Three Bears Bedtime Story — <span class="dm" style="color:var(--muted)">create from scratch</span></dd>
+        <dt>v0.0.2</dt><dd>A Friendly Fox at the Stream — <span class="dm" style="color:var(--muted)">read v0.0.1, add a scene</span></dd>
+        <dt>v0.0.3</dt><dd>Add an interior scene — <span class="dm" style="color:var(--muted)">extend again</span></dd>
+        <dt>v0.0.4</dt><dd>Remove the fox &amp; stream scene — <span class="dm" style="color:var(--muted)">edit down</span></dd>
+        <dt>v0.0.5</dt><dd>Bring the fox back coherently — <span class="dm" style="color:var(--muted)">re-extend</span></dd>
+      </dl>
+      <p style="margin-top:10px;">Each is a single Markdown requirement file. The whole demo is just dropping these in order.</p>
+    </div>
+  </section>
+
+  <!-- ============ RUN IT ============ -->
+  <section class="block">
+    <h2 class="sec step-h">4 · Run it</h2>
+    <div class="panel step-p">
+
+      <div class="step">
+        <div class="n">1</div>
+        <div class="sc">
+          <h3>Drop the first requirement</h3>
+          <p>Deposit the <span class="mono">v0.0.1</span> requirement into the project. <span class="mono">intake.sh</span> is a dumb router — it places the file by name; it doesn't validate contents.</p>
+          <div class="cmd"><span class="lbl">copy · paste</span>scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span> \
+  <span class="p">v0.0.1-three-bears-story-20260604.md</span></div>
+          <p style="font-size:.86rem; color:var(--muted);">The filename's <span class="mono">vX.Y.*</span> prefix routes it to <span class="mono">projects/pgai-three-bears/requirements/</span>. That's the only "command" the build needs — the chain takes it from here on the next cron wake.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">2</div>
+        <div class="sc">
+          <h3>Watch it on the dashboard</h3>
+          <p>Two views you'll live in: the <b>main</b> window (window&nbsp;0) for at-a-glance progress, and the <b>visibility</b> window (window&nbsp;1) for the per-agent columns.</p>
+
+          <div class="term">
+            <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 0 · main</span></div>
+<pre><span class="cy">══ pgai-agent-kanban dashboard ══</span>     01:58:04 UTC
+
+<span class="og">══ pgai-three-bears (priority 1) ══</span>
+  RC: <span class="dm">none</span>     Last Released: <span class="dm">none</span     HALT(local): <span class="gn">off</span>
+
+  <span class="og">pgai-three-bears</span>
+  Progress: <span class="gn">████████</span><span class="dm">░░░░░░░░░░░░</span>  35%  (writing v0.0.1)
+
+  <span class="bl">pgai-chomp-man</span>
+  Progress: <span class="gn">████</span><span class="dm">░░░░░░░░░░░░░░░░</span>  20%  (1/5 done)
+
+<span class="cy">══ Next Agent Wake (incl. stagger) ══</span>
+  <span class="gn">WRITER</span>   in <span class="bold">0:11</span>
+  <span class="gn">TESTER</span>   in <span class="bold">0:23</span>
+  <span class="gn">CM</span>       in <span class="bold">0:35</span>
+  <span class="gn">PM</span>       in <span class="bold">0:47</span>
+
+<span class="cy">══ pgai-three-bears ══</span>     <span class="dm">provider: claude</span>
+  <span class="dm">pm:</span>     <span class="gn">1/1</span>     100%
+  <span class="dm">writer:</span> <span class="yl">0/1  working</span>
+  <span class="dm">cm:</span>     <span class="dm">0/1</span>      0%
+<span class="statusbar">0:main* 1:visibility 2:attention 5:metrics 6:logs 9:terminal
+v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T01:58:04</span></pre>
+          </div>
+          <p class="cap">Window 0 — progress bars per project + the staggered wake schedule. WRITER is mid-task on v0.0.1.</p>
+
+          <div class="term">
+            <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 1 · visibility</span></div>
+            <div class="w1">
+              <div class="grid">
+                <div class="col"><div class="hd">=== BUGS ===</div><div class="row dm">(none)</div></div>
+                <div class="col"><div class="hd">=== PRIORITIES ===</div><div class="row dm">(none)</div></div>
+                <div class="col"><div class="hd">=== REQUIREMENTS ===</div>
+                  <div class="row"><span class="sq og"></span><span class="og">v0.0.2</span></div>
+                  <div class="row"><span class="sq og"></span><span class="gn">v0.0.1</span></div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">v0.0.1</span></div>
+                </div>
+                <div class="col"><div class="hd">=== PM ===</div>
+                  <div class="row"><span class="sq og"></span><span class="gn">20260605-001</span></div>
+                  <div class="row"><span class="sq og"></span><span class="gn">20260604-001</span></div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">20260603-001</span></div>
+                </div>
+                <div class="col"><div class="hd">=== CODER ===</div><div class="row dm">(none)</div></div>
+                <div class="col"><div class="hd">=== WRITER ===</div>
+                  <div class="row"><span class="sq og"></span><span class="yl">20260605-001</span></div>
+                  <div class="row"><span class="sq og"></span><span class="gn">20260604-001</span></div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">20260603-001</span></div>
+                </div>
+                <div class="col"><div class="hd">=== TESTER ===</div>
+                  <div class="row"><span class="sq og"></span><span class="gn">20260604-001</span></div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">20260603-001</span></div>
+                </div>
+                <div class="col"><div class="hd">=== CM ===</div>
+                  <div class="row"><span class="sq og"></span><span class="gn">20260604-001</span></div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">20260603-001</span></div>
+                </div>
+              </div>
+              <div class="legend">
+                <div class="statusbar">PROJECT: <span class="og">▪</span> pgai-three-bears   <span class="bl">▪</span> pgai-chomp-man   |   STATUS: <span class="wt">open</span> <span class="yl">running</span> <span class="gn">done</span> <span class="dm">wont-do</span> <span class="rd">blocked</span></div>
+                <div class="statusbar" style="margin-top:5px;">[pgai-kanban-dashboard] 0:main 1:visibility* 2:attention 3:git 4:metadata 5:metrics 6:logs 7:debug-logs 8:training-logs 9:terminal</div>
+                <div class="statusbar">10:drill-1: pgai-three-bears  11:drill-2: pgai-chomp-man</div>
+                <div class="statusbar">v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T01:58:11</div>
+              </div>
+            </div>
+          </div>
+          <p class="cap">Window 1 — the eight-column board (all three intake lanes + the five agents), each column ruled and left-justified like the live dashboard. Leading squares are project color: <span class="og">orange</span> = pgai-three-bears, <span class="bl">blue</span> = pgai-chomp-man. Text color is status: <span class="gn">done</span>, <span class="yl">running</span>. The WRITER task for bears v0.0.2 is <span class="yl">running</span>.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">3</div>
+        <div class="sc">
+          <h3>Follow the chain in the logs</h3>
+          <p>The <b>logs</b> window (window&nbsp;6) streams each agent's wake. For a document build you'll see PM decompose, WRITER write, then CM finalize.</p>
+          <div class="term">
+            <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 6 · logs</span></div>
+<pre><span class="mg">[pm 01:54:09]</span> wake(pm): project pgai-three-bears: beginning chain
+<span class="mg">[pm 01:54:11]</span> wake(pm): decomposed v0.0.1 <span class="arrow" style="color:var(--term-cyan)">→</span> WRITER-20260604-001-write-story
+<span class="mg">[pm 01:54:11]</span> wake(pm): done: 1 task materialized
+<span class="gn">[writer 01:56:13]</span> wake(writer): project pgai-three-bears: beginning chain
+<span class="gn">[writer 01:56:14]</span> wake(writer): WRITER-20260604-001 <span class="arrow" style="color:var(--term-cyan)">→</span> WORKING
+<span class="gn">[writer 01:58:40]</span> wake(writer): wrote artifacts/draft/three-bears-bedtime-story.md (612 words)
+<span class="gn">[writer 01:58:40]</span> wake(writer): WRITER-20260604-001 <span class="arrow" style="color:var(--term-cyan)">→</span> DONE
+<span class="rd">[cm 02:00:25]</span> wake(cm): project pgai-three-bears: beginning chain
+<span class="rd">[cm 02:00:27]</span> wake(cm): finalize: read ## Artifact Name = three-bears-bedtime-story
+<span class="rd">[cm 02:00:27]</span> wake(cm): published <span class="cy">projects/pgai-three-bears/artifacts/v0.0.1-three-bears-bedtime-story.md</span>
+<span class="rd">[cm 02:00:28]</span> wake(cm): v0.0.1 <span class="arrow" style="color:var(--term-cyan)">→</span> released
+<span class="statusbar">0:main 1:visibility 2:attention 5:metrics 6:logs* 9:terminal
+v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T02:00:28</span></pre>
+          </div>
+          <p class="cap">Window 6 — the document chain end to end: PM <span class="arrow">→</span> WRITER <span class="arrow">→</span> CM, finishing with the published artifact path.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">4</div>
+        <div class="sc">
+          <h3>Read the published artifact</h3>
+          <p>CM publishes the versioned file. That's your deliverable:</p>
+          <div class="cmd"><span class="lbl">copy · paste</span><span class="c"># the published, versioned artifact</span>
+cat projects/pgai-three-bears/artifacts/<span class="a">v0.0.1-three-bears-bedtime-story.md</span>
+
+<span class="c"># or inspect the requirement's state through the operator tool</span>
+scripts/show.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span> <span class="f">--key</span> <span class="a">v0.0.1</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">5</div>
+        <div class="sc">
+          <h3>Check the cost / timing</h3>
+          <p>The <b>metrics</b> window (window&nbsp;5) shows per-version wall-time and token cost — identical to the release workflow.</p>
+          <div class="term">
+            <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 5 · metrics</span></div>
+<pre><span class="cy">=== RC Metrics: pgai-three-bears (last 10) ===</span>
+
+<span class="wt">RC          Wall      Input     Output   Cache Read   Cache Write   Tasks</span>
+v0.0.1      20.97    28,665     62,687    3,288,161       350,597       6
+v0.0.2      18.40    24,112     54,903    2,901,455       312,880       5
+
+<span class="cy">=== RC Metrics: pgai-chomp-man ===</span>
+
+<span class="wt">RC          Wall      Input     Output   Cache Read   Cache Write   Tasks</span>
+v0.0.1      52.20    22,237   117,786   14,906,163       610,045       7
+<span class="statusbar">0:main 1:visibility 2:attention 5:metrics* 6:logs 9:terminal
+v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T02:01:10</span></pre>
+          </div>
+          <p class="cap">Window 5 — wall-time (seconds) and token usage per version. The document workflow reports the same metrics as release.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">6</div>
+        <div class="sc">
+          <h3>Evolve the document — drop the next version</h3>
+          <p>This is the part that makes it a <i>workflow</i>, not a one-shot. The <span class="mono">v0.0.2</span>
+          requirement tells WRITER to read the <span class="mono">v0.0.1</span> artifact and add a scene. Same command, next file:</p>
+          <div class="cmd"><span class="lbl">copy · paste</span>scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span> \
+  <span class="p">v0.0.2-three-bears-friendly-fox-at-the-stream.md</span>
+
+<span class="c"># then v0.0.3, v0.0.4, v0.0.5 the same way — each reads the prior artifact</span>
+scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span> <span class="p">v0.0.3-bears-add-interior-scene.md</span></div>
+          <p style="font-size:.86rem; color:var(--muted);">Drop them one at a time. The Active-RC gate serializes them — <span class="mono">v0.0.1</span> fully publishes before <span class="mono">v0.0.2</span> starts — so you can stack the whole arc and walk away.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ FIX / RE-RUN ============ -->
+  <section class="block">
+    <h2 class="sec cmd-h">5 · If a version needs a re-run</h2>
+    <div class="panel cmd-p">
+      <p>Not happy with a version, or it went sideways? Reset it and let the chain rebuild it. Follow the
+      safe routine: back up, HALT, wait for any working task to finish, reset, then resume.</p>
+      <div class="cmd"><span class="lbl">copy · paste</span><span class="c"># 1) pause the project (let the current task finish first)</span>
+scripts/halt.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span>
+
+<span class="c"># 2) reset the version's requirement — PM will re-decompose it</span>
+scripts/reset.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span> <span class="f">--key</span> <span class="a">v0.0.2</span>
+
+<span class="c"># 3) resume — the chain rebuilds v0.0.2 on the next wake</span>
+scripts/unhalt.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span></div>
+      <div class="callout"><b>Note:</b> the operator scripts do exactly what you tell them. They don't guard against
+      resetting a task an agent is actively working — that's why you HALT and wait first. Safety lives in the routine,
+      not the command.</div>
+      <h3>Other handy commands</h3>
+      <dl class="rows">
+        <dt>show … --key v0.0.2</dt><dd>print a version's status &amp; paths</dd>
+        <dt>close … --key v0.0.2</dt><dd>mark a requirement done by hand</dd>
+        <dt>wontdo … --key v0.0.2</dt><dd>abandon a version you don't want</dd>
+      </dl>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  pgai-agent-kanban · document-workflow demo · pgai-three-bears · examples scoped to the managed demo projects ·
+  commands verified against v0.91.x. Pair with the operator cheat sheet for the full command reference.
+</footer>
+
+</body>
+</html>

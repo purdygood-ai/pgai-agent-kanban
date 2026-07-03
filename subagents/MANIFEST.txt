@@ -1,0 +1,26 @@
+# subagents/MANIFEST.txt
+#
+# The list of subagent role files that pgai-agent-kanban installs into
+# ~/.claude/agents/ (or $CLAUDE_CONFIG_DIR/agents/).
+#
+# install.sh reads this file at install time and copies each named agent from
+# subagents/<name>.md to the agents directory.
+#
+# install.sh also tracks which agents it has previously installed via a state
+# file at $KANBAN_ROOT/.installed-subagents. On subsequent installs, any agent
+# present in the state file but absent from this manifest is removed (the
+# kanban no longer ships it). Agents NOT in the state file are never touched —
+# the installer assumes they belong to the operator or to another tool.
+#
+# To add a new subagent: drop subagents/<name>.md into the repo and add the
+# name on its own line below.
+#
+# To remove a subagent: delete the line below. The next install will detect
+# the removal and clean up the file from the agents directory.
+
+po
+pm
+coder
+writer
+tester
+cm

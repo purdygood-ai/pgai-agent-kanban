@@ -1,0 +1,89 @@
+# pgai-agent-kanban: crontab-large.example
+#
+# Hardware assumption: 8+ cores / 16+ GB RAM, dedicated high-throughput host.
+#
+# Tier: large
+# Design choice: three separate tier files (small/medium/large) rather than a
+#   parameterized template.  Each file is self-contained and flows through the
+#   existing __KANBAN_ROOT__ / __CLAUDE_PATH__ substitution and
+#   safe_overwrite_crontab mechanism in install-crontab.sh unchanged.
+#   Install with: team/scripts/install-crontab.sh  (after pointing it at this
+#   file, or by substituting manually as shown below).
+#
+# Cadence: every minute, pipeline-ordered with sub-minute stagger.
+#   Pipeline phase A (release-side: PM, CM, TESTER):
+#     fires on every minute at :00, with CM at :00+24s and TESTER at :00+48s.
+#   Pipeline phase B (work-producers: CODER, WRITER):
+#     fires on every minute at :00+12s, with WRITER at :00+36s.
+#
+#   The two phases are interleaved within each minute:
+#     :00+00s  PM
+#     :00+12s  CODER
+#     :00+24s  CM
+#     :00+36s  WRITER
+#     :00+48s  TESTER
+#
+#   This pipeline ordering ensures CM/TESTER always see completed CODER/WRITER
+#   work from the previous minute before they run, while CODER/WRITER get a
+#   12-second head start on each new minute before CM/TESTER check in.
+#
+# Maximum agent-to-agent handoff latency: ~60 seconds (one full minute cycle).
+# Best-case handoff (adjacent pipeline slot): 12-24 seconds.
+# Recommended for: 8+ core dedicated servers, high-throughput CI machines,
+#   production kanban instances requiring minimum RC latency.
+#
+# IMPORTANT: Replace __KANBAN_ROOT__ and __CLAUDE_PATH__ with real values
+# before installing.  install-crontab.sh performs these substitutions
+# automatically.
+#
+# Manual install:
+#   sed -e "s|__KANBAN_ROOT__|/your/kanban/root|g" \
+#       -e "s|__CLAUDE_PATH__|/usr/local/bin|g" \
+#     team/templates/install/crontab-large.example | crontab -
+
+# --- Environment ---
+PGAI_AGENT_KANBAN_ROOT_PATH=__KANBAN_ROOT__
+PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
+
+# =============================================================================
+# LARGE-TIER PATTERN — every-minute firing with sub-minute pipeline-ordered
+#                      stagger across all five agents
+# =============================================================================
+# Fires every minute. Agents are interleaved by sub-minute sleep offset:
+#   :00+00s  PM      — release-side phase A start
+#   :00+12s  CODER   — work-producer phase B start
+#   :00+24s  CM      — release-side phase A mid
+#   :00+36s  WRITER  — work-producer phase B mid
+#   :00+48s  TESTER  — release-side phase A end
+#
+# Operator tuning:
+#   - Adjust sleep offsets (12, 24, 36, 48) for wider/narrower stagger.
+#   - Use 0-59 for N in --sleep=N; values >= 60 trigger a warning.
+#   - Reduce to every-2-minutes (*/2 / 1-59/2) if API rate limits are hit.
+
+# --- Release-side agents: PM, CM, TESTER ---
+# PM fires every minute at :00 (no sleep offset — leads the phase)
+* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0  >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+
+# CM fires every minute with 24-second delay: :00+24s
+* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=24 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+
+# TESTER fires every minute with 48-second delay: :00+48s
+* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=48 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+
+# --- Work-producer agents: CODER, WRITER ---
+# CODER fires every minute with 12-second delay (leads phase B): :00+12s
+* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=12 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+
+# WRITER fires every minute with 36-second delay: :00+36s
+* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=36 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+
+# --- Cleanup Script (weekly, Sundays at 4:00 AM) ---
+0 4 * * 0 __KANBAN_ROOT__/scripts/cleanup/cleanup.sh >> __KANBAN_ROOT__/logs/cron-cleanup.log 2>&1
+
+# --- Trivial-log purge (daily at 04:15, opt-in) ---
+# Uncomment to enable daily purge of small stale batch logs:
+# 15 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup.sh --trivial-only >> __KANBAN_ROOT__/logs/cron-cleanup-trivial.log 2>&1
+
+# --- Log Cleanup (daily at 04:30) ---
+30 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup_logs.sh >> __KANBAN_ROOT__/logs/cron-cleanup-logs.log 2>&1

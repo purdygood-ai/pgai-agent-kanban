@@ -1,0 +1,157 @@
+# pseudocron-small.cfg.example — pgai-agent-kanban pseudocron schedule: SMALL tier
+#
+# Hardware assumption: 1 core / <=8 GB RAM, or shared/low-resource host.
+#
+# Tier: small
+# Cadence: every 5 minutes per agent, with per-agent integer-minute offsets.
+#   - PM     fires at minutes 0,5,10,...,55   (offset 0)
+#   - CM     fires at minutes 1,6,11,...,56   (offset +1 from PM)
+#   - TESTER fires at minutes 2,7,12,...,57   (offset +2 from PM)
+#   - CODER  fires at minutes 3,8,13,...,58   (offset +3 from PM)
+#   - WRITER fires at minutes 4,9,14,...,59   (offset +4 from PM)
+#
+# Crontab-to-pseudocron mapping:
+#   crontab-small uses integer-minute offsets (no sub-minute stagger).
+#   crontab expression "*/5"    -> minutes: 0,5,10,15,20,25,30,35,40,45,50,55
+#   crontab expression "1-59/5" -> minutes: 1,6,11,16,21,26,31,36,41,46,51,56
+#   crontab expression "2-59/5" -> minutes: 2,7,12,17,22,27,32,37,42,47,52,57
+#   crontab expression "3-59/5" -> minutes: 3,8,13,18,23,28,33,38,43,48,53,58
+#   crontab expression "4-59/5" -> minutes: 4,9,14,19,24,29,34,39,44,49,54,59
+#   No sub-minute stagger in the crontab-small tier; mapping is exact.
+#
+# Maximum agent-to-agent handoff latency: ~5 minutes.
+# Recommended for: single-core VMs, shared CI runners, low-budget hosts.
+#
+# -----------------------------------------------------------------------
+# REQUIRED pseudocron.env EXPORTS
+# -----------------------------------------------------------------------
+# When paired with install-pseudocron.sh, pseudocron.env must contain:
+#
+#   export PGAI_AGENT_KANBAN_ROOT_PATH=/path/to/pgai_agent_kanban
+#       # Full path to the installed kanban root.  All wake scripts derive
+#       # their paths from this variable.
+#
+#   export PATH=/usr/local/bin:/usr/bin:/bin
+#       # Ensure wake-batch.sh and its dependencies are on PATH.
+#       # Adjust if claude or other tools are installed to non-standard paths.
+#
+#   export HOME=/home/your-user
+#       # Required when pseudocron is launched from a system init (systemd unit,
+#       # etc.) that does not set HOME.  Wake scripts and claude may need HOME.
+#
+#   export ANTHROPIC_API_KEY=<your-api-key>
+#       # Anthropic API key consumed by claude.  Required unless the API key
+#       # is injected via another mechanism (e.g. a secrets manager wrapper).
+#
+# Optional: override a role's model (per-role; provider-agnostic)
+#   export PGAI_CODER_MODEL=<model-id>
+#   export PGAI_PM_MODEL=<model-id>
+#       # Recognized roles: PM, CODER, WRITER, TESTER, CM
+#
+# Copy team/scripts/pseudocron.env.example to
+# $PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.env and fill in real values.
+# -----------------------------------------------------------------------
+#
+# Install:
+#   cp team/templates/install/pseudocron-small.cfg.example \
+#      "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.cfg"
+#   # Then edit to set the correct KANBAN_ROOT value in each command.
+#
+# Replacement token:  Replace __KANBAN_ROOT__ with the real kanban root path
+# before installing, e.g.:
+#   sed "s|__KANBAN_ROOT__|/home/rocky/pgai_agent_kanban|g" \
+#     team/templates/install/pseudocron-small.cfg.example \
+#     > "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.cfg"
+
+# =============================================================================
+# SMALL-TIER PATTERN — every-5-minutes with integer-minute phase offsets
+# =============================================================================
+# Maximum wait between agent firings: 5 minutes
+# No sub-minute stagger needed; one phase per minute avoids resource contention.
+
+# --- PM: fires every 5 minutes starting at minute 0 ---
+0  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+5  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+10 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+15 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+20 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+25 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+30 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+35 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+40 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+45 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+50 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+55 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+
+# --- CM: fires every 5 minutes starting at minute 1 (1-minute offset) ---
+1  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+6  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+11 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+16 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+21 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+26 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+31 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+36 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+41 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+46 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+51 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+56 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=0 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+
+# --- TESTER: fires every 5 minutes starting at minute 2 (2-minute offset) ---
+2  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+7  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+12 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+17 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+22 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+27 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+32 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+37 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+42 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+47 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+52 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+57 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=0 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+
+# --- CODER: fires every 5 minutes starting at minute 3 (3-minute offset) ---
+3  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+8  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+13 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+18 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+23 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+28 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+33 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+38 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+43 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+48 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+53 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+58 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=0 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+
+# --- WRITER: fires every 5 minutes starting at minute 4 (4-minute offset) ---
+4  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+9  __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+14 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+19 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+24 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+29 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+34 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+39 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+44 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+49 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+54 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+59 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=0 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+
+# =============================================================================
+# MAINTENANCE JOBS
+# =============================================================================
+# Note: pseudocron fires a job every time the matching minute occurs within
+# each hour.  Unlike cron, it has no day-of-week or hour field.  The cleanup
+# jobs below fire once per hour at the listed minute.  For weekly/daily
+# semantics, use a wrapper script that checks the current date/time before
+# running, or schedule these jobs via cron alongside pseudocron.
+
+# --- Cleanup script (fires hourly at minute 0; use a date-guard wrapper
+#     for weekly semantics equivalent to crontab's "0 4 * * 0") ---
+# 0 __KANBAN_ROOT__/scripts/cleanup/cleanup.sh >> __KANBAN_ROOT__/logs/cron-cleanup.log 2>&1
+
+# --- Log cleanup (fires hourly at minute 30; use a date-guard wrapper
+#     for daily semantics equivalent to crontab's "30 4 * * *") ---
+# 30 __KANBAN_ROOT__/scripts/cleanup/cleanup_logs.sh >> __KANBAN_ROOT__/logs/cron-cleanup-logs.log 2>&1

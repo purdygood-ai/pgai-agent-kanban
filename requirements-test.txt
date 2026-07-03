@@ -1,0 +1,20 @@
+# pgai-agent-kanban — test dependencies
+#
+# Python packages required to run the test suites and produce coverage in the
+# TESTER verification report. NOT needed to run the kanban itself — only to
+# exercise team/scripts/run-unit-tests.sh and run-integration-tests.sh.
+#
+# Install once, after install.sh, into the venv the agents run under:
+#   pip install -r requirements-test.txt --break-system-packages
+#
+# Includes the runtime requirements so a single command sets up a full
+# test-capable environment.
+-r requirements.txt
+
+# Test runner (run-unit-tests.sh / run-integration-tests.sh).
+pytest>=7
+
+# Coverage reporting in the TESTER report (run-*-tests.sh --coverage).
+# If absent, coverage is reported as "unavailable" and the suite still runs —
+# coverage is informational and never blocks a release.
+pytest-cov>=5

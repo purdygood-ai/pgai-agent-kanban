@@ -1,0 +1,71 @@
+name: document
+description: "Unified document workflow supporting both short-form (story, blog post) and long-form (whitepaper, SOP) documents; long-form steps are gated by when: conditions. Canonical workflow_type value is 'document'."
+
+inputs:
+  required:
+    - brief.md
+  optional:
+    - style_guide.md
+    - reference_material.md
+  context:
+    - project_context_path
+
+agents:
+  primary: WRITER
+  manage: CM
+
+pipeline:
+  - role: CM
+    name: open-doc
+    operation: open_doc
+
+  - role: WRITER
+    name: outline
+    deliverable: outline.md
+
+  # Short-form only: single full-document draft from the outline.
+  # In long-form mode the materializer uses section-draft + integrate instead.
+  - role: WRITER
+    name: draft
+    deliverable: draft.md
+    inputs: [outline.md]
+
+  # Long-form only: one drafting ticket per section discovered in the outline.
+  # Skipped when the brief produces no sections (short-form path).
+  - role: WRITER
+    name: section-draft
+    foreach: outline.sections
+    deliverable: section-{section_name}.md
+    when: foreach_was_used
+
+  # Long-form only: merge all section drafts into a single integrated document.
+  # Skipped when no foreach tickets were produced (short-form path).
+  - role: WRITER
+    name: integrate
+    deliverable: integrated.md
+    inputs:
+      - outline.md
+      - "section-{section_name}.md"
+    when: foreach_was_used
+
+  - role: WRITER
+    name: polish
+    deliverable: polished.md
+
+  # Optional review by TESTER. Only runs when a review agent is declared for this project.
+  - role: TESTER
+    name: review
+    deliverable: review-report.md
+    inputs: [polished.md]
+    autonomous_criterion: required
+    when: review_agent_configured
+
+  - role: CM
+    name: finalize
+    operation: finalize
+
+outputs:
+  format: document
+  location: artifacts/
+
+versioning: auto-increment

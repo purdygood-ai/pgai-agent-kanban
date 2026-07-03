@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pgai-agent-kanban — Demo: Release Workflow (pgai-chomp-man)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f5f4ef; --ink:#1c1c1a; --muted:#6a6a63; --rule:#d9d7cd; --card:#fffefb;
+    --z-rel:#2f5fa8; --z-cmd:#2f4b8f; --z-step:#b3402e; --z-note:#5a5a52;
+    --term-bg:#0e0e0d; --term-ink:#d7d5cc; --term-cyan:#39c5cf; --term-green:#74b84a;
+    --term-orange:#d9772e; --term-blue:#4a90d9; --term-yellow:#d2b54a; --term-red:#cf5b48;
+    --term-dim:#6f6f68; --term-magenta:#b07cc6;
+  }
+  *{box-sizing:border-box;}
+  html{font-size:14px;}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:'IBM Plex Sans',system-ui,sans-serif; line-height:1.5; -webkit-font-smoothing:antialiased;}
+  code,kbd,.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+
+  header.mast{padding:20px 26px 16px; border-bottom:3px solid var(--ink);}
+  .mast .kicker{font-size:.72rem; font-weight:600; letter-spacing:.13em; text-transform:uppercase; color:var(--z-rel);}
+  .mast h1{font-size:1.95rem; font-weight:700; letter-spacing:-.01em; margin:3px 0 4px; line-height:1.05;}
+  .mast h1 .mono{font-weight:600;}
+  .mast .tag{font-size:.86rem; color:var(--muted);}
+
+  main{max-width:1180px; margin:0 auto; padding:22px 26px 60px;}
+  .lede{font-size:1.02rem; color:var(--ink); max-width:64ch; margin:6px 0 26px;}
+
+  section.block{margin:0 0 30px;}
+  h2.sec{font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.09em;
+    color:#fff; background:var(--z-rel); display:inline-block; padding:5px 12px; border-radius:5px 5px 0 0; margin:0;}
+  h2.sec.cmd-h{background:var(--z-cmd);} h2.sec.step-h{background:var(--z-step);} h2.sec.note-h{background:var(--z-note);}
+  .panel{background:var(--card); border:1px solid var(--rule); border-top:3px solid var(--z-rel);
+    border-radius:0 7px 7px 7px; padding:16px 18px;}
+  .panel.cmd-p{border-top-color:var(--z-cmd);} .panel.step-p{border-top-color:var(--z-step);} .panel.note-p{border-top-color:var(--z-note);}
+  .panel p{margin:0 0 10px;} .panel p:last-child{margin-bottom:0;}
+  .panel h3{font-size:.95rem; font-weight:600; margin:16px 0 6px;}
+  .panel h3:first-child{margin-top:0;}
+
+  .two{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media (max-width:820px){.two{grid-template-columns:1fr;}}
+
+  .cmd{background:#1c1c1a; color:#eceae2; border-radius:5px; font-family:'IBM Plex Mono',monospace;
+    font-size:.8rem; line-height:1.6; padding:10px 13px; margin:8px 0; white-space:pre-wrap; word-break:break-word;}
+  .cmd .f{color:#9ecbff;} .cmd .a{color:#e6c07b;} .cmd .c{color:#7f8a7f;} .cmd .p{color:#74b84a;}
+  .cmd .lbl{display:block; color:#7f8a7f; font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; margin-bottom:5px;}
+
+  dl.rows{margin:6px 0; display:grid; grid-template-columns:auto 1fr; gap:4px 12px; align-items:baseline;}
+  dl.rows dt{font-family:'IBM Plex Mono',monospace; font-size:.82rem; font-weight:500; white-space:nowrap; color:var(--z-cmd);}
+  dl.rows dd{margin:0; font-size:.88rem; color:var(--muted);}
+  ul.tight{margin:8px 0; padding-left:20px;} ul.tight li{margin:4px 0; font-size:.92rem;}
+  .arrow{color:var(--z-rel); font-weight:600;}
+  .pill{display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:.74rem; font-weight:500;
+    background:#eef1f7; color:var(--z-rel); border:1px solid #cdd9ec; border-radius:4px; padding:1px 6px;}
+
+  .step{display:flex; gap:13px; align-items:flex-start; margin:0 0 18px;}
+  .step .n{flex:none; width:26px; height:26px; border-radius:50%; background:var(--z-step); color:#fff;
+    font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:.85rem; text-align:center; line-height:26px;}
+  .step .sc{flex:1; min-width:0;}
+  .step .sc h3{margin:2px 0 5px; font-size:1rem;}
+  .step .sc p{margin:0 0 7px; font-size:.92rem;}
+
+  .term{background:var(--term-bg); border-radius:8px; overflow:hidden; margin:10px 0 4px;
+    box-shadow:0 2px 14px rgba(0,0,0,.18); border:1px solid #2a2a28;}
+  .term .bar{background:#26261f; padding:6px 12px; display:flex; align-items:center; gap:7px;}
+  .term .bar .dot{width:11px; height:11px; border-radius:50%;}
+  .term .bar .dot.r{background:#e0584a;} .term .bar .dot.y{background:#dab84a;} .term .bar .dot.g{background:#69b34a;}
+  .term .bar .ttl{color:#9a9a90; font-family:'IBM Plex Mono',monospace; font-size:.72rem; margin-left:8px;}
+  .term pre{margin:0; padding:13px 15px; font-family:'IBM Plex Mono',monospace; font-size:.7rem;
+    line-height:1.5; color:var(--term-ink); overflow-x:auto; white-space:pre;}
+  .cap{font-size:.78rem; color:var(--muted); margin:5px 2px 0; font-style:italic;}
+  .cy{color:var(--term-cyan);} .gn{color:var(--term-green);} .og{color:var(--term-orange);}
+  .bl{color:var(--term-blue);} .yl{color:var(--term-yellow);} .rd{color:var(--term-red);}
+  .dm{color:var(--term-dim);} .mg{color:var(--term-magenta);} .wt{color:#e9e7df;} .bold{font-weight:600;}
+  .statusbar{color:#cfcfc6;} .statusbar .hl{color:var(--term-yellow); font-weight:600;}
+
+  /* window-1 bordered column board (green vertical rules, left-justified) */
+  .w1{background:var(--term-bg); font-family:'IBM Plex Mono',monospace; font-size:.66rem; line-height:1.7; color:var(--term-ink);}
+  .w1 .grid{display:grid; grid-template-columns:repeat(8,1fr); padding:10px 0 12px;}
+  .w1 .col{padding:0 10px; border-left:1px solid #2f6b2f; min-width:0;}
+  .w1 .col:first-child{border-left:none;}
+  .w1 .col .hd{color:#e9e7df; font-weight:600; white-space:nowrap; margin-bottom:3px;}
+  .w1 .col .row{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .w1 .col .sq{display:inline-block; width:.62em; height:.62em; margin-right:5px; vertical-align:baseline; border-radius:1px;}
+  .w1 .sq.og{background:var(--term-orange);} .w1 .sq.bl{background:var(--term-blue);} .w1 .sq.gn{background:var(--term-green);}
+  .w1 .legend{border-top:1px solid #2f6b2f; padding:7px 12px 0;}
+
+  .callout{background:#fbf7ee; border:1px solid #e6dcc2; border-left:4px solid var(--z-step); border-radius:5px;
+    padding:11px 14px; font-size:.9rem; margin:14px 0;}
+  .callout b{color:var(--z-step);}
+  footer{border-top:1px solid var(--rule); padding:16px 26px 40px; font-size:.8rem; color:var(--muted); max-width:1180px; margin:0 auto;}
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="kicker">pgai-agent-kanban · Demo</div>
+  <h1>The release workflow — <span class="mono">pgai-chomp-man</span></h1>
+  <div class="tag">Drop a requirement, walk away, come back to a tested, tagged software release.</div>
+</header>
+
+<main>
+
+  <p class="lede">This walkthrough builds an actual game — <b>Chomp Man</b>, a maze arcade game whose pursuers are
+  dragons, not ghosts — one release at a time, fully autonomously. You drop a requirement; the agent chain plans it,
+  writes the code, tests it, and ships a tagged release on a git branch. Every command is copy-paste ready and scoped
+  to the managed demo project <span class="pill">pgai-chomp-man</span>.</p>
+
+  <!-- ============ INTRO 1: WORKFLOWS ============ -->
+  <section class="block">
+    <h2 class="sec">1 · How the kanban uses workflows</h2>
+    <div class="panel">
+      <p>A <b>project</b> declares a <b>workflow type</b> in its <span class="mono">project.cfg</span>. The same
+      agent chain — PM, CODER, WRITER, TESTER, CM — runs every project, but the <i>lifecycle</i> they follow is set
+      by the workflow type. The kanban ships two:</p>
+      <div class="two">
+        <div>
+          <h3>release <span class="pill">this demo</span></h3>
+          <p style="font-size:.9rem; margin:0;">Software. Drives a git release-candidate branch lifecycle: open an RC <span class="arrow">→</span> code <span class="arrow">→</span> test <span class="arrow">→</span> ship + tag. The managed demo project is <span class="mono">pgai-chomp-man</span>.</p>
+        </div>
+        <div>
+          <h3>document</h3>
+          <p style="font-size:.9rem; margin:0;">Prose deliverables. Drives off the requirement's version number and publishes a versioned artifact file. The managed demo project is <span class="mono">pgai-three-bears</span>.</p>
+        </div>
+      </div>
+      <p style="margin-top:12px;">You drive both the same way: drop a requirement file, and the chain runs on its own. The
+      operator's whole job is dropping requirements and occasionally glancing at the dashboard.</p>
+    </div>
+  </section>
+
+  <!-- ============ INTRO 2: RELEASE WORKFLOW ============ -->
+  <section class="block">
+    <h2 class="sec">2 · The release workflow, specifically</h2>
+    <div class="panel">
+      <p>In the release workflow, each minor version is built on its own <b>release-candidate (RC) branch</b>, and CM
+      is the only agent that touches the remote. One requirement becomes one RC:</p>
+      <div class="cmd">PM decompose <span class="arrow" style="color:#9ecbff">→</span> CM open RC branch <span class="arrow" style="color:#9ecbff">→</span> CODER implement <span class="arrow" style="color:#9ecbff">→</span> TESTER verify <span class="arrow" style="color:#9ecbff">→</span> CM ship: merge + tag</div>
+      <p>Three things to know about how work enters a release project:</p>
+      <ul class="tight">
+        <li><b>Requirements</b> (<span class="mono">vX.Y.0-*.md</span>) are features — each minor version is a new RC.</li>
+        <li><b>Bugs</b> (<span class="mono">BUG-NNNN-*.md</span>) ride the patch lane — a fix ships as the next patch.</li>
+        <li><b>Priorities</b> (<span class="mono">PRIORITY-NNNN-*.md</span>) are enhancements that ride into a minor.</li>
+      </ul>
+      <p><span class="mono">pgai-chomp-man</span> runs in an isolated branch lane: <span class="mono">branch_prefix = ai_</span>,
+      so its branches and tags are <span class="mono">ai_main</span>, <span class="mono">ai_develop</span>,
+      <span class="mono">ai_rc/vX.Y.Z</span>, and tags <span class="mono">ai_vX.Y.Z</span> — your own <span class="mono">main</span>
+      stays untouched. The whole RC lifecycle, branch and tag mechanics included, runs without you.</p>
+    </div>
+  </section>
+
+  <!-- ============ THE EXAMPLE ARC ============ -->
+  <section class="block">
+    <h2 class="sec note-h">3 · The example: build a maze game, release by release</h2>
+    <div class="panel note-p">
+      <p>We'll build Chomp Man up one minor at a time — each a self-contained, shippable release — then fix a bug and
+      add an enhancement. This is the full arc that exercises every release-workflow lane:</p>
+      <dl class="rows">
+        <dt>v0.0.1</dt><dd>Project bootstrap — <span style="color:var(--muted)">runnable pygame window skeleton</span></dd>
+        <dt>v0.1.0</dt><dd>Screen &amp; movement</dd>
+        <dt>v0.2.0</dt><dd>Dots &amp; scoring</dd>
+        <dt>v0.3.0</dt><dd>Dragons (the pursuers)</dd>
+        <dt>v0.4.0</dt><dd>Power pellets</dd>
+        <dt>v0.5.0 → v0.8.0</dt><dd><span style="color:var(--muted)">fruit bonus · sprites · warp tunnels · dragon personalities</span></dd>
+        <dt>BUG-0001</dt><dd><span style="color:var(--muted)">movement requires repeated keypress (should hold-to-move)</span></dd>
+        <dt>PRIORITY-0001</dt><dd><span style="color:var(--muted)">sound effects</span></dd>
+      </dl>
+      <p style="margin-top:10px;">Each is a single Markdown file. The whole demo is dropping these in order and watching the
+      releases tag themselves.</p>
+    </div>
+  </section>
+
+  <!-- ============ RUN IT ============ -->
+  <section class="block">
+    <h2 class="sec step-h">4 · Run it</h2>
+    <div class="panel step-p">
+
+      <div class="step">
+        <div class="n">1</div>
+        <div class="sc">
+          <h3>Drop the bootstrap requirement</h3>
+          <p>Deposit <span class="mono">v0.0.1</span> into the project. <span class="mono">intake.sh</span> routes by filename — the <span class="mono">vX.Y.*</span> prefix sends it to <span class="mono">requirements/</span>.</p>
+          <div class="cmd"><span class="lbl">copy · paste</span>scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> \
+  <span class="p">v0.0.1-bootstrap-20260602.md</span></div>
+          <p style="font-size:.86rem; color:var(--muted);">On the next cron wake, PM decomposes it and CM opens the RC branch <span class="mono">ai_rc/v0.0.1</span>. From here it's hands-off.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">2</div>
+        <div class="sc">
+          <h3>Watch the RC on the dashboard</h3>
+          <p>The <b>main</b> window (0) shows the active RC and last released tag; the <b>visibility</b> window (1) shows the per-agent columns.</p>
+
+          <div class="term">
+            <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 0 · main</span></div>
+<pre><span class="cy">══ pgai-agent-kanban dashboard ══</span>     02:14:08 UTC
+
+<span class="bl">══ pgai-chomp-man (priority 1) ══</span>
+  RC: <span class="yl">ai_rc/v0.1.0</span>   Last Released: <span class="gn">ai_v0.0.1</span>   HALT(local): <span class="gn">off</span>
+
+  <span class="bl">pgai-chomp-man</span>
+  Progress: <span class="gn">██████████</span><span class="dm">░░░░░░░░░░</span>  55%  (CODER working v0.1.0)
+
+  <span class="og">pgai-three-bears</span>
+  Progress: <span class="gn">████████████████</span>  100%  (5/5 done)
+
+<span class="cy">══ Next Agent Wake (incl. stagger) ══</span>
+  <span class="gn">CODER</span>    in <span class="bold">0:11</span>
+  <span class="gn">TESTER</span>   in <span class="bold">0:23</span>
+  <span class="gn">CM</span>       in <span class="bold">0:35</span>
+  <span class="gn">PM</span>       in <span class="bold">0:47</span>
+
+<span class="cy">══ pgai-chomp-man ══</span>     <span class="dm">provider: claude</span>
+  <span class="dm">pm:</span>     <span class="gn">1/1</span>     100%
+  <span class="dm">coder:</span>  <span class="yl">1/2  working</span>
+  <span class="dm">tester:</span> <span class="dm">0/1</span>      0%
+  <span class="dm">cm:</span>     <span class="dm">0/1</span>      0%
+<span class="statusbar">0:main* 1:visibility 2:attention 3:git 5:metrics 6:logs 9:terminal
+v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:14:08</span></pre>
+          </div>
+          <p class="cap">Window 0 — active RC <span class="yl">ai_rc/v0.1.0</span>, last released <span class="gn">ai_v0.0.1</span>. CODER is mid-implementation.</p>
+
+          <div class="term">
+            <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 1 · visibility</span></div>
+            <div class="w1">
+              <div class="grid">
+                <div class="col"><div class="hd">=== BUGS ===</div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">BUG-0001</span></div>
+                </div>
+                <div class="col"><div class="hd">=== PRIORITIES ===</div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">PRIORITY-0001</span></div>
+                </div>
+                <div class="col"><div class="hd">=== REQUIREMENTS ===</div>
+                  <div class="row"><span class="sq bl"></span><span class="yl">v0.1.0</span></div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">v0.0.1</span></div>
+                  <div class="row"><span class="sq og"></span><span class="gn">v0.0.1</span></div>
+                </div>
+                <div class="col"><div class="hd">=== PM ===</div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">20260603-002</span></div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">20260603-001</span></div>
+                  <div class="row"><span class="sq og"></span><span class="gn">20260604-001</span></div>
+                </div>
+                <div class="col"><div class="hd">=== CODER ===</div>
+                  <div class="row"><span class="sq bl"></span><span class="yl">20260603-002</span></div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">20260603-001</span></div>
+                </div>
+                <div class="col"><div class="hd">=== WRITER ===</div>
+                  <div class="row"><span class="sq og"></span><span class="gn">20260604-001</span></div>
+                </div>
+                <div class="col"><div class="hd">=== TESTER ===</div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">20260603-001</span></div>
+                  <div class="row"><span class="sq og"></span><span class="gn">20260604-001</span></div>
+                </div>
+                <div class="col"><div class="hd">=== CM ===</div>
+                  <div class="row"><span class="sq bl"></span><span class="gn">20260603-001</span></div>
+                  <div class="row"><span class="sq og"></span><span class="gn">20260604-001</span></div>
+                </div>
+              </div>
+              <div class="legend">
+                <div class="statusbar">PROJECT: <span class="bl">▪</span> pgai-chomp-man   <span class="og">▪</span> pgai-three-bears   |   STATUS: <span class="wt">open</span> <span class="yl">running</span> <span class="gn">done</span> <span class="dm">wont-do</span> <span class="rd">blocked</span></div>
+                <div class="statusbar" style="margin-top:5px;">[pgai-kanban-dashboard] 0:main 1:visibility* 2:attention 3:git 4:metadata 5:metrics 6:logs 7:debug-logs 8:training-logs 9:terminal</div>
+                <div class="statusbar">10:drill-1: pgai-chomp-man  11:drill-2: pgai-three-bears</div>
+                <div class="statusbar">v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:14:15</div>
+              </div>
+            </div>
+          </div>
+          <p class="cap">Window 1 — the eight-column board: all three intake lanes (BUGS · PRIORITIES · REQUIREMENTS) plus the five agents, each column ruled and left-justified like the live dashboard. Leading squares are project color: <span class="bl">blue</span> = pgai-chomp-man, <span class="og">orange</span> = pgai-three-bears. Text color is status — the CODER task for chomp-man v0.1.0 is <span class="yl">running</span>.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">3</div>
+        <div class="sc">
+          <h3>Follow the RC lifecycle in the logs</h3>
+          <p>The <b>logs</b> window (6) streams the whole release: PM decompose, CM open the RC branch, CODER implement, TESTER verify, CM ship and tag.</p>
+          <div class="term">
+            <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 6 · logs</span></div>
+<pre><span class="mg">[pm 02:08:02]</span> wake(pm): project pgai-chomp-man: decomposed v0.1.0 <span class="cy">→</span> 2 tasks
+<span class="rd">[cm 02:09:40]</span> wake(cm): opened RC branch <span class="yl">ai_rc/v0.1.0</span> from ai_develop
+<span class="gn">[coder 02:11:18]</span> wake(coder): CODER-20260603-002 <span class="cy">→</span> WORKING
+<span class="gn">[coder 02:13:55]</span> wake(coder): implemented screen + hold-to-move; committed to ai_rc/v0.1.0
+<span class="gn">[coder 02:13:56]</span> wake(coder): CODER-20260603-002 <span class="cy">→</span> DONE
+<span class="bl">[tester 02:15:30]</span> wake(tester): ran suite on ai_rc/v0.1.0 — 0 failures
+<span class="bl">[tester 02:15:31]</span> wake(tester): TESTER-20260603-002 <span class="cy">→</span> DONE (PASS, no findings)
+<span class="rd">[cm 02:17:12]</span> wake(cm): ship: merged ai_rc/v0.1.0 <span class="cy">→</span> ai_develop, ai_main
+<span class="rd">[cm 02:17:13]</span> wake(cm): tagged <span class="gn">ai_v0.1.0</span>  ·  v0.1.0 <span class="cy">→</span> released
+<span class="statusbar">0:main 1:visibility 2:attention 3:git 5:metrics 6:logs* 9:terminal
+v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:17:13</span></pre>
+          </div>
+          <p class="cap">Window 6 — the release chain end to end, finishing with the merge and the <span class="gn">ai_v0.1.0</span> tag. All on the isolated <span class="mono">ai_</span> lane.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">4</div>
+        <div class="sc">
+          <h3>Inspect the release</h3>
+          <p>The tag and merge are real git. Check them — or inspect the requirement through the operator tool:</p>
+          <div class="cmd"><span class="lbl">copy · paste</span><span class="c"># the release is a real git tag on the ai_ lane</span>
+git -C ~/develop/pgai-chomp-man tag -l <span class="a">'ai_v*'</span>
+
+<span class="c"># inspect the requirement's state</span>
+scripts/show.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="f">--key</span> <span class="a">v0.1.0</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">5</div>
+        <div class="sc">
+          <h3>Check the cost / timing</h3>
+          <p>The <b>metrics</b> window (5) shows per-RC wall-time and token cost.</p>
+          <div class="term">
+            <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 5 · metrics</span></div>
+<pre><span class="cy">=== RC Metrics: pgai-chomp-man (last 10) ===</span>
+
+<span class="wt">RC          Wall      Input     Output   Cache Read   Cache Write   Tasks</span>
+v0.0.1      52.20    22,237   117,786   14,906,163       610,045       7
+v0.1.0      48.65    19,884    98,210   12,330,401       540,118       5
+
+<span class="cy">=== RC Metrics: pgai-three-bears (last 10) ===</span>
+
+<span class="wt">RC          Wall      Input     Output   Cache Read   Cache Write   Tasks</span>
+v0.0.1      20.97    28,665    62,687    3,288,161       350,597       6
+<span class="statusbar">0:main 1:visibility 2:attention 3:git 5:metrics* 6:logs 9:terminal
+v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:18:02</span></pre>
+          </div>
+          <p class="cap">Window 5 — wall-time (seconds) and token usage per RC. Same metrics surface as the document workflow.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">6</div>
+        <div class="sc">
+          <h3>Keep shipping — features, a bug, an enhancement</h3>
+          <p>Stack the rest. Features are minors; a bug rides the patch lane; a priority is an enhancement. Same
+          <span class="mono">intake.sh</span> for all three — the filename decides the lane.</p>
+          <div class="cmd"><span class="lbl">copy · paste</span><span class="c"># next feature minor (a new RC)</span>
+scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="p">v0.2.0-dots-and-scoring-20260602.md</span>
+
+<span class="c"># a bug — routes to bugs/, ships as the next patch</span>
+scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="p">BUG-0001-movement-requires-repeated-keypress-not-held.md</span>
+
+<span class="c"># an enhancement — routes to priority/, rides into a minor</span>
+scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="p">PRIORITY-0001-sound-effects.md</span></div>
+          <p style="font-size:.86rem; color:var(--muted);">The Active-RC gate serializes them — one RC fully ships (merged + tagged) before the next starts — so you can stack the whole game and walk away.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ RC OPERATOR COMMANDS ============ -->
+  <section class="block">
+    <h2 class="sec cmd-h">5 · RC operator commands</h2>
+    <div class="panel cmd-p">
+      <p>The release workflow adds two RC-lifecycle commands beyond the everyday ones. Follow the safe routine for
+      anything destructive: back up, HALT, wait for the working task to finish, run, resume.</p>
+      <div class="cmd"><span class="lbl">copy · paste</span><span class="c"># ship a ready RC by hand (operator stands in for CM)</span>
+scripts/ship-rc.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="f">--key</span> <span class="a">v0.1.0</span>
+
+<span class="c"># abort an in-flight RC: backup → delete the RC branch → tasks WONT-DO → reset state</span>
+scripts/unwind-rc.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="f">--key</span> <span class="a">v0.2.0</span> <span class="f">--dry-run</span>   <span class="c"># preview first</span>
+scripts/unwind-rc.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="f">--key</span> <span class="a">v0.2.0</span></div>
+      <div class="callout"><b>Note:</b> <span class="mono">unwind-rc</span> cannot unwind a release that's already tagged — shipped is shipped.
+      To re-roll a broken release, cut the next patch. And the scripts do exactly what you tell them; they don't guard against
+      acting on a task an agent is working — HALT and wait first.</div>
+      <h3>Everyday commands (same as any project)</h3>
+      <dl class="rows">
+        <dt>show … --key v0.1.0</dt><dd>print an RC / bug / priority status</dd>
+        <dt>reset … --key v0.2.0</dt><dd>send a version back to BACKLOG to rebuild (HALT first)</dd>
+        <dt>close … --key BUG-0001</dt><dd>resolve a bug by hand</dd>
+        <dt>wontdo … --key PRIORITY-0001</dt><dd>abandon an enhancement</dd>
+      </dl>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  pgai-agent-kanban · release-workflow demo · pgai-chomp-man · examples scoped to the managed demo projects ·
+  commands verified against v0.91.x. Pair with the operator cheat sheet for the full command reference.
+</footer>
+
+</body>
+</html>

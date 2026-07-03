@@ -1,0 +1,75 @@
+# pseudocron.cfg.example — Example schedule for pseudocron.py
+#
+# This is a generic single-job example.  For production kanban deployments
+# use install-pseudocron.sh to lay down a tier-appropriate schedule:
+#
+#   team/scripts/install-pseudocron.sh --wake-tier=small   # (default, 1-core hosts)
+#   team/scripts/install-pseudocron.sh --wake-tier=medium  # (2-4 core hosts)
+#   team/scripts/install-pseudocron.sh --wake-tier=large   # (8+ core hosts)
+#
+# install-pseudocron.sh selects the matching tier template from
+# team/templates/install/pseudocron-{small,medium,large}.cfg.example, substitutes the
+# __KANBAN_ROOT__ placeholder with the real kanban root path, and writes
+# pseudocron.cfg to $PGAI_AGENT_KANBAN_ROOT_PATH.
+#
+# To install manually from a tier template (e.g. small):
+#
+#   sed "s|__KANBAN_ROOT__|$PGAI_AGENT_KANBAN_ROOT_PATH|g" \
+#     team/templates/install/pseudocron-small.cfg.example \
+#     > "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.cfg"
+#
+# To start pseudocron after installing:
+#
+#   python3 "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/pseudocron.py" \
+#       --config "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.cfg" \
+#       --env    "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.env"
+#
+# -----------------------------------------------------------------------
+# FORMAT
+# -----------------------------------------------------------------------
+#
+#   <minute>  <command>
+#
+#   <minute>  — integer 0–59 (literal; no *, */N, ranges, or lists)
+#   <command> — the shell command to run (executed via bash -c)
+#               whitespace within the command is preserved
+#
+# Rules:
+#   - One job per line
+#   - Any amount of whitespace between minute and command (spaces or tabs)
+#   - Lines beginning with # are comments and are ignored
+#   - Blank lines are ignored
+#   - To fire a command at multiple minutes, list it on multiple lines
+#   - Shell metacharacters (pipes, redirects, backticks) work because
+#     pseudocron runs every command through: bash -c "<command>"
+#
+# -----------------------------------------------------------------------
+# EXAMPLES
+# -----------------------------------------------------------------------
+
+# --- Date/time snapshots ---
+# Fire date three times an hour (minutes 1, 9, and 17)
+# 1   /usr/bin/date >> /tmp/date.log
+# 9   /usr/bin/date >> /tmp/date.log
+# 17  /usr/bin/date >> /tmp/date.log
+
+# --- Kanban wake cycles ---
+# Uncomment and adjust paths to wake agents on a schedule.
+# Stagger agents by 1–2 minutes so they do not compete for resources.
+# For a full tier-appropriate schedule use install-pseudocron.sh (see above).
+#
+# 5   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=pm
+# 6   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=coder
+# 7   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=writer
+# 8   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=tester
+# 9   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=cm
+
+# --- Health check ---
+# 30  curl -fsS https://example.com/health >> /tmp/health.log 2>&1
+
+# --- Periodic cleanup ---
+# 45  find /tmp -name '*.tmp' -mmin +60 -delete
+
+# -----------------------------------------------------------------------
+# Add your jobs below this line.
+# -----------------------------------------------------------------------

@@ -1,0 +1,11 @@
+# HALT flag example
+#
+# When a file named exactly "HALT" (no extension) is placed in this directory
+# by the human operator, wake scripts will detect it and stop processing new
+# tasks. No new Claude sessions will be launched until the HALT file is removed.
+#
+# This provides an emergency stop mechanism so the human can pause all
+# autonomous agent activity at any time without modifying scripts or configs.
+#
+# To activate: copy or rename this file to HALT (remove the .example extension).
+# To deactivate: delete the HALT file.
