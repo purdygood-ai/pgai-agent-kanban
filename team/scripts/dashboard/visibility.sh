@@ -48,7 +48,7 @@
 #   exactly-10-mixed  Active block centered; open and closed fill remaining slots.
 #
 # Environment:
-#   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: ~/pgai_agent_kanban)
+#   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root; required (no default)
 #   DASHBOARD_ROWS_PER_COLUMN           — global rows cap (read from config.cfg)
 #   NO_COLOR                            — set non-empty to disable ANSI colors
 #   TERM=dumb                           — also disables ANSI colors
@@ -56,11 +56,13 @@
 # Legend:
 #   The single-line color-convention legend rendered beneath the visibility
 #   grid lives in team/scripts/lib/dashboard_legend.sh as the
-#   DASHBOARD_LEGEND_TEMPLATE constant. See "Dashboard color conventions" in
-#   team/SOP.md for the operator-facing explanation of project colors,
+#   DASHBOARD_LEGEND_TEMPLATE constant. See "Dashboard Color Conventions" in
+#   docs/OPERATIONS.md for the operator-facing explanation of project colors,
 #   status colors, and the projects.cfg override flow.
 
 set -euo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

@@ -11,7 +11,7 @@
 #
 # Options:
 #   --diff <range>     Git diff range to inspect (e.g., rc/v0.24.9..HEAD,
-#                      develop..HEAD, SHA1..SHA2).  Required.
+#                      main..HEAD, SHA1..SHA2).  Required.
 #   --project <name>   Project name as registered in projects.cfg.  Used to
 #                      locate test directories relative to the project root.
 #                      Required.
@@ -72,7 +72,7 @@ markdown-formatted ## Stale Literal Risks section for pasting into status.md.
 
 Options:
   --diff <range>     Git diff range to inspect.
-                     Examples: rc/v0.24.9..HEAD  develop..HEAD  SHA1..SHA2
+                     Examples: rc/v0.24.9..HEAD  main..HEAD  SHA1..SHA2
                      Required.
 
   --project <name>   Project name as registered in projects.cfg.  Used to

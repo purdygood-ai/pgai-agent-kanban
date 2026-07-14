@@ -27,6 +27,8 @@
 #   4   Filesystem error during copy.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Locate the lib directory relative to this script ---
 _INTAKE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -176,7 +178,7 @@ if [[ ${#_missing_args[@]} -gt 0 ]]; then
 fi
 
 # --- Resolve kanban root ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 # --- Resolve project root ---

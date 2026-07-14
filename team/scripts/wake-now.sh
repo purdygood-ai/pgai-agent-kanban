@@ -17,10 +17,12 @@
 # --all fires: pm, coder, cm, writer, tester  (overwatch excluded from burst)
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/shell-env" ]] && source "$KANBAN_ROOT/shell-env"
 
 # Source operator_args.sh for parsing and uniform --help.

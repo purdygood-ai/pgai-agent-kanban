@@ -74,8 +74,9 @@ Possible values:
   - "none" — no git operations needed
 
 Branch convention enforced by the system:
-  - CM opens a release-candidate branch `rc/vX.Y.Z` from `develop`
-    (prefixed per project.cfg branch_prefix, e.g. ai_rc/ai_vX.Y.Z)
+  - CM opens a release-candidate branch `rc/vX.Y.Z` from the prefixed
+    main branch (prefixed per project.cfg branch_prefix, e.g.
+    ai_rc/ai_vX.Y.Z branches from ai_main)
   - Each task works in its own per-task git worktree on a feature branch
     named `feature/<task-id>`, branched from the RC branch — never from
     main, where <task-id> follows the agent-prefixed kebab-case format:
@@ -86,11 +87,12 @@ Branch convention enforced by the system:
     TESTER-YYYYMMDD-NNN-short-slug
   - Tasks merge their feature branch back into the RC branch locally with
     --no-ff. Working agents NEVER push, pull, or fetch — CM is the sole
-    origin-toucher (it pulls develop on RC open and pushes the release
-    squash and tag)
-  - `main` receives only CM's release squash and tag; `develop` is the
-    integration buffer. The operator creates base branches with
-    init-project-git-repo.sh — never agents
+    origin-toucher (it pushes the release squash and tag)
+  - The prefixed main branch receives one squash per release (CM's
+    release squash), then the tag. A post-squash fidelity gate asserts
+    the RC and main trees are byte-identical before the tag. The
+    operator creates the prefixed main branch with init-project-git-repo.sh
+    — never agents
 
 Anti-pattern acknowledgment: this bypasses PR review on individual tasks.
 That's intentional for autonomous work. TESTER verifies the release
@@ -163,14 +165,15 @@ true
 The branch that the shared feature branch is created from. Used by the CODER
 create-shared-branch ticket in feature workflows.
 
-Default: develop
+Default: main
 
 Only relevant when Workflow Type = feature. Ignored for release workflows.
 
-Leave blank or omit to accept the default (develop).
+Leave blank or omit to accept the default (main). The prefixed main
+branch resolves per project.cfg branch_prefix.
 -->
 
-develop
+main
 
 ## Human Approval Required
 <!--
@@ -277,7 +280,7 @@ Tips:
 
 **Ticket 1 of every release lifecycle MUST be a CM ticket with `## CM Operation: open-rc`, not a CODER ticket.**
 
-The CM subagent creates the RC branch (`rc/vX.Y.Z`) from `develop` AND atomically updates the project's `release-state.md` (`Active RC`, `RC Opened At`, `RC Opened By Task`) before any feature tickets begin. The release-state file is per-install at `$KANBAN_ROOT/projects/<project-name>/release-state.md` and is owned by the CM scripts.
+The CM subagent creates the RC branch (`rc/vX.Y.Z`) from the prefixed main branch AND atomically updates the project's `release-state.md` (`Active RC`, `RC Opened At`, `RC Opened By Task`) before any feature tickets begin. The release-state file is per-install at `$KANBAN_ROOT/projects/<project-name>/release-state.md` and is owned by the CM scripts.
 
 Why this matters: CODER agents are prohibited from modifying state files (e.g., `release-state.md`). A CODER create-rc-branch ticket can push the branch but cannot update release-state.md, which causes the CM-release ticket to find "Active RC: none" and block. CM owns RC branch creation for exactly this reason. Released-version state (Last Released) is derived from git tags via `pp_last_released_version`, not stored in `release-state.md`.
 
@@ -290,7 +293,7 @@ CM
 open-rc
 
 ## Source Branch
-develop
+main
 
 ## Feature Branch
 none

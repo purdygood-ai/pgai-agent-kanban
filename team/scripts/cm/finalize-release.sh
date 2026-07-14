@@ -22,10 +22,12 @@
 # What this script does:
 #   1. Resolve the version (from $1 or from the most recent tag on main)
 #   2. Confirm the push with the operator (skip with -y)
-#   2b. If release-notes/<VERSION>.md has uncommitted WRITER polish, commit it
-#       as "Polish release notes for <VERSION>" before pushing. If the file is
-#       unchanged from the cm-release.sh stub, this step is a no-op. If the
-#       file is missing, a warning is logged and the step is skipped.
+#   2b. Safety check: if release-notes/<VERSION>.md has uncommitted WRITER polish
+#       that arrived after cm-release.sh ran, commit both the polish AND a fresh
+#       CHANGELOG.md regeneration together so the freshness gate stays green.
+#       In the normal flow cm-release.sh Step 8b handles this before CHANGELOG
+#       regeneration; this step is a no-op when the file is unchanged or already
+#       committed. If the file is missing, a warning is logged and the step is skipped.
 #   3. git push $REMOTE $MAIN_BRANCH  (includes the polish commit if Step 2b ran)
 #   4. git push $REMOTE <VERSION>
 #   5. Optionally create a GitHub release via gh CLI if available and authenticated
@@ -41,10 +43,13 @@
 #   REPO_ROOT         — override path to the repository root (normally derived
 #                       from the project's project.cfg dev_tree_path)
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Source optional config files (BEFORE strict mode) ---
 # The kanban bashrc/env may have unset vars, non-zero returns, or interactive
 # aliases that would trip strict mode. Source them first.
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
 [[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
@@ -209,21 +214,27 @@ fi
 # of whether the tag was created with a prefix in hybrid-mode installs.
 _BARE_VERSION="$(pp_strip_prefix_from_tag "$PROJECT_NAME" "$VERSION")"
 
-# --- Step 2b: Commit WRITER polish of release notes if present ---
-# After cm-release.sh ships, a WRITER polish task may update release-notes/<VERSION>.md
-# on disk (local main branch) without committing it. Detect any uncommitted changes
-# to that specific file and create a follow-up commit so the polish reaches origin.
+# --- Step 2b: Safety check for uncommitted WRITER polish of release notes ---
+# Normally, cm-release.sh Step 8b commits any uncommitted WRITER polish of
+# release-notes/<VERSION>.md BEFORE regenerating CHANGELOG.md, so by the time
+# this script runs the working tree should be clean and CHANGELOG.md is already
+# fresh for the tip.
 #
-# This step also covers the case where CM already committed augmentation content
-# directly (so the file is clean in the working tree but the commit is stranded
-# on local main, unpushed): Step 2b is a no-op here — but the unconditional push
-# in Step 3 carries the stranded commit to origin regardless.
-# No special handling is needed: Step 3 always pushes all of $MAIN_BRANCH.
+# This step guards against the uncommon case where WRITER polish arrived AFTER
+# cm-release.sh ran (unexpected timing): if uncommitted changes to the release-notes
+# file are detected here, committing the polish alone would stale CHANGELOG.md and
+# re-arm the freshness gate failure. Instead, both the polish AND a fresh
+# CHANGELOG.md regeneration are committed together to keep the gate green.
+#
+# The case where CM already committed the polish (file is clean, commit is stranded
+# on local main, unpushed) is still handled: Step 2b is a no-op, and the
+# unconditional push in Step 3 carries the stranded commit to origin.
 #
 # Four cases:
-#   - File modified (uncommitted working-tree changes)  → commit, then push in Step 3
-#   - File already committed but not yet pushed         → Step 2b no-op; Step 3 pushes it
-#   - File unchanged from the stub (no diff)            → no-op (stub is the record)
+#   - File modified (uncommitted working-tree changes after cm-release.sh) →
+#       commit polish + regenerate and commit CHANGELOG.md (freshness gate stays green)
+#   - File already committed but not yet pushed  → Step 2b no-op; Step 3 pushes it
+#   - File unchanged from the committed state (no diff) → no-op
 #   - File missing entirely                             → log warning, continue
 POLISH_NOTES_FILE="$REPO_ROOT/release-notes/${_BARE_VERSION}.md"
 POLISH_COMMIT_STATUS="skipped (no polish detected)"
@@ -238,13 +249,23 @@ else
   POLISH_PORCELAIN="$(git -C "$REPO_ROOT" status --porcelain "release-notes/${_BARE_VERSION}.md" 2>/dev/null || true)"
   if [[ -n "$POLISH_PORCELAIN" ]]; then
     echo ""
-    echo "[Step 2b] Detected uncommitted WRITER polish for ${VERSION}; committing..."
+    echo "[Step 2b] Detected uncommitted WRITER polish for ${VERSION} after cm-release.sh."
+    echo "  Committing polish and regenerating CHANGELOG.md together to keep the freshness gate green..."
     git -C "$REPO_ROOT" add "release-notes/${_BARE_VERSION}.md"
+    # Regenerate CHANGELOG.md from the polished notes so the committed artifact
+    # matches a fresh regeneration.  PYTHONHASHSEED=0 ensures stable frozenset
+    # iteration (same requirement as cm-release.sh Step 11b).
+    _cl_bugs_dir="${KANBAN_ROOT}/projects/${PROJECT_NAME}/bugs"
+    PYTHONPATH="$KANBAN_ROOT" PYTHONHASHSEED=0 \
+      python3 -m pgai_agent_kanban.cm.changelog_writer \
+      "$REPO_ROOT" "$_cl_bugs_dir" \
+      > "$REPO_ROOT/CHANGELOG.md"
+    git -C "$REPO_ROOT" add "CHANGELOG.md"
     git -C "$REPO_ROOT" commit -m "Polish release notes for ${VERSION}"
-    POLISH_COMMIT_STATUS="committed"
-    echo "  [Step 2b] Polish commit created."
+    POLISH_COMMIT_STATUS="committed (with CHANGELOG.md regeneration)"
+    echo "  [Step 2b] Polish commit created (release-notes + CHANGELOG.md)."
   else
-    echo "[Step 2b] release-notes/${_BARE_VERSION}.md unchanged from stub; no polish commit needed."
+    echo "[Step 2b] release-notes/${_BARE_VERSION}.md unchanged; no polish commit needed."
     POLISH_COMMIT_STATUS="skipped (file unchanged)"
   fi
 fi

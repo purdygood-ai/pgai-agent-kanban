@@ -3,7 +3,7 @@ two_project.py
 ==============
 Test-fidelity helper: build a kanban root containing two registered projects.
 
-WHY THIS EXISTS (BUG-0160)
+WHY THIS EXISTS (an earlier defect)
 --------------------------
 Before this helper, the test suite built only single-project fixtures.
 Code paths that iterate over multiple projects (the wake-script outer loop,
@@ -51,7 +51,7 @@ The kanban root also receives:
     projects.cfg            — two-section INI registering project_a and project_b
     logs/                   — kanban-root log dir
     locks/                  — kanban-root lock dir
-    workflows/              — release.yaml, document.yaml (real workflow definitions)
+    workflows/              — plugin dirs: release/, document/ (with pipeline.yaml)
     tasks/queues/plans/     — root-level plans directory (legacy compat)
 
 WHAT THIS HELPER DOES NOT DO
@@ -67,6 +67,7 @@ WHAT THIS HELPER DOES NOT DO
 from __future__ import annotations
 
 import pathlib
+import shutil
 
 import pytest
 
@@ -76,7 +77,11 @@ import pytest
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 _REAL_WORKFLOWS_DIR = _TEAM_DIR / "workflows"
-_WORKFLOW_FILES = ["release.yaml", "document.yaml"]
+# Workflow plugin directories to copy into test fixture roots.
+# Each entry is a subdirectory under _REAL_WORKFLOWS_DIR containing at minimum
+# workflow.cfg and workflow.sh; types with a pipeline.yaml (release, document)
+# also carry it inside the directory so load_workflow() can resolve them.
+_WORKFLOW_PLUGIN_DIRS = ["release", "document"]
 
 # Fixed project names — deterministic, recognisable in logs.
 PROJECT_A = "project_a"
@@ -210,10 +215,10 @@ def build_two_project_root(
             logs/agents/        — per-firing wake-batch logs
             logs/debug/archive/ — debug log rotation target
             locks/              — flock files
-            workflows/          — release.yaml, document.yaml (document-workflow definition)
+            workflows/          — plugin dirs: release/, document/ (with pipeline.yaml)
             tasks/queues/plans/ — root-level plans dir (legacy compat)
 
-    Design note: BUG-0160 documented that the test suite built only
+    Design note: an earlier defect documented that the test suite built only
     single-project fixtures.  Tests using this fixture exercise multi-project
     isolation guarantees that single-project fixtures cannot reach.
     """
@@ -261,15 +266,19 @@ def build_two_project_root(
     # --- Legacy root-level plans directory ---
     (root / "tasks" / "queues" / "plans").mkdir(parents=True, exist_ok=True)
 
-    # --- workflows/: real definitions (mirror install.sh) ---
+    # --- workflows/: plugin directories (mirror install.sh behaviour) ---
+    # install.sh copies team/workflows/ (including plugin subdirs) to
+    # $KANBAN_ROOT/workflows/.  Each plugin dir contains workflow.cfg,
+    # workflow.sh, and optionally pipeline.yaml (release and document carry one).
     wf_dir = root / "workflows"
     wf_dir.mkdir(parents=True, exist_ok=True)
-    for wf_name in _WORKFLOW_FILES:
-        src = _REAL_WORKFLOWS_DIR / wf_name
-        if src.exists():
-            (wf_dir / wf_name).write_text(
-                src.read_text(encoding="utf-8"), encoding="utf-8"
-            )
+    for plugin_name in _WORKFLOW_PLUGIN_DIRS:
+        src_plugin = _REAL_WORKFLOWS_DIR / plugin_name
+        if src_plugin.is_dir():
+            dest_plugin = wf_dir / plugin_name
+            if dest_plugin.exists():
+                shutil.rmtree(dest_plugin)
+            shutil.copytree(src_plugin, dest_plugin)
 
     # --- Build each project directory ---
     projects_root = root / "projects"
@@ -301,7 +310,7 @@ def two_project_root(tmp_path: pathlib.Path) -> pathlib.Path:
             monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(two_project_root))
             # ... exercise multi-project discovery path ...
 
-    BUG-0160: this fixture closes the test-fidelity gap where single-project
+    an earlier defect: this fixture closes the test-fidelity gap where single-project
     fixtures could not exercise cross-project isolation guarantees.
     """
     return build_two_project_root(tmp_path)

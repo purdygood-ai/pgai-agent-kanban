@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # verify_quarantine_visibility.sh
 #
-# End-to-end verification of the quarantine visibility flow introduced in
-# v0.39.4 (tickets 1-5: CODER-20260528-022 through CODER-20260528-026).
+# End-to-end verification of the quarantine visibility flow.
 #
 # What this script verifies:
 #   (a) bash -n over every shell file touched in tickets 1-5
@@ -80,12 +79,12 @@ SANDBOX_ROOT="${TEMP_ROOT}/verify_quarantine_$$"
 # ---------------------------------------------------------------------------
 # Strategy: stale entries removed (option a).
 # test_dashboard_rejection_indicator.sh and test_discovery_rejection_quarantine.sh
-# were present in an earlier RC and removed during a subsequent refactor; they do
-# not exist in the current tree or the v0.1003.1 baseline (cf4b158).  Removing
-# them here is preferable to a per-file existence guard (option b) because these
-# files are confirmed absent — not transiently missing — so a runtime skip would
-# produce permanent warning noise with no coverage value.  If either file is
-# re-introduced in a future RC, add it back to this list at that time.
+# were present in an earlier baseline and removed during a subsequent refactor; they
+# do not exist in the current tree.  Removing them here is preferable to a per-file
+# existence guard (option b) because these files are confirmed absent — not
+# transiently missing — so a runtime skip would produce permanent warning noise with
+# no coverage value.  If either file is re-introduced in a future release, add it
+# back to this list at that time.
 section "STEP A: bash -n syntax checks"
 
 SHELL_FILES=(
@@ -113,8 +112,8 @@ done
 # Strategy: stale entries removed (option a).
 # test_pgai_agent_kanban_dashboard_render_costs.py and
 # test_pgai_agent_kanban_dashboard_scan_attention.py do not exist in the current
-# tree or the v0.1003.1 baseline.  Same rationale as STEP A above: confirmed
-# absent, not transiently missing.  Re-add if the files are restored in a future RC.
+# tree.  Same rationale as STEP A above: confirmed absent, not transiently missing.
+# Re-add if the files are restored in a future release.
 section "STEP B: python3 -m py_compile checks"
 
 PYTHON_FILES=(

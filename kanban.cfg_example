@@ -291,3 +291,26 @@ trivial_log_bytes = 1700
 # this are always preserved, even if below the byte threshold.
 # Default: 6
 trivial_log_hours = 6
+
+
+# ---------------------------------------------------------------------------
+# [api] — operator REST API settings (localhost-only; v1.2.0+)
+# ---------------------------------------------------------------------------
+# The API service exposes the operator command surface as a localhost-only
+# REST API.  It binds to a loopback address only — access from remote hosts
+# is by SSH tunnel or SOCKS proxy.  The service is NOT a cron citizen; the
+# operator starts it explicitly with scripts/api-server.sh start.
+#
+# Security note: no authentication or TLS in v1.2.0.  The loopback binding
+# is the sole access-control mechanism.  Auth/TLS are planned as future work.
+[api]
+
+# Host address the API server binds to.
+# MUST be a loopback address (127.0.0.0/8 for IPv4 or ::1 for IPv6).
+# The server refuses to start when this is set to a non-loopback value.
+# Default: 127.0.0.1
+host = 127.0.0.1
+
+# TCP port the API server listens on.
+# Default: 8300
+port = 8300

@@ -4,7 +4,7 @@ This file orients you to what the pgai-agent-kanban is and why it exists. Read t
 
 ## What this kanban is
 
-A software shop in a box. Seven agents collaborate through a file-based task system to ship work autonomously, without a human in the loop. The kanban itself is one of the projects it builds — it ships its own releases.
+A software shop in a box. Six pipeline agents (plus OVERWATCH, a horizontal observer described below) collaborate through a file-based task system to ship work autonomously, without a human in the loop. The kanban itself is one of the projects it builds — it ships its own releases.
 
 This is not a pair-programming tool. If a human were available to review every step, you'd use Claude Code with VS Code directly. This kanban exists to do work when no one is watching.
 
@@ -20,6 +20,8 @@ Six vertical agents move work through the RC pipeline.
 | WRITER | Authors and revises standalone documents: docs, role files, SOPs, release notes |
 | TESTER | Verifies the RC against acceptance criteria; files gap bug reports |
 | CM | Opens RC branches, ships releases, owns origin |
+
+A seventh role, **OVERWATCH**, sits outside this pipeline: a horizontal observer on its own schedule that watches the running system, auto-fixes a small whitelist of provably-safe wedges, and files bugs for everything else. It never advances a release.
 
 The agents take turns advancing a release. Each role picks up from where the previous left off, implements its deliverable, and hands off cleanly.
 
@@ -44,9 +46,9 @@ Always prefer shipping over hedging. If a task's brief is silent on a design cho
 
 This is the trade-off you are operating under. It is not optional. It is not a guideline you balance against caution. The system was built around the assumption that you ship.
 
-## Multiple projects (future)
+## Multiple projects
 
-The kanban will eventually host many projects. Today there is one (the kanban building itself); tomorrow there will be several — software releases, documents, presentations, marketing campaigns, anything decomposable into tickets. The principles in this file apply to every project the kanban runs. Universal autonomy. Universal ship-and-iterate. Universal binary terminal states.
+The kanban hosts many projects at once — registered in `projects.cfg`, each with its own git topology, branch prefix, version line, and task queues, all advanced by the same agent pipeline. The self-build (the kanban shipping itself) is one lane among several; games, documents, APIs, and UIs run beside it. The principles in this file apply to every project equally. Universal autonomy. Universal ship-and-iterate. Universal binary terminal states.
 
 When per-project context exists (a `projects/<name>/README.md`, a project-specific style guide), read it after this file but before the per-task README. Project context narrows scope; it never overrides this file's principles.
 

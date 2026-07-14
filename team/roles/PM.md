@@ -181,14 +181,14 @@ Before generating tasks, read these top-level fields from the requirements docum
 | `## Workflow Type` | `release` |
 | `## Source Branch` | `none` (required when Workflow Type = feature) |
 | `## Test Required` | `true` |
-| `## Parent Branch` | `develop` |
+| `## Parent Branch` | `main` |
 | `## Human Approval Required` | `auto` |
 
 ### Workflow Type values:
 
 - **`release`** — Standard release lifecycle. Materializer adds CM-open + feature tasks + TESTER (optional) + CM-release bookends. **Default.**
 
-- **`feature`** — Lightweight feature workflow. Materializer adds CODER(create-shared-branch) as ticket 1 + feature tasks + TESTER (optional). No CM bookends, no RC branch. Useful for multi-task feature work that shares a common branch but does not constitute a full release.
+- **`feature`** — Lightweight feature workflow. Materializer adds CODER(create-shared-branch) as ticket 1 + feature tasks + TESTER (optional). No CM bookends, no RC branch. Useful for multi-task feature work that shares a common branch but does not constitute a full release. (NOTE: `feature` names this shared-branch DECOMPOSITION MODE — an assembly shape at the materializer layer, not a workflow-type plugin under `workflows/`.)
 
 - **`document`** — Document workflow supporting both short-form (story, blog post) and long-form (whitepaper, SOP) documents. The pipeline shape depends on whether the brief includes a `## Sections` list:
 
@@ -223,6 +223,15 @@ The workflow type comes from the requirements document's `## Workflow Type` fiel
 ### Block conditions
 
 If `Workflow Type = feature` AND `Source Branch` is blank AND no Active RC exists, write a single-task plan with `slug: blocked-no-source-branch`, `role: CODER`, and acceptance criterion: `"PM could not determine source branch for feature workflow."` Do not decompose further.
+
+**The type set is OPEN.** The values above are the built-ins this file
+documents. Any OTHER value in `## Workflow Type` means a workflow-type
+plugin under `workflows/<type>/` defines the semantics: read its
+`workflow.cfg` capabilities and the task README, which carries the
+procedure for that type. A type the dispatcher does not recognize never
+reaches you — it fails closed at discovery — so never improvise a
+default for a present-but-unrecognized value; the absent-field default
+above is the ONLY default.
 
 ## Decomposition Standards
 
@@ -368,7 +377,7 @@ This section describes the dependency-injection contract: what each downstream r
 |---|---|---|
 | `working_directory` | Requirements doc's `## Working Directory`, or `$PGAI_DEV_TREE_PATH` for self-build | Where the agent `cd`s to |
 | `git_repo` | Requirements doc, or `none` for non-git tasks | Whether git workflow applies |
-| `source_branch` | Materializer overrides with `rc/<target_version>` for release workflow; otherwise PM sets to `develop` | Branch to merge feature back into |
+| `source_branch` | Materializer overrides with `rc/<target_version>` for release workflow; otherwise PM sets to the prefixed main branch | Branch to merge feature back into |
 | `feature_branch` | Materializer computes `feature/<task_id>` | Branch to do work on |
 
 ### Release/version fields (TESTER and CM bookend tasks need these)
@@ -414,7 +423,7 @@ Write ONLY valid JSON to the specified output file. No markdown fences, no pream
   "workflow_type": "release | feature | document (default: release)",
   "source_branch": "shared branch name for feature workflow, or none",
   "test_required": "true | false (default: true)",
-  "parent_branch": "branch the shared feature branch is created from (default: develop)",
+  "parent_branch": "branch the shared feature branch is created from (default: main)",
   "human_approval_required": "auto | required (default: auto)",
   "artifact_name": "output-name-slug (document only; omit to derive from filename)",
   "source_documents": ["v0.1.3-slide-deck", "v0.3.7-other-doc"],
@@ -426,7 +435,7 @@ Write ONLY valid JSON to the specified output file. No markdown fences, no pream
       "role": "CODER",
       "working_directory": "/path | local-development-only | null",
       "git_repo": "git@github.com:org/repo.git | none",
-      "source_branch": "develop | none",
+      "source_branch": "main | none",
       "goal": "What must be achieved",
       "inputs": ["files or resources needed"],
       "context_paths": ["READMEs to read"],
@@ -467,16 +476,16 @@ Write ONLY valid JSON to the specified output file. No markdown fences, no pream
 
 - `depends_on` references sequence numbers. The first task always has `depends_on: []`. Materializer translates sequence numbers to full task IDs and into `prerequisite_ids`.
 - `working_directory` and `git_repo` are usually the same across all tasks in a project — the project-level substrate.
-- Per-task `source_branch` is `"develop"` if `git_repo` is set, `"none"` otherwise. Materializer overrides with `rc/vX.Y.Z` when `workflow_type` is `release`.
+- Per-task `source_branch` is `"main"` (the prefixed main branch resolves per `project.cfg branch_prefix`) if `git_repo` is set, `"none"` otherwise. Materializer overrides with `rc/vX.Y.Z` when `workflow_type` is `release`.
 - Slugs: kebab-case, lowercase, under 30 characters.
 - `feature_branch` is generated by the materializer (as `feature/<task_id>`) — PM does not set it.
 - `task_id` is generated by the materializer — PM does not set it.
 
 #### Release-workflow source-branch override
 
-For `workflow_type: release`, treat the per-task `source_branch` field as **advisory only**. The materializer rewrites `## Source Branch` on every rendered task README to `rc/<target_version>` — regardless of the `git_repo` value PM emits and regardless of what PM put in the per-task `source_branch` slot. The single exception is the `CM-open-rc` bookend, which legitimately branches from `develop` (or whatever `parent_branch` resolves to) in order to create the RC. Every CODER, WRITER, TESTER, and CM-release task on a release plan is forced onto `rc/<target_version>` by the materializer; PM cannot opt out by setting a different per-task value.
+For `workflow_type: release`, treat the per-task `source_branch` field as **advisory only**. The materializer rewrites `## Source Branch` on every rendered task README to `rc/<target_version>` — regardless of the `git_repo` value PM emits and regardless of what PM put in the per-task `source_branch` slot. The single exception is the `CM-open-rc` bookend, which legitimately branches from the prefixed main branch (or whatever `parent_branch` resolves to) in order to create the RC. Every CODER, WRITER, TESTER, and CM-release task on a release plan is forced onto `rc/<target_version>` by the materializer; PM cannot opt out by setting a different per-task value.
 
-This matters because a release-workflow task whose rendered README says `## Source Branch: develop` is a failure signature: worker agents read the README literally, branch from and merge into `develop`, and the RC ends up empty. Trust the override — do not try to second-guess it by hand-editing rendered READMEs, and do not invent special-case per-task `source_branch` values for release plans expecting them to survive materialization.
+This matters because a release-workflow task whose rendered README says `## Source Branch: main` is a failure signature: worker agents read the README literally, branch from and merge into the prefixed main branch, and the RC ends up empty. Trust the override — do not try to second-guess it by hand-editing rendered READMEs, and do not invent special-case per-task `source_branch` values for release plans expecting them to survive materialization.
 
 ## Self-Build: Dev Tree vs Live Install
 

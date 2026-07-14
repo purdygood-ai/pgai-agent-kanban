@@ -1,0 +1,27 @@
+[
+  {
+    "role": "CM",
+    "task_id": "CM-20260101-100-open-doc",
+    "slug": "open-doc"
+  },
+  {
+    "role": "WRITER",
+    "task_id": "WRITER-20260101-101-outline",
+    "slug": "outline"
+  },
+  {
+    "role": "WRITER",
+    "task_id": "WRITER-20260101-102-draft",
+    "slug": "draft"
+  },
+  {
+    "role": "WRITER",
+    "task_id": "WRITER-20260101-103-polish",
+    "slug": "polish"
+  },
+  {
+    "role": "CM",
+    "task_id": "CM-20260101-104-finalize",
+    "slug": "finalize"
+  }
+]

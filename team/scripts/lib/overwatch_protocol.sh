@@ -11,9 +11,10 @@
 # no files are created, no variables are set outside function definitions.
 #
 # Dependencies:
-#   - team/scripts/lib/overwatch_lib.sh must be sourced first (provides
+#   - team/scripts/lib/overwatch_lib.sh should be sourced first when
 #     overwatch_state_dir, overwatch_halt_flag_path, overwatch_acquire_firing_lock,
-#     overwatch_release_firing_lock).
+#     or overwatch_release_firing_lock are needed by the caller. This file
+#     does not call those functions itself.
 #
 # Required environment variables (must be set before calling any function):
 #   KANBAN_ROOT        — absolute path to the kanban installation root

@@ -236,7 +236,7 @@ unhalt <span class="f">--project</span> <span class="a">&lt;name&gt;</span>   <s
       <div class="grp">naming conventions</div>
       <ul class="tight">
         <li>Requirement: <span class="mono">vX.Y.0-&lt;slug&gt;.md</span></li>
-        <li>Bug: <span class="mono">BUG-NNNN-YYYYMMDD-&lt;slug&gt;.md</span> — needs the date segment <em>and</em> an internal <span class="mono"># BUG-NNNN</span> heading or intake rejects it</li>
+        <li>Bug: <span class="mono">BUG-NNNN-&lt;slug&gt;.md</span> (date segment optional — <span class="mono">BUG-NNNN-YYYYMMDD-&lt;slug&gt;.md</span> is also accepted). Body needs an internal <span class="mono"># BUG-NNNN</span> heading or intake rejects it.</li>
         <li>Priority: <span class="mono">PRIORITY-NNNN-&lt;slug&gt;.md</span></li>
       </ul>
       <p class="note">Confirm the high-water before numbering:<br><span class="mono" style="font-size:.68rem;">ls projects/&lt;p&gt;/bugs/ | grep -oE 'BUG-[0-9]+' | sort -V | tail -1</span></p>
@@ -291,7 +291,7 @@ import-kanban-config <span class="f">--file</span> <span class="a">&lt;archive&g
         <dt>TESTER</dt><dd>verifies, files bugs (reports, never blocks on findings)</dd>
         <dt>CM</dt><dd>release manager — sole origin-toucher; defaults to ship</dd>
         <dt>PO</dt><dd>human-invoked product owner</dd>
-        <dt class="muted">OVERWATCH</dt><dd class="muted">auto-recovery — dormant (post-1.0)</dd>
+        <dt>OVERWATCH</dt><dd>self-monitor — hourly deterministic sweep, daily LLM deep-clean, on-BLOCK trigger</dd>
       </dl>
       <div class="grp">workflow types</div>
       <p class="kv"><b>release</b> — software, git RC branch lifecycle<br>

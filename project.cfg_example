@@ -161,25 +161,69 @@ max_major = 0
 # ---------------------------------------------------------------------------
 # [hooks] — Optional CM release lifecycle hooks
 # ---------------------------------------------------------------------------
-# Hook scripts are called by cm-release.sh at specific phases.
-# Paths: leading '/' = absolute; no leading '/' = relative to dev_tree_path.
+# Hook scripts are called by cm-release.sh AND ship-rc.sh at three phases:
+# pre-squash (before RC squashes to main), pre-tag (after squash, before
+# git tag), post-tag (after tag, before push).  Both scripts resolve, print,
+# and enforce hooks identically via team/scripts/lib/cm_release_hooks.sh.
+#
+# Resolution precedence (highest to lowest):
+#   (a) project.cfg [hooks] cm_release_<phase>_hook           (explicit cfg path)
+#   (b) $KANBAN_ROOT/projects/<name>/hooks/cm-release-<phase>.sh  (kanban-side)
+#   (c) <dev_tree_path>/.pgai/hooks/cm-release-<phase>.sh    (in-repo portable hook)
+#
+# The in-repo tier (c) travels with the managed repository and survives
+# remove-project + create-project cycles.  Prefer it for hooks that should
+# always be present regardless of the kanban installation state (e.g.,
+# a version-bump wrapper whose absence would silently break shipping).
+#
+# Paths (tier a): leading '/' = absolute; no leading '/' = relative to dev_tree_path.
 # Failure behavior: pre_squash and pre_tag block the release; post_tag is logged only.
+# Non-executable in-repo hook (tier c) is an ERROR (fail-loud), not a silent skip.
+#
+# Every release prints exactly one resolution line per phase before that phase runs:
+#   pre-squash hook: /path/to/hook.sh (source: cfg|kanban-side|in-repo)
+#   pre-squash hook: none configured
+#
+# Full precedence, printing, required-flag semantics, and the hook environment
+# contract (PGAI_TARGET_VERSION, PGAI_PROJECT_NAME, PGAI_PROJECT_ROOT,
+# PGAI_DEV_TREE_PATH, PGAI_RC_BRANCH, PGAI_KANBAN_ROOT, cwd = dev tree) are
+# documented in docs/OPERATIONS.md under "Release Lifecycle Hooks".
 [hooks]
 
-# cm_release_pre_squash_hook: Runs before RC branch is squashed to develop.
+# cm_release_pre_squash_hook: Runs before RC branch is squashed to main.
 # Hook commits become part of the squash. Failure BLOCKS the release.
 # Example: scripts/release-version-bump.sh
 # cm_release_pre_squash_hook =
+
+# cm_release_pre_squash_hook_required: When true, the release HALTs before the
+# pre-squash phase if no hook is found at any tier (cfg, kanban-side, in-repo).
+# The HALT message names the phase, all three searched locations, and this key.
+# Set to true on projects where a pre-squash hook is mandatory (e.g. version bump);
+# leaves shipping drift visible instead of silent.
+# Default: false (missing hook is allowed; 'none configured' is printed instead)
+# cm_release_pre_squash_hook_required = false
 
 # cm_release_pre_tag_hook: Runs after squash to main, before git tag is created.
 # Use for final consistency checks. Failure BLOCKS the release.
 # Example: hooks/cm-release-pre-tag.sh
 # cm_release_pre_tag_hook =
 
+# cm_release_pre_tag_hook_required: When true, the release HALTs before the
+# pre-tag phase if no hook is found at any tier. Set true when a consistency
+# check must run at this seam and its absence is a shipping bug.
+# Default: false
+# cm_release_pre_tag_hook_required = false
+
 # cm_release_post_tag_hook: Runs after git tag is created (before push).
 # Use for notifications or asset uploads. Failure is LOGGED but does NOT block.
 # Example: /absolute/path/to/post-tag.sh
 # cm_release_post_tag_hook =
+
+# cm_release_post_tag_hook_required: When true, the release HALTs before the
+# post-tag phase if no hook is found at any tier. Rarely set (post-tag work is
+# usually best-effort side-effects like notifications, not release-critical).
+# Default: false
+# cm_release_post_tag_hook_required = false
 
 
 # ---------------------------------------------------------------------------

@@ -50,9 +50,12 @@
 # has already been queued for PM:
 #
 #   ## Status: open     — bundle exists but has NOT been queued yet; eligible
-#   ## Status: running  — bundle was queued for PM (PM task ID in ## PM Task);
-#                         Step 3 checks pm_backlog for that exact task ID to
-#                         distinguish in-flight from done
+#   ## Status: running  — bundle was queued for PM AND pm-agent success was
+#                         verified (task ID in ## PM Task, pm_backlog entry
+#                         confirmed present); Step 3 checks pm_backlog for that
+#                         exact task ID to distinguish in-flight from done.
+#                         Set only after verified success — never on pm-agent
+#                         failure, to prevent permanent no-retry deadlock.
 #   ## Status: done     — RC shipped; bundle is fully processed; skip forever
 #
 # The invariant is robust against filename collisions because it is anchored to
@@ -85,6 +88,13 @@ _DISC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if ! declare -F pgai_temp_dir >/dev/null 2>&1; then
     # shellcheck source=temp.sh
     source "${_DISC_LIB_DIR}/temp.sh"
+fi
+
+# Source the workflow-type dispatcher so _disc_write_bundle can call
+# wf_bundle_source_branch rather than comparing the workflow_type string.
+if ! declare -F wf_load_plugin >/dev/null 2>&1; then
+    # shellcheck source=workflow.sh
+    source "${_DISC_LIB_DIR}/workflow.sh"
 fi
 unset _DISC_LIB_DIR
 
@@ -389,9 +399,9 @@ discovery_step_priority() {
 # ---------------------------------------------------------------------------
 # discovery_step_requirements <project_name>
 #
-# Step 3 of the pipeline. Scans requirements/ for *.md files where
-# target_version > current_live, sorted by version (lowest first). Iterates
-# ALL eligible files in semver order, applying the following rules per file:
+# Step 3 of the pipeline. Scans requirements/ for *.md files that are eligible
+# for PM pickup, iterating them in order (semver ascending for semver projects,
+# filename-lexical ascending for label projects), applying per-file rules:
 #
 #   - File matched in pm_backlog as [x] (done): skip it and continue to the
 #     next bundle — this is a historical record, not an obstacle.
@@ -399,16 +409,22 @@ discovery_step_priority() {
 #     a 'PM in flight' log line. Only one PM task is allowed at a time.
 #   - File not in pm_backlog at all: queue a PM ticket and return 0.
 #
-# Files with Target Version set to 'auto', 'next-patch', empty string, or the
-# field entirely absent are treated as auto-sentinel files. Their effective
-# version is computed via discovery_compute_next_patch at pickup time, and a
-# log line is emitted recording the computed version and the source file path.
-# Auto-sentinel files are sorted AFTER all explicit-version files.
+# Semver projects (version_semantics = semver):
+#   Files with Target Version set to 'auto', 'next-patch', empty string, or the
+#   field entirely absent are treated as auto-sentinel files. Their effective
+#   version is computed via discovery_compute_next_patch at pickup time, and a
+#   log line is emitted recording the computed version and the source file path.
+#   Auto-sentinel files are sorted AFTER all explicit-version files.
 #
-# Ceiling gate: files whose target_version exceeds the project ceiling are
-# logged as 'ceiling-blocked, skipping' and skipped during iteration.
-# If no eligible file survives the ceiling+backlog checks, Step 3 produces no
-# work (pipeline returns idle).
+#   Ceiling gate: files whose target_version exceeds the project ceiling are
+#   logged as 'ceiling-blocked, skipping' and skipped during iteration.
+#   If no eligible file survives the ceiling+backlog checks, Step 3 produces no
+#   work (pipeline returns idle).
+#
+# Label projects (version_semantics = label or none):
+#   All unhandled items in requirements/ are eligible.  No semver parse, no
+#   ceiling filter.  Auto-sentinel values (auto, next-patch, absent Target
+#   Version) are invalid on label projects and fail loud with a named reason.
 #
 # Returns 0 if a PM ticket was queued. Returns 1 if nothing eligible.
 # ---------------------------------------------------------------------------
@@ -443,12 +459,33 @@ discovery_step_requirements() {
     max_major="$(pp_max_major "$project_name" 2>/dev/null)" || max_major=""
     max_patch="$(pp_max_patch "$project_name" 2>/dev/null)" || max_patch=""
 
-    # Get ALL eligible requirements files sorted by version (lowest first).
-    # Each line is either an absolute path or a path with ":auto" suffix for
-    # auto-sentinel files. Ceiling-blocked files are NOT filtered here — we
-    # want to log them explicitly as 'ceiling-blocked, skipping'.
+    # Resolve the project's version_semantics by loading its workflow plugin.
+    # The plugin's manifest [capabilities] version_semantics field controls
+    # how eligibility is computed — engine queries the capability flag;
+    # zero workflow-type string comparisons occur here.
+    local _wf_type _version_semantics
+    _wf_type="$(pp_workflow_type "$project_name" 2>/dev/null)" || _wf_type="release"
+    local _wf_load_exit=0
+    set +e
+    wf_load_plugin "$_wf_type"
+    _wf_load_exit=$?
+    set -e
+    if [[ $_wf_load_exit -ne 0 ]]; then
+        log "discovery_step_requirements: WARNING cannot load workflow plugin '${_wf_type}': ${WF_LOAD_ERROR}; defaulting to semver eligibility"
+        _version_semantics="semver"
+    else
+        _version_semantics="$(wf_version_semantics)"
+    fi
+
+    # Get ALL eligible requirements files in order appropriate for the semantics.
+    # Each line is either an absolute path or a path with a special suffix:
+    #   ":auto"          — auto-sentinel (semver path only)
+    #   ":auto-invalid"  — auto-sentinel on a label project (fails loud on pickup)
+    #   ":ceiling-blocked:<version>:..." — exceeds project ceiling (semver only)
+    # Ceiling-blocked and auto-invalid files are NOT filtered here — we want
+    # the shell caller to log them with named reasons and continue iterating.
     local all_eligible
-    all_eligible="$(_disc_list_all_eligible_requirements "$requirements_dir" "$last_released" "$max_minor" "$max_major" "$max_patch")"
+    all_eligible="$(_disc_list_all_eligible_requirements "$requirements_dir" "$last_released" "$max_minor" "$max_major" "$max_patch" "$_version_semantics")"
 
     if [[ -z "$all_eligible" ]]; then
         return 1
@@ -458,7 +495,8 @@ discovery_step_requirements() {
     local pm_backlog_file
     pm_backlog_file="$(pp_queue_path "$project_name" "pm")"
 
-    # Iterate all eligible files in version order.
+    # Iterate all eligible files in order (semver ascending or filename-lexical
+    # ascending, depending on version_semantics; ordered by the Python caller).
     while IFS= read -r file_raw; do
         [[ -z "$file_raw" ]] && continue
 
@@ -487,6 +525,15 @@ discovery_step_requirements() {
         if [[ "$file_raw" == *:ceiling-blocked ]]; then
             chosen_file="${file_raw%:ceiling-blocked}"
             log "discovery_step_requirements: ceiling-blocked, skipping ${chosen_file}"
+            continue
+        fi
+
+        # Auto-sentinel on a label-semantics project: fail loud and skip.
+        # Auto-sentinel values (auto / next-patch / absent Target Version) compute
+        # a next semver patch slot, which has no meaning for label projects.
+        if [[ "$file_raw" == *:auto-invalid ]]; then
+            chosen_file="${file_raw%:auto-invalid}"
+            log "discovery_step_requirements: skipping $(basename "${chosen_file}"): auto-sentinel Target Version is not valid for label-semantics projects (version_semantics=${_version_semantics})"
             continue
         fi
 
@@ -543,10 +590,28 @@ discovery_step_requirements() {
                     return 1
                 fi
             else
-                # ## PM Task field is absent or 'none' (older bundle or interrupted write).
-                # Treat as in-flight to be conservative: do not re-queue PM.
-                log "discovery_step_requirements: PM in flight for ${chosen_file} (## Status: running, ## PM Task not set), aborting scan"
-                return 1
+                # ## PM Task field is absent or 'none'.  Distinguish two sub-cases:
+                #
+                # Stuck state: Status=running + PM Task absent/none + no pm_backlog
+                # entry — this is a half-write left by a pm-agent failure.  The
+                # item will never self-recover under the old generic deferral.
+                # Emit a stuck-state diagnosis naming the reset recovery so an
+                # operator (or OVERWATCH) knows exactly what action unblocks it.
+                #
+                # Conservative deferral (fallback): Status=running + PM Task absent/none
+                # + pm_backlog file does not exist yet — treat as in-flight to avoid
+                # re-queueing a PM task whose backlog file may not have been written yet.
+                if [[ -f "$pm_backlog_file" ]]; then
+                    # Backlog file exists but contains no entry matching this bundle —
+                    # definitively a stuck state from a failed or incomplete pm-agent run.
+                    log "discovery_step_requirements: stuck-state detected for ${chosen_file} (## Status: running, ## PM Task not set, no pm_backlog match) — reset ## Status to ready to recover"
+                    return 1
+                else
+                    # No backlog file at all — defer conservatively; pm-agent may not
+                    # have written it yet.
+                    log "discovery_step_requirements: PM in flight for ${chosen_file} (## Status: running, ## PM Task not set), aborting scan"
+                    return 1
+                fi
             fi
         fi
 
@@ -568,8 +633,9 @@ discovery_step_requirements() {
         # Pass the active project name via PGAI_PROJECT_NAME so that pm-agent.sh
         # creates the PM task folder and pm_backlog entry under the correct
         # project's tasks/ directory.
-        local _pm_output _queued_task_id
-        _pm_output="$(PGAI_PROJECT_NAME="$project_name" "$pm_agent_script" "$chosen_file" 2>&1)"
+        local _pm_output _pm_exit _queued_task_id
+        _pm_output="$(PGAI_PROJECT_NAME="$project_name" "$pm_agent_script" "$chosen_file" 2>&1)" || _pm_exit=$?
+        _pm_exit="${_pm_exit:-0}"
         echo "$_pm_output" >&2  # re-emit so it appears in caller's log
 
         # Extract task ID from "  Folder  : <path>" line produced by pm-agent.sh.
@@ -579,10 +645,25 @@ discovery_step_requirements() {
             | head -n1 \
             | sed -E 's|.*Folder\s*:\s*||; s|/[[:space:]]*$||; s|.*/||')" || true
 
-        # Mark the bundle as queued-for-PM.  Even if task-ID extraction failed,
-        # setting ## Status to 'running' prevents a second PM queuing attempt.
-        _disc_update_bundle_pm_queued "$chosen_file" "${_queued_task_id:-none}"
-        log "discovery_step_requirements: bundle marked running (PM task: ${_queued_task_id:-none})"
+        # Mark running ONLY when pm-agent succeeded: exit 0, non-empty task ID
+        # parsed from the Folder line, AND the pm_backlog entry is present.
+        # On any failure, emit a fail-loud ERROR and leave ## Status unchanged
+        # so the next discovery tick re-selects this bundle and retries.
+        local _pm_backlog_entry_present=0
+        if [[ -n "$_queued_task_id" && -f "$pm_backlog_file" ]] \
+            && grep -qF "$_queued_task_id" "$pm_backlog_file" 2>/dev/null; then
+            _pm_backlog_entry_present=1
+        fi
+
+        if [[ "$_pm_exit" -eq 0 && -n "$_queued_task_id" && "$_pm_backlog_entry_present" -eq 1 ]]; then
+            # Verified success: task ID obtained and pm_backlog entry confirmed present.
+            _disc_update_bundle_pm_queued "$chosen_file" "$_queued_task_id"
+            log "discovery_step_requirements: bundle marked running (PM task: ${_queued_task_id})"
+        else
+            # pm-agent failed or produced no verifiable output — leave ## Status
+            # unchanged so the next tick retries this bundle.
+            log "discovery_step_requirements: ERROR pm-agent failed for ${chosen_file} (exit ${_pm_exit}) — leaving status 'ready' for retry"
+        fi
 
         return 0
     done <<< "$all_eligible"
@@ -1631,14 +1712,20 @@ for entry in sorted(dir_path.iterdir()):
 
     # Authoritative check: ## Status header is the source of truth.
     # A file whose Status is 'open' (or absent) is eligible for bundling
-    # regardless of whether its cache marker is [x].  Only 'running' or
-    # 'done' status unconditionally suppresses the file.
+    # regardless of whether its cache marker is [x].  Terminal states
+    # ('done', 'wont-do') and 'running' unconditionally suppress the file.
     text = entry.read_text(encoding="utf-8", errors="replace")
     sm = status_re.search(text)
     if sm:
         status = sm.group(1).strip().lower()
-        # Skip done items unconditionally (already shipped)
-        if status == "done":
+        # Skip terminal items unconditionally — they are definitively resolved.
+        # 'done'    = item completed and shipped; never re-bundle.
+        # 'wont-do' = operator explicitly abandoned; never re-bundle.
+        if status in ("done", "wont-do"):
+            print(
+                f"skipping {entry.name}: terminal state '{status}'",
+                file=sys.stderr,
+            )
             continue
         # Skip running items unconditionally (already bundled, RC in flight)
         if status == "running":
@@ -1810,24 +1897,39 @@ else:
 PY
 }
 
-# _disc_list_all_eligible_requirements <dir> <last_released> [max_minor] [max_major] [max_patch]
+# _disc_list_all_eligible_requirements <dir> <last_released> [max_minor] [max_major] [max_patch] [version_semantics]
 #
-# List ALL requirements files that are eligible for PM pickup, in ascending
-# semver order (lowest version first), followed by any auto-sentinel files.
+# List ALL requirements files that are eligible for PM pickup.  Behavior
+# branches on <version_semantics> declared by the project's workflow plugin:
 #
-#   - Outputs every file that has target_version > last_released
-#   - Marks ceiling-blocked files with a structured suffix so the shell caller
-#     can emit the documented rejection log line and continue iterating:
-#       ":ceiling-blocked:<version>:<component>:<value>:<ceiling_name>:<ceiling_value>"
-#   - Marks auto-sentinel files with a ":auto" suffix (same convention as the
-#     sibling function)
+#   semver (release, document with semver)
+#     - Ascending semver order (lowest version first), followed by auto-sentinels.
+#     - Outputs every file with target_version > last_released.
+#     - Ceiling-blocked files carry a structured suffix so the shell caller
+#       can emit the documented rejection log line and continue iterating:
+#         ":ceiling-blocked:<version>:<component>:<value>:<ceiling_name>:<ceiling_value>"
+#     - Auto-sentinel files carry ":auto" suffix.
+#     - Items with non-semver Target Version are logged and skipped.
 #
-# This allows discovery_step_requirements to iterate the full list and apply
-# the skip-done / exit-on-in-flight / queue-first logic per file.
+#   label / none (testing-only and any future label-version plugin)
+#     - Every unhandled item in requirements/ is eligible; no semver parse,
+#       no ceiling filter (ceilings are version-consumption checkpoints that
+#       only apply to semver release lanes).
+#     - Ordering: filename-lexical ascending (deterministic, reproducible
+#       across systems; avoids mtime variance on copy/restore operations).
+#     - Auto-sentinel (Target Version: auto / next-patch / absent) is NOT
+#       valid for label projects — these files are emitted with ":auto-invalid"
+#       so the shell caller can fail loud with a named reason.
+#     - Items with a Terminal ## Status (done / wont-do) are still filtered.
+#     - One-line skip log is emitted to stderr for any skipped item.
 #
-# max_minor, max_major, max_patch are optional (pass empty string for "no constraint").
-# Output: one line per file, absolute path, possibly with ":auto" or
-#         structured ":ceiling-blocked:..." suffix.
+# When <version_semantics> is absent or empty it defaults to "semver" for
+# backward compatibility with callers that predate the parameter.
+#
+# max_minor, max_major, max_patch are optional (pass empty string for "no
+# constraint"); they are honoured only on the semver path.
+# Output: one line per file, absolute path, possibly with ":auto",
+#         ":auto-invalid", or structured ":ceiling-blocked:..." suffix.
 #         Outputs nothing if no eligible file found.
 _disc_list_all_eligible_requirements() {
     local dir="$1"
@@ -1835,8 +1937,9 @@ _disc_list_all_eligible_requirements() {
     local max_minor="${3:-}"
     local max_major="${4:-}"
     local max_patch="${5:-}"
+    local version_semantics="${6:-semver}"
 
-    python3 - "$dir" "$last_released" "$max_minor" "$max_major" "$max_patch" <<'PY'
+    python3 - "$dir" "$last_released" "$max_minor" "$max_major" "$max_patch" "$version_semantics" "${TEAM_ROOT:-}" <<'PY'
 import pathlib, re, sys
 
 req_dir = pathlib.Path(sys.argv[1])
@@ -1844,6 +1947,29 @@ last_released = sys.argv[2].lstrip("v") or "0.0.0"
 max_minor_str = sys.argv[3] if len(sys.argv) > 3 else ""
 max_major_str = sys.argv[4] if len(sys.argv) > 4 else ""
 max_patch_str = sys.argv[5] if len(sys.argv) > 5 else ""
+version_semantics = sys.argv[6].strip().lower() if len(sys.argv) > 6 else "semver"
+_team_root = sys.argv[7] if len(sys.argv) > 7 else ""
+
+# Locate the pgai_agent_kanban package via TEAM_ROOT so we can import
+# filename_contract (the single-source filename pattern module).
+if _team_root:
+    sys.path.insert(0, _team_root)
+try:
+    from pgai_agent_kanban.lib.filename_contract import (
+        INTAKE_REQUIREMENTS_RE as _INTAKE_RE,
+        SEMVER_REQUIREMENTS_RE as _SEMVER_RE,
+        skip_log_line as _skip_log_line,
+        SKIP_REASON_SEMVER_SHAPE_REQUIRED as _SKIP_SEMVER_SHAPE,
+    )
+except ImportError:
+    # Fall back to inline definitions when the package is not importable
+    # (e.g., test environments without a full install).  The literals here
+    # are intentionally identical to filename_contract.py.
+    _INTAKE_RE = re.compile(r"^v[0-9].*\.md$")
+    _SEMVER_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+-.+\.md$", re.IGNORECASE)
+    _SKIP_SEMVER_SHAPE = "semver-shape-required"
+    def _skip_log_line(name, reason):
+        return f"discovery: skipping {name}: {reason}"
 
 max_minor = int(max_minor_str) if max_minor_str.strip() else None
 max_major = int(max_major_str) if max_major_str.strip() else None
@@ -1874,7 +2000,14 @@ def ceiling_violation(tv):
         return ("patch", patch, "max_patch", max_patch)
     return None
 
-last_tuple = parse_ver(last_released) or (0, 0, 0)
+# Allowlist pattern for non-requirements intake items (BUG- and PRIORITY- prefixes).
+# Requirements files are matched by _INTAKE_RE (sourced from filename_contract).
+_NON_REQ_BUNDLE_RE = re.compile(
+    r'^(PRIORITY-[0-9]{4,}-.+|BUG-[0-9]{4,}-.+)\.md$',
+    re.IGNORECASE,
+)
+
+status_field_re = re.compile(r'^##\s+Status\s*\n\s*(\S+)', re.M | re.IGNORECASE)
 
 target_field_re = re.compile(
     r'^##\s+Target Version\s*\n+\s*(\S+)',
@@ -1882,75 +2015,181 @@ target_field_re = re.compile(
 )
 explicit_ver_re = re.compile(r'^v?\d+\.\d+\.\d+$')
 
-# Three buckets:
-#   explicit_eligible        — (tv_tuple, path) within ceiling
-#   explicit_ceiling_blocked — (tv_tuple, path, structured_suffix) above ceiling
-#   auto_eligible            — [path] for sentinel/missing Target Version
-explicit_eligible = []
-explicit_ceiling_blocked = []
-auto_eligible = []
+def is_terminal(text, name):
+    """Return True and emit a skip log when the item is in a terminal state."""
+    status_match = status_field_re.search(text)
+    if status_match:
+        item_status = status_match.group(1).strip().lower()
+        if item_status in ("wont-do",):
+            print(
+                f"discovery: skipping {name}: terminal state '{item_status}'",
+                file=sys.stderr,
+            )
+            return True
+        if item_status == "done":
+            return True
+    return False
 
-BUNDLE_RE = re.compile(
-    r'^(v[0-9]+\.[0-9]+\.[0-9]+-.+|PRIORITY-[0-9]{4,}-.+|BUG-[0-9]{4,}-.+)\.md$',
-    re.IGNORECASE,
-)
+def iter_candidates():
+    """Yield (entry, text) for all candidates passing the common pre-filters.
 
-for entry in sorted(req_dir.iterdir()):
-    if not entry.is_file() or not entry.name.endswith(".md"):
-        continue
-    # Skip README.md and any documentation-level files
-    if entry.name == "README.md":
-        continue
-    # Skip templates/ subdirectory contents (guard by parent path segment)
-    if "templates" in entry.parts:
-        continue
-    # Skip rejected/ subdirectory contents — quarantined files are not
-    # eligible for re-processing by the discovery pipeline.
-    if "rejected" in entry.parts:
-        continue
-    # Strict allowlist: only files matching bundle naming patterns are eligible
-    if not BUNDLE_RE.match(entry.name):
-        continue
-    text = entry.read_text(encoding="utf-8", errors="replace")
-    m = target_field_re.search(text)
-    if m:
-        raw_val = m.group(1).strip().lower()
-    else:
-        raw_val = ""
+    The allowlist accepts files matching intake's filename contract
+    (INTAKE_REQUIREMENTS_RE for requirements files, plus the BUG- and
+    PRIORITY- prefix patterns for bug/priority intake items).  Semantics-
+    specific filtering (e.g. dotted-semver shape for semver projects) is
+    applied by the caller after this generator yields, not here.
+    """
+    for entry in sorted(req_dir.iterdir()):
+        if not entry.is_file() or not entry.name.endswith(".md"):
+            continue
+        # Skip README.md and any documentation-level files
+        if entry.name == "README.md":
+            continue
+        # Skip templates/ subdirectory contents (guard by parent path segment)
+        if "templates" in entry.parts:
+            continue
+        # Skip rejected/ subdirectory contents — quarantined files are not
+        # eligible for re-processing by the discovery pipeline.
+        if "rejected" in entry.parts:
+            continue
+        # Allowlist: accept requirements files (intake's looser v[0-9]* pattern)
+        # or BUG-/PRIORITY- intake items.  This replaces the former single-RE
+        # BUNDLE_RE that required dotted semver filenames for requirements — the
+        # old strictness caused label-semantics files (e.g. v20260712-slug.md)
+        # to be silently rejected before the semantics branch ever ran.
+        if not (_INTAKE_RE.match(entry.name) or _NON_REQ_BUNDLE_RE.match(entry.name)):
+            continue
+        text = entry.read_text(encoding="utf-8", errors="replace")
+        yield entry, text
 
-    if raw_val in AUTO_SENTINELS or not explicit_ver_re.match(raw_val):
-        auto_eligible.append(entry.resolve())
-        continue
 
-    tv = parse_ver(raw_val)
-    if tv is None:
-        continue
-    if tv <= last_tuple:
-        continue
-    # Check ceilings — both blocked and within-ceiling files are returned so the
-    # shell caller can log each blocked entry explicitly with the exact reason.
-    viol = ceiling_violation(tv)
-    if viol is not None:
-        comp, val, cname, cval = viol
-        # The version string in the rejection log uses raw_val (preserves 'v' prefix if present)
-        ver_str = raw_val if raw_val.startswith("v") else "v" + raw_val
-        # Structured suffix: ceiling-blocked:<version>:<component>:<value>:<cname>:<cval>
-        suffix = f":ceiling-blocked:{ver_str}:{comp}:{val}:{cname}:{cval}"
-        explicit_ceiling_blocked.append((tv, entry.resolve(), suffix))
-    else:
-        explicit_eligible.append((tv, entry.resolve()))
+if version_semantics == "semver":
+    # -----------------------------------------------------------------------
+    # Semver path — existing behavior, byte-identical output for release and
+    # document projects.
+    # -----------------------------------------------------------------------
+    last_tuple = parse_ver(last_released) or (0, 0, 0)
 
-# Output in semver order: within-ceiling files first (sorted), then
-# ceiling-blocked files (sorted), then auto-sentinel files.
-explicit_eligible.sort()
-explicit_ceiling_blocked.sort()
+    # Three buckets:
+    #   explicit_eligible        — (tv_tuple, path) within ceiling
+    #   explicit_ceiling_blocked — (tv_tuple, path, structured_suffix) above ceiling
+    #   auto_eligible            — [path] for sentinel/missing Target Version
+    explicit_eligible = []
+    explicit_ceiling_blocked = []
+    auto_eligible = []
 
-for _tv, path in explicit_eligible:
-    print(path)
-for _tv, path, suffix in explicit_ceiling_blocked:
-    print(str(path) + suffix)
-for path in auto_eligible:
-    print(str(path) + ":auto")
+    for entry, text in iter_candidates():
+        # Semver filename shape guard: requirements files must have a dotted
+        # vX.Y.Z-slug.md name on a semver project.  A file that passed intake's
+        # looser v[0-9]* rule but lacks dots (e.g. v20260712-slug.md) is a
+        # label-semantics file deposited into a semver project — skip it with a
+        # named log line (no silent rejection per BUG-0045).
+        if _INTAKE_RE.match(entry.name) and not _SEMVER_RE.match(entry.name):
+            print(
+                _skip_log_line(entry.name, _SKIP_SEMVER_SHAPE),
+                file=sys.stderr,
+            )
+            continue
+
+        # Skip intake items in terminal states — they are definitively resolved and
+        # must never be re-selected or re-materialized by the discovery pipeline.
+        # 'done'    = bundle shipped; skip forever.
+        # 'wont-do' = operator explicitly abandoned; skip forever.
+        # The shell caller's Step 3 loop handles 'running' (in-flight) and 'open'
+        # (eligible) via its own idempotency gate; we only filter terminal states here.
+        if is_terminal(text, entry.name):
+            continue
+
+        m = target_field_re.search(text)
+        if m:
+            raw_val = m.group(1).strip().lower()
+        else:
+            raw_val = ""
+
+        if raw_val in AUTO_SENTINELS or not explicit_ver_re.match(raw_val):
+            auto_eligible.append(entry.resolve())
+            continue
+
+        tv = parse_ver(raw_val)
+        if tv is None:
+            # Non-semver Target Version on a semver project — skip with log.
+            print(
+                f"discovery: skipping {entry.name}: non-semver Target Version '{raw_val}' on semver project",
+                file=sys.stderr,
+            )
+            continue
+        if tv <= last_tuple:
+            continue
+        # Check ceilings — both blocked and within-ceiling files are returned so the
+        # shell caller can log each blocked entry explicitly with the exact reason.
+        viol = ceiling_violation(tv)
+        if viol is not None:
+            comp, val, cname, cval = viol
+            # The version string in the rejection log uses raw_val (preserves 'v' prefix if present)
+            ver_str = raw_val if raw_val.startswith("v") else "v" + raw_val
+            # Structured suffix: ceiling-blocked:<version>:<component>:<value>:<cname>:<cval>
+            suffix = f":ceiling-blocked:{ver_str}:{comp}:{val}:{cname}:{cval}"
+            explicit_ceiling_blocked.append((tv, entry.resolve(), suffix))
+        else:
+            explicit_eligible.append((tv, entry.resolve()))
+
+    # Output in semver order: within-ceiling files first (sorted), then
+    # ceiling-blocked files (sorted), then auto-sentinel files.
+    explicit_eligible.sort()
+    explicit_ceiling_blocked.sort()
+
+    for _tv, path in explicit_eligible:
+        print(path)
+    for _tv, path, suffix in explicit_ceiling_blocked:
+        print(str(path) + suffix)
+    for path in auto_eligible:
+        print(str(path) + ":auto")
+
+else:
+    # -----------------------------------------------------------------------
+    # Label / none path — for projects whose workflow plugin declares
+    # version_semantics = label or version_semantics = none.
+    #
+    # Every unhandled item in requirements/ is eligible.  There is no semver
+    # parse and no ceiling filter: ceilings are version-consumption
+    # checkpoints that only apply to the semver release lane.
+    #
+    # Ordering: filename-lexical ascending (deterministic across systems;
+    # avoids mtime variance on file copy or restore operations).
+    #
+    # Auto-sentinel (Target Version: auto / next-patch / absent) is not
+    # valid for label projects.  These files are marked ":auto-invalid" so
+    # the shell caller can fail loud with a named reason instead of silently
+    # falling through.
+    # -----------------------------------------------------------------------
+    label_eligible = []
+    auto_invalid = []
+
+    for entry, text in iter_candidates():
+        # Skip terminal states (same as semver path).
+        if is_terminal(text, entry.name):
+            continue
+
+        m = target_field_re.search(text)
+        if m:
+            raw_val = m.group(1).strip().lower()
+        else:
+            raw_val = ""
+
+        # Auto-sentinel values are invalid on label projects.
+        if raw_val in AUTO_SENTINELS:
+            auto_invalid.append(entry.resolve())
+            continue
+
+        # All other items are eligible on label projects regardless of the
+        # version string's format.  No semver parse, no ceiling check.
+        label_eligible.append(entry.resolve())
+
+    # Output filename-lexical order (iter_candidates already sorts by name).
+    for path in label_eligible:
+        print(str(path))
+    for path in auto_invalid:
+        print(str(path) + ":auto-invalid")
 PY
 }
 
@@ -1958,8 +2197,11 @@ PY
 # Write a minimal but valid requirements bundle file referencing each input.
 #
 # Source Branch selection:
-#   - workflow_type == "release" → rc/<target_version>  (bug/priority bundles are RC patches)
-#   - workflow_type == "feature" (or anything else) → develop  (existing behaviour)
+#   Queries the workflow plugin's wf_bundle_source_branch hook after loading the
+#   plugin for the given workflow_type.  The release plugin returns rc/<version>;
+#   other plugin types return main (or their own branch convention).
+#   If the plugin cannot be loaded, the function logs a warning and returns
+#   non-zero so the caller can surface the failure as BLOCKED.
 _disc_write_bundle() {
     local bundle_path="$1"
     local target_version="$2"
@@ -1969,15 +2211,22 @@ _disc_write_bundle() {
     local files="$6"
     local kind="$7"  # "BUG" or "PRIORITY"
 
-    # Compute the correct source branch based on workflow type.
-    # Release bundles target an RC branch derived from the target version;
-    # feature bundles and any other workflow type continue to use develop.
-    local source_branch
-    if [[ "$workflow_type" == "release" ]]; then
-        source_branch="rc/${target_version}"
-    else
-        source_branch="develop"
+    # Load the workflow plugin to query the source branch via wf_bundle_source_branch.
+    # Fail-closed: if the plugin cannot be loaded, stop bundling and surface the
+    # error so the operator can fix the plugin configuration.
+    local _wf_load_exit=0
+    set +e
+    wf_load_plugin "$workflow_type"
+    _wf_load_exit=$?
+    set -e
+    if [[ $_wf_load_exit -ne 0 ]]; then
+        log "_disc_write_bundle: cannot load workflow plugin '${workflow_type}': ${WF_LOAD_ERROR}; bundle aborted"
+        return 1
     fi
+
+    # Compute the correct source branch via the plugin hook.
+    local source_branch
+    source_branch="$(wf_bundle_source_branch "$target_version")"
 
     mkdir -p "$(dirname "$bundle_path")"
 

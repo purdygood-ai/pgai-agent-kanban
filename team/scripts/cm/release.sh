@@ -27,35 +27,33 @@
 #   4e. Stamp release-notes ## Status placeholder (PENDING-RELEASE) with ship decision
 #       (if WRITER-authored notes exist on the RC branch; no-op if absent)
 #       HALT if placeholder survives after stamp, or no recognizable Status line found.
-#   4f. Squash pollution guard: inspect RC→develop diff for stray non-source paths
+#   4f. Squash pollution guard: inspect RC→main diff for stray non-source paths
 #       (repo-root artifacts/, misplaced PRIORITY-*.md, misplaced requirements v*.md,
 #       task-ID dirs outside projects/<name>/tasks/).
 #       Warns loudly; halts if CM_SQUASH_STRICT_POLLUTION_GUARD=true.
-#   5.  Verify rc/<ACTIVE_RC> exists locally and on origin
-#   6.  git checkout develop && git pull --ff-only
-#       if develop SHA == rc/<ACTIVE_RC> SHA, skip steps 7-8 (nothing to squash)
-#   7.  git merge --squash -X theirs rc/<ACTIVE_RC>
-#   8.  git commit -m "<ACTIVE_RC>: release candidate squashed to develop"
-#   9.  git push origin develop
-#   10. git checkout main && git pull --ff-only
-#   11. git merge --squash -X theirs develop
-#   12. git commit -m "Release <ACTIVE_RC>"
-#   12a. Generate release-notes/<ACTIVE_RC>.md from RC branch commits; commit on main
-#        (skipped when WRITER-authored notes were stamped in Step 4e and are already in HEAD)
-#        Auto-generated notes include ## Status field from ship-policy recommendation.
+#   5.  git checkout main && git pull --ff-only
+#   6.  git merge --squash rc/<ACTIVE_RC>
+#   7.  git commit -m "Release <ACTIVE_RC>"
+#   7a. Fidelity gate: git diff --quiet rc/<ACTIVE_RC> main
+#       HALT before release-notes commit and tag if trees diverge.
+#   8.  Generate release-notes/<ACTIVE_RC>.md from RC branch commits; commit on main
+#       (skipped when WRITER-authored notes were stamped in Step 4e and are already in HEAD)
+#       Auto-generated notes include ## Status field from ship-policy recommendation.
+#   8b. Commit any uncommitted WRITER polish of release-notes/<ACTIVE_RC>.md on main
+#       (no-op when file is unchanged; must run BEFORE Step 11b so changelog_writer
+#       reads the polished notes — keeps the freshness gate green on the tip).
 #   NOTE: main is staged locally; auto-push is attempted at Step 18 (best-effort)
-#   13. git push origin --delete rc/<ACTIVE_RC>
-#   14. git branch -D rc/<ACTIVE_RC>
-#   15. Update project-scoped release-state.md (live install) — Active RC cleared
+#   9.  git push origin --delete rc/<ACTIVE_RC>
+#   10. git branch -D rc/<ACTIVE_RC>
+#   11. Update project-scoped release-state.md (live install) — Active RC cleared
 #       Last Released* fields are NOT written; the git tag is the canonical record.
-#   16. git tag <ACTIVE_RC>  ← tag points to the final housekeeping commit on main
+#   12. git tag <ACTIVE_RC>  ← tag points to the final housekeeping commit on main
 #       After this tag exists, pp_last_released_version returns <ACTIVE_RC>.
 #   NOTE: tag auto-pushed at Step 18 (best-effort); operator may push manually if needed
-#   16b. Promote bundled items from 'running' to 'done'
-#   17. Sync project-scoped release-state.md state to develop's working tree and push
-#   18. Best-effort auto-push of main and tags to origin
+#   12b. Promote bundled items from 'running' to 'done'
+#   13. Best-effort auto-push of main and tags to origin
 #       Push failures are non-fatal — script always exits 0 if release shipped locally
-#   19. Print "Next Recommended Step" block and exit 0
+#   14. Print "Next Recommended Step" block and exit 0
 #
 # HALT triggers (create $KANBAN_ROOT/HALT and exit 1):
 #   - TESTER state is BLOCKED (verification could not complete)
@@ -63,8 +61,9 @@
 #   - Any finding Fix Effort=large in a SHIP-WITH-SERIOUS-CONCERNS context
 #   - Pre-squash hook fails
 #   - Squash pollution guard fires in strict mode (CM_SQUASH_STRICT_POLLUTION_GUARD=true)
-#   - Squash to develop or main has conflicts
-#   - Push to origin fails after retries (checked in Step 9 / Step 18)
+#   - Squash to main has conflicts
+#   - Fidelity gate fires (rc/<version> tree diverges from main after squash)
+#   - Push to origin fails after retries (checked in Step 18)
 #   - Tag already exists on remote
 #   - Last 3 consecutive RCs for this project were all marked NON-FUNCTIONAL
 #
@@ -116,11 +115,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Source optional config files (BEFORE strict mode) ---
 # The kanban bashrc/env may have unset vars, non-zero returns, or interactive
 # aliases that would trip strict mode. Source them first.
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
-TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
 # $HOME/.config/pgai-kanban.cfg is operator-local bash config; sourced as-is.
@@ -148,6 +150,12 @@ fi
 # shellcheck source=lib/projects.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/projects.sh"
 
+# --- Source CM release hook resolution/printing/enforcement library ---
+# cm_release_hooks.sh provides cm_resolve_and_enforce_hook, the single call site
+# for hook resolution used by both release.sh and ship-rc.sh (one-implementation rule).
+# shellcheck source=lib/cm_release_hooks.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm_release_hooks.sh"
+
 # --- Enable strict mode for our own code ---
 set -euo pipefail
 
@@ -164,10 +172,9 @@ PROJECT_NAME="$(pp_require_project_context "${PROJECT_ARG:-}")" || {
 # Resolve branch/tag prefix for this project (empty string for pure-AI installs)
 _RELEASE_PREFIX="$(pp_branch_prefix "$PROJECT_NAME")"
 
-# --- Resolve base branch names via pp_prefix_branch ---
-# For projects with branch_prefix=ai_, DEVELOP_BRANCH=ai_develop and MAIN_BRANCH=ai_main.
-# For projects with no branch_prefix, these are 'develop' and 'main' unchanged.
-DEVELOP_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "develop")"
+# --- Resolve base branch name via pp_prefix_branch ---
+# For projects with branch_prefix=ai_, MAIN_BRANCH=ai_main.
+# For projects with no branch_prefix, MAIN_BRANCH=main unchanged.
 MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
 
 # --- Resolve REPO_ROOT from project.cfg dev_tree_path ---
@@ -507,7 +514,7 @@ append_autoresolve_note_to_release_state() {
 Timestamp: ${timestamp}
 Squash: ${squash_desc}
 CM Task: cm-release.sh (automated)
-Action: Auto-resolved modify/delete (UD/DU) conflicts by taking develop's side.
+Action: Auto-resolved modify/delete (UD/DU) conflicts by taking main's side.
 Resolved Paths:
 ${paths_resolved}
 EOF
@@ -517,9 +524,9 @@ EOF
 # Helper: auto-resolve UD/DU modify/delete conflicts after a failed git merge --squash.
 # Usage: _cm_autoresolve_ud_conflicts <repo_root> <squash_label> <source_branch_label>
 #
-# squash_label      : human-readable description for log lines, e.g. "rc/v0.63.1 into develop"
+# squash_label      : human-readable description for log lines, e.g. "rc/v0.63.1 into main"
 # source_branch_label : the name of the branch being squashed IN (the "theirs" side),
-#                       used in log lines, e.g. "develop" or "rc/v0.63.1"
+#                       used in log lines, e.g. "main" or "rc/v0.63.1"
 #
 # Returns:
 #   0  — all conflicts were UD/DU and have been resolved; caller may proceed with commit.
@@ -529,8 +536,8 @@ EOF
 # Side effects on exit 0:
 #   - All UD/DU paths have been staged (git rm or git add as appropriate).
 #   - Each resolution is logged to stdout with the exact line:
-#       cm-release: auto-resolved modify/delete: <path> (took develop's deletion)
-#       cm-release: auto-resolved modify/delete: <path> (took develop's version)
+#       cm-release: auto-resolved modify/delete: <path> (took main's deletion)
+#       cm-release: auto-resolved modify/delete: <path> (took main's version)
 #   - DOES NOT commit — the caller is responsible for the commit step.
 #
 # Side effects on exit 1 or 2:
@@ -566,14 +573,14 @@ _cm_autoresolve_ud_conflicts() {
         ;;
       UD)
         # Our side (HEAD/target branch) updated, their side (source branch) deleted.
-        # Taking source branch's (develop's) side = delete the file.
+        # Taking source branch's (main's) side = delete the file.
         has_ud=1
         ud_paths+=("$_path")
         ud_actions+=("delete")
         ;;
       DU)
         # Our side (HEAD/target branch) deleted, their side (source branch) updated.
-        # Taking source branch's (develop's) side = keep develop's version.
+        # Taking source branch's (main's) side = keep main's version.
         has_ud=1
         ud_paths+=("$_path")
         ud_actions+=("keep")
@@ -605,7 +612,7 @@ _cm_autoresolve_ud_conflicts() {
     return 1
   fi
 
-  # Pure UD/DU case: auto-resolve each path by taking develop's side.
+  # Pure UD/DU case: auto-resolve each path by taking main's side.
   echo "[cm-release] All conflicts are modify/delete (UD/DU); auto-resolving by taking ${source_branch_label}'s side..."
   local _resolved_paths_log=""
   local i
@@ -615,14 +622,14 @@ _cm_autoresolve_ud_conflicts() {
     if [[ "$_action" == "delete" ]]; then
       # Their (source branch's) side deleted the file — take the deletion.
       git -C "$repo_root" rm --force -- "$_p" >/dev/null 2>&1
-      echo "cm-release: auto-resolved modify/delete: ${_p} (took develop's deletion)"
-      _resolved_paths_log="${_resolved_paths_log}  - ${_p} (took develop's deletion)"$'\n'
+      echo "cm-release: auto-resolved modify/delete: ${_p} (took main's deletion)"
+      _resolved_paths_log="${_resolved_paths_log}  - ${_p} (took main's deletion)"$'\n'
     else
       # Their (source branch's) side kept/modified the file — take their version.
       git -C "$repo_root" checkout --theirs -- "$_p"
       git -C "$repo_root" add -- "$_p"
-      echo "cm-release: auto-resolved modify/delete: ${_p} (took develop's version)"
-      _resolved_paths_log="${_resolved_paths_log}  - ${_p} (took develop's version)"$'\n'
+      echo "cm-release: auto-resolved modify/delete: ${_p} (took main's version)"
+      _resolved_paths_log="${_resolved_paths_log}  - ${_p} (took main's version)"$'\n'
     fi
   done
 
@@ -926,24 +933,23 @@ echo "  Proceeding with release: $_SHIP_DECISION (release notes Status: ${_RELEA
 echo ""
 
 # --- Hook: cm-release-pre-squash ---
-# Runs on the RC branch after verification, before squash to develop.
+# Runs on the RC branch after verification, before squash to main.
 # Any commits made by this hook become part of what gets squashed.
 # Failure here triggers HALT (Trigger 4).
+# Resolution, visibility printing, and required-flag enforcement are handled by
+# cm_resolve_and_enforce_hook (see team/scripts/lib/cm_release_hooks.sh).
 # NOTE: _run_release_hook calls exit 1 on hook failure (not return 1), so we run
 # it in a subshell to capture the exit code without exiting the parent script.
 echo "[Step 4b] Running pre-squash hook (if present)..."
-_pre_squash_hook_path="$(projects_resolve_release_hook_path "$PROJECT_NAME" "pre-squash" 2>/dev/null || true)"
+CM_RESOLVED_HOOK_PATH=""
+cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-squash" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" || {
+  cm_halt \
+    "Trigger 4: Pre-squash in-repo hook is not executable" \
+    "cm-release-pre-squash in-repo hook exists but is not executable. Fix with: chmod +x (path shown above)"
+}
 _pre_squash_rc=0
-if [[ -n "$_pre_squash_hook_path" ]]; then
-  echo "[cm-release] pre-squash hook source: project.cfg (${_pre_squash_hook_path})"
-  ( _run_release_hook "cm-release-pre-squash" "$_pre_squash_hook_path" ) || _pre_squash_rc=$?
-else
-  _pre_squash_legacy="${PROJECT_HOOKS_DIR}/cm-release-pre-squash.sh"
-  if [[ -f "$_pre_squash_legacy" ]]; then
-    echo "[cm-release] WARNING: Legacy hook path detected; declare in project.cfg." >&2
-    echo "[cm-release] pre-squash hook source: legacy (${_pre_squash_legacy})"
-  fi
-  ( _run_release_hook "cm-release-pre-squash" "$_pre_squash_legacy" ) || _pre_squash_rc=$?
+if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
+  ( _run_release_hook "cm-release-pre-squash" "$CM_RESOLVED_HOOK_PATH" ) || _pre_squash_rc=$?
 fi
 if [[ $_pre_squash_rc -ne 0 ]]; then
   cm_halt \
@@ -956,7 +962,7 @@ fi
 # the notes file contains a "## Status: PENDING-RELEASE" placeholder (per CM.md convention).
 # This step replaces that placeholder with the actual ship decision value
 # (_RELEASE_NOTES_STATUS, set by Step 4d above) and commits the result on the RC branch
-# so the squash carries the stamped notes to develop and then to main.
+# so the squash carries the stamped notes directly to main.
 #
 # If no WRITER-authored notes file exists for this RC, this step is a no-op — Step 11a
 # generates fresh notes with the correct status after the squash to main.
@@ -1052,20 +1058,20 @@ STAMP_PY
 
     echo "[Step 4e] Stamp complete. Committing stamped release notes on RC branch..."
     git_step "git add release-notes stamp" git -C "$REPO_ROOT" add "release-notes/${ACTIVE_RC}.md"
-    _stamp_commit_out=""
-    _stamp_commit_rc=0
-    _stamp_commit_out="$(git -C "$REPO_ROOT" commit -m "Stamp release-notes/${ACTIVE_RC}.md ## Status: ${_RELEASE_NOTES_STATUS}" 2>&1)" || _stamp_commit_rc=$?
-    if [[ $_stamp_commit_rc -ne 0 ]]; then
-      if echo "$_stamp_commit_out" | grep -qiE "nothing to commit|nothing added to commit"; then
-        echo "[Step 4e] step 4e: already complete, continuing — release notes stamp commit already present."
-      else
+    if git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+      echo "[Step 4e] step 4e: already complete, continuing — release notes stamp commit already present (no staged changes)."
+    else
+      _stamp_commit_out=""
+      _stamp_commit_rc=0
+      _stamp_commit_out="$(git -C "$REPO_ROOT" commit -m "Stamp release-notes/${ACTIVE_RC}.md ## Status: ${_RELEASE_NOTES_STATUS}" 2>&1)" || _stamp_commit_rc=$?
+      if [[ $_stamp_commit_rc -ne 0 ]]; then
         echo "" >&2
         echo "ERROR: git commit release-notes stamp failed (rc=${_stamp_commit_rc})" >&2
         echo "$_stamp_commit_out" >&2
         exit 1
+      else
+        echo "$_stamp_commit_out"
       fi
-    else
-      echo "$_stamp_commit_out"
     fi
     echo "[Step 4e] Release notes stamped and committed on ${RC_BRANCH}."
   fi
@@ -1073,7 +1079,7 @@ fi
 
 # --- Step 4f: Squash pollution guard ---
 # Before squashing, inspect the set of files that the RC branch introduces
-# relative to the squash target (develop).  Flag any file matching a
+# relative to the squash target (main).  Flag any file matching a
 # non-source / stray pattern:
 #
 #   (a) repo-root artifacts/          — task scratch escaped to wrong location
@@ -1102,9 +1108,9 @@ echo "[Step 4f] Running squash pollution guard on ${RC_BRANCH}..."
 _guard_flagged=()
 _guard_diff_base=""
 
-# Compute the merge-base of develop and RC so the diff covers exactly
+# Compute the merge-base of main and RC so the diff covers exactly
 # what the squash would commit (files introduced or changed on the RC).
-_guard_diff_base="$(git -C "$REPO_ROOT" merge-base "$DEVELOP_BRANCH" "$RC_BRANCH" 2>/dev/null || true)"
+_guard_diff_base="$(git -C "$REPO_ROOT" merge-base "$MAIN_BRANCH" "$RC_BRANCH" 2>/dev/null || true)"
 if [[ -z "$_guard_diff_base" ]]; then
   echo "[Step 4f] WARNING: could not compute merge-base for pollution guard; skipping path scan." >&2
 else
@@ -1188,176 +1194,117 @@ else
 fi
 unset _guard_flagged _guard_diff_base _gpath _gf _basename_gpath_d _basename_gpath_e
 
-# --- Step 5: git checkout develop (or prefixed equivalent) && git pull --ff-only ---
-# Gated by push_to_remote flag: the ff-only pull from origin is skipped when
-# push_to_remote=false (no origin to pull from).  The checkout still runs — subsequent
-# steps depend on DEVELOP_BRANCH being the current HEAD.
-echo "[Step 5] Checking out $DEVELOP_BRANCH and pulling..."
-git_step "git checkout $DEVELOP_BRANCH" git -C "$REPO_ROOT" checkout "$DEVELOP_BRANCH"
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  git_step "git pull --ff-only $DEVELOP_BRANCH" git -C "$REPO_ROOT" merge --ff-only "origin/$DEVELOP_BRANCH"
-else
-  echo "[Step 5] push_to_remote=false — skipping ff-only pull from origin/$DEVELOP_BRANCH (local-only install)."
-fi
-
-# --- Step 6: git merge --squash rc/<ACTIVE_RC> ---
-# Before squashing, check whether develop is already at the RC tip.
-# This happens when the operator fast-forwards an RC to develop (recovery action).
-# In that case there is nothing to squash and git commit would fail with "nothing
-# to commit". Detect and skip cleanly — the content is already correct.
-DEVELOP_SHA="$(git -C "$REPO_ROOT" rev-parse "$DEVELOP_BRANCH")"
-RC_SHA="$(git -C "$REPO_ROOT" rev-parse "$RC_BRANCH")"
-
-if [[ "$DEVELOP_SHA" == "$RC_SHA" ]]; then
-  echo "[Step 6] $DEVELOP_BRANCH is already at $RC_BRANCH tip ($( echo "$DEVELOP_SHA" | cut -c1-7)). Skipping squash — no new commits to merge."
-  echo "[Step 7] No commit needed ($DEVELOP_BRANCH already contains the full release content)."
-else
-  echo "[Step 6] Squash-merging $RC_BRANCH into $DEVELOP_BRANCH..."
-  _squash_develop_rc=0
-  git -C "$REPO_ROOT" merge --squash -X theirs "$RC_BRANCH" || _squash_develop_rc=$?
-  if [[ $_squash_develop_rc -ne 0 ]]; then
-    # Attempt UD/DU auto-resolve before halting.
-    _autoresolve_rc=0
-    _cm_autoresolve_ud_conflicts "$REPO_ROOT" "${RC_BRANCH} into ${DEVELOP_BRANCH}" "develop" || _autoresolve_rc=$?
-    if [[ $_autoresolve_rc -ne 0 ]]; then
-      cm_halt \
-        "Trigger 5: Squash of ${RC_BRANCH} into ${DEVELOP_BRANCH} produced conflicts (rc=${_squash_develop_rc})" \
-        "git merge --squash -X theirs ${RC_BRANCH} into ${DEVELOP_BRANCH} failed (rc=${_squash_develop_rc}). Git state may be damaged; operator must resolve before any branch mutation continues."
-    fi
-  fi
-
-  # --- Step 7: git commit ---
-  # Idempotency: "nothing to commit" after the squash means develop already
-  # contained the RC content (e.g., operator manually squashed before re-run).
-  # Treat this as success and continue — do NOT use git_step which would exit 1.
-  echo "[Step 7] Committing squash on $DEVELOP_BRANCH..."
-  _commit_develop_out=""
-  _commit_develop_rc=0
-  _commit_develop_out="$(git -C "$REPO_ROOT" commit -m "$ACTIVE_RC: release candidate squashed to $DEVELOP_BRANCH" 2>&1)" || _commit_develop_rc=$?
-  if [[ $_commit_develop_rc -ne 0 ]]; then
-    if echo "$_commit_develop_out" | grep -qiE "nothing to commit|nothing added to commit"; then
-      echo "[Step 7] step 7: already complete, continuing — nothing to commit ($DEVELOP_BRANCH already contained RC content from prior run or manual operator commit)."
-    else
-      echo "" >&2
-      echo "ERROR: git commit ($DEVELOP_BRANCH squash) failed (rc=${_commit_develop_rc})" >&2
-      echo "$_commit_develop_out" >&2
-      echo "The release-state.md has NOT been modified." >&2
-      echo "Recover manually by checking the git state and re-running or reverting as needed." >&2
-      exit 1
-    fi
-  else
-    echo "$_commit_develop_out"
-  fi
-fi
-
-# --- Step 8: git push origin $DEVELOP_BRANCH ---
-# Push failures after retries trigger HALT (Trigger 6).
-# Gated by push_to_remote flag: skipped entirely when push_to_remote=false.
-echo "[Step 8] Pushing $DEVELOP_BRANCH to origin..."
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  _push_develop_out=$(git -C "$REPO_ROOT" push origin "$DEVELOP_BRANCH" 2>&1); _push_develop_rc=$?
-  printf '%s\n' "$_push_develop_out" | sed 's/^/[cm-release push develop] /'
-  if [[ $_push_develop_rc -ne 0 ]]; then
-    echo "[cm-release] Push to origin $DEVELOP_BRANCH failed (rc=${_push_develop_rc}). Retrying in 3 seconds..."
-    sleep 3
-    _push_develop_out=$(git -C "$REPO_ROOT" push origin "$DEVELOP_BRANCH" 2>&1); _push_develop_rc=$?
-    printf '%s\n' "$_push_develop_out" | sed 's/^/[cm-release push develop retry] /'
-  fi
-  # Emit single grep-able push-result marker for Step 8 develop push.
-  if [[ $_push_develop_rc -ne 0 ]]; then
-    _push_develop_outcome=FAILED
-  elif printf '%s\n' "$_push_develop_out" | grep -q "Everything up-to-date"; then
-    _push_develop_outcome=UP-TO-DATE
-  else
-    _push_develop_outcome=PUSHED
-  fi
-  echo "[cm-release push-result] target=$DEVELOP_BRANCH rc=${ACTIVE_RC} outcome=${_push_develop_outcome} outcome_code=${_push_develop_rc}"
-  if [[ $_push_develop_rc -ne 0 ]]; then
-    cm_halt \
-      "Trigger 6: Push to origin $DEVELOP_BRANCH failed after retries (rc=${_push_develop_rc})" \
-      "git push origin $DEVELOP_BRANCH failed after retries (rc=${_push_develop_rc}) for ${ACTIVE_RC}. Origin unreachable or rejecting push. Operator must resolve network/auth issue."
-  fi
-else
-  echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: git push origin $DEVELOP_BRANCH (Step 8)"
-fi
-
-# --- Step 9: git checkout main (or prefixed equivalent) && git pull --ff-only ---
+# --- Step 5: git checkout main (or prefixed equivalent) && git pull --ff-only ---
 # Idempotency: on a re-run, local main may already be AHEAD of origin/main (push_to_remote=false,
 # or a partial re-run where push succeeded on the prior run).  git merge --ff-only fails in that
 # case ("not possible to fast-forward").  Guard: skip the ff-only pull when local main is already
 # ahead of or equal to origin/main, logging the idempotent step.
-echo "[Step 9] Checking out $MAIN_BRANCH and pulling..."
+echo "[Step 5] Checking out $MAIN_BRANCH and pulling..."
 git_step "git checkout $MAIN_BRANCH" git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
 
 _main_local_sha="$(git -C "$REPO_ROOT" rev-parse "$MAIN_BRANCH" 2>/dev/null)" || _main_local_sha=""
 _main_origin_sha="$(git -C "$REPO_ROOT" rev-parse "origin/$MAIN_BRANCH" 2>/dev/null)" || _main_origin_sha=""
 if [[ -z "$_main_origin_sha" ]]; then
   # origin/main doesn't exist yet (local-only install) — skip the ff pull.
-  echo "[Step 9] origin/$MAIN_BRANCH not found — skipping ff-only pull (local-only or push_to_remote=false install)."
+  echo "[Step 5] origin/$MAIN_BRANCH not found — skipping ff-only pull (local-only or push_to_remote=false install)."
 elif [[ "$_main_local_sha" == "$_main_origin_sha" ]]; then
-  echo "[Step 9] $MAIN_BRANCH already up-to-date with origin/$MAIN_BRANCH — skipping ff-only pull."
+  echo "[Step 5] $MAIN_BRANCH already up-to-date with origin/$MAIN_BRANCH — skipping ff-only pull."
 else
   # Check whether local is already ahead of origin (merge-base == origin SHA).
   _main_merge_base="$(git -C "$REPO_ROOT" merge-base "$MAIN_BRANCH" "origin/$MAIN_BRANCH" 2>/dev/null)" || _main_merge_base=""
   if [[ -n "$_main_merge_base" && "$_main_merge_base" == "$_main_origin_sha" ]]; then
-    echo "[Step 9] step 9: already complete, continuing — $MAIN_BRANCH is already ahead of origin/$MAIN_BRANCH (re-run after partial release)."
+    echo "[Step 5] step 5: already complete, continuing — $MAIN_BRANCH is already ahead of origin/$MAIN_BRANCH (re-run after partial release)."
   else
     git_step "git pull --ff-only $MAIN_BRANCH" git -C "$REPO_ROOT" merge --ff-only "origin/$MAIN_BRANCH"
   fi
 fi
 
-# --- Step 10: git merge --squash $DEVELOP_BRANCH ---
-# Idempotency: if main already contains all of develop's content (SHA-equality or
-# "nothing to commit" after squash), treat the squash as already complete.
-# This is the symmetric check to the develop squash fast-path in Steps 6-7.
-echo "[Step 10] Squash-merging $DEVELOP_BRANCH into $MAIN_BRANCH..."
+# --- Step 6: git merge --squash rc/<ACTIVE_RC> ---
+# Idempotency: if main already contains all of the RC's content (SHA-equality or
+# an empty index after squash), treat the squash as already complete.
+echo "[Step 6] Squash-merging $RC_BRANCH into $MAIN_BRANCH..."
 MAIN_SHA="$(git -C "$REPO_ROOT" rev-parse "$MAIN_BRANCH")"
-DEVELOP_SHA_MAIN="$(git -C "$REPO_ROOT" rev-parse "$DEVELOP_BRANCH")"
+RC_SHA="$(git -C "$REPO_ROOT" rev-parse "$RC_BRANCH")"
 
-if [[ "$MAIN_SHA" == "$DEVELOP_SHA_MAIN" ]]; then
-  echo "[Step 10] step 10: already complete, continuing — $MAIN_BRANCH is already at $DEVELOP_BRANCH tip ($(echo "$MAIN_SHA" | cut -c1-7)). Skipping squash."
-  echo "[Step 11] step 11: already complete, continuing — no commit needed ($MAIN_BRANCH already contains $DEVELOP_BRANCH content)."
+if [[ "$MAIN_SHA" == "$RC_SHA" ]]; then
+  echo "[Step 6] step 6: already complete, continuing — $MAIN_BRANCH is already at $RC_BRANCH tip ($(echo "$MAIN_SHA" | cut -c1-7)). Skipping squash."
+  echo "[Step 7] step 7: already complete, continuing — no commit needed ($MAIN_BRANCH already contains RC content)."
 else
   _squash_main_rc=0
-  git -C "$REPO_ROOT" merge --squash -X theirs "$DEVELOP_BRANCH" || _squash_main_rc=$?
+  git -C "$REPO_ROOT" merge --squash "$RC_BRANCH" || _squash_main_rc=$?
   if [[ $_squash_main_rc -ne 0 ]]; then
     # Attempt UD/DU auto-resolve before halting.
     _autoresolve_main_rc=0
-    _cm_autoresolve_ud_conflicts "$REPO_ROOT" "${DEVELOP_BRANCH} into ${MAIN_BRANCH}" "develop" || _autoresolve_main_rc=$?
+    _cm_autoresolve_ud_conflicts "$REPO_ROOT" "${RC_BRANCH} into ${MAIN_BRANCH}" "main" || _autoresolve_main_rc=$?
     if [[ $_autoresolve_main_rc -ne 0 ]]; then
       cm_halt \
-        "Trigger 5: Squash of ${DEVELOP_BRANCH} into ${MAIN_BRANCH} produced conflicts (rc=${_squash_main_rc})" \
-        "git merge --squash -X theirs ${DEVELOP_BRANCH} into ${MAIN_BRANCH} failed (rc=${_squash_main_rc}). Git state may be damaged; operator must resolve before any branch mutation continues."
+        "Trigger 5: Squash of ${RC_BRANCH} into ${MAIN_BRANCH} produced conflicts (rc=${_squash_main_rc})" \
+        "git merge --squash ${RC_BRANCH} into ${MAIN_BRANCH} failed (rc=${_squash_main_rc}). Git state may be damaged; operator must resolve before any branch mutation continues."
     fi
   fi
 
-  # --- Step 11: git commit ---
-  # Idempotency: "nothing to commit" after a squash merge means the content was
-  # already present on main (e.g., operator manually committed main before re-run).
-  # Treat this as success and continue — do NOT use git_step which would exit 1.
-  echo "[Step 11] Committing squash on main..."
-  _commit_main_out=""
-  _commit_main_rc=0
-  _commit_main_out="$(git -C "$REPO_ROOT" commit -m "Release $ACTIVE_RC" 2>&1)" || _commit_main_rc=$?
-  if [[ $_commit_main_rc -ne 0 ]]; then
-    if echo "$_commit_main_out" | grep -qiE "nothing to commit|nothing added to commit"; then
-      echo "[Step 11] step 11: already complete, continuing — nothing to commit (main already contained release content from prior run or manual operator commit)."
-    else
+  # --- Step 7: git commit ---
+  # Idempotency: an empty index after the squash merge means the RC's content was
+  # already present on main (e.g., from a prior run that committed the squash before
+  # dying, or an operator manual commit). Detect via exit code, not git prose.
+  echo "[Step 7] Committing squash on $MAIN_BRANCH..."
+  if git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+    echo "[Step 7] step 7: already complete, continuing — index is empty after squash (main already contained release content from prior run or manual operator commit)."
+  else
+    _commit_main_out=""
+    _commit_main_rc=0
+    _commit_main_out="$(git -C "$REPO_ROOT" commit -m "Release $ACTIVE_RC" 2>&1)" || _commit_main_rc=$?
+    if [[ $_commit_main_rc -ne 0 ]]; then
       echo "" >&2
       echo "ERROR: git commit (main squash) failed (rc=${_commit_main_rc})" >&2
       echo "$_commit_main_out" >&2
       echo "The release-state.md has NOT been modified." >&2
       echo "Recover manually by checking the git state and re-running or reverting as needed." >&2
       exit 1
+    else
+      echo "$_commit_main_out"
     fi
-  else
-    echo "$_commit_main_out"
   fi
 fi
 
-# --- Step 11a: Generate release notes from RC branch commits ---
-# Done here, after the main squash commit (Step 11) but before push (Step 12) and
-# before the RC branch is deleted (Steps 13-14).  The RC branch must still exist
+# --- Step 7a: Fidelity gate ---
+# After the squash commit on main and BEFORE release-notes and tag:
+# assert that rc/<ACTIVE_RC> and $MAIN_BRANCH are byte-identical.
+# At this moment no release-notes have landed, so no diff exclusions are needed.
+# On divergence: print git diff --stat, write HALT, exit 1.
+# A clean gate prints a single OK line and continues.
+#
+# When divergence is detected it means an unexpected commit landed on main
+# after the RC branched from it (e.g. an operator commit mid-RC).  The squash
+# absorbed the RC's changes but the foreign commit is now present on main and
+# not in the RC — a difference the tag would silently lock in.
+#
+# Idempotency (resume): if release-notes for this RC are already committed to
+# main HEAD, the fidelity gate already passed on the prior run; skip it here.
+# Main legitimately contains more commits than the RC branch at this point
+# (the release artifacts from the prior run), so a diff would falsely fire.
+_fidelity_resume=0
+_fidelity_rn_ls="$(git -C "$REPO_ROOT" ls-tree --name-only HEAD "release-notes/${ACTIVE_RC}.md" 2>/dev/null)" || true
+[[ -n "$_fidelity_rn_ls" ]] && _fidelity_resume=1
+if [[ $_fidelity_resume -eq 1 ]]; then
+  echo "[Step 7a] Fidelity gate: skip — release-notes/${ACTIVE_RC}.md already committed to $MAIN_BRANCH HEAD (resume path; gate passed on prior run)."
+else
+  echo "[Step 7a] Fidelity gate: verifying rc/$ACTIVE_RC tree matches $MAIN_BRANCH after squash..."
+  if git -C "$REPO_ROOT" diff --quiet "$RC_BRANCH" "$MAIN_BRANCH" 2>/dev/null; then
+    echo "[Step 7a] Fidelity gate: OK — rc/$ACTIVE_RC and $MAIN_BRANCH are identical."
+  else
+    echo "" >&2
+    echo "[Step 7a] Fidelity gate: DIVERGENCE DETECTED — rc/$ACTIVE_RC and $MAIN_BRANCH differ:" >&2
+    git -C "$REPO_ROOT" diff --stat "$RC_BRANCH" "$MAIN_BRANCH" >&2 || true
+    cm_halt \
+      "Trigger 11: Fidelity gate fired — rc/${ACTIVE_RC} tree diverges from ${MAIN_BRANCH} after squash" \
+      "Post-squash fidelity gate failed for ${ACTIVE_RC}: ${MAIN_BRANCH} contains commits not present in rc/${ACTIVE_RC}. A commit landed on main mid-RC. Operator must inspect the divergent paths shown above and resolve before re-running."
+  fi
+fi
+
+# --- Step 8: Generate release notes from RC branch commits ---
+# Done here, after the fidelity gate (Step 7a) and squash commit (Step 7), but
+# before the RC branch is deleted (Steps 9-10).  The RC branch must still exist
 # so git log can enumerate the feature/bug commits it contributed.
 #
 # Strategy (in priority order):
@@ -1375,7 +1322,7 @@ fi
 #   ## Documentation
 #   ## Other Changes
 #   ## Known Issues
-echo "[Step 11a] Generating release notes for $ACTIVE_RC..."
+echo "[Step 8] Generating release notes for $ACTIVE_RC..."
 
 RELEASE_NOTES_DIR="$REPO_ROOT/release-notes"
 RELEASE_NOTES_FILE="$RELEASE_NOTES_DIR/${ACTIVE_RC}.md"
@@ -1383,7 +1330,7 @@ RELEASE_DATE="$(date +%Y-%m-%d)"
 
 # Idempotency: if release-notes/${ACTIVE_RC}.md is already committed to HEAD on main,
 # the entire generation + add + commit block is already complete.  Re-running the Python
-# generator could produce different output (e.g., if RC_BRANCH now points at develop tip
+# generator could produce different output (e.g., if RC_BRANCH now points at main tip
 # after a reset), creating a new commit that advances main HEAD past the existing tag.
 # Guard: skip the block entirely when the file is already present in HEAD.
 # NOTE: git ls-tree exits 0 even when the path is absent (output is empty in that case).
@@ -1392,16 +1339,16 @@ _rn_in_head=0
 _rn_ls_out="$(git -C "$REPO_ROOT" ls-tree --name-only HEAD "release-notes/${ACTIVE_RC}.md" 2>/dev/null)" || true
 [[ -n "$_rn_ls_out" ]] && _rn_in_head=1
 if [[ $_rn_in_head -eq 1 ]]; then
-  echo "[Step 11a] step 11a: already complete, continuing — release-notes/${ACTIVE_RC}.md is already committed to $MAIN_BRANCH HEAD."
+  echo "[Step 8] step 8: already complete, continuing — release-notes/${ACTIVE_RC}.md is already committed to $MAIN_BRANCH HEAD."
 else
 
 # Ensure the release-notes/ directory exists
 mkdir -p "$RELEASE_NOTES_DIR"
 
-# Identify the point where the RC branch diverged from develop.
+# Identify the point where the RC branch diverged from main.
 # merge-base gives us the last common ancestor commit.
-RC_MERGE_BASE="$(git -C "$REPO_ROOT" merge-base "$DEVELOP_BRANCH" "$RC_BRANCH" 2>/dev/null)" || {
-  echo "WARNING: could not find merge-base for $RC_BRANCH and $DEVELOP_BRANCH; using empty commit list." >&2
+RC_MERGE_BASE="$(git -C "$REPO_ROOT" merge-base "$MAIN_BRANCH" "$RC_BRANCH" 2>/dev/null)" || {
+  echo "WARNING: could not find merge-base for $RC_BRANCH and $MAIN_BRANCH; using empty commit list." >&2
   RC_MERGE_BASE=""
 }
 
@@ -1616,31 +1563,79 @@ print(f"  Release notes written to: release-notes/{active_rc}.md", flush=True)
 RELNOTES_PY
 
 # Commit the release notes file on main (alongside the squash commit just made).
-# Idempotency: if release notes already exist unchanged from a prior run, git commit
-# will say "nothing to commit" — treat that as success (step already complete).
+# Idempotency: if release notes already exist unchanged from a prior run, the index
+# is empty after git add — detect via exit code, not git prose.
 git_step "git add release-notes" git -C "$REPO_ROOT" add "release-notes/${ACTIVE_RC}.md"
-_commit_rn_out=""
-_commit_rn_rc=0
-_commit_rn_out="$(git -C "$REPO_ROOT" commit -m "Add release notes for ${ACTIVE_RC}" 2>&1)" || _commit_rn_rc=$?
-if [[ $_commit_rn_rc -ne 0 ]]; then
-  if echo "$_commit_rn_out" | grep -qiE "nothing to commit|nothing added to commit"; then
-    echo "[Step 11a] step 11a: already complete, continuing — release notes already committed from prior run."
-  else
+if git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+  echo "[Step 11a] step 11a: already complete, continuing — release notes already committed from prior run (no staged changes)."
+else
+  _commit_rn_out=""
+  _commit_rn_rc=0
+  _commit_rn_out="$(git -C "$REPO_ROOT" commit -m "Add release notes for ${ACTIVE_RC}" 2>&1)" || _commit_rn_rc=$?
+  if [[ $_commit_rn_rc -ne 0 ]]; then
     echo "" >&2
     echo "ERROR: git commit release-notes failed (rc=${_commit_rn_rc})" >&2
     echo "$_commit_rn_out" >&2
     exit 1
+  else
+    echo "$_commit_rn_out"
   fi
-else
-  echo "$_commit_rn_out"
 fi
 
 fi  # end: skip if release-notes/${ACTIVE_RC}.md already in HEAD
 
-# --- Step 11b: Create/update CHANGELOG.md at project root ---
-# Prepend the new release entry to CHANGELOG.md so the file always shows
-# newest-first. The entry is the full content of the release-notes file
-# minus its top-level H1 title line (to avoid duplicate heading levels).
+# --- Step 8b: Commit WRITER polish of release-notes/<ACTIVE_RC>.md if present ---
+# When WRITER authored release notes on the RC branch, the squash merge already
+# brought those notes onto main.  If the WRITER also left uncommitted polish
+# changes on disk (working tree), commit them NOW — before Step 11b regenerates
+# CHANGELOG.md — so the changelog_writer reads the polished notes as input.
+# This ordering ensures that after the release: (1) the polished notes are committed,
+# (2) CHANGELOG.md reflects those polished notes, and (3) the tag lands on that
+# CHANGELOG commit, leaving the freshness gate green on the tip (tag == tip).
+#
+# Idempotency: git status --porcelain is empty when the file matches HEAD.
+# A re-run with no uncommitted polish produces no commit — this step is a no-op.
+#
+# Cases handled:
+#   - Working-tree changes to the file (uncommitted WRITER polish) → commit them
+#   - File already committed (no diff) or unchanged from generated stub → no-op
+#   - File missing (notes were never generated and WRITER never authored them)  → warning
+_BARE_VERSION_FOR_POLISH="$(pp_strip_prefix_from_tag "$PROJECT_NAME" "$ACTIVE_RC" 2>/dev/null)" || _BARE_VERSION_FOR_POLISH="$ACTIVE_RC"
+_POLISH_NOTES_FILE="$REPO_ROOT/release-notes/${_BARE_VERSION_FOR_POLISH}.md"
+echo "[Step 8b] Checking for uncommitted WRITER polish of release-notes/${_BARE_VERSION_FOR_POLISH}.md..."
+if [[ ! -f "$_POLISH_NOTES_FILE" ]]; then
+  echo "  [Step 8b] release-notes/${_BARE_VERSION_FOR_POLISH}.md not found; polish step skipped." >&2
+else
+  _POLISH_PORCELAIN="$(git -C "$REPO_ROOT" status --porcelain "release-notes/${_BARE_VERSION_FOR_POLISH}.md" 2>/dev/null || true)"
+  if [[ -n "$_POLISH_PORCELAIN" ]]; then
+    echo "  [Step 8b] Uncommitted WRITER polish detected; committing before CHANGELOG regeneration..."
+    git_step "git add release-notes (polish)" git -C "$REPO_ROOT" add "release-notes/${_BARE_VERSION_FOR_POLISH}.md"
+    if git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+      echo "  [Step 8b] step 8b: already complete, continuing — no staged polish changes to commit."
+    else
+      _commit_polish_out=""
+      _commit_polish_rc=0
+      _commit_polish_out="$(git -C "$REPO_ROOT" commit -m "Polish release notes for ${ACTIVE_RC}" 2>&1)" || _commit_polish_rc=$?
+      if [[ $_commit_polish_rc -ne 0 ]]; then
+        echo "" >&2
+        echo "ERROR: git commit release-notes polish failed (rc=${_commit_polish_rc})" >&2
+        echo "$_commit_polish_out" >&2
+        exit 1
+      else
+        echo "$_commit_polish_out"
+        echo "  [Step 8b] Polish commit created before CHANGELOG regeneration."
+      fi
+    fi
+  else
+    echo "  [Step 8b] release-notes/${_BARE_VERSION_FOR_POLISH}.md is clean (no uncommitted polish)."
+  fi
+fi
+
+# --- Step 11b: Regenerate CHANGELOG.md at project root ---
+# Regenerates the full CHANGELOG.md from all release-notes/vX.Y.Z.md files and
+# the bug ledger via changelog_writer.py (newest release first). The writer is
+# the single source of truth; using it here keeps the released artifact
+# byte-identical to what the freshness gate verifies.
 echo "[Step 11b] Updating CHANGELOG.md for ${ACTIVE_RC}..."
 
 # Idempotency: if CHANGELOG.md is already committed to HEAD on main and already
@@ -1660,78 +1655,36 @@ if [[ $_cl_in_head -eq 1 ]]; then
   echo "[Step 11b] step 11b: already complete, continuing — CHANGELOG.md already contains entry for ${ACTIVE_RC} in $MAIN_BRANCH HEAD."
 else
 
-python3 - \
-  "$REPO_ROOT" \
-  "$ACTIVE_RC" \
-  "$RELEASE_DATE" \
-  <<'CHANGELOG_PY'
-import sys
-import pathlib
-import re
-
-repo_root   = sys.argv[1]
-active_rc   = sys.argv[2]
-release_date = sys.argv[3]
-
-changelog_path = pathlib.Path(repo_root) / "CHANGELOG.md"
-notes_path     = pathlib.Path(repo_root) / "release-notes" / f"{active_rc}.md"
-
-HEADER = (
-    "# Changelog\n\n"
-    "<!-- Auto-generated by cm-release.sh. Do not edit manually. -->\n"
-)
-
-# Read the release notes file and strip the top-level H1 title line.
-notes_text = notes_path.read_text(encoding="utf-8")
-notes_lines = notes_text.splitlines()
-# Remove the first non-empty line that starts with a single '#'
-body_lines = []
-skipped_title = False
-for line in notes_lines:
-    if not skipped_title and re.match(r"^#[^#]", line):
-        skipped_title = True
-        continue
-    body_lines.append(line)
-notes_body = "\n".join(body_lines).lstrip("\n")
-
-new_entry = f"## {active_rc} — {release_date}\n\n{notes_body}"
-
-if changelog_path.exists():
-    existing = changelog_path.read_text(encoding="utf-8")
-    # Strip the header block (everything up to and including the first ---)
-    # so we can re-prepend it cleanly.
-    # Match: header lines + optional blank lines + first --- separator
-    stripped = re.sub(
-        r"^# Changelog\s*\n.*?<!-- Auto-generated[^>]*-->\s*\n(\s*---\s*\n)?",
-        "",
-        existing,
-        count=1,
-        flags=re.DOTALL,
-    ).lstrip("\n")
-    new_content = f"{HEADER}\n---\n\n{new_entry}\n\n---\n\n{stripped}"
-else:
-    new_content = f"{HEADER}\n---\n\n{new_entry}\n\n---\n"
-
-changelog_path.write_text(new_content, encoding="utf-8")
-print(f"  CHANGELOG.md updated with entry for {active_rc}", flush=True)
-CHANGELOG_PY
+# Regenerate CHANGELOG.md in full by invoking the canonical writer module.
+# PYTHONHASHSEED=0 ensures frozenset iteration over section heading names is
+# stable across invocations, so two runs on identical inputs produce byte-identical
+# output — required by the freshness gate in run-unit-tests.sh and
+# run-integration-tests.sh.  PYTHONPATH=$KANBAN_ROOT exposes the installed
+# pgai_agent_kanban package to the subprocess.
+_cl_bugs_dir="${_CM_PROJECT_ROOT}/bugs"
+PYTHONPATH="$KANBAN_ROOT" PYTHONHASHSEED=0 \
+  python3 -m pgai_agent_kanban.cm.changelog_writer \
+  "$REPO_ROOT" "$_cl_bugs_dir" \
+  > "$REPO_ROOT/CHANGELOG.md"
+echo "  CHANGELOG.md regenerated in full for ${ACTIVE_RC}."
 
 git_step "git add CHANGELOG.md" git -C "$REPO_ROOT" add "CHANGELOG.md"
-# Idempotency: CHANGELOG.md already committed from a prior run — skip if nothing staged.
-_commit_cl_out=""
-_commit_cl_rc=0
-_commit_cl_out="$(git -C "$REPO_ROOT" commit -m "Update CHANGELOG.md for ${ACTIVE_RC}" 2>&1)" || _commit_cl_rc=$?
-if [[ $_commit_cl_rc -ne 0 ]]; then
-  if echo "$_commit_cl_out" | grep -qiE "nothing to commit|nothing added to commit"; then
-    echo "[Step 11b] step 11b: already complete, continuing — CHANGELOG.md already committed from prior run."
-  else
+# Idempotency: CHANGELOG.md already committed from a prior run — detect via exit code,
+# not git prose. An empty index after git add means nothing changed.
+if git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+  echo "[Step 11b] step 11b: already complete, continuing — CHANGELOG.md already committed from prior run (no staged changes)."
+else
+  _commit_cl_out=""
+  _commit_cl_rc=0
+  _commit_cl_out="$(git -C "$REPO_ROOT" commit -m "Update CHANGELOG.md for ${ACTIVE_RC}" 2>&1)" || _commit_cl_rc=$?
+  if [[ $_commit_cl_rc -ne 0 ]]; then
     echo "" >&2
     echo "ERROR: git commit CHANGELOG.md failed (rc=${_commit_cl_rc})" >&2
     echo "$_commit_cl_out" >&2
     exit 1
+  else
+    echo "$_commit_cl_out"
   fi
-else
-  echo "$_commit_cl_out"
 fi
 
 fi  # end: skip if CHANGELOG.md already in HEAD with RC entry
@@ -1751,44 +1704,44 @@ if [[ -f "$REPO_ROOT/README.md" ]]; then
   fi
 fi
 
-# --- Step 12: main is NOT pushed here ---
+# --- Step 9: main is NOT pushed here ---
 # The release commits on main stay local until the operator runs cm-finalize-release.sh.
-# Operator will push main (and the tag created in Step 17) as the human-gated final step.
-echo "[Step 12] main is staged locally — NOT pushing to origin (operator will push via cm-finalize-release.sh)."
+# Operator will push main (and the tag created in Step 12) as the human-gated final step.
+echo "[Step 9] main is staged locally — NOT pushing to origin (operator will push via cm-finalize-release.sh)."
 
-# --- Step 13: git push origin --delete rc/<ACTIVE_RC> ---
+# --- Step 10: git push origin --delete rc/<ACTIVE_RC> ---
 # Gated by push_to_remote flag: skipped when push_to_remote=false.
 # Idempotency: if the RC branch is already absent on origin (e.g., deleted in a prior run),
 # treat that as success and continue with an audit log line.
-echo "[Step 13] Deleting $RC_BRANCH on origin..."
+echo "[Step 10] Deleting $RC_BRANCH on origin..."
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
   if ! git -C "$REPO_ROOT" ls-remote --exit-code --heads origin "$RC_BRANCH" >/dev/null 2>&1; then
-    echo "[Step 13] step 13: already complete, continuing — $RC_BRANCH is already absent on origin (deleted in prior run or never pushed)."
+    echo "[Step 10] step 10: already complete, continuing — $RC_BRANCH is already absent on origin (deleted in prior run or never pushed)."
   else
     git_step "git push origin --delete $RC_BRANCH" git -C "$REPO_ROOT" push origin --delete "$RC_BRANCH"
   fi
 else
-  echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: git push origin --delete $RC_BRANCH (Step 13)"
+  echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: git push origin --delete $RC_BRANCH (Step 10)"
 fi
 
-# --- Step 14: git branch -D rc/<ACTIVE_RC> ---
+# --- Step 11: git branch -D rc/<ACTIVE_RC> ---
 # Idempotency: if the local RC branch is already absent (deleted in a prior run),
 # treat that as success and continue with an audit log line.
-echo "[Step 14] Deleting local branch $RC_BRANCH..."
+echo "[Step 11] Deleting local branch $RC_BRANCH..."
 if ! git -C "$REPO_ROOT" rev-parse --verify "refs/heads/$RC_BRANCH" >/dev/null 2>&1; then
-  echo "[Step 14] step 14: already complete, continuing — local branch $RC_BRANCH is already absent (deleted in prior run)."
+  echo "[Step 11] step 11: already complete, continuing — local branch $RC_BRANCH is already absent (deleted in prior run)."
 else
   git_step "git branch -D $RC_BRANCH" git -C "$REPO_ROOT" branch -D "$RC_BRANCH"
 fi
 
-# --- Step 15: Update project-scoped release-state.md (canonical format) ---
+# --- Step 12: Update project-scoped release-state.md (canonical format) ---
 # Only reached here if ALL git operations above succeeded.
 # Write the complete file from a here-doc; no post-hoc sed or regex modifications.
 # Fields written: Active RC, RC Opened At, RC Opened By Task, Last Released.
 # Last Released is set to the just-shipped version (ACTIVE_RC, normalized to vX.Y.Z)
 # so that drain.py's rc:vX.Y.Z branch can read it with semver >=.
 # Written directly to the live install path — dev tree team/release-state.md is NOT touched.
-echo "[Step 15] Updating project-scoped release-state.md..."
+echo "[Step 12] Updating project-scoped release-state.md..."
 
 cat > "$RELEASE_STATE" <<EOF
 # Release State
@@ -1809,9 +1762,9 @@ EOF
 echo "  release-state.md updated: Active RC -> none, Last Released -> ${ACTIVE_RC}"
 echo "  Path: $RELEASE_STATE"
 
-# --- Step 15 post-write: Append auto-resolve audit trail (if any) ---
-# If UD/DU conflicts were auto-resolved at Steps 6 or 10, _CM_AUTORESOLVE_LOG is set.
-# Step 15 just overwrote release-state.md with 'cat >', so we append the audit note now.
+# --- Step 12 post-write: Append auto-resolve audit trail (if any) ---
+# If UD/DU conflicts were auto-resolved at Step 6, _CM_AUTORESOLVE_LOG is set.
+# Step 12 just overwrote release-state.md with 'cat >', so we append the audit note now.
 if [[ -n "${_CM_AUTORESOLVE_LOG:-}" ]]; then
   _ar_timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   cat >> "$RELEASE_STATE" <<EOF
@@ -1819,22 +1772,22 @@ if [[ -n "${_CM_AUTORESOLVE_LOG:-}" ]]; then
 ## Auto-Resolve Event
 Timestamp: ${_ar_timestamp}
 CM Task: cm-release.sh (automated)
-Action: Auto-resolved modify/delete (UD/DU) conflicts by taking develop's side.
+Action: Auto-resolved modify/delete (UD/DU) conflicts by taking main's side.
 Resolved Paths:
 ${_CM_AUTORESOLVE_LOG}
 EOF
   echo "[cm-release] Auto-resolve audit trail appended to release-state.md."
 fi
 
-# --- Step 15b: Run token usage aggregator (per-RC roll-up) ---
-# Runs AFTER the squash-to-main commits (Steps 11-11a) and BEFORE the tag (Step 16).
+# --- Step 12b: Run token usage aggregator (per-RC roll-up) ---
+# Runs AFTER the squash-to-main commits (Steps 7-8) and BEFORE the tag (Step 12).
 # Produces projects/<name>/usage/rc/<ACTIVE_RC>-tokens.json from every task that
 # contributed to this RC (identified by ## Release Version in task README.md).
 #
 # The aggregator is NON-BLOCKING: if it exits non-zero, the failure is logged
 # and the release continues to the tag step.  Per the autonomy principle:
 # ship the release, do not stop on a metrics-collection failure.
-echo "[Step 15b] Running token usage aggregator for $ACTIVE_RC..."
+echo "[Step 12b] Running token usage aggregator for $ACTIVE_RC..."
 _agg_script="$KANBAN_ROOT/pm-agent/aggregate_tokens.py"
 if [[ -f "$_agg_script" ]]; then
   (
@@ -1850,35 +1803,34 @@ if [[ -f "$_agg_script" ]]; then
     fi
   ) || true
 else
-  echo "[Step 15b] WARNING: aggregate_tokens.py not found at $_agg_script — skipping token roll-up." >&2
+  echo "[Step 12b] WARNING: aggregate_tokens.py not found at $_agg_script — skipping token roll-up." >&2
 fi
 
 # --- Hook: cm-release-pre-tag ---
-# Runs after squash to develop AND main, before the git tag is created.
+# Runs after squash to main and release-notes commit, before the git tag is created.
 # Use for final consistency checks or generating release artifacts.
 # Failure here blocks the release (tag has NOT yet been created).
-echo "[Step 15c] Running pre-tag hook (if present)..."
-_pre_tag_hook_path="$(projects_resolve_release_hook_path "$PROJECT_NAME" "pre-tag" 2>/dev/null || true)"
-if [[ -n "$_pre_tag_hook_path" ]]; then
-  echo "[cm-release] pre-tag hook source: project.cfg (${_pre_tag_hook_path})"
-  _run_release_hook "cm-release-pre-tag" "$_pre_tag_hook_path"
-else
-  _pre_tag_legacy="${PROJECT_HOOKS_DIR}/cm-release-pre-tag.sh"
-  if [[ -f "$_pre_tag_legacy" ]]; then
-    echo "[cm-release] WARNING: Legacy hook path detected; declare in project.cfg." >&2
-    echo "[cm-release] pre-tag hook source: legacy (${_pre_tag_legacy})"
-  fi
-  _run_release_hook "cm-release-pre-tag" "$_pre_tag_legacy"
+# Resolution, visibility printing, and required-flag enforcement are handled by
+# cm_resolve_and_enforce_hook (see team/scripts/lib/cm_release_hooks.sh).
+echo "[Step 12c] Running pre-tag hook (if present)..."
+CM_RESOLVED_HOOK_PATH=""
+cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-tag" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" || {
+  cm_halt \
+    "Trigger: Pre-tag in-repo hook is not executable" \
+    "cm-release-pre-tag in-repo hook exists but is not executable. Fix with: chmod +x (path shown above)"
+}
+if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
+  _run_release_hook "cm-release-pre-tag" "$CM_RESOLVED_HOOK_PATH"
 fi
 
-# --- Step 16: git tag <RELEASE_TAG> ---
-# Tag is created HERE, after the squash commits on main, so that
+# --- Step 13: git tag <RELEASE_TAG> ---
+# Tag is created HERE, after the squash commit and release-notes commit on main, so that
 # `git describe --tags` on main returns the clean tag (e.g. v0.17.1) with
 # no trailing commit offset.
 # RELEASE_TAG is the prefixed tag name (e.g. ai_v0.31.0 in hybrid mode,
 # or v0.31.0 in pure-AI mode where prefix is empty).
 RELEASE_TAG="$(pp_prefix_tag "$PROJECT_NAME" "$ACTIVE_RC")"
-echo "[Step 16] Tagging $RELEASE_TAG on the final commit on main..."
+echo "[Step 13] Tagging $RELEASE_TAG on the final commit on main..."
 
 # Idempotency: check local tag first.
 #   - Local tag exists AND points at HEAD: already done, continue (log audit line).
@@ -1888,7 +1840,7 @@ _local_tag_sha="$(git -C "$REPO_ROOT" rev-parse "${RELEASE_TAG}^{}" 2>/dev/null)
 if [[ -n "$_local_tag_sha" ]]; then
   _current_head_sha="$(git -C "$REPO_ROOT" rev-parse "$MAIN_BRANCH")"
   if [[ "$_local_tag_sha" == "$_current_head_sha" ]]; then
-    echo "[Step 16] step 16: already complete, continuing — local tag $RELEASE_TAG already exists and points at the expected commit ($(echo "$_local_tag_sha" | cut -c1-7))."
+    echo "[Step 13] step 13: already complete, continuing — local tag $RELEASE_TAG already exists and points at the expected commit ($(echo "$_local_tag_sha" | cut -c1-7))."
   else
     cm_halt \
       "Trigger 5b: Tag ${RELEASE_TAG} exists locally but points at wrong commit" \
@@ -1911,31 +1863,28 @@ else
   fi
 fi
 
-# --- Step 16a: tag is NOT pushed here ---
-# The tag was created locally in Step 16. The operator pushes it via
+# --- Step 13a: tag is NOT pushed here ---
+# The tag was created locally in Step 13. The operator pushes it via
 # cm-finalize-release.sh (or manually: git push origin <VERSION>).
-echo "[Step 16a] Tag $RELEASE_TAG created locally — NOT pushing to origin (operator will push via cm-finalize-release.sh)."
+echo "[Step 13a] Tag $RELEASE_TAG created locally — NOT pushing to origin (operator will push via cm-finalize-release.sh)."
 
 # --- Hook: cm-release-post-tag ---
 # Runs after the tag is created (tag has NOT yet been pushed to origin — push
-# is best-effort at Step 18).  Use for external notifications, asset uploads,
+# is best-effort at Step 14).  Use for external notifications, asset uploads,
 # or downstream triggers.  Failure here is a LOGGED WARNING ONLY and does NOT
-# block the release; the tag already exists locally and will be pushed at Step 18.
-echo "[Step 16a2] Running post-tag hook (if present)..."
-_post_tag_hook_path="$(projects_resolve_release_hook_path "$PROJECT_NAME" "post-tag" 2>/dev/null || true)"
-if [[ -n "$_post_tag_hook_path" ]]; then
-  echo "[cm-release] post-tag hook source: project.cfg (${_post_tag_hook_path})"
-  _run_release_hook "cm-release-post-tag" "$_post_tag_hook_path" --no-block
-else
-  _post_tag_legacy="${PROJECT_HOOKS_DIR}/cm-release-post-tag.sh"
-  if [[ -f "$_post_tag_legacy" ]]; then
-    echo "[cm-release] WARNING: Legacy hook path detected; declare in project.cfg." >&2
-    echo "[cm-release] post-tag hook source: legacy (${_post_tag_legacy})"
-  fi
-  _run_release_hook "cm-release-post-tag" "$_post_tag_legacy" --no-block
+# block the release; the tag already exists locally and will be pushed at Step 14.
+# Resolution, visibility printing, and required-flag enforcement are handled by
+# cm_resolve_and_enforce_hook (see team/scripts/lib/cm_release_hooks.sh).
+echo "[Step 13b] Running post-tag hook (if present)..."
+CM_RESOLVED_HOOK_PATH=""
+cm_resolve_and_enforce_hook "$PROJECT_NAME" "post-tag" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" || {
+  echo "[cm-release] WARNING: post-tag in-repo hook exists but is not executable — skipping (post-tag does not block release)" >&2
+}
+if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
+  _run_release_hook "cm-release-post-tag" "$CM_RESOLVED_HOOK_PATH" --no-block
 fi
 
-# --- Step 16b: Promote bundled items from running -> done ---
+# --- Step 13c: Promote bundled items from running -> done ---
 # This step runs ONLY after all git operations above have succeeded (including
 # tag creation). It is on the success path only — any git_step failure above
 # would have exited before reaching here.
@@ -1950,7 +1899,7 @@ fi
 #
 # Only files whose ## Status is currently "running" are touched. Files at
 # "open" or "done" (or any other value) are skipped.
-echo "[Step 16b] Promoting bundled items and bundle file from 'running' to 'done'..."
+echo "[Step 13c] Promoting bundled items and bundle file from 'running' to 'done'..."
 
 # Locate the project root for the active project (where requirements/ lives).
 _cm_project_name="$PROJECT_NAME"
@@ -1991,7 +1940,7 @@ else
   _cm_promote_script="$(dirname "${BASH_SOURCE[0]}")/promote_bundled_items.py"
   if [[ ! -f "$_cm_promote_script" ]]; then
     echo "  ERROR: promote_bundled_items.py not found at $_cm_promote_script" >&2
-    echo "  Step 16b cannot promote bundled items. Check your installation." >&2
+    echo "  Step 13c cannot promote bundled items. Check your installation." >&2
     # Non-fatal: release is already locally complete (tag created). Log and continue.
     echo "  WARNING: bundled item ## Status fields NOT promoted. Run promote_bundled_items.py manually." >&2
   else
@@ -2007,22 +1956,22 @@ else
   fi
 fi
 
-# --- Step 16c: Record shipped state in per-RC release-state JSON ---
-# Fires unconditionally after the local tag is created (Step 16), the canonical
+# --- Step 13d: Record shipped state in per-RC release-state JSON ---
+# Fires unconditionally after the local tag is created (Step 13), the canonical
 # shipped signal per this script's own comments.  This ensures closed_at is
 # populated for every successful release regardless of push_to_remote mode.
 #
 # The write_rc_state.py ship call fires here (keyed off the local tag) so that
 # closed_at is populated for every successful release regardless of push_to_remote
-# mode.  Step-18 writes ship state a second time after origin push when
+# mode.  Step-14 writes ship state a second time after origin push when
 # push_to_remote=true; write_ship() is idempotent so the double write is harmless.
 #
-# For push_to_remote=true releases the Step-18 branch writes ship state a second
+# For push_to_remote=true releases the Step-14 branch writes ship state a second
 # time after the push succeeds; write_ship() is idempotent (it always overwrites
 # closed_at and outcome), so the double write is harmless.
 #
 # Non-blocking: any failure is logged as a warning; the release continues.
-echo "[Step 16c] Recording shipped state in per-RC release-state JSON (closed_at + outcome=shipped)..."
+echo "[Step 13d] Recording shipped state in per-RC release-state JSON (closed_at + outcome=shipped)..."
 _rc_state_dir="${KANBAN_ROOT}/projects/${PROJECT_NAME}/release-state"
 _rc_state_json="${_rc_state_dir}/${ACTIVE_RC}.json"
 _closed_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -2031,48 +1980,9 @@ python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" ship \
     "$_rc_state_json" "$ACTIVE_RC" "$_closed_at_utc" 2>&1 || \
   echo "[cm-release] WARNING: could not update per-RC release-state JSON at $_rc_state_json" >&2
 
-# --- Step 17: Sync develop branch with origin ---
-# After updating main, sync develop so that cm-open-rc for the next RC finds
-# Active RC = none and does not refuse to open the new RC.
-# The project-scoped release-state.md is already updated (Step 15).
-# No release-state.md git commit is needed — the file lives outside the repo.
-# The push portion is gated by push_to_remote flag.
-echo "[Step 17] Syncing $DEVELOP_BRANCH branch with origin..."
-git_step "git checkout $DEVELOP_BRANCH (sync)" git -C "$REPO_ROOT" checkout "$DEVELOP_BRANCH"
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  git_step "git pull --ff-only $DEVELOP_BRANCH (sync)" git -C "$REPO_ROOT" merge --ff-only "origin/$DEVELOP_BRANCH"
-  _push_develop_sync_out=$(git -C "$REPO_ROOT" push origin "$DEVELOP_BRANCH" 2>&1); _push_develop_sync_rc=$?
-  printf '%s\n' "$_push_develop_sync_out" | sed 's/^/[cm-release push develop sync] /'
-  if [[ $_push_develop_sync_rc -ne 0 ]]; then
-    echo "[cm-release] $DEVELOP_BRANCH sync push failed (rc=${_push_develop_sync_rc}). Retrying in 3 seconds..."
-    sleep 3
-    _push_develop_sync_out=$(git -C "$REPO_ROOT" push origin "$DEVELOP_BRANCH" 2>&1); _push_develop_sync_rc=$?
-    printf '%s\n' "$_push_develop_sync_out" | sed 's/^/[cm-release push develop sync retry] /'
-  fi
-  # Emit single grep-able push-result marker for Step 17 develop sync push.
-  if [[ $_push_develop_sync_rc -ne 0 ]]; then
-    _push_develop_sync_outcome=FAILED
-  elif printf '%s\n' "$_push_develop_sync_out" | grep -q "Everything up-to-date"; then
-    _push_develop_sync_outcome=UP-TO-DATE
-  else
-    _push_develop_sync_outcome=PUSHED
-  fi
-  echo "[cm-release push-result] target=$DEVELOP_BRANCH rc=${ACTIVE_RC} outcome=${_push_develop_sync_outcome} outcome_code=${_push_develop_sync_rc}"
-  if [[ $_push_develop_sync_rc -ne 0 ]]; then
-    cm_halt \
-      "Trigger 6: Push to origin $DEVELOP_BRANCH (sync) failed after retries (rc=${_push_develop_sync_rc})" \
-      "git push origin $DEVELOP_BRANCH (sync step 17) failed after retries (rc=${_push_develop_sync_rc}) for ${ACTIVE_RC}. Origin unreachable or rejecting push. Operator must resolve and push manually."
-  fi
-else
-  echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: git push origin $DEVELOP_BRANCH (Step 17 sync)"
-fi
-
-# Return to main so the summary runs from the expected branch.
-git_step "git checkout $MAIN_BRANCH (return)" git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
-
-# --- Step 18: Best-effort auto-push of main and tags to origin ---
-# All critical release work is complete above this line (squash commits,
-# tag, RC branch deleted, release-state.md updated, develop synced).  Attempt to
+# --- Step 14: Best-effort auto-push of main and tags to origin ---
+# All critical release work is complete above this line (squash commit,
+# tag, RC branch deleted, release-state.md updated).  Attempt to
 # push main and tags so upgrade.sh sees the new release without operator intervention.
 #
 # Both pushes are best-effort: the script ALWAYS exits 0 after a successful release,
@@ -2084,7 +1994,7 @@ git_step "git checkout $MAIN_BRANCH (return)" git -C "$REPO_ROOT" checkout "$MAI
 #
 # Gated by push_to_remote flag: when push_to_remote=false, the entire auto-push
 # block is skipped and the release is considered complete locally.
-echo "[Step 18] Attempting best-effort auto-push of main and tags to origin..."
+echo "[Step 14] Attempting best-effort auto-push of main and tags to origin..."
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
 (
   set +e
@@ -2098,7 +2008,7 @@ if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
     _push_main_out=$(git -C "$REPO_ROOT" push origin "$MAIN_BRANCH" 2>&1); _push_main_rc=$?
     printf '%s\n' "$_push_main_out" | sed 's/^/[cm-release auto-push retry] /'
   fi
-  # Emit single grep-able push-result marker for Step 18 main push.
+  # Emit single grep-able push-result marker for Step 14 main push.
   if [[ $_push_main_rc -ne 0 ]]; then
     _push_main_outcome=FAILED
   elif printf '%s\n' "$_push_main_out" | grep -q "Everything up-to-date"; then
@@ -2117,7 +2027,7 @@ if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
     _push_tags_out=$(git -C "$REPO_ROOT" push origin --tags 2>&1); _push_tags_rc=$?
     printf '%s\n' "$_push_tags_out" | sed 's/^/[cm-release auto-push retry] /'
   fi
-  # Emit single grep-able push-result marker for Step 18 tags push.
+  # Emit single grep-able push-result marker for Step 14 tags push.
   if [[ $_push_tags_rc -ne 0 ]]; then
     _push_tags_outcome=FAILED
   elif printf '%s\n' "$_push_tags_out" | grep -q "Everything up-to-date"; then
@@ -2147,17 +2057,17 @@ if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
   fi
 ) || true
 else
-  echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: auto-push of $MAIN_BRANCH and tags (Step 18)"
+  echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: auto-push of $MAIN_BRANCH and tags (Step 14)"
 fi
 
-# --- Step 19: Metrics aggregation and CSV append ---
+# --- Step 15: Metrics aggregation and CSV append ---
 # This is the final step in the release lifecycle.  It runs AFTER all git
-# operations (squash, tag, push) and AFTER status.md is updated (Step 15).
+# operations (squash, tag, push) and AFTER status.md is updated (Step 12).
 #
 # Two sub-steps:
-#   19a. Invoke metrics_aggregator.py to write the per-RC JSON rollup at
+#   15a. Invoke metrics_aggregator.py to write the per-RC JSON rollup at
 #        projects/<name>/metrics/rc/<ACTIVE_RC>.json.
-#   19b. Invoke metrics_csv_writer.py to append one row to the cumulative
+#   15b. Invoke metrics_csv_writer.py to append one row to the cumulative
 #        history CSV at projects/<name>/metrics/history.csv.
 #
 # Both sub-steps are NON-BLOCKING: any failure is captured to stderr with a
@@ -2171,13 +2081,13 @@ fi
 #
 # Arguments are passed explicitly: --project and --rc (or equivalent).
 # Neither script is allowed to infer the project name from cwd.
-echo "[Step 19] Running metrics aggregation for $ACTIVE_RC (non-blocking)..."
+echo "[Step 15] Running metrics aggregation for $ACTIVE_RC (non-blocking)..."
 
 _metrics_agg_script="$KANBAN_ROOT/scripts/lib/metrics_aggregator.py"
 _metrics_csv_script="$KANBAN_ROOT/scripts/lib/metrics_csv_writer.py"
-_metrics_rc_json=""  # set if 19a succeeds; used by 19b
+_metrics_rc_json=""  # set if 15a succeeds; used by 15b
 
-# 19a: per-RC JSON rollup
+# 15a: per-RC JSON rollup
 if [[ -f "$_metrics_agg_script" ]]; then
   _metrics_agg_rc=0
   (
@@ -2192,7 +2102,7 @@ if [[ -f "$_metrics_agg_script" ]]; then
   if [[ $_metrics_agg_rc -ne 0 ]]; then
     echo "[metrics] WARNING: metrics_aggregator.py exited with code $_metrics_agg_rc — per-RC JSON rollup may be incomplete; release continues." >&2
   else
-    # Derive the rollup path from the known output convention so 19b can read it.
+    # Derive the rollup path from the known output convention so 15b can read it.
     _cm_proj_dir="$(KANBAN_ROOT="$KANBAN_ROOT" pp_project_root "$PROJECT_NAME" 2>/dev/null)" || _cm_proj_dir=""
     if [[ -n "$_cm_proj_dir" ]]; then
       _metrics_rc_json="${_cm_proj_dir}/metrics/rc/${ACTIVE_RC}.json"
@@ -2203,10 +2113,10 @@ if [[ -f "$_metrics_agg_script" ]]; then
     fi
   fi
 else
-  echo "[Step 19a] WARNING: metrics_aggregator.py not found at $_metrics_agg_script — skipping per-RC JSON rollup." >&2
+  echo "[Step 15a] WARNING: metrics_aggregator.py not found at $_metrics_agg_script — skipping per-RC JSON rollup." >&2
 fi
 
-# 19b: append row to cumulative history.csv
+# 15b: append row to cumulative history.csv
 if [[ -n "$_metrics_rc_json" && -f "$_metrics_csv_script" ]]; then
   _cm_proj_dir_csv="$(KANBAN_ROOT="$KANBAN_ROOT" pp_project_root "$PROJECT_NAME" 2>/dev/null)" || _cm_proj_dir_csv=""
   if [[ -n "$_cm_proj_dir_csv" ]]; then
@@ -2224,15 +2134,15 @@ if [[ -n "$_metrics_rc_json" && -f "$_metrics_csv_script" ]]; then
       echo "[metrics] WARNING: metrics_csv_writer.py exited with code $_metrics_csv_rc — history.csv row may not have been appended; release continues." >&2
     fi
   else
-    echo "[Step 19b] WARNING: could not resolve project directory for '$PROJECT_NAME' — skipping history.csv append." >&2
+    echo "[Step 15b] WARNING: could not resolve project directory for '$PROJECT_NAME' — skipping history.csv append." >&2
   fi
 elif [[ -z "$_metrics_rc_json" ]]; then
-  echo "[Step 19b] WARNING: per-RC JSON rollup was not written — skipping history.csv append." >&2
+  echo "[Step 15b] WARNING: per-RC JSON rollup was not written — skipping history.csv append." >&2
 else
-  echo "[Step 19b] WARNING: metrics_csv_writer.py not found at $_metrics_csv_script — skipping history.csv append." >&2
+  echo "[Step 15b] WARNING: metrics_csv_writer.py not found at $_metrics_csv_script — skipping history.csv append." >&2
 fi
 
-# --- Step 20: Success-gated RC temp cleanup (non-blocking) ---
+# --- Step 16: Success-gated RC temp cleanup (non-blocking) ---
 # Runs ONLY here on the explicit success path — ALL git operations, tag, state
 # updates, bundled-item promotion, and metrics are complete above this line.
 # MUST NOT be placed in cleanup_on_exit / trap EXIT (those fire on failure too).
@@ -2252,15 +2162,111 @@ fi
 #   pgai_temp_cleanup $(pgai_worktree_path <task_id>)
 # targeting only THIS project's subtree.  No code path here enumerates a
 # directory that can contain another project's temp.
-echo "[Step 20] Success-gated RC temp cleanup (non-blocking)..."
+echo "[Step 16] Success-gated RC temp cleanup (non-blocking)..."
 (
   set +e
-  # 20a: prune stale worktree refs from the git registry (repo-scoped; safe).
-  echo "[Step 20a] Running git worktree prune on $REPO_ROOT..."
+  # 16a: prune stale worktree refs from the git registry (repo-scoped; safe).
+  echo "[Step 16a] Running git worktree prune on $REPO_ROOT..."
   git -C "$REPO_ROOT" worktree prune 2>&1 | sed 's/^/[worktree prune] /' || \
-    echo "[Step 20a] WARNING: git worktree prune exited non-zero — continuing." >&2
-  echo "[Step 20a] git worktree prune complete (no FS sweep — safe by construction)."
+    echo "[Step 16a] WARNING: git worktree prune exited non-zero — continuing." >&2
+  echo "[Step 16a] git worktree prune complete (no FS sweep — safe by construction)."
 ) || true
+
+# --- Step 16b: Stamp ## Fixed In: <ACTIVE_RC> on every bug that shipped in this release ---
+# Iterates bugs_dir (the project-scoped bug ledger) and writes ## Fixed In: <ACTIVE_RC>
+# to any bug file whose ## Status is 'done' (promoted in Step 13c) and whose
+# ## Fixed In field is currently absent or empty.  Bugs already carrying a ## Fixed In
+# value are left unchanged — never overwrite a set field.
+#
+# Non-blocking: any Python error is logged and the release summary continues.
+echo "[Step 16b] Stamping ## Fixed In: ${ACTIVE_RC} on bugs closed in this release..."
+(
+  set +e
+  _16b_bugs_dir="${_cm_bugs_dir:-${_CM_PROJECT_ROOT}/bugs}"
+  _16b_kanban_root="${KANBAN_ROOT}"
+  python3 - "$_16b_bugs_dir" "$ACTIVE_RC" "$_16b_kanban_root" \
+    <<'FIXED_IN_PY'
+import sys
+import pathlib
+import importlib.util
+import re
+
+bugs_dir    = pathlib.Path(sys.argv[1])
+active_rc   = sys.argv[2]
+kanban_root = pathlib.Path(sys.argv[3])
+
+# Import parse_bug_file from the changelog_writer library.
+_writer_path = kanban_root / "pgai_agent_kanban" / "cm" / "changelog_writer.py"
+_spec = importlib.util.spec_from_file_location("changelog_writer", _writer_path)
+_mod  = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+
+if not bugs_dir.exists():
+    print(f"[Step 16b] bugs_dir not found: {bugs_dir} — skipping Fixed-In writeback.")
+    sys.exit(0)
+
+stamped = 0
+skipped_already_set = 0
+skipped_not_done = 0
+
+for bug_path in sorted(bugs_dir.glob("BUG-*.md"), key=lambda p: p.name):
+    try:
+        rec = _mod.parse_bug_file(bug_path)
+    except Exception as exc:
+        print(f"[Step 16b] WARNING: could not parse {bug_path.name}: {exc}", flush=True)
+        continue
+
+    # Only stamp bugs whose status is 'done' in this release.
+    if rec.status != "done":
+        skipped_not_done += 1
+        continue
+
+    # If Fixed In is already set, do not overwrite.
+    if rec.fixed_in:
+        skipped_already_set += 1
+        continue
+
+    # Write ## Fixed In: <ACTIVE_RC> into the bug file.
+    text = bug_path.read_text(encoding="utf-8")
+    section_pattern = re.compile(
+        r"(^##\s+Fixed In\s*$)([\s\S]*?)(?=^##\s+|\Z)",
+        re.MULTILINE,
+    )
+    match = section_pattern.search(text)
+    if match:
+        # Section exists but body is empty — fill it in.
+        existing_body = match.group(2)
+        content_clean = re.sub(r"<!--[\s\S]*?-->", "", existing_body).strip()
+        if not content_clean:
+            comment_match = re.search(r"<!--[\s\S]*?-->", existing_body)
+            if comment_match:
+                insert_pos = match.start(2) + comment_match.end()
+                new_text = text[:insert_pos] + f"\n{active_rc}\n" + text[insert_pos:]
+            else:
+                heading_end = match.start(2)
+                new_text = (
+                    text[:heading_end]
+                    + f"\n{active_rc}\n"
+                    + text[heading_end:].lstrip("\n")
+                )
+            bug_path.write_text(new_text, encoding="utf-8")
+            stamped += 1
+        else:
+            # Already has content (race condition or prior partial run).
+            skipped_already_set += 1
+    else:
+        # Section absent — append at end of file.
+        new_text = text.rstrip("\n") + f"\n\n## Fixed In\n{active_rc}\n"
+        bug_path.write_text(new_text, encoding="utf-8")
+        stamped += 1
+
+print(
+    f"[Step 16b] Fixed-In writeback: {stamped} stamped, "
+    f"{skipped_already_set} already set, {skipped_not_done} not-done skipped.",
+    flush=True,
+)
+FIXED_IN_PY
+) || echo "[Step 16b] WARNING: Fixed-In writeback encountered an error — release continues." >&2
 
 echo ""
 echo "Local release preparation complete."
@@ -2268,18 +2274,17 @@ echo "  Version:     $ACTIVE_RC"
 echo "  State file:  $RELEASE_STATE"
 echo ""
 echo "Summary of what was done:"
-echo "  - $RC_BRANCH squashed to $DEVELOP_BRANCH and pushed (skipped squash if $DEVELOP_BRANCH==RC tip)"
-echo "  - $DEVELOP_BRANCH squashed to $MAIN_BRANCH (local commit + best-effort auto-push to origin)"
+echo "  - $RC_BRANCH squashed to $MAIN_BRANCH (single-lane squash commit)"
+echo "  - Post-squash fidelity gate passed: $RC_BRANCH and $MAIN_BRANCH trees are identical"
 echo "  - Tag $RELEASE_TAG created locally and best-effort pushed to origin"
 echo "  - $RC_BRANCH deleted from origin and locally"
 echo "  - release-state.md updated: Active RC -> none"
-echo "  - $DEVELOP_BRANCH synced with origin"
 echo "  - release-notes/${ACTIVE_RC}.md generated and committed on $MAIN_BRANCH"
-echo "  - bundled items promoted from 'running' to 'done' (Step 16b)"
-echo "  - token usage roll-up attempted via aggregate_tokens.py (Step 15b, non-blocking)"
-echo "  - metrics aggregation + history.csv append attempted (Step 19, non-blocking)"
-echo "  - auto-push of $MAIN_BRANCH and tags attempted (Step 18, best-effort — see [cm-release auto-push] lines above)"
-echo "  - RC temp cleanup attempted (Step 20, non-blocking — git worktree prune; no FS sweep by design)"
+echo "  - bundled items promoted from 'running' to 'done' (Step 13c)"
+echo "  - ## Fixed In: ${ACTIVE_RC} stamped on bugs that shipped in this release (Step 16b)"
+echo "  - metrics aggregation + history.csv append attempted (Step 15, non-blocking)"
+echo "  - auto-push of $MAIN_BRANCH and tags attempted (Step 14, best-effort — see [cm-release auto-push] lines above)"
+echo "  - RC temp cleanup attempted (Step 16, non-blocking — git worktree prune; no FS sweep by design)"
 echo ""
 echo "## Next Recommended Step"
 echo "If the auto-push above succeeded, the release is complete on origin."
@@ -2288,5 +2293,5 @@ echo "    git push origin $MAIN_BRANCH"
 echo "    git push origin ${RELEASE_TAG}"
 echo "Or run the convenience script:"
 echo "    bash ${KANBAN_ROOT}/scripts/cm/finalize-release.sh"
-echo "The release is complete locally and on $DEVELOP_BRANCH."
+echo "The release is complete locally."
 exit 0

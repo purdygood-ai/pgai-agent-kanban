@@ -10,7 +10,7 @@
 #   │ ▶ CLAUDE-CM-20260428-009-release-0-15-5                                  │
 #   │   Blocked since: 14:23:18 (2m ago)                                       │
 #   │   Reason: cm-release.sh exited 1 at Step 4 ...                           │
-#   │   Next step: Update develop's release-state.md ...                       │
+#   │   Next step: Update main's release-state.md ...                         │
 #   └─────────────────────────────────────────────────────────────────────────┘
 #
 # Layout when nothing blocked:
@@ -26,6 +26,9 @@
 # Environment:
 #   NO_COLOR=1 — disables all ANSI codes
 #   TERM=dumb  — disables all ANSI codes
+
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 # --- Resolve script dir ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +46,7 @@ source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 DATA_ARGS=("$@")
 
 # --- Source config (non-strict) ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 _args=("$@")
 _i=0
 while [[ $_i -lt ${#_args[@]} ]]; do

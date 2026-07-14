@@ -43,6 +43,8 @@
 #   NO_COLOR                           — set to suppress ANSI colors
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEAM_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -50,7 +52,7 @@ TEAM_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 PROJECT_FILTER=""
 USE_COLOR=true
 

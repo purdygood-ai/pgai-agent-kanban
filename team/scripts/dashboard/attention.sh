@@ -53,11 +53,13 @@
 #   NO_COLOR                            — set to suppress ANSI colors
 
 set -euo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -317,7 +319,6 @@ printf '%s\n' "$DIVIDER"
 python3 "$_SCAN_ATTENTION_PY" \
   quarantine "$KANBAN_ROOT" "$_COLOR_ARG" \
   --threshold "${PGAI_DISCOVERY_REJECT_THRESHOLD:-3}"
-unset _SCAN_ATTENTION_PY
 
 # ---------------------------------------------------------------------------
 # HALTED section: enumerate all active halts and drains — GLOBAL entry when
@@ -481,3 +482,35 @@ if [[ "$_stale_found_any" == "false" ]]; then
   fi
 fi
 printf '\n'
+
+# ---------------------------------------------------------------------------
+# Pending-approvals needs-human stratum: render each pending HUMAN-APPROVE
+# gate task with the raised-hand class and project label.  Placed ABOVE the
+# OVERWATCH ledger so approval gates are immediately visible.
+# ---------------------------------------------------------------------------
+if [[ "$USE_COLOR" == "true" ]]; then
+  printf '\n%s%s✋ PENDING APPROVALS%s\n' "$C_RED" "$C_BOLD" "$C_RESET"
+else
+  printf '\n! PENDING APPROVALS\n'
+fi
+printf '%s\n' "$DIVIDER"
+
+python3 "$_SCAN_ATTENTION_PY" \
+  pending-approvals "$KANBAN_ROOT" "$_COLOR_ARG"
+
+# ---------------------------------------------------------------------------
+# OVERWATCH section: surface sweep results from the per-project OVERWATCH
+# action logs.  TRANSIENT items (auto-requeued transient API errors) are
+# rendered distinctly from needs-human items (ceiling reached, bug filed).
+# Section is always present so operators can verify OVERWATCH is running.
+# ---------------------------------------------------------------------------
+if [[ "$USE_COLOR" == "true" ]]; then
+  printf '\n%s%s\U0001f6e1 OVERWATCH%s\n' "$C_YELLOW" "$C_BOLD" "$C_RESET"
+else
+  printf '\n[W] OVERWATCH\n'
+fi
+printf '%s\n' "$DIVIDER"
+
+python3 "$_SCAN_ATTENTION_PY" \
+  overwatch-section "$KANBAN_ROOT" "$_COLOR_ARG"
+unset _SCAN_ATTENTION_PY

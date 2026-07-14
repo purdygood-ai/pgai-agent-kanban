@@ -4,9 +4,14 @@
 # OVERWATCH detection module: find and delete orphan RC branches — local and
 # remote rc/* branches for which a corresponding release tag already exists.
 #
-# A rc/vX.Y.Z branch is "orphan" if:
-#   1. The local branch rc/vX.Y.Z exists, AND
-#   2. A git tag named vX.Y.Z exists in the dev tree.
+# Branch names and tag names use the project's branch_prefix from project.cfg.
+# With branch_prefix=ai_, orphan detection looks for ai_rc/vX.Y.Z branches and
+# ai_vX.Y.Z tags.  With an empty prefix the bare names (rc/vX.Y.Z, vX.Y.Z) are
+# used (existing behavior preserved).
+#
+# A <prefix>rc/vX.Y.Z branch is "orphan" if:
+#   1. The local branch <prefix>rc/vX.Y.Z exists, AND
+#   2. A git tag named <prefix>vX.Y.Z exists in the dev tree.
 #
 # An orphan RC branch indicates that the release completed (tag pushed) but the
 # RC branch was not cleaned up. CM is responsible for branch cleanup as part
@@ -123,6 +128,17 @@ _corb_resolve_env() {
         return 1
     fi
 
+    # Read branch_prefix from project config; default to empty (no prefix).
+    # Strips surrounding double-quotes so that `branch_prefix = ""` is treated as empty.
+    _CORB_BRANCH_PREFIX=""
+    if [[ -n "${cfg_file}" ]]; then
+        local _raw_prefix
+        _raw_prefix="$(grep -E '^[[:space:]]*branch_prefix[[:space:]]*=' "${cfg_file}" \
+            | head -n1 \
+            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+        _CORB_BRANCH_PREFIX="${_raw_prefix:-}"
+    fi
+
     return 0
 }
 
@@ -147,26 +163,30 @@ _corb_read_active_rc() {
 }
 
 # ---------------------------------------------------------------------------
-# _corb_tag_exists <dev_tree> <version>
-# Returns 0 if a git tag exactly matching <version> exists in the dev tree.
-# <version> is e.g. "v0.21.42".
+# _corb_tag_exists <dev_tree> <version> [prefix]
+# Returns 0 if a git tag matching <prefix><version> exists in the dev tree.
+# <version> is the bare version e.g. "v0.21.42".
+# <prefix> is the optional branch_prefix (e.g. "ai_"); default is empty.
 # ---------------------------------------------------------------------------
 _corb_tag_exists() {
     local dev_tree="$1"
     local version="$2"
+    local prefix="${3:-}"
     local result
-    result="$(git -C "${dev_tree}" tag --list "${version}" 2>/dev/null)" || return 1
+    result="$(git -C "${dev_tree}" tag --list "${prefix}${version}" 2>/dev/null)" || return 1
     [[ -n "${result}" ]]
 }
 
 # ---------------------------------------------------------------------------
-# _corb_list_local_rc_branches <dev_tree>
-# Echo one local rc/* branch name per line.
-# Branch names are in full form: rc/vX.Y.Z
+# _corb_list_local_rc_branches <dev_tree> [prefix]
+# Echo one local <prefix>rc/* branch name per line.
+# Branch names are in full form: <prefix>rc/vX.Y.Z
+# When prefix is empty, lists bare rc/* branches.
 # ---------------------------------------------------------------------------
 _corb_list_local_rc_branches() {
     local dev_tree="$1"
-    git -C "${dev_tree}" branch --list 'rc/*' 2>/dev/null \
+    local prefix="${2:-}"
+    git -C "${dev_tree}" branch --list "${prefix}rc/*" 2>/dev/null \
         | sed 's/^[[:space:]]*\*\?[[:space:]]*//'
 }
 
@@ -203,7 +223,7 @@ _corb_do_delete_branch() {
             "${branch}" \
             "local-branch-deleted" \
             "none" \
-            "Orphan RC branch deleted locally: tag ${version} exists, branch ${branch} removed" \
+            "Orphan RC branch deleted locally: release tag for ${version} exists; branch ${branch} removed" \
         || true
     else
         echo "check-orphan-rc-branches: local branch delete failed for ${branch}: ${local_del_output}" >&2
@@ -297,21 +317,27 @@ overwatch_check_orphan_rc_branches() {
         fi
     fi
 
+    local branch_prefix="${_CORB_BRANCH_PREFIX:-}"
+    echo "check-orphan-rc-branches: project=${project_name} branch_prefix='${branch_prefix}'" >&2
+
     # Read current Active RC — never delete the currently active RC branch
     local active_rc
     active_rc="$(_corb_read_active_rc "${rs_file}")"
     echo "check-orphan-rc-branches: Active RC from release-state.md: ${active_rc}" >&2
 
-    # List all local rc/* branches
+    # List all local <prefix>rc/* branches
     local rc_branches
-    rc_branches="$(_corb_list_local_rc_branches "${_CORB_DEV_TREE}")"
+    rc_branches="$(_corb_list_local_rc_branches "${_CORB_DEV_TREE}" "${branch_prefix}")"
 
     if [[ -z "${rc_branches}" ]]; then
-        echo "check-orphan-rc-branches: no local rc/* branches found" >&2
+        echo "check-orphan-rc-branches: no local ${branch_prefix}rc/* branches found" >&2
         return 0
     fi
 
-    echo "check-orphan-rc-branches: scanning local rc/* branches for orphans" >&2
+    echo "check-orphan-rc-branches: scanning local ${branch_prefix}rc/* branches for orphans" >&2
+
+    # rc_prefix is the full prefix up to the version: e.g. "ai_rc/" or "rc/"
+    local rc_prefix="${branch_prefix}rc/"
 
     local orphan_count=0
     local deleted_count=0
@@ -320,8 +346,8 @@ overwatch_check_orphan_rc_branches() {
     while IFS= read -r branch; do
         [[ -z "${branch}" ]] && continue
 
-        # Extract version from branch name (rc/vX.Y.Z -> vX.Y.Z)
-        local version="${branch#rc/}"
+        # Extract version from branch name (<prefix>rc/vX.Y.Z -> vX.Y.Z)
+        local version="${branch#"${rc_prefix}"}"
         if [[ "${version}" == "${branch}" ]]; then
             echo "check-orphan-rc-branches: skipping non-rc branch: ${branch}" >&2
             continue
@@ -333,14 +359,16 @@ overwatch_check_orphan_rc_branches() {
             continue
         fi
 
-        # Check if a release tag exists for this version
-        if ! _corb_tag_exists "${_CORB_DEV_TREE}" "${version}"; then
-            echo "check-orphan-rc-branches: branch ${branch}: no tag ${version}; not an orphan" >&2
+        # Check if a release tag exists for this version (with prefix applied)
+        if ! _corb_tag_exists "${_CORB_DEV_TREE}" "${version}" "${branch_prefix}"; then
+            local prefixed_tag="${branch_prefix}${version}"
+            echo "check-orphan-rc-branches: branch ${branch}: no tag ${prefixed_tag}; not an orphan" >&2
             continue
         fi
 
         orphan_count=$(( orphan_count + 1 ))
-        echo "check-orphan-rc-branches: orphan confirmed: branch ${branch} has matching tag ${version}" >&2
+        local prefixed_tag_for_log="${branch_prefix}${version}"
+        echo "check-orphan-rc-branches: orphan confirmed: branch ${branch} has matching tag ${prefixed_tag_for_log}" >&2
 
         if (( dry_run == 1 )); then
             echo "check-orphan-rc-branches: [dry-run] would delete local branch ${branch} and remote origin/${branch}" >&2
@@ -349,7 +377,7 @@ overwatch_check_orphan_rc_branches() {
                 "${branch}" \
                 "dry-run-orphan-rc-branch-detected" \
                 "none" \
-                "Orphan RC branch detected: tag ${version} exists; dry-run, no deletion attempted" \
+                "Orphan RC branch detected: tag ${prefixed_tag_for_log} exists; dry-run, no deletion attempted" \
             2>/dev/null || true
             continue
         fi

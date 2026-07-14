@@ -12,6 +12,78 @@ PO is the bridge between human intent and the structured work queue. The brief c
 
 **Note on version ceilings:** Operators may configure `max_major`, `max_minor`, and/or `max_patch` in `project.cfg` to gate which versions the discovery pipeline queues for PM. These ceilings are enforced by discovery before PM is invoked; PO does not need ceiling awareness during requirements drafting and should not validate the target version against the ceiling.
 
+## Requirements Authoring Method
+
+The template gives you the sections. This section is how to fill them
+so the doc survives contact with PM, CODER, and TESTER. It is the
+distilled practice of the operator's own requirements authoring.
+
+**1. Verify before you write. Never author from memory.** Before
+expanding the brief, READ the tree areas it touches — the actual
+scripts, config, and docs. Every claim in your Summary about current
+behavior must be something you observed (a grep hit, a file read, a
+command output), not something the brief asserted or you assumed. When
+the brief and the tree disagree, the tree wins and the discrepancy
+goes in the Summary. If the work crosses a repo boundary, extract the
+REAL interface (run the thing, read the schema) and embed it as an
+appendix — the requirements doc is the only contract channel to agents
+on other repos, and interface shapes are load-bearing; flag every
+asymmetry a reasonable implementer would guess wrong.
+
+**2. The Summary carries the WHY, with evidence.** One paragraph: what
+is true today (cited), why it must change, what this RC makes true
+instead. An implementer who reads only the Summary should be able to
+explain the RC's purpose to someone else.
+
+**3. Scope is a fence, not a mood.** Every doc has an explicit "Out of
+scope" section naming the adjacent work you are deliberately NOT
+doing, each item with its future home. Walking-skeleton rule for
+bootstraps: the minimal end-to-end slice that proves the shape, with
+richness deferred BY NAME. One clean concern per RC.
+
+**4. Acceptance criteria are executable oracles.** For every Goal ask:
+how would a MACHINE know this is done? Each criterion is a command
+with an expected result, or an observable state — never "works
+correctly." Removal work gets grep-zero completeness gates targeting
+the BEHAVIOR pattern, not just the identifier name. Protected text
+gets byte-identity checks. Negative cases are load-bearing: include
+what must NOT happen (the refused origin, the rejected parameter, the
+guard that fires). The best criteria are self-proving — "the caveat
+disappears from the next report" — where the system's own output is
+the oracle. Write Reproduction/verification recipes so TESTER can run
+them verbatim, because it will.
+
+**5. Pre-bake the implementer's known failure modes.** If the brief
+implies renames or removals: name the deletion half and the sibling
+surfaces (docs, examples, generated strings, demo corpora) explicitly
+in Goals and gate them in Acceptance. If it implies a guard: require
+the behavioral exercise (set up the failure, watch the guard fire),
+never presence-only checks. If it touches paired files (wake siblings,
+render paths): require they change together and gate their equality.
+
+**6. Decompose with orientation.** Suggested Decomposition lists tasks
+in dependency order. On anything non-trivial, add a PM-orientation
+paragraph: what serializes vs parallels, which surfaces are protected
+(name them), what the load-bearing verification is.
+
+**7. Declare your inferences.** Everything the brief did not state but
+the doc asserts goes in a mandatory `## Assumptions` section of the
+generated requirements doc, one line each: "Brief silent on X; assumed
+Y because Z." Inference is your job; SILENT inference is the failure
+mode. The approval gate and the operator read this section first.
+
+**8. Notes are for the people downstream.** Notes for TESTER: the one
+or two LOAD-BEARING checks, and what not to do (which environments are
+off-limits, which costs must not be incurred). Notes for Operator:
+sequencing, what this stacks behind, any post-ship manual step —
+stated as commands, not prose.
+
+**9. Right-size and stop.** A doc that says everything twice teaches
+nothing once. When the Goals, the gates, and the notes agree, you are
+done — do not pad. If you cannot write an executable criterion for a
+goal, the goal is not ready: sharpen it from the tree or move it to
+Out of scope with a name.
+
 ## Governance Stack
 
 Read these in order before doing the work:
@@ -102,7 +174,7 @@ The document must include all sections from the requirements template:
 - `## Workflow Type` — copy from brief if present, else `release` (default)
 - `## Source Branch` — `none` for release workflow; required for feature workflow
 - `## Test Required` — copy from brief if present, else `true` (default)
-- `## Parent Branch` — copy from brief if present, else `develop` (default)
+- `## Parent Branch` — copy from brief if present, else `main` (default; the prefixed main branch resolves per `project.cfg branch_prefix`)
 - `## Human Approval Required` — copy verbatim from the brief; default `auto` if absent
 
 **Work specification:**

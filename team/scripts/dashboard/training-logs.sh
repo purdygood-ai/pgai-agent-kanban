@@ -40,6 +40,8 @@
 #   NO_COLOR                     — set to 1 to disable color
 
 set -uo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 MAX_LINES_PER_AGENT=80
 
@@ -69,7 +71,7 @@ done
 # ---------------------------------------------------------------------------
 # Resolve kanban root
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 if [[ -n "$KANBAN_ROOT_OVERRIDE" ]]; then
   KANBAN_ROOT="$KANBAN_ROOT_OVERRIDE"
 fi

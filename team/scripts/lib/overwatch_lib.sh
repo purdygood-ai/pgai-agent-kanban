@@ -14,15 +14,17 @@
 #   - KANBAN_ROOT must be set in the environment before calling any function
 #     that resolves the state directory (overwatch_state_dir).
 #   - The caller is responsible for creating the state directory before
-#     calling write-side helpers (overwatch_log_action, overwatch_backup_file).
+#     calling write-side helpers (see overwatch_protocol.sh).
 #     install.sh seeds the state directory on first run.
 #
 # Functions defined here:
 #   overwatch_state_dir        <project_name>  — resolve projects/<p>/overwatch/
-#   overwatch_log_action       <project_name> <action> [detail]  — append to actions.log
-#   overwatch_backup_file      <project_name> <src_path>  — timestamped backup into backups/
 #   overwatch_acquire_firing_lock  <project_name>  — per-firing flock acquire
 #   overwatch_release_firing_lock  <project_name>  — per-firing flock release
+#
+# NOTE: overwatch_log_action and overwatch_backup_file are defined in
+#   overwatch_protocol.sh (the canonical single implementation). Source
+#   overwatch_protocol.sh for those functions.
 #
 # Constants defined here:
 #   HALT_OVERWATCH_FLAG  — path to the per-OVERWATCH halt flag file
@@ -97,91 +99,6 @@ overwatch_state_dir() {
         return 1
     fi
     echo "${KANBAN_ROOT}/projects/${project_name}/overwatch"
-}
-
-# ---------------------------------------------------------------------------
-# overwatch_log_action <project_name> <action> [detail]
-# Append a timestamped entry to the project's OVERWATCH action log:
-#   $KANBAN_ROOT/projects/<project_name>/overwatch/actions.log
-#
-# Log format (one line per call):
-#   YYYY-MM-DDTHH:MM:SS±HHMM  <action>  <detail>
-#
-# Args:
-#   $1  project_name — e.g. "pgai-agent-kanban"
-#   $2  action       — short label for the event (e.g. "halt-flag-detected")
-#   $3  detail       — optional free-form detail string (may be empty)
-#
-# Creates the log file if it does not exist.
-# Exits with status 1 if the state directory does not exist.
-# ---------------------------------------------------------------------------
-overwatch_log_action() {
-    local project_name="$1"
-    local action="$2"
-    local detail="${3:-}"
-    local state_dir log_file timestamp
-
-    state_dir="$(overwatch_state_dir "$project_name")" || return 1
-    log_file="${state_dir}/actions.log"
-
-    if [[ ! -d "$state_dir" ]]; then
-        echo "overwatch_lib.sh: overwatch_log_action: state dir does not exist: ${state_dir}" >&2
-        return 1
-    fi
-
-    timestamp="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')"
-    printf '%s\t%s\t%s\n' "$timestamp" "$action" "$detail" >> "$log_file"
-}
-
-# ---------------------------------------------------------------------------
-# overwatch_backup_file <project_name> <src_path>
-# Copy <src_path> into the backups/ subdirectory of the OVERWATCH state dir
-# with a timestamp appended to the filename.
-#
-# Destination pattern:
-#   $KANBAN_ROOT/projects/<project_name>/overwatch/backups/<basename>.<YYYYMMDD-HHMMSS>
-#
-# Args:
-#   $1  project_name — e.g. "pgai-agent-kanban"
-#   $2  src_path     — absolute path to the file to back up
-#
-# Returns 0 on success.
-# Returns 1 if the source file does not exist, state dir is missing, or copy fails.
-# ---------------------------------------------------------------------------
-overwatch_backup_file() {
-    local project_name="$1"
-    local src_path="$2"
-    local state_dir backup_dir basename timestamp dst_path
-
-    if [[ -z "$src_path" ]]; then
-        echo "overwatch_lib.sh: overwatch_backup_file: src_path argument is required" >&2
-        return 1
-    fi
-
-    if [[ ! -f "$src_path" ]]; then
-        echo "overwatch_lib.sh: overwatch_backup_file: source file does not exist: ${src_path}" >&2
-        return 1
-    fi
-
-    state_dir="$(overwatch_state_dir "$project_name")" || return 1
-    backup_dir="${state_dir}/backups"
-
-    if [[ ! -d "$backup_dir" ]]; then
-        echo "overwatch_lib.sh: overwatch_backup_file: backups dir does not exist: ${backup_dir}" >&2
-        return 1
-    fi
-
-    basename="$(basename "$src_path")"
-    timestamp="$(date '+%Y%m%d-%H%M%S')"
-    dst_path="${backup_dir}/${basename}.${timestamp}"
-
-    if ! cp "$src_path" "$dst_path"; then
-        echo "overwatch_lib.sh: overwatch_backup_file: copy failed: ${src_path} -> ${dst_path}" >&2
-        return 1
-    fi
-
-    echo "$dst_path"
-    return 0
 }
 
 # ---------------------------------------------------------------------------

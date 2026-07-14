@@ -7,16 +7,18 @@ Integration tests for the RC lifecycle: cm-open-rc → coder merge → tester ve
 These tests exercise the real CM scripts end-to-end against temporary kanban trees
 and temporary git repositories.  No seam is mocked — each test stands up a real
 tree, runs real scripts, and asserts on the resulting on-disk state (branches, tags,
-release-state.md, develop/main contents).
+release-state.md, main contents).
 
 Coverage:
   - Full open-rc → coder merge → cm-release path produces correct tag/branch state
   - Branch-prefix isolation: branch_prefix= in project.cfg is applied to all
-    git branches (rc/<v>, develop, main → prefix_rc/prefix_v, prefix_develop, etc.)
+    git branches (rc/<v>, main → prefix_rc/prefix_v, prefix_main, etc.)
   - Idempotent release re-run: a second cm-release.sh invocation does not corrupt
     the already-shipped state
   - Local-only vs push behavior: push_to_remote=false keeps the RC branch local
     (not pushed to origin); push_to_remote=true pushes to a local bare remote
+  - Fidelity gate: post-squash diff between RC and main halts the release when
+    main received a commit mid-RC; passes cleanly when no divergence exists
 
 Design notes:
   - All tests use pytest's tmp_path for scratch.  No bare /tmp paths.
@@ -69,22 +71,20 @@ def _init_git_repo_with_remote(
     bare_remote: pathlib.Path,
     *,
     main_branch: str = "main",
-    develop_branch: str = "develop",
 ) -> None:
-    """Initialise a local git repo with initial branches and a local bare remote.
+    """Initialise a local git repo with a single trunk branch and a local bare remote.
 
     Creates:
       - A bare git repo at *bare_remote* acting as 'origin'
-      - A non-bare git repo at *repo_path* with an initial commit on *main_branch*
-        and a *develop_branch* forked from main, both pushed to *bare_remote*
+      - A non-bare git repo at *repo_path* with an initial commit on *main_branch*,
+        pushed to *bare_remote*
 
     All git config is repo-local (--local) so no ~/.gitconfig is touched.
 
     Args:
-        repo_path:       Directory to initialise as a non-bare git repo.
-        bare_remote:     Directory to initialise as a bare repo ('origin').
-        main_branch:     Name for the main/trunk branch (default: 'main').
-        develop_branch:  Name for the integration branch (default: 'develop').
+        repo_path:    Directory to initialise as a non-bare git repo.
+        bare_remote:  Directory to initialise as a bare repo ('origin').
+        main_branch:  Name for the main/trunk branch (default: 'main').
     """
     bare_remote.mkdir(parents=True, exist_ok=True)
     repo_path.mkdir(parents=True, exist_ok=True)
@@ -111,8 +111,13 @@ def _init_git_repo_with_remote(
 
     # Create an initial commit on main_branch.
     (repo_path / "README.md").write_text("# Test repo\n", encoding="utf-8")
+    # release-notes/PUBLISHED: required by the changelog writer (load_published_manifest).
+    # An empty file is valid — it means no versions have been publicly released yet.
+    (repo_path / "release-notes").mkdir(parents=True, exist_ok=True)
+    (repo_path / "release-notes" / "PUBLISHED").write_text("", encoding="utf-8")
     subprocess.run(
-        ["git", "-C", str(repo_path), "add", "README.md"],
+        ["git", "-C", str(repo_path), "add", "README.md",
+         "release-notes/PUBLISHED"],
         capture_output=True, check=True,
     )
     subprocess.run(
@@ -127,16 +132,6 @@ def _init_git_repo_with_remote(
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "push", "origin", main_branch],
-        capture_output=True, check=True,
-    )
-
-    # Create develop_branch from main_branch and push it.
-    subprocess.run(
-        ["git", "-C", str(repo_path), "checkout", "-b", develop_branch],
-        capture_output=True, check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(repo_path), "push", "-u", "origin", develop_branch],
         capture_output=True, check=True,
     )
 
@@ -346,24 +341,25 @@ def _git_tag_exists_on_bare_remote(bare_remote: pathlib.Path, tag: str) -> bool:
 def _simulate_coder_work(
     repo_path: pathlib.Path,
     rc_branch: str,
-    develop_branch: str = "develop",
+    return_branch: str = "main",
     commit_message: str = "feat: add feature for release",
 ) -> None:
     """Simulate a CODER task: add a commit on the RC branch.
 
-    Checks out *rc_branch*, adds a new file, commits, and returns to develop.
+    Checks out *rc_branch*, adds a new file, commits, and returns to
+    *return_branch* (main by default — single-lane flow has no develop).
 
     Args:
-        repo_path:       Path to the temp git repo.
-        rc_branch:       Name of the RC branch to commit on.
-        develop_branch:  Name of the integration branch to return to.
-        commit_message:  Commit message for the simulated coder work.
+        repo_path:      Path to the temp git repo.
+        rc_branch:      Name of the RC branch to commit on.
+        return_branch:  Branch to return to after the commit (default: 'main').
+        commit_message: Commit message for the simulated coder work.
     """
     _git_local(repo_path, "checkout", rc_branch)
     (repo_path / "feature.txt").write_text("feature content\n", encoding="utf-8")
     _git_local(repo_path, "add", "feature.txt")
     _git_local(repo_path, "commit", "-m", commit_message)
-    _git_local(repo_path, "checkout", develop_branch)
+    _git_local(repo_path, "checkout", return_branch)
 
 
 def _add_tester_task(
@@ -544,14 +540,14 @@ class TestFullRCLifecycleLocalOnly:
             f"stdout: {result.stdout}"
         )
 
-    def test_coder_commit_on_rc_branch_is_reachable_from_develop_after_release(
+    def test_coder_commit_on_rc_branch_is_reachable_from_main_after_release(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """After cm-release.sh, the coder's commit content is present on develop.
+        """After cm-release.sh, the coder's commit content is present on main.
 
-        The RC lifecycle squashes the RC branch into develop before tagging main.
+        The single-lane RC lifecycle squashes the RC branch directly into main.
         A file committed on the RC branch by a simulated coder task must be
-        present on develop's working tree after cm-release.sh completes.
+        present on main's working tree after cm-release.sh completes.
         """
         version = "v0.3.0"
         project_name = "coder_reachable_test"
@@ -580,11 +576,11 @@ class TestFullRCLifecycleLocalOnly:
             f"cm-release.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        # Assert: feature.txt is present on develop after the squash.
-        _git_local(repo_path, "checkout", "develop")
+        # Assert: feature.txt is present on main after the single-lane squash.
+        _git_local(repo_path, "checkout", "main")
         assert (repo_path / "feature.txt").exists(), (
             "feature.txt (added by simulated coder work on RC branch) must be "
-            "present on develop after cm-release.sh squash.\n"
+            "present on main after cm-release.sh single-lane squash.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
@@ -654,7 +650,6 @@ class TestBranchPrefixIsolation:
         _init_git_repo_with_remote(
             repo_path, bare_remote,
             main_branch="ai_main",
-            develop_branch="ai_develop",
         )
 
         kanban_root = _build_kanban_root_for_rc(
@@ -702,7 +697,6 @@ class TestBranchPrefixIsolation:
         _init_git_repo_with_remote(
             repo_path, bare_remote,
             main_branch="ai_main",
-            develop_branch="ai_develop",
         )
 
         kanban_root = _build_kanban_root_for_rc(
@@ -725,7 +719,7 @@ class TestBranchPrefixIsolation:
         prefixed_rc_branch = f"{prefix}rc/{version}"
         _simulate_coder_work(
             repo_path, prefixed_rc_branch,
-            develop_branch="ai_develop",
+            return_branch="ai_main",
         )
 
         # Run cm-release.sh.
@@ -763,12 +757,12 @@ class TestIdempotentRelease:
 
         The idempotency property protects against double-invocation in automation:
         a retry after a partial failure must not corrupt the already-shipped state.
-        The tag SHA must be unchanged after the second invocation, and develop must
+        The tag SHA must be unchanged after the second invocation, and main must
         still exist.
 
         The second invocation exits non-zero (no active RC to close) — this is
         acceptable and expected.  What must NOT happen is the tag being changed or
-        develop being deleted.
+        main being deleted.
         """
         version = "v0.1.0"
         project_name = "idempotent_test"
@@ -813,9 +807,9 @@ class TestIdempotentRelease:
             f"Second run stdout: {result_second.stdout}\nstderr: {result_second.stderr}"
         )
 
-        # develop must still exist (second run did not destroy it).
-        assert _git_branch_exists_local(repo_path, "develop"), (
-            f"'develop' branch was deleted or corrupted by second cm-release.sh invocation.\n"
+        # main must still exist (second run did not destroy it).
+        assert _git_branch_exists_local(repo_path, "main"), (
+            f"'main' branch was deleted or corrupted by second cm-release.sh invocation.\n"
             f"stdout: {result_second.stdout}\nstderr: {result_second.stderr}"
         )
 
@@ -990,7 +984,7 @@ class TestLocalOnlyVsPushBehavior:
             ["git", "-C", str(repo_path), "push", "origin", rc_branch],
             capture_output=True, check=True,
         )
-        _git_local(repo_path, "checkout", "develop")
+        _git_local(repo_path, "checkout", "main")
 
         # Run cm-release.sh.
         result_release = _run_cm_script(
@@ -1153,4 +1147,120 @@ class TestTesterVerificationGate:
         assert not _git_tag_exists(repo_path, version), (
             f"Release tag '{version}' was created despite high Systemic Risk.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+class TestFidelityGate:
+    """Post-squash fidelity gate: git diff --quiet rc/<v> main halts when trees diverge."""
+
+    def test_fidelity_gate_passes_on_clean_release(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """When no commit lands on main mid-RC, the fidelity gate passes and the tag is created.
+
+        The single-lane squash makes main identical to the RC branch.  The fidelity
+        gate (git diff --quiet rc/<v> main) must produce zero output and the release
+        must complete normally with a local tag.
+        """
+        version = "v0.1.0"
+        project_name = "gate_pass_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root_for_rc(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        # Open the RC and add coder work.
+        _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        rc_branch = f"rc/{version}"
+        _simulate_coder_work(repo_path, rc_branch, commit_message="feat: clean feature")
+
+        # Run cm-release.sh — no mid-RC commit on main, gate should pass.
+        result = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result.returncode == 0, (
+            f"cm-release.sh failed when fidelity gate should have passed.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # Tag must exist.
+        assert _git_tag_exists(repo_path, version), (
+            f"Release tag '{version}' not found after clean release (gate should have passed).\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # The gate OK line must appear in stdout.
+        combined_output = result.stdout + result.stderr
+        assert "Fidelity gate" in combined_output and "OK" in combined_output, (
+            "Expected 'Fidelity gate' and 'OK' in release output.\n"
+            f"output: {combined_output}"
+        )
+
+    def test_fidelity_gate_halts_when_main_diverges_mid_rc(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """When a commit lands on main mid-RC, the fidelity gate fires before the tag.
+
+        After the RC is opened and coder work is committed, an additional commit
+        lands directly on main (simulating an out-of-band change).  The post-squash
+        fidelity gate must detect the divergence, print the diff stat to stderr,
+        and exit non-zero before creating a tag.  No HALT file is required (the
+        gate exits 1 directly); the RC branch must still exist after the failure.
+        """
+        version = "v0.2.0"
+        project_name = "gate_fail_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root_for_rc(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        # Open the RC and add coder work.
+        _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        rc_branch = f"rc/{version}"
+        _simulate_coder_work(repo_path, rc_branch, commit_message="feat: coder work")
+
+        # Inject a divergent commit directly on main AFTER the RC was opened.
+        # This simulates an out-of-band change (e.g. a hotfix committed to main
+        # while the RC was in flight).
+        _git_local(repo_path, "checkout", "main")
+        (repo_path / "hotfix.txt").write_text("hotfix content\n", encoding="utf-8")
+        _git_local(repo_path, "add", "hotfix.txt")
+        _git_local(repo_path, "commit", "-m", "hotfix: emergency fix landed mid-RC")
+
+        # Run cm-release.sh — gate must fire.
+        result = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result.returncode != 0, (
+            "cm-release.sh must exit non-zero when fidelity gate detects divergence.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # The release tag must NOT have been created.
+        assert not _git_tag_exists(repo_path, version), (
+            f"Release tag '{version}' was created despite fidelity gate divergence.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # The fidelity-gate divergence message must appear in output.
+        combined_output = result.stdout + result.stderr
+        assert "DIVERGENCE" in combined_output or "fidelity gate" in combined_output.lower(), (
+            "Expected divergence or fidelity gate error in output.\n"
+            f"output: {combined_output}"
         )

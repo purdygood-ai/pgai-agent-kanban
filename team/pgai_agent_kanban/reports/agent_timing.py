@@ -248,19 +248,13 @@ def render_table(
 
 
 def resolve_logs_dir() -> pathlib.Path:
-    """Return the logs directory path based on env var or default location.
+    """Return the logs directory path under the kanban root.
 
-    Priority:
-    1. $PGAI_AGENT_KANBAN_ROOT_PATH/logs/
-    2. ~/pgai_agent_kanban/logs/
-
+    Delegates to the canonical resolver (pgai_agent_kanban.env.resolve_kanban_root)
+    which reads PGAI_AGENT_KANBAN_ROOT_PATH and fails loud if unset or empty.
     """
-    root_env = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "").strip()
-    if root_env:
-        root = pathlib.Path(root_env).expanduser()
-    else:
-        root = pathlib.Path.home() / "pgai_agent_kanban"
-    return root / "logs"
+    from pgai_agent_kanban.env import resolve_kanban_root
+    return resolve_kanban_root() / "logs"
 
 
 # ---------------------------------------------------------------------------

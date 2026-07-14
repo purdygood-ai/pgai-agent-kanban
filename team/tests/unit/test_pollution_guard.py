@@ -131,7 +131,7 @@ def test_priority_template_in_templates_tree_is_not_flagged(
 ) -> None:
     """PRIORITY-TEMPLATE.md under team/templates/ must pass silently.
 
-    This is the canonical false-positive from BUG-0012: the guard flagged
+    This is the canonical false-positive from an earlier defect: the guard flagged
     legitimate template source files because they matched the PRIORITY-*.md
     pattern without a location-based exclusion.
     """

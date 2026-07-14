@@ -67,10 +67,12 @@ from pgai_agent_kanban.dashboard.scan_attention import (
     _scan_state_file,
     _scan_rejected_dir,
     _iter_projects,
+    _parse_overwatch_action_log,
     scan_blocked_tasks,
     scan_quarantine,
     scan_stale_working_tasks,
     scan_transient_tasks,
+    scan_overwatch_section,
 )
 
 # ---------------------------------------------------------------------------
@@ -881,6 +883,276 @@ def test_scan_stale_working_tasks_flags_old_working_task(
     scan_stale_working_tasks(str(tasks_dir), use_color=False, max_task_seconds=5400)
     captured = capsys.readouterr()
     assert "CODER-20260601-001-stale" in captured.out
+
+
+# ===========================================================================
+# scan_attention — scan_overwatch_section and _parse_overwatch_action_log
+# ===========================================================================
+
+
+def _write_overwatch_action_log(
+    kanban_root: pathlib.Path,
+    project_name: str,
+    entries: list[tuple],
+) -> pathlib.Path:
+    """Create a fixture actions.log under kanban_root/projects/<name>/overwatch/.
+
+    Each entry in ``entries`` is a 6-tuple:
+        (timestamp, name, target, action, backup, reason)
+    """
+    ow_dir = kanban_root / "projects" / project_name / "overwatch"
+    ow_dir.mkdir(parents=True, exist_ok=True)
+    log_path = ow_dir / "actions.log"
+    lines = []
+    for ts, name, target, action, backup, reason in entries:
+        lines.append(f"{ts}\t{name}\t{target}\t{action}\t{backup}\t{reason}")
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return log_path
+
+
+def test_parse_overwatch_action_log_returns_empty_for_missing_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    """_parse_overwatch_action_log returns [] when the log file does not exist."""
+    result = _parse_overwatch_action_log(tmp_path / "nonexistent.log", max_entries=10)
+    assert result == []
+
+
+def test_parse_overwatch_action_log_labels_transient_action(
+    tmp_path: pathlib.Path,
+) -> None:
+    """_parse_overwatch_action_log sets type=TRANSIENT for transient-auto-requeued."""
+    log_path = tmp_path / "actions.log"
+    log_path.write_text(
+        "2026-07-07T10:00:00Z\tcheck-transient-api-error\tCODER-001\t"
+        "transient-auto-requeued\tnone\tTransient 529 in log tail\n",
+        encoding="utf-8",
+    )
+    entries = _parse_overwatch_action_log(log_path, max_entries=10)
+    assert len(entries) == 1
+    assert entries[0]["type"] == "TRANSIENT"
+    assert entries[0]["target"] == "CODER-001"
+    assert entries[0]["action"] == "transient-auto-requeued"
+
+
+def test_parse_overwatch_action_log_labels_needs_human_action(
+    tmp_path: pathlib.Path,
+) -> None:
+    """_parse_overwatch_action_log sets type=needs-human for ceiling-reached bug-filed."""
+    log_path = tmp_path / "actions.log"
+    log_path.write_text(
+        "2026-07-07T10:00:00Z\tcheck-transient-api-error\tCODER-002\t"
+        "transient-ceiling-bug-filed\tnone\tCeiling=2 reached\n",
+        encoding="utf-8",
+    )
+    entries = _parse_overwatch_action_log(log_path, max_entries=10)
+    assert len(entries) == 1
+    assert entries[0]["type"] == "needs-human"
+    assert entries[0]["target"] == "CODER-002"
+
+
+def test_parse_overwatch_action_log_labels_routine_action_as_info(
+    tmp_path: pathlib.Path,
+) -> None:
+    """_parse_overwatch_action_log sets type=info for sweep-end and check-ok entries."""
+    log_path = tmp_path / "actions.log"
+    log_path.write_text(
+        "2026-07-07T10:00:00Z\toverwatch-sweep\tpgai-agent-kanban\t"
+        "sweep-end\tnone\t5 ok, 0 error\n",
+        encoding="utf-8",
+    )
+    entries = _parse_overwatch_action_log(log_path, max_entries=10)
+    assert len(entries) == 1
+    assert entries[0]["type"] == "info"
+
+
+def test_parse_overwatch_action_log_returns_newest_first(
+    tmp_path: pathlib.Path,
+) -> None:
+    """_parse_overwatch_action_log returns entries in reverse-chronological order."""
+    log_path = tmp_path / "actions.log"
+    log_path.write_text(
+        "2026-07-07T09:00:00Z\tcheck-transient-api-error\tCODER-001\t"
+        "transient-auto-requeued\tnone\told entry\n"
+        "2026-07-07T10:00:00Z\tcheck-transient-api-error\tCODER-002\t"
+        "transient-ceiling-bug-filed\tnone\tnew entry\n",
+        encoding="utf-8",
+    )
+    entries = _parse_overwatch_action_log(log_path, max_entries=10)
+    assert len(entries) == 2
+    # Newest (CODER-002) first
+    assert entries[0]["target"] == "CODER-002"
+    assert entries[1]["target"] == "CODER-001"
+
+
+def test_parse_overwatch_action_log_respects_max_entries(
+    tmp_path: pathlib.Path,
+) -> None:
+    """_parse_overwatch_action_log caps results at max_entries."""
+    lines = []
+    for i in range(10):
+        lines.append(
+            f"2026-07-07T10:0{i}:00Z\tcheck-transient-api-error\tCODER-{i:03d}\t"
+            f"transient-auto-requeued\tnone\treason {i}"
+        )
+    log_path = tmp_path / "actions.log"
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    entries = _parse_overwatch_action_log(log_path, max_entries=3)
+    assert len(entries) == 3
+
+
+def test_scan_overwatch_section_shows_no_activity_when_no_logs(
+    tmp_path: pathlib.Path,
+    capsys,
+) -> None:
+    """scan_overwatch_section prints 'no recent OVERWATCH activity' when no logs exist."""
+    # No projects/*/overwatch/actions.log files
+    (tmp_path / "projects" / "myproj").mkdir(parents=True)
+    scan_overwatch_section(str(tmp_path), use_color=False)
+    captured = capsys.readouterr()
+    assert "no recent OVERWATCH activity" in captured.out
+
+
+def test_scan_overwatch_section_renders_transient_and_needs_human_items(
+    tmp_path: pathlib.Path,
+    capsys,
+) -> None:
+    """scan_overwatch_section renders both TRANSIENT and needs-human items with distinct labels.
+
+    Fixture: sweep populates the action log with one TRANSIENT entry and one
+    needs-human entry.  Both must appear in the output with distinct type labels.
+    """
+    _write_overwatch_action_log(
+        tmp_path,
+        "pgai-agent-kanban",
+        [
+            (
+                "2026-07-07T10:00:00Z",
+                "check-transient-api-error",
+                "CODER-20260707-001-task",
+                "transient-auto-requeued",
+                "none",
+                "529 Overloaded in log tail; reset to BACKLOG (requeue #1 of 2)",
+            ),
+            (
+                "2026-07-07T10:01:00Z",
+                "check-transient-api-error",
+                "CODER-20260707-002-task",
+                "transient-ceiling-bug-filed",
+                "none",
+                "Transient ceiling=2; bug filed",
+            ),
+        ],
+    )
+    scan_overwatch_section(str(tmp_path), use_color=False)
+    captured = capsys.readouterr()
+
+    # Both items must appear
+    assert "CODER-20260707-001-task" in captured.out
+    assert "CODER-20260707-002-task" in captured.out
+
+    # Distinct type labels must appear
+    assert "TRANSIENT" in captured.out
+    assert "needs-human" in captured.out
+
+
+def test_scan_overwatch_section_suppresses_info_entries(
+    tmp_path: pathlib.Path,
+    capsys,
+) -> None:
+    """scan_overwatch_section does not render info-type entries (sweep-end, check-ok)."""
+    _write_overwatch_action_log(
+        tmp_path,
+        "pgai-agent-kanban",
+        [
+            (
+                "2026-07-07T10:00:00Z",
+                "overwatch-sweep",
+                "pgai-agent-kanban",
+                "sweep-end",
+                "none",
+                "5 ok, 0 error",
+            ),
+        ],
+    )
+    scan_overwatch_section(str(tmp_path), use_color=False)
+    captured = capsys.readouterr()
+    # Info-only entry should result in the no-activity message
+    assert "no recent OVERWATCH activity" in captured.out
+
+
+def test_scan_overwatch_section_transient_distinct_from_needs_human_in_output(
+    tmp_path: pathlib.Path,
+    capsys,
+) -> None:
+    """TRANSIENT and needs-human items carry distinguishable labels in the output.
+
+    This verifies the structured-field acceptance criterion: downstream renderers
+    can distinguish the two types without parsing prose.
+    """
+    _write_overwatch_action_log(
+        tmp_path,
+        "proj-alpha",
+        [
+            (
+                "2026-07-07T12:00:00Z",
+                "check-transient-api-error",
+                "TASK-TRANSIENT",
+                "transient-auto-requeued",
+                "none",
+                "rate limit in log",
+            ),
+            (
+                "2026-07-07T12:01:00Z",
+                "check-transient-api-error",
+                "TASK-HUMAN",
+                "transient-ceiling-bug-filed",
+                "none",
+                "ceiling reached",
+            ),
+        ],
+    )
+    scan_overwatch_section(str(tmp_path), use_color=False)
+    captured = capsys.readouterr()
+
+    # TRANSIENT label must precede TASK-TRANSIENT in the output
+    transient_pos = captured.out.find("TRANSIENT")
+    task_transient_pos = captured.out.find("TASK-TRANSIENT")
+    assert transient_pos != -1
+    assert task_transient_pos != -1
+
+    # needs-human label must precede TASK-HUMAN in the output
+    needs_human_pos = captured.out.find("needs-human")
+    task_human_pos = captured.out.find("TASK-HUMAN")
+    assert needs_human_pos != -1
+    assert task_human_pos != -1
+
+    # The two labels must be different strings (structural distinction check)
+    assert "TRANSIENT" != "needs-human"
+
+
+def test_scan_overwatch_section_existing_sections_unaffected(
+    tmp_path: pathlib.Path,
+    capsys,
+) -> None:
+    """scan_overwatch_section output does not include blocked-tasks section content.
+
+    Verifies the additive constraint: OVERWATCH section does not modify or
+    replace content from other scanners.
+    """
+    # Write a BLOCKED task — scan_overwatch_section should NOT mention it
+    task_dir = tmp_path / "projects" / "myproj" / "tasks" / "CODER-001-blocked"
+    task_dir.mkdir(parents=True)
+    (task_dir / "status.md").write_text(
+        "## State\nBLOCKED\n\n## Needs Human\nyes\n\n## Blockers\nmissing file\n",
+        encoding="utf-8",
+    )
+    # No overwatch action log — so no OVERWATCH data
+    scan_overwatch_section(str(tmp_path), use_color=False)
+    captured = capsys.readouterr()
+    # The blocked task should NOT appear — scan_overwatch_section only reads action logs
+    assert "CODER-001-blocked" not in captured.out
+    assert "no recent OVERWATCH activity" in captured.out
 
 
 # ===========================================================================

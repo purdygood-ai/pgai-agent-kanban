@@ -28,6 +28,12 @@ hierarchy.  This file adds only what is specific to the integration scope:
                         this to exercise multi-project isolation: real discovery,
                         real RC lifecycle, real operator commands across projects.
 
+  - api_server        — teardown-guaranteed API server on an ephemeral port;
+                        from tests/fixtures/api_server.py.  Starts a real
+                        uvicorn subprocess, yields a ServerHandle(port, pid),
+                        and stops it in a finally block, asserting the port is
+                        free before returning.  Never binds port 8300.
+
 Integration test contract (from SOP.md):
   - Integration tests do NOT mock the integration points.  They stand up real
     temporary kanban trees (via the fixtures above) and exercise actual flows
@@ -51,3 +57,4 @@ from __future__ import annotations
 # discover and register them for all tests under tests/integration/.
 from tests.fixtures.installed_root import installed_root  # noqa: F401
 from tests.fixtures.two_project import two_project_root  # noqa: F401
+from tests.fixtures.api_server import api_server  # noqa: F401

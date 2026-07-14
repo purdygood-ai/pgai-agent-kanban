@@ -53,22 +53,27 @@ Possible values:
     or local-development-only)
 
 Branch convention: features always branch from the Source Branch (default
-develop). Never from main. main is reserved for tagged releases.
+main, prefixed per project.cfg branch_prefix). The RC branch is the
+usual intermediate branch during a release cycle; main receives one
+squash per release from CM.
 
 If the working directory is not yet a git checkout and Git Repo is set,
-the FIRST task to run for this project must clone it. If the develop
-branch does not exist on the remote, the first task must create it from
-main and push it.
+the FIRST task to run for this project must clone it. If the prefixed
+main branch does not exist on the remote, the operator creates it with
+init-project-git-repo.sh.
 -->
 none
 
 ## Source Branch
 <!--
 The branch this task's feature branch should be created from.
-Default: develop
+Default: main (the prefixed main branch resolves per project.cfg
+branch_prefix). For release-workflow tasks, the materializer overrides
+this to rc/<target_version>.
 
 Future use: a parent feature branch name for sub-features. Currently the
-PM agent only generates one layer deep, so this is always develop or none.
+PM agent only generates one layer deep, so this is always main, an RC
+branch, or none.
 -->
 none
 

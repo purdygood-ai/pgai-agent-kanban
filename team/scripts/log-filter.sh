@@ -31,6 +31,9 @@
 #   TERM=dumb  — disables all ANSI codes
 #   PGAI_LOG_FILTER_VERBOSE=1 — disable noise filtering (show all lines)
 
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+
 # --- Argument parsing: strip --* flags before passing args to awk ---
 # Recognized flags:
 #   --kanban-root <path>   (sets KANBAN_ROOT override; value is consumed and stored)
@@ -63,7 +66,7 @@ done
 
 # --- Source config (non-strict) ---
 # Start with env var fallback, then apply --kanban-root override if provided
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 if [[ -n "$_KANBAN_ROOT_OVERRIDE" ]]; then
   KANBAN_ROOT="$_KANBAN_ROOT_OVERRIDE"
 fi

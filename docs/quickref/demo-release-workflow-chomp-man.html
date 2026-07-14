@@ -146,9 +146,10 @@
         <li><b>Priorities</b> (<span class="mono">PRIORITY-NNNN-*.md</span>) are enhancements that ride into a minor.</li>
       </ul>
       <p><span class="mono">pgai-chomp-man</span> runs in an isolated branch lane: <span class="mono">branch_prefix = ai_</span>,
-      so its branches and tags are <span class="mono">ai_main</span>, <span class="mono">ai_develop</span>,
+      so its branches and tags are <span class="mono">ai_main</span>,
       <span class="mono">ai_rc/vX.Y.Z</span>, and tags <span class="mono">ai_vX.Y.Z</span> — your own <span class="mono">main</span>
-      stays untouched. The whole RC lifecycle, branch and tag mechanics included, runs without you.</p>
+      stays untouched. Each RC branches from <span class="mono">ai_main</span> and squashes back into it in one hop.
+      The whole RC lifecycle, branch and tag mechanics included, runs without you.</p>
     </div>
   </section>
 
@@ -280,13 +281,13 @@ v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:1
           <div class="term">
             <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 6 · logs</span></div>
 <pre><span class="mg">[pm 02:08:02]</span> wake(pm): project pgai-chomp-man: decomposed v0.1.0 <span class="cy">→</span> 2 tasks
-<span class="rd">[cm 02:09:40]</span> wake(cm): opened RC branch <span class="yl">ai_rc/v0.1.0</span> from ai_develop
+<span class="rd">[cm 02:09:40]</span> wake(cm): opened RC branch <span class="yl">ai_rc/v0.1.0</span> from ai_main
 <span class="gn">[coder 02:11:18]</span> wake(coder): CODER-20260603-002 <span class="cy">→</span> WORKING
 <span class="gn">[coder 02:13:55]</span> wake(coder): implemented screen + hold-to-move; committed to ai_rc/v0.1.0
 <span class="gn">[coder 02:13:56]</span> wake(coder): CODER-20260603-002 <span class="cy">→</span> DONE
 <span class="bl">[tester 02:15:30]</span> wake(tester): ran suite on ai_rc/v0.1.0 — 0 failures
 <span class="bl">[tester 02:15:31]</span> wake(tester): TESTER-20260603-002 <span class="cy">→</span> DONE (PASS, no findings)
-<span class="rd">[cm 02:17:12]</span> wake(cm): ship: merged ai_rc/v0.1.0 <span class="cy">→</span> ai_develop, ai_main
+<span class="rd">[cm 02:17:12]</span> wake(cm): ship: squashed ai_rc/v0.1.0 <span class="cy">→</span> ai_main (single-lane)
 <span class="rd">[cm 02:17:13]</span> wake(cm): tagged <span class="gn">ai_v0.1.0</span>  ·  v0.1.0 <span class="cy">→</span> released
 <span class="statusbar">0:main 1:visibility 2:attention 3:git 5:metrics 6:logs* 9:terminal
 v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:17:13</span></pre>

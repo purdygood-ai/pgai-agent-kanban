@@ -19,7 +19,7 @@ Plan JSON schema (per task):
     assigned_agent      str (optional) — e.g. "coder", "writer". Overrides role-based routing.
     working_directory   str — absolute path, "local-development-only", or "none"
     git_repo            str — repo URL or "none"
-    source_branch       str — typically "develop", or "none" if no git
+    source_branch       str — typically "main" or "rc/<version>", or "none" if no git
     goal                str
     inputs              list[str]
     context_paths       list[str]
@@ -30,11 +30,15 @@ Plan JSON schema (per task):
     notes               str
 
 Top-level plan fields:
-    workflow_type           str — "release" (default), "feature", or "document" (canonical doc workflow)
-    source_branch           str — shared branch name for feature workflow (required when
-                                  workflow_type=feature; falls back to active RC if unset)
+    workflow_type           str — plugin name resolved as workflows/<type>/pipeline.yaml.
+                                  "release" is the default when absent or empty.
+                                  Any registered plugin directory is a valid value; the set
+                                  is not closed.  A plugin without pipeline.yaml decomposes
+                                  via the simple wf_agents path (no pipeline steps).
+    source_branch           str — shared branch name for the shared-branch decomposition mode
+                                  (workflow_type="feature"; falls back to active RC if unset)
     test_required           str — "true" (default) or "false"; controls TESTER task injection
-    parent_branch           str — branch the shared feature branch is created from (default: "develop")
+    parent_branch           str — branch the shared feature branch is created from (default: "main")
     target_version          str — semver version, or "none"
     human_approval_required str — "required" or "auto" (default)
     requirements_path       str — absolute path of the requirements doc (optional)
@@ -59,16 +63,24 @@ The materializer:
 - Appends task IDs to per-agent queue files based on assigned_agent or role:
     CODER -> tasks/queues/coder_backlog.md
     WRITER -> tasks/queues/writer_backlog.md
-    HUMAN-role tasks are NOT added to any agent queue.
+    HUMAN -> tasks/queues/human_backlog.md (gate tasks visible in dashboard)
 
-Workflow type controls the task assembly pipeline:
+workflow_type controls the decomposition mode — how PM assembles the task pipeline for a
+plan.  Each mode is resolved as a plugin directory (workflows/<type>/).  A plugin may carry
+a pipeline.yaml for rich multi-step decomposition; a plugin without pipeline.yaml uses the
+simple wf_agents path (single-track decomposition, no pipeline steps).
+
+Note on terminology: "work tasks" below means the operator-authored tasks in the submitted
+plan JSON (the CODER/WRITER tasks PM decomposes).  These are distinct from the
+"shared-branch decomposition mode" (workflow_type="feature"), which is an assembly-mode
+concept, not a description of what tasks contain.
 
   workflow_type = 'document':
     Unified document pipeline with CM open-doc / finalize bookends. Dispatches to
     inject_document_workflow_tasks() using the workflow definition loaded from
-    team/workflows/document.yaml. Operator specifies sections in the plan-level
-    'sections' field (list of section names); one section-draft WRITER ticket is
-    emitted per section.
+    team/workflows/document/pipeline.yaml (resolved via the type string). Operator
+    specifies sections in the plan-level 'sections' field (list of section names);
+    one section-draft WRITER ticket is emitted per section.
 
     Section strategy: operator-defined sections (fallback from runtime-foreach).
     The plan JSON must include a 'sections' list at the top level. If absent or
@@ -85,42 +97,51 @@ Workflow type controls the task assembly pipeline:
         TESTER-review      — depends on WRITER-polish
         CM-finalize        — last task, role CM, cm_operation=finalize, depends on TESTER-review
 
-  workflow_type = 'release' (default):
-    CM bookend injection is UNCONDITIONAL.  Every release plan
-    gets CM-open-rc at position 1 and CM-release at the final position regardless
-    of whether target_version is set.  When target_version is 'none' or absent,
-    the version label 'unversioned' is used for the bookend task IDs and a WARNING
-    is emitted.  A HUMAN-APPROVE gate is injected only when the plan's
-    human_approval_required field is 'required'.
+  workflow_type = 'release' (default, or any type whose workflow.cfg declares
+                              git_mode=rw and finalize=tag/publish):
+    CM bookend injection is conditional on the plugin's declared capabilities.
+    When the plugin manifest declares git_mode=rw AND finalize in {tag, publish}
+    (the release-lifecycle shape), CM-open-rc is prepended at position 1 and
+    CM-release is appended at the final position.  When target_version is 'none'
+    or absent, the version label 'unversioned' is used for the bookend task IDs
+    and a WARNING is emitted.  A HUMAN-APPROVE gate is injected only when the
+    plan's human_approval_required field is 'required'.  For workflow types whose
+    manifest declares git_mode != rw or finalize not in {tag, publish} (e.g.
+    testing-only with finalize=report), no CM bookends are injected.
 
         human_approval_required = 'required':
             CM-open       — first task, role CM, no prereqs
-            (feature tasks, each depends_on CM-open)
-            TESTER        — verify task, role TESTER, prereqs = all feature task IDs
-            HUMAN-APPROVE — gate task, role HUMAN, prereqs = all feature task IDs + TESTER ID
-            CM-release    — last task, role CM, prereqs = all feature IDs + TESTER + HUMAN-APPROVE
+            (work tasks, each depends_on CM-open)
+            TESTER        — verify task, role TESTER, prereqs = all work task IDs
+            HUMAN-APPROVE — gate task, role HUMAN, prereqs = all work task IDs + TESTER ID
+            CM-release    — last task, role CM, prereqs = all work IDs + TESTER + HUMAN-APPROVE
 
         human_approval_required = 'auto' (default / missing):
             CM-open       — first task, role CM, no prereqs
-            (feature tasks, each depends_on CM-open)
-            TESTER        — verify task, role TESTER, prereqs = all feature task IDs
-            CM-release    — last task, role CM, prereqs = all feature task IDs + TESTER ID
+            (work tasks, each depends_on CM-open)
+            TESTER        — verify task, role TESTER, prereqs = all work task IDs
+            CM-release    — last task, role CM, prereqs = all work task IDs + TESTER ID
 
     Invalid values for human_approval_required log a WARNING to stderr and default
     to 'auto'.
 
-  workflow_type = 'feature':
+  workflow_type = 'feature' [shared-branch decomposition mode]:
+    NOTE: "feature" here is a DECOMPOSITION MODE name, not a description of task content.
+    It means: a shared development branch is created first and all work tasks branch from
+    it.  Do not confuse with the term "work tasks" (the operator-submitted tasks in any
+    workflow type).
+
     No CM bookends. Instead a CODER create-shared-branch ticket is prepended as
     ticket 1. A TESTER task is appended when test_required=True.
 
         test_required = 'true' (default):
             CODER(create-shared-branch) — first task
-            (feature tasks, each depends_on create-shared-branch)
-            TESTER — verify task, prereqs = all feature task IDs
+            (work tasks, each depends_on create-shared-branch)
+            TESTER — verify task, prereqs = all work task IDs
 
         test_required = 'false':
             CODER(create-shared-branch) — first task
-            (feature tasks, each depends_on create-shared-branch)
+            (work tasks, each depends_on create-shared-branch)
 
     If source_branch is not set and no Active RC is found in release-state.md,
     the materializer exits with an error (exit code 1).
@@ -141,6 +162,11 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.config import get_config
 from lib.workflow_loader import load_workflow, WorkflowError
+
+# pgai_agent_kanban package lives one level up from pm-agent/ (i.e. under team/).
+# Insert team/ onto sys.path so the import works from any caller working directory.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from pgai_agent_kanban.lib.terminal_states import is_terminal as _bundle_is_terminal
 
 
 # ---------------------------------------------------------------------------
@@ -944,35 +970,35 @@ def determine_source_branch(task, team_root, workflow_type=None, target_version=
          per-task source_branch for tasks that should target the RC (CODER,
          WRITER, TESTER, CM-release).  ``branch_prefix`` is read from
          ``project.cfg [project] branch_prefix`` (default empty).
-         The CM-open bookend is a special case: it merges into develop because
+         The CM-open bookend is a special case: it branches from main because
          the RC branch is what it CREATES.
-      2. Default to "develop" if no target_version (defensive fallback)
+      2. Default to "main" if no target_version (defensive fallback)
 
     For non-release workflows (feature, etc.):
       1. Explicit task["source_branch"] from PM (highest priority)
       2. Active RC from release-state.md — returned as
          ``<branch_prefix>rc/<active>`` so the README matches the real branch
          name created by the prefix-aware shell layer.
-      3. Default to "develop"
+      3. Default to "main"
 
     For release workflows, the RC branch ALWAYS wins for
-    work tasks. PM populates per-task source_branch with "develop" as its
+    work tasks. PM populates per-task source_branch as its
     standard schema for git-enabled tasks, but during a release the work must
     land on the RC branch. Honoring per-task source_branch in release mode
-    caused CODER tasks to merge into develop instead of rc/<target_version>,
+    caused CODER tasks to merge into the wrong branch instead of rc/<target_version>,
     leaving the RC empty at ship time.
 
     The CM-open task is identified by cm_operation == "open-rc" and is excluded
-    from the RC override — it sources from develop because it is what creates
-    the RC branch.  branch_prefix does NOT affect the CM-open source; the
-    develop / parent_branch name for CM-open is determined elsewhere.
+    from the RC override — it branches from main because that is the single base
+    branch from which all RCs are created.  branch_prefix does NOT affect the
+    CM-open source; the parent_branch name for CM-open is determined elsewhere.
     """
     # Resolve branch_prefix once; empty string means "no prefix" (default).
     prefix = _resolve_branch_prefix(team_root)
 
     # For release workflow: <prefix>rc/<target_version> wins for work tasks.
     if (workflow_type or "").strip().lower() == "release":
-        # CM-open is the bookend that CREATES the RC branch — it must source from develop.
+        # CM-open is the bookend that CREATES the RC branch — it must source from main.
         cm_op = (task.get("cm_operation") or "").strip().lower()
         is_cm_open = cm_op == "open-rc"
 
@@ -983,8 +1009,8 @@ def determine_source_branch(task, team_root, workflow_type=None, target_version=
                 base = f"rc/{tv}" if tv.startswith("v") else f"rc/v{tv}"
                 return f"{prefix}{base}"
 
-        # CM-open task or no target_version: source from develop.
-        return "develop"
+        # CM-open task or no target_version: source from main.
+        return "main"
 
     # Non-release workflows: honor explicit per-task source_branch first.
     sb = (task.get("source_branch") or "").strip()
@@ -993,11 +1019,185 @@ def determine_source_branch(task, team_root, workflow_type=None, target_version=
     active = get_active_rc(team_root)
     if active:
         return f"{prefix}rc/{active}"
-    return "develop"
+    return "main"
+
+
+# Roles that require an isolated git worktree at dispatch time.
+# The wake script's TESTER path (claude.sh) unconditionally checks for
+# ## Source Branch when the workflow's git_mode is not "none".  Any role
+# listed here triggers the fail-closed source-ref guard at materialize time.
+_WORKTREE_REQUIRING_ROLES = frozenset({"TESTER"})
+
+
+def _read_source_branch_from_requirements(requirements_path: str) -> str:
+    """Parse the ``## Source Branch`` field from a requirements document.
+
+    Returns the stripped value when found, or an empty string when the
+    file is absent, unreadable, or lacks the field.
+
+    Parameters
+    ----------
+    requirements_path:
+        Absolute path to the requirements Markdown file, or ``"none"``/empty
+        to skip (returns ``""`` immediately).
+    """
+    if not requirements_path or requirements_path.strip().lower() == "none":
+        return ""
+    try:
+        text = Path(requirements_path).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    # Match "## Source Branch" as a section header (possibly followed by a
+    # blank line) and capture the next non-blank, non-header line.
+    for i, line in enumerate(text.splitlines()):
+        if line.strip().lower() == "## source branch":
+            # Scan ahead for the first non-empty, non-header line.
+            for rest in text.splitlines()[i + 1:]:
+                stripped = rest.strip()
+                if stripped and not stripped.startswith("#"):
+                    return stripped
+    return ""
+
+
+def _resolve_plan_source_branch(plan: dict, requirements_path: str) -> str:
+    """Return the effective plan-level source branch for default-fill propagation.
+
+    Resolution order (first non-empty, non-"none" value wins):
+      1. ``plan["source_branch"]`` — explicitly set by PM in the plan JSON.
+      2. ``## Source Branch`` field parsed from *requirements_path* — the
+         requirements document the PM read when generating the plan.
+
+    Returns an empty string when neither source provides a usable value, so
+    callers can distinguish "nothing to propagate" from "propagate this value".
+
+    Parameters
+    ----------
+    plan:
+        The top-level plan dict (deserialized plan JSON).
+    requirements_path:
+        Absolute path to the requirements doc, or ``"none"``/empty to skip.
+    """
+    # 1. Plan JSON field.
+    val = (plan.get("source_branch") or "").strip()
+    if val and val.lower() != "none":
+        return val
+    # 2. Requirements doc.
+    val = _read_source_branch_from_requirements(requirements_path)
+    if val and val.lower() != "none":
+        return val
+    return ""
+
+
+def _propagate_plan_source_branch(tasks: list, plan_source_branch: str) -> int:
+    """Default-fill *plan_source_branch* onto every task that lacks an explicit value.
+
+    "Lacks an explicit value" means the task's ``source_branch`` key is absent,
+    empty, or the string ``"none"`` (case-insensitive).  Tasks that already
+    carry a real source-branch value are **not** touched — this is strictly a
+    default-fill, not an overwrite.
+
+    Returns the number of tasks that were updated (for logging).
+
+    Parameters
+    ----------
+    tasks:
+        The fully assembled list of task dicts (work tasks + synthetics).
+        Mutated in-place.
+    plan_source_branch:
+        The plan-level source ref to fill in.  When empty, the function is a
+        no-op (returns 0) — callers may pass the result of
+        ``_resolve_plan_source_branch()`` directly.
+    """
+    if not plan_source_branch:
+        return 0
+    updated = 0
+    for task in tasks:
+        existing = (task.get("source_branch") or "").strip()
+        if not existing or existing.lower() == "none":
+            task["source_branch"] = plan_source_branch
+            updated += 1
+    return updated
+
+
+def _validate_source_ref_for_worktree_roles(
+    tasks: list, wf_caps: dict, workflow_type: str
+) -> None:
+    """Fail-closed guard: refuse to continue when a worktree-requiring task lacks a source ref.
+
+    For every task whose role is in ``_WORKTREE_REQUIRING_ROLES`` (currently
+    ``TESTER``) and whose ``git_repo`` is not ``"none"``, the task MUST carry
+    a non-empty, non-``"none"`` ``source_branch``.  If it does not, the
+    materializer prints a diagnostic to stderr naming the offending task ID
+    and the missing field, then calls ``sys.exit(1)``.
+
+    This guard fires **before** any task folders are created, so a failure
+    leaves no half-materialized output — consistent with the BUG-0055
+    receipt-rule inheritance named in BUG-0059.
+
+    The guard is bypassed for release workflows: ``determine_source_branch``
+    in ``create_task_folder`` always resolves ``rc/<target_version>`` for
+    release work tasks, so per-task source_branch is irrelevant there.
+
+    Parameters
+    ----------
+    tasks:
+        The fully assembled, propagated list of task dicts.
+    wf_caps:
+        The workflow capabilities dict from ``load_workflow_capabilities()``.
+        Used to check whether the workflow's ``git_mode`` requires a worktree.
+    workflow_type:
+        The normalised workflow-type string (e.g. ``"testing-only"``).
+        Release workflows skip this guard entirely.
+    """
+    # Release workflow: determine_source_branch always supplies rc/<version>.
+    if (workflow_type or "").strip().lower() == "release":
+        return
+
+    # Only enforce when the workflow plugin's git_mode requires a worktree.
+    # A workflow with git_mode="none" (or unknown/missing caps) does not need
+    # Source Branch for TESTER dispatch.
+    wf_git_mode = (wf_caps.get("git_mode") or "").strip().lower()
+    if wf_git_mode == "none":
+        return
+    # When caps are absent (empty dict), we cannot determine git_mode — skip
+    # the guard rather than false-positive on custom plugins that predate the
+    # manifest contract.
+    if not wf_caps:
+        return
+
+    errors = []
+    for task in tasks:
+        role = (task.get("role") or "").upper()
+        if role not in _WORKTREE_REQUIRING_ROLES:
+            continue
+        git_repo = (task.get("git_repo") or "").strip()
+        if not git_repo or git_repo.lower() == "none":
+            # No git_repo → no worktree required → guard does not apply.
+            continue
+        sb = (task.get("source_branch") or "").strip()
+        if not sb or sb.lower() == "none":
+            task_id = task.get("task_id") or task.get("slug") or "<unknown>"
+            errors.append(
+                f"  task {task_id!r} (role={role!r}): "
+                f"'## Source Branch' is absent or 'none'"
+            )
+
+    if errors:
+        print(
+            "[pm-materialize] ERROR: fail-closed source-ref guard triggered.\n"
+            "The following task(s) require a source branch for worktree dispatch "
+            "but none is resolvable (neither the plan nor the ticket carries one):\n"
+            + "\n".join(errors) + "\n"
+            "Ensure the plan JSON or the requirements document carries a "
+            "'source_branch' / '## Source Branch' value.  "
+            "No task folders have been written.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def is_human_task(task):
-    """Return True if a task is a HUMAN-role task (not routed to any agent queue)."""
+    """Return True if a task is a HUMAN-role task (gate task, operator-facing)."""
     role = (task.get("role") or "").upper()
     assigned = (task.get("assigned_agent") or "").upper()
     return role == "HUMAN" or assigned == "HUMAN"
@@ -1011,12 +1211,11 @@ def get_queue_path(task, team_root):
         queue_path  = f'{team_root}/tasks/queues/{agent_lower}_backlog.md'
 
     Tasks without an assigned_agent field fall back to the role field
-    (CODER->coder, WRITER->writer).
+    (CODER->coder, WRITER->writer, HUMAN->human).
 
-    Returns None for HUMAN-role tasks (they are not routed to any agent queue).
+    HUMAN-role tasks route to tasks/queues/human_backlog.md so the dashboard's
+    queue-marker check can track their state without a 'no queue entry' warning.
     """
-    if is_human_task(task):
-        return None
     agent_lower = task.get("assigned_agent", task.get("role", "CODER")).lower()
     return Path(team_root) / "tasks" / "queues" / f"{agent_lower}_backlog.md"
 
@@ -1267,15 +1466,6 @@ def _is_strictly_older_version(candidate: str, current: str) -> bool:
     return c_tuple < cur_tuple
 
 
-def _rewrite_task_id_in_text(text: str, old_id: str, new_id: str) -> str:
-    """Replace all verbatim occurrences of *old_id* with *new_id* in *text*.
-
-    Used to update a task folder's own task-ID references (status.md ## Task,
-    README.md ## Task ID and ## Feature Branch) after a folder rename.
-    """
-    return text.replace(old_id, new_id)
-
-
 def _apply_rename_map_to_prerequisites(text: str, rename_map: dict,
                                        known_old_ids: set = None) -> str:
     """Rewrite task-ID references in prerequisite-style sections of *text*.
@@ -1385,16 +1575,32 @@ def recycle_cancelled_folder(
     old_dir: Path,
     new_task_id: str,
     old_task_id: str,
+    readme_content: str,
+    status_content: str,
 ) -> Path:
-    """Rename a cancelled (WONT-DO) task folder to the new task ID.
+    """Rename a cancelled (WONT-DO) task folder and write fresh contract files.
+
+    Recycling preserves history (logs/ is retained in place; it moves with the
+    folder rename) but replaces the contract files with fresh-rendered content
+    from the current task dict.  A recycled folder's README.md and status.md
+    are byte-equivalent to what a freshly-created folder would produce for the
+    same task dict.
 
     Steps:
     1. Rename the folder from OLD path to NEW path (sibling of old_dir).
-    2. Rewrite the task's own ID references inside status.md and README.md.
-    3. Reset ## State to BACKLOG in status.md.
-    4. Clear ## Artifacts, ## Summary, ## Blockers, and ## Needs Human in status.md.
-    5. Append a recycling note to ## Summary in status.md.
-    6. Remove stale artifact files from artifacts/ (leave the directory).
+    2. Write readme_content to README.md — fully rendered from the current task
+       dict via TASK_README_TEMPLATE; not a surgical edit of the prior corpse.
+    3. Write status_content to status.md — fresh-task shape (State=BACKLOG)
+       rendered via STATUS_TEMPLATE; not a surgical edit of the prior corpse.
+    4. Remove stale artifact files from artifacts/ (leave the directory).
+    5. Leave logs/ untouched — prior-life log evidence is preserved in place.
+
+    Args:
+        old_dir:        Path to the existing WONT-DO task folder.
+        new_task_id:    New task ID (the folder will be renamed to this).
+        old_task_id:    Old task ID (used only for the log message).
+        readme_content: Fully-rendered README.md text from the current task dict.
+        status_content: Fresh-task status.md text from the current task dict.
 
     Returns the new folder Path.
 
@@ -1407,60 +1613,18 @@ def recycle_cancelled_folder(
         file=sys.stderr,
     )
 
-    # --- Update status.md ---
-    status_path = new_dir / "status.md"
-    if status_path.is_file():
-        status_text = status_path.read_text(encoding="utf-8")
-        # Replace old task ID references with new ones
-        status_text = _rewrite_task_id_in_text(status_text, old_task_id, new_task_id)
-        # Reset state to BACKLOG
-        status_text = re.sub(
-            r'(## State\s*\n)\S[^\n]*',
-            r'\1BACKLOG',
-            status_text,
-        )
-        # Clear and reset Summary
-        status_text = re.sub(
-            r'(## Summary\s*\n).*?(?=\n## |\Z)',
-            (
-                r'\1'
-                f'Recycled from cancelled folder {old_task_id}. '
-                f'State reset to BACKLOG. Waiting for participant to pull and begin work.\n'
-            ),
-            status_text,
-            flags=re.DOTALL,
-        )
-        # Clear Artifacts
-        status_text = re.sub(
-            r'(## Artifacts\s*\n).*?(?=\n## |\Z)',
-            r'\1none\n',
-            status_text,
-            flags=re.DOTALL,
-        )
-        # Clear Blockers
-        status_text = re.sub(
-            r'(## Blockers\s*\n).*?(?=\n## |\Z)',
-            r'\1none\n',
-            status_text,
-            flags=re.DOTALL,
-        )
-        # Reset Needs Human
-        status_text = re.sub(
-            r'(## Needs Human\s*\n).*?(?=\n## |\Z)',
-            r'\1no\n',
-            status_text,
-            flags=re.DOTALL,
-        )
-        status_path.write_text(status_text, encoding="utf-8")
-
-    # --- Update README.md ---
-    readme_path = new_dir / "README.md"
-    if readme_path.is_file():
-        readme_text = readme_path.read_text(encoding="utf-8")
-        readme_text = _rewrite_task_id_in_text(readme_text, old_task_id, new_task_id)
-        readme_path.write_text(readme_text, encoding="utf-8")
+    # --- Write fresh contract files from the current task dict ---
+    # Overwrite (or create) README.md and status.md with current-generation
+    # content.  The prior corpse bytes are discarded; what lands on disk is
+    # identical to what a fresh folder creation would produce for the same
+    # task dict.
+    (new_dir / "README.md").write_text(readme_content, encoding="utf-8")
+    (new_dir / "status.md").write_text(status_content, encoding="utf-8")
 
     # --- Clear stale artifacts ---
+    # artifacts/ is cleared so the incoming agent starts from a clean slate.
+    # logs/ is left untouched — the prior-life log evidence moves with the
+    # folder rename and is preserved for audit purposes.
     artifacts_dir = new_dir / "artifacts"
     if artifacts_dir.is_dir():
         for artifact in artifacts_dir.iterdir():
@@ -1561,8 +1725,9 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     (not 'none'), it is prepended to the task's ## Inputs section so every
     materialized task can trace context back to the source requirements.
 
-    workflow_type: the workflow type string (e.g. 'release', 'feature') to include
-    in the generated README.md ## Workflow Type field.
+    workflow_type: the decomposition mode / plugin name (e.g. 'release', 'feature',
+    'document', or any registered plugin) to include in the generated README.md
+    ## Workflow Type field.  Passed through verbatim; not validated here.
 
     tasks_root: explicit Path (or str) for the tasks directory. Task folders are
     created at tasks_root/task_id. Must be provided — passing None raises ValueError.
@@ -1662,9 +1827,9 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
         source_documents_section = ""
 
     # Determine source branch using RC-aware three-tier precedence:
-    # (1) explicit task source_branch, (2) active RC from release-state.md, (3) develop
+    # (1) explicit task source_branch, (2) active RC from release-state.md, (3) main
     # For release workflows, rc/<target_version> always wins for work tasks.
-    # The CM-open task is excluded from the override — it sources develop because it creates the RC.
+    # The CM-open task is excluded from the override — it sources main because it creates the RC.
     #
     # Always exercise determine_source_branch for release workflows, regardless
     # of git_repo.  Non-release workflows fall back to normalize_workspace_value
@@ -1749,25 +1914,21 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
                         f"(Option A: state WONT-DO → BACKLOG)"
                     )
                 elif _cf and _cs == "DONE":
+                    # Terminal-state exemption: DONE prior task never blocks.
                     _cv = get_task_readme_release_version(_cf)
-                    _pv = (release_version or "").strip()
-                    if _cv and _pv and _pv.lower() != "none" and _is_strictly_older_version(_cv, _pv):
-                        print(
-                            f"[dry-run] Would create fresh folder {task_id} "
-                            f"(Option C: DONE collision {_cf.name} at older version {_cv} < {_pv}; "
-                            f"prior folder left intact)"
-                        )
-                    else:
-                        print(
-                            f"[dry-run] COLLISION BLOCK: ({role}, {task_slug_dr}) exists at "
-                            f"{_cf.name if _cf else '(unknown)'} (state: DONE, version: {_cv or 'unknown'}). "
-                            f"Option B: would block materialization."
-                        )
+                    print(
+                        f"[dry-run] Would create fresh folder {task_id} "
+                        f"(Option C: terminal-state exemption — DONE collision {_cf.name} "
+                        f"at version {_cv or 'unknown'}; prior folder left intact)"
+                    )
                 else:
+                    # Option B: NON-terminal prior task blocks materialization.
                     print(
                         f"[dry-run] COLLISION BLOCK: ({role}, {task_slug_dr}) exists at "
                         f"{_cf.name if _cf else '(unknown)'} (state: {_cs or 'unknown'}). "
-                        f"Option B: would block materialization."
+                        f"Option B: would block materialization. "
+                        f"Resolution: wait for {_cf.name if _cf else '(unknown)'} to reach "
+                        f"a terminal state (DONE or WONT-DO) before re-materializing."
                     )
             else:
                 print(f"[dry-run] Would create: {task_dir}/")
@@ -1785,14 +1946,18 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     # Role+slug duplicate detection.
     # When a (role, slug) collision is detected, determine which path to take:
     #
+    # Terminal-state exemption: prior tasks in a terminal state (DONE or WONT-DO)
+    # never block new materialization.  Re-verification of the same target on a
+    # label/testing-only workflow is a normal lifecycle — the same slug legitimately
+    # appears across sequential runs.  Blocking on a completed prior task would make
+    # label-semantics re-runs impossible without manual intervention.
+    #
     # Option A (recycle): colliding folder is WONT-DO → rename + reset to BACKLOG.
-    # Option C (skip):    colliding folder is in a TERMINAL state (DONE or WONT-DO)
-    #                     AND belongs to a strictly older target_version than the
-    #                     current plan → do NOT touch the prior folder; create the
-    #                     new task in a fresh folder as usual.
-    # Option B (block):   colliding folder is active (WORKING/WAITING/BACKLOG) OR
-    #                     is terminal but at the same or newer version → return None
-    #                     so the caller skips both folder creation AND queue entry.
+    # Option C (skip):    colliding folder is in terminal state DONE → do NOT touch
+    #                     the prior folder; create the new task in a fresh folder.
+    # Option B (block):   colliding folder is NON-terminal (WORKING/WAITING/BACKLOG
+    #                     or state unknown) → return None so the caller skips both
+    #                     folder creation AND queue entry.
     #
     # Never silently skip: every collision must produce either consistent state
     # (Option A / Option C) or a clean caller-visible error (Option B / None return).
@@ -1812,7 +1977,13 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
                 file=sys.stderr,
             )
             try:
-                recycle_cancelled_folder(collision_folder, task_id, old_collision_id)
+                recycle_cancelled_folder(
+                    collision_folder,
+                    task_id,
+                    old_collision_id,
+                    readme_content,
+                    status_content,
+                )
             except OSError as exc:
                 print(
                     f"[pm-materialize] ERROR: Option A recycle failed for {old_collision_id} -> {task_id}: {exc}. "
@@ -1830,55 +2001,39 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
                 existing_role_slugs.add((role.upper(), task_slug))
             return task_id
         elif collision_folder and collision_state == "DONE":
-            # Option C: DONE collision at a strictly older release.
-            # Document-workflow bookend slugs (open-doc, outline, integrate, polish,
-            # finalize) are constant across releases.  A DONE folder from a prior
-            # release must not block the next release's same-named synthetic task.
-            # Determine whether the colliding folder is from a strictly older version.
+            # Option C: terminal-state exemption — prior DONE task never blocks new work.
+            # A completed task is finished; the same slug on a new run is a fresh unit of
+            # work (different task ID, different date/seq).  This is normal on label/
+            # testing-only workflows where the same verification target is re-run across
+            # releases.  The prior DONE folder is left completely untouched.
             collision_version = get_task_readme_release_version(collision_folder)
             plan_version = (release_version or "").strip()
-            if (
-                collision_version
-                and plan_version
-                and plan_version.lower() != "none"
-                and _is_strictly_older_version(collision_version, plan_version)
-            ):
-                # The prior DONE folder belongs to an older release — non-blocking.
-                # The new task gets a brand-new folder (date+seq already differ);
-                # the prior DONE folder is left completely untouched.
-                print(
-                    f"[pm-materialize] INFO: (role, slug) collision detected: "
-                    f"({role}, {task_slug}) — colliding folder {old_collision_id} is DONE "
-                    f"(version {collision_version}), which is strictly older than current "
-                    f"plan version {plan_version}. "
-                    f"Option C: prior DONE folder left intact; creating fresh folder for {task_id}.",
-                    file=sys.stderr,
-                )
-                # Remove the stale (role, slug) entry so the fresh folder can be
-                # registered after creation below.
-                if existing_role_slugs is not None:
-                    existing_role_slugs.discard((role.upper(), task_slug))
-                # Fall through to the normal folder-creation path below.
-            else:
-                # DONE at same or newer version (or version unparseable) → Option B.
-                print(
-                    f"[pm-materialize] ERROR: (role, slug) collision — BLOCKING MATERIALIZATION: "
-                    f"({role}, {task_slug}) already exists at {old_collision_id} "
-                    f"(state: DONE, version: {collision_version or 'unknown'}). "
-                    f"New task ID would have been: {task_id}. "
-                    f"Resolution: fully unwind the prior RC (cancel-rc.sh) before re-materializing.",
-                    file=sys.stderr,
-                )
-                return None
+            print(
+                f"[pm-materialize] INFO: (role, slug) collision detected: "
+                f"({role}, {task_slug}) — colliding folder {old_collision_id} is DONE "
+                f"(version {collision_version or 'unknown'}). "
+                f"Terminal-state exemption: prior DONE folder left intact; "
+                f"creating fresh folder for {task_id}.",
+                file=sys.stderr,
+            )
+            # Remove the stale (role, slug) entry so the fresh folder can be
+            # registered after creation below.
+            if existing_role_slugs is not None:
+                existing_role_slugs.discard((role.upper(), task_slug))
+            # Fall through to the normal folder-creation path below.
         else:
-            # Option B: colliding folder is active (not a terminal state) or state unknown.
-            # Emit a structured error and return None — caller must skip queue write.
+            # Option B: colliding folder is NON-terminal (active or state unknown).
+            # A task in WORKING, WAITING, or BACKLOG state is still in flight — creating
+            # a duplicate would produce two concurrent tasks with the same identity.
+            # Emit a structured error naming the blocking task and return None so the
+            # caller skips both folder creation and queue entry.
             print(
                 f"[pm-materialize] ERROR: (role, slug) collision — BLOCKING MATERIALIZATION: "
                 f"({role}, {task_slug}) already exists at {old_collision_id} "
                 f"(state: {collision_state or 'unknown'}). "
                 f"New task ID would have been: {task_id}. "
-                f"Resolution: fully unwind the prior RC (cancel-rc.sh) before re-materializing.",
+                f"Resolution: wait for {old_collision_id} to reach a terminal state "
+                f"(DONE or WONT-DO), or cancel it manually, before re-materializing.",
                 file=sys.stderr,
             )
             return None
@@ -2021,17 +2176,12 @@ def update_backlog(tasks, team_root, dry_run=False):
         Tasks with empty prerequisite_ids     -> [ ] (BACKLOG, ready to process)
 
     Tasks are grouped by their target queue so each file is written once.
-    HUMAN-role tasks are skipped — they are not routed to any agent queue.
+    HUMAN-role gate tasks route to tasks/queues/human_backlog.md.
     """
-    # Group (task_id, marker) pairs by their target queue path (None means skip)
+    # Group (task_id, marker) pairs by their target queue path
     queue_map: dict = {}
     for task in tasks:
         queue_path = get_queue_path(task, team_root)
-        if queue_path is None:
-            # HUMAN-role task — not added to any agent queue
-            if dry_run:
-                print(f"[dry-run] Skipping queue entry for HUMAN task: {task['task_id']}")
-            continue
         marker = queue_marker_for_task(task)
         # Defensive guard — refuse to write [B] markers under any circumstance.
         # queue_marker_for_task() should never return 'B', but if something upstream
@@ -2149,20 +2299,26 @@ def build_cm_task_ids(version, start_seq, date_str):
 
 def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_branch,
                                    date_str, base_seq, owner, git_repo="none"):
-    """Inject a CODER create-shared-branch ticket as ticket 1 for feature workflows.
+    """Inject a CODER create-shared-branch ticket as ticket 1 for the shared-branch
+    decomposition mode (workflow_type="feature").
 
-    Must be called AFTER assign_task_ids() so that feature tasks already have
-    their task_ids set.
+    "feature" here is the NAME of the decomposition mode — it means a shared development
+    branch is created first and all work tasks branch from it.  The word "feature" in this
+    function name refers to that mode, not to "feature tasks" as a generic PM term for
+    operator-submitted work tasks.
 
-    For feature workflows there are no CM bookends and no release version.
-    The assembly is:
-        test_required=True:  CODER(create-shared-branch) -> features -> TESTER
-        test_required=False: CODER(create-shared-branch) -> features
+    Must be called AFTER assign_task_ids() so that work tasks already have their task_ids
+    set.
+
+    For the shared-branch decomposition mode there are no CM bookends and no release
+    version.  The assembly is:
+        test_required=True:  CODER(create-shared-branch) -> work tasks -> TESTER
+        test_required=False: CODER(create-shared-branch) -> work tasks
 
     Mutates `tasks` in-place:
     - Prepends a CODER create-shared-branch task (no prereqs).
-    - Adds the create-shared-branch task ID as a dependency for all feature tasks.
-    - Appends a TESTER task (prereqs = all feature task IDs) when test_required=True.
+    - Adds the create-shared-branch task ID as a dependency for all work tasks.
+    - Appends a TESTER task (prereqs = all work task IDs) when test_required=True.
 
     Returns the list of synthetic tasks added.
     """
@@ -2180,7 +2336,7 @@ def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_br
         "assigned_agent": "CODER",
         "working_directory": "none",
         "git_repo": git_repo if git_repo else "none",
-        "source_branch": parent_branch if parent_branch else "develop",
+        "source_branch": parent_branch if parent_branch else "main",
         "feature_branch": "none",
         "goal": (
             f"Create the shared feature branch '{source_branch}' from '{parent_branch}' "
@@ -2212,7 +2368,7 @@ def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_br
         "_create_shared_branch": True,
     }
 
-    # Build TESTER synthetic task for feature workflow (if test_required)
+    # Build TESTER synthetic task for the shared-branch decomposition mode (if test_required)
     synthetic_added = [create_branch_task]
     tester_task = None
     if test_required:
@@ -2250,7 +2406,7 @@ def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_br
         }
         synthetic_added.append(tester_task)
 
-    # Add create-shared-branch task ID as dependency for all existing feature tasks
+    # Add create-shared-branch task ID as dependency for all existing work tasks
     for task in tasks:
         prereq_ids = task.setdefault("prerequisite_ids", [])
         if create_branch_id not in prereq_ids:
@@ -2268,12 +2424,12 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
                        human_approval_required="auto", test_required=True):
     """Inject CM-open, optional TESTER, optional HUMAN-APPROVE, and CM-release tasks.
 
-    Must be called AFTER assign_task_ids() so that feature tasks already have
+    Must be called AFTER assign_task_ids() so that work tasks already have
     their task_ids set. Pass date_str and base_seq from the assign_task_ids
     return value to avoid sequence number conflicts.
 
-    base_seq should be start_seq + len(feature_tasks) so CM seq numbers do not
-    collide with the feature task seq numbers assigned by assign_task_ids().
+    base_seq should be start_seq + len(work_tasks) so CM seq numbers do not
+    collide with the work task seq numbers assigned by assign_task_ids().
 
     human_approval_required controls whether a HUMAN-APPROVE gate is injected:
         'required' — inject HUMAN-APPROVE between TESTER and CM-release.
@@ -2282,40 +2438,40 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
         any other  — WARNING logged to stderr, treated as 'auto'.
 
     test_required controls whether a TESTER task is injected:
-        True  (default) — inject TESTER between features and CM-release.
-        False           — skip TESTER; CM-release depends only on feature tasks.
+        True  (default) — inject TESTER between work tasks and CM-release.
+        False           — skip TESTER; CM-release depends only on work tasks.
 
     Mutates `tasks` in-place:
     - Prepends a CM-open synthetic task (no prereqs).
     - Appends a TESTER synthetic task when test_required=True
-      (prereqs = all feature task IDs).
+      (prereqs = all work task IDs).
     - Appends a HUMAN-APPROVE synthetic task when human_approval_required='required'
-      (prereqs = all feature task IDs + TESTER ID if test_required).
+      (prereqs = all work task IDs + TESTER ID if test_required).
     - Appends a CM-release synthetic task
-      (prereqs = all feature IDs [+ TESTER ID when test_required]
+      (prereqs = all work IDs [+ TESTER ID when test_required]
        [+ HUMAN-APPROVE ID when required]).
-    - Adds CM-open task ID as a dependency for all original feature tasks.
+    - Adds CM-open task ID as a dependency for all original work tasks.
 
     Returns the list of synthetic tasks added (for informational use), or an
     empty list if target_version is falsy or 'none'.
 
     Dependency graph (required, test_required=True):
         CM-open (no prereqs)
-          -> feature tasks (depend on CM-open)
-          -> TESTER (depends on all features)
-          -> HUMAN-APPROVE (depends on TESTER + all features)
+          -> work tasks (depend on CM-open)
+          -> TESTER (depends on all work tasks)
+          -> HUMAN-APPROVE (depends on TESTER + all work tasks)
           -> CM-release (depends on TESTER + HUMAN-APPROVE)
 
     Dependency graph (auto, test_required=True):
         CM-open (no prereqs)
-          -> feature tasks (depend on CM-open)
-          -> TESTER (depends on all features)
-          -> CM-release (depends on TESTER + all features)
+          -> work tasks (depend on CM-open)
+          -> TESTER (depends on all work tasks)
+          -> CM-release (depends on TESTER + all work tasks)
 
     Dependency graph (auto, test_required=False):
         CM-open (no prereqs)
-          -> feature tasks (depend on CM-open)
-          -> CM-release (depends on all features)
+          -> work tasks (depend on CM-open)
+          -> CM-release (depends on all work tasks)
     """
     # The caller (main()) is responsible for converting target_version="none"
     # to a fallback label (e.g. "unversioned") before calling this function for
@@ -2349,11 +2505,8 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
     human_approve_id = ids["human_approve_id"]
     cm_release_id = ids["cm_release_id"]
 
-    # Collect all feature task IDs (tasks already in the list at this point
-    # do not yet have task_ids — they will be assigned later by assign_task_ids).
-    # We need to track them symbolically using their sequence numbers first,
-    # then resolve after assignment.  Instead, we inject after assign_task_ids
-    # so we rely on the caller to call us AFTER assign_task_ids.
+    # Collect all work task IDs (the operator-submitted tasks already in the list).
+    # These are available because inject_cm_bookends is called AFTER assign_task_ids().
     feature_task_ids = [t["task_id"] for t in tasks]
 
     # Strip leading 'v' for use in the TESTER task goal/notes
@@ -2436,7 +2589,7 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
         tester_task = None
 
     # Build HUMAN-APPROVE task dict
-    # Human gate prereqs: all feature tasks + TESTER (if injected)
+    # Human gate prereqs: all work task IDs + TESTER (if injected)
     human_approve = {
         "task_id": human_approve_id,
         "owner": "HUMAN",
@@ -2467,9 +2620,9 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
 
     # Build CM-release task dict.
     # CM-release prereqs depend on whether TESTER and HUMAN-APPROVE are injected:
-    #   test_required=True, required:  all feature tasks + TESTER + HUMAN-APPROVE
-    #   test_required=True, auto:      all feature tasks + TESTER
-    #   test_required=False, auto:     all feature tasks
+    #   test_required=True, required:  all work tasks + TESTER + HUMAN-APPROVE
+    #   test_required=True, auto:      all work tasks + TESTER
+    #   test_required=False, auto:     all work tasks
     cm_release_prereqs = list(feature_task_ids)
     if inject_tester:
         cm_release_prereqs.append(tester_id)
@@ -2501,7 +2654,7 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
         "_synthetic": True,
     }
 
-    # Add CM-open as a dependency for all existing feature tasks
+    # Add CM-open as a dependency for all existing work tasks
     for task in tasks:
         prereq_ids = task.setdefault("prerequisite_ids", [])
         if cm_open_id not in prereq_ids:
@@ -2564,7 +2717,7 @@ def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner,
         Date string in YYYYMMDD format from assign_task_ids().
     base_seq:
         Starting sequence number for synthetic task IDs (must not collide with
-        feature task IDs already assigned by assign_task_ids()).
+        work task IDs already assigned by assign_task_ids()).
     owner:
         Task owner prefix string, e.g. 'CLAUDE'.
     git_repo:
@@ -2877,6 +3030,283 @@ def _read_cfg_field(cfg_path, field_name):
     return ""
 
 
+def load_workflow_capabilities(workflow_type: str, kanban_root=None) -> dict:
+    """Read the [capabilities] section of a workflow plugin's workflow.cfg manifest.
+
+    Search order for the ``workflow.cfg`` file (first match wins — mirrors the
+    search order used by ``workflow_loader._find_workflow_file`` for pipeline.yaml):
+
+    1. ``$KANBAN_ROOT/workflows/<type>/workflow.cfg``
+       Project-local flat override: the live install layout copies the plugin
+       directories to ``$KANBAN_ROOT/workflows/`` (no ``team/`` prefix).
+    2. ``$KANBAN_ROOT/team/workflows/<type>/workflow.cfg``
+       Canonical plugin-directory path for development checkouts and CI.
+
+    Returns a dict with the following keys (all lowercase strings):
+
+        git_mode          — "rw", "ro", or "none" (empty string when absent)
+        finalize          — "tag", "publish", "report", or "" (empty when absent)
+        agents            — comma-separated agent list string, e.g. "pm,tester"
+        version_semantics — "semver", "label", or "" (empty when absent)
+
+    When the plugin directory or manifest file is not found in either location,
+    returns an empty dict so callers can distinguish "plugin present, field
+    absent" from "plugin not found."  Callers that need to fail-closed on a
+    missing manifest should check ``bool(result)`` and handle the empty-dict
+    case explicitly.
+
+    Parameters
+    ----------
+    workflow_type:
+        The workflow type string, e.g. ``'release'``, ``'testing-only'``.
+    kanban_root:
+        Override for the kanban root directory.  Defaults to
+        ``PGAI_AGENT_KANBAN_ROOT_PATH`` env var or ``~/pgai_agent_kanban``.
+
+    Returns
+    -------
+    dict
+        Capabilities dict (keys: git_mode, finalize, agents, version_semantics).
+        Empty dict when the manifest cannot be read.
+    """
+    import configparser as _configparser
+
+    if kanban_root is None:
+        kanban_root = (
+            os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
+            or str(Path.home() / "pgai_agent_kanban")
+        )
+    root = Path(kanban_root)
+    # Search order mirrors workflow_loader._find_workflow_file:
+    #   1. flat install layout:  $KANBAN_ROOT/workflows/<type>/workflow.cfg
+    #   2. canonical dev layout: $KANBAN_ROOT/team/workflows/<type>/workflow.cfg
+    _candidates = [
+        root / "workflows" / workflow_type / "workflow.cfg",
+        root / "team" / "workflows" / workflow_type / "workflow.cfg",
+    ]
+    cfg_path = next((p for p in _candidates if p.is_file()), None)
+    if cfg_path is None:
+        return {}
+
+    parser = _configparser.ConfigParser()
+    try:
+        parser.read(str(cfg_path), encoding="utf-8")
+    except _configparser.Error:
+        return {}
+
+    caps = {}
+    _SECTION = "capabilities"
+    if parser.has_section(_SECTION):
+        for key in ("git_mode", "finalize", "agents", "version_semantics"):
+            try:
+                caps[key] = parser.get(_SECTION, key).strip()
+            except _configparser.NoOptionError:
+                caps[key] = ""
+    else:
+        # Section missing — return empty dict (manifest is malformed or pre-schema)
+        return {}
+    return caps
+
+
+def _workflow_requires_cm_bookends(caps: dict) -> bool:
+    """Return True when a workflow's capabilities call for CM bookend injection.
+
+    The predicate: the plugin declares ``git_mode = rw`` AND ``finalize``
+    is one of the release-lifecycle values (``tag`` or ``publish``).
+    Both conditions must hold; a read-only or no-git plugin never needs
+    CM-open-rc / CM-release tasks.
+
+    When *caps* is empty (manifest not found), the function defaults to
+    True — the conservative fallback ensures backward-compatibility with
+    unknown workflow types that predate the plugin manifest contract.
+
+    Parameters
+    ----------
+    caps:
+        Capabilities dict from :func:`load_workflow_capabilities`.
+        Empty dict means "manifest not found" — handled as conservative
+        fallback (emit bookends, same as before the fix).
+
+    Returns
+    -------
+    bool
+        True  — the workflow requires CM bookend tasks (open-rc + release).
+        False — the workflow does not require CM bookend tasks.
+    """
+    if not caps:
+        # No manifest found — fall back to the old behavior (emit bookends).
+        return True
+    git_mode = caps.get("git_mode", "").strip().lower()
+    finalize = caps.get("finalize", "").strip().lower()
+    return git_mode == "rw" and finalize in {"tag", "publish"}
+
+
+def _parse_manifest_roster(caps: dict) -> list:
+    """Parse the agents roster from workflow capabilities into an uppercase list.
+
+    The ``agents`` field in ``workflow.cfg [capabilities]`` is a
+    comma-separated string of agent names (lowercase), e.g. ``pm,tester``.
+    This function normalises each entry to uppercase and returns a list.
+
+    When the ``agents`` field is absent or empty, returns an empty list.
+    Callers that need to enforce a non-empty roster should handle the empty
+    list explicitly.
+
+    Parameters
+    ----------
+    caps:
+        Capabilities dict from :func:`load_workflow_capabilities`.
+
+    Returns
+    -------
+    list[str]
+        Roster of agent names in uppercase, e.g. ``['PM', 'TESTER']``.
+    """
+    raw = caps.get("agents", "").strip()
+    if not raw:
+        return []
+    return [a.strip().upper() for a in raw.split(",") if a.strip()]
+
+
+def _check_plan_roster_against_manifest(tasks: list, manifest_roster: list,
+                                         workflow_type: str) -> None:
+    """Fail loudly when a plan task requests an agent outside the plugin roster.
+
+    Iterates over the plan tasks and checks each task's role against the
+    ``manifest_roster`` list.  When a role is not in the roster, prints an
+    actionable error to stderr and calls ``sys.exit(1)`` with a message that
+    names both the offending agent and the full roster.
+
+    Synthetic tasks (``_synthetic=True``) are skipped — they are materializer-
+    injected and not subject to PM's roster.
+
+    When ``manifest_roster`` is empty (manifest not found or agents field
+    absent), the check is skipped silently with a warning so that unknown
+    plugin types do not false-positive.  This is the conservative open-plugin
+    fallback: unknown plugins pass the guard.
+
+    Parameters
+    ----------
+    tasks:
+        The list of plan task dicts (before ID assignment and bookend injection).
+    manifest_roster:
+        The uppercase agent roster from the plugin manifest, e.g.
+        ``['PM', 'TESTER']``.  Empty list disables the check.
+    workflow_type:
+        The workflow type string, used in the error message for context.
+    """
+    if not manifest_roster:
+        print(
+            f"[pm-materialize] ROSTER GUARD: manifest roster for workflow_type "
+            f"'{workflow_type}' is empty or unreadable — skipping roster check.",
+            file=sys.stderr,
+        )
+        return
+
+    roster_display = ", ".join(manifest_roster)
+    for task in tasks:
+        # Skip materializer-injected synthetic tasks.
+        if task.get("_synthetic"):
+            continue
+        role = (task.get("role") or "").strip().upper()
+        if role and role not in manifest_roster:
+            print(
+                f"[pm-materialize] ERROR: ROSTER GUARD — plan requests role '{role}' "
+                f"but workflow_type '{workflow_type}' plugin roster is: {roster_display}. "
+                f"Remove the out-of-roster task (slug={task.get('slug', '?')!r}) or "
+                f"switch to a workflow type whose roster includes '{role}'.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+
+def inject_simple_tester_task(tasks: list, date_str: str, base_seq: int,
+                               owner: str, git_repo: str = "none",
+                               target_version: str = "none",
+                               finalize_mode: str = "report") -> list:
+    """Inject a standalone TESTER task for workflows without CM bookends.
+
+    Used by non-CM workflow types (e.g. testing-only) where the workflow
+    plugin declares ``finalize=report``.  The injected TESTER task carries
+    the finalize responsibility: its goal and notes make explicit that the
+    TESTER must write the report artifact at the finalize location.
+
+    Must be called AFTER ``assign_task_ids()`` so that work tasks already
+    have their ``task_id`` set.
+
+    Mutates *tasks* in-place: appends the TESTER task at the end.
+
+    Parameters
+    ----------
+    tasks:
+        The list of plan task dicts (with task_ids already assigned).
+    date_str:
+        Date string in YYYYMMDD format (from ``assign_task_ids`` return).
+    base_seq:
+        Starting sequence number for the TESTER task ID.
+    owner:
+        Task owner string, e.g. ``'CLAUDE'``.
+    git_repo:
+        Git repo URL or ``'none'``.  Passed through to the task dict.
+    target_version:
+        Version label or semver string from the plan.  Used in task text.
+    finalize_mode:
+        Declared ``finalize`` capability of the plugin.  Controls the
+        goal/notes language.  Defaults to ``'report'``.
+
+    Returns
+    -------
+    list
+        The list containing only the injected TESTER task (for logging).
+    """
+    work_task_ids = [t["task_id"] for t in tasks]
+    tester_id = f"TESTER-{date_str}-{base_seq:03d}-verify-and-report"
+
+    version_label = target_version if target_version and target_version.lower() != "none" else ""
+    version_ctx = f" for {version_label}" if version_label else ""
+
+    tester_task = {
+        "task_id": tester_id,
+        "slug": "verify-and-report",
+        "owner": owner,
+        "title": f"Verify and Report{' — ' + version_label if version_label else ''}",
+        "role": "TESTER",
+        "assigned_agent": "TESTER",
+        "working_directory": "none",
+        "git_repo": git_repo,
+        "source_branch": "none",
+        "feature_branch": "none",
+        "goal": (
+            f"Verify the work tasks{version_ctx} and produce the finalize artifact "
+            f"(finalize={finalize_mode}). "
+            "Write the test report to the finalize location declared by the workflow plugin. "
+            "No git release lifecycle applies — this workflow finalizes by report, not by tag."
+        ),
+        "inputs": list(work_task_ids),
+        "context_paths": [],
+        "required_output": _TESTER_PATH_C_REQUIRED_OUTPUT,
+        "constraints": [
+            f"tester_operation: verify-and-report",
+            f"finalize_mode: {finalize_mode}",
+        ],
+        "acceptance_criteria": list(_TESTER_PATH_C_ACCEPTANCE_CRITERIA),
+        "depends_on": [],
+        "prerequisite_ids": list(work_task_ids),
+        "notes": (
+            f"Standalone TESTER task for a non-CM workflow (finalize={finalize_mode}). "
+            "Write the report artifact to the finalize location (projects/<project>/artifacts/). "
+            "No CM release task follows — this task IS the final step in the pipeline. "
+            + _TESTER_PATH_C_NOTES_SUFFIX
+        ),
+        "_synthetic": True,
+        "_tester": True,
+        "_finalize_report": True,
+    }
+
+    tasks.append(tester_task)
+    return [tester_task]
+
+
 def load_project_git_repo_url(team_root):
     """Return the git_repo_url from project.cfg [project] section, or '' if absent.
 
@@ -2932,7 +3362,7 @@ def apply_git_repo_override(tasks, canonical_url, dry_run=False):
       or injected TESTER/HUMAN tasks (``_synthetic``, ``_tester``,
       ``_human_approve``, ``_create_shared_branch``).  In practice this
       function is called BEFORE bookend injection so all tasks in *tasks* at
-      that point are PM-emitted feature tasks.
+      that point are PM-emitted work tasks.
     - Emits one stderr warning per overridden task when the original value
       differs from ``canonical_url``.
     - Does NOT override tasks whose ``git_repo`` already matches the
@@ -3215,7 +3645,8 @@ def inject_document_workflow_tasks(tasks, workflow_def, sections, date_str, base
         PM-supplied tasks (typically empty for document workflows; accepted for
         forward compatibility).
     workflow_def:
-        A ``WorkflowDefinition`` object loaded from ``document.yaml``.
+        A ``WorkflowDefinition`` object loaded from the document plugin's
+        ``pipeline.yaml`` (``team/workflows/document/pipeline.yaml``).
     sections:
         List of section name strings from the plan-level ``sections`` field.
         When empty or absent the short-form path is used.
@@ -3536,7 +3967,7 @@ def create_human_approve_folder(task, team_root, dry_run=False, tasks_root=None)
         cm_release_id=cm_release_id,
     )
 
-    # HUMAN-APPROVE tasks have prerequisites (feature tasks + TESTER); use WAITING.
+    # HUMAN-APPROVE tasks have prerequisites (work tasks + TESTER); use WAITING.
     human_initial_state = "WAITING" if prereq_ids else "BACKLOG"
     status_content = STATUS_TEMPLATE.format(
         task_id=task_id,
@@ -3817,6 +4248,30 @@ def main():
         requirements_path = "none"
         print("[pm-materialize] Requirements path: none (not provided via CLI or plan JSON)", file=sys.stderr)
 
+    # Terminal-state guard: refuse to (re-)materialize an intake item whose
+    # ## Status is a terminal state (done or wont-do).  A terminal item is
+    # definitively resolved; mutating its state would clobber the operator's
+    # explicit close decision and re-arm the bug this guard protects against.
+    #
+    # Fail-loud: emit the skip line and exit non-zero.  Never silently proceed.
+    if requirements_path and requirements_path.lower() != "none":
+        _req_path = Path(requirements_path)
+        if _req_path.is_file():
+            _req_text = _req_path.read_text(encoding="utf-8", errors="replace")
+            _status_re = re.compile(
+                r'^##\s+Status\s*\n\s*(\S+)', re.M | re.IGNORECASE
+            )
+            _status_m = _status_re.search(_req_text)
+            if _status_m:
+                _req_status_raw = _status_m.group(1).strip()
+                if _bundle_is_terminal(_req_status_raw):
+                    print(
+                        f"[pm-materialize] skipping {_req_path.name}: "
+                        f"terminal state '{_req_status_raw.lower()}'",
+                        file=sys.stderr,
+                    )
+                    sys.exit(0)
+
     # Read target_version from the plan (propagated from ## Target Version in the
     # requirements doc).  Falls back to "none" if missing or blank.
     #
@@ -3861,14 +4316,21 @@ def main():
 
     # Read workflow_type from the plan. Controls which workflow pipeline is executed.
     # Default: 'release' when absent or empty.
-    # The workflow type is validated against available workflow YAML files via
-    # load_workflow(). An unknown type raises a clear error; missing type defaults
-    # to 'release'.
     workflow_type = (plan.get("workflow_type") or "release").strip().lower()
     print(f"[pm-materialize] Workflow type: {workflow_type}", file=sys.stderr)
-    # Validate the workflow type by loading its YAML definition. This ensures
-    # that the workflow type corresponds to a known, valid workflow. Unknown types
-    # produce a clear error message via WorkflowError.
+    # Load the pipeline definition from workflows/<type>/pipeline.yaml, constructed
+    # from the type string.  The path is resolved generically by load_workflow —
+    # no per-type path constants, no enumeration of type names here.
+    #
+    # Two outcomes:
+    #   pipeline found  → _workflow_def is a WorkflowDefinition; pipeline-driven
+    #                     dispatch (e.g. inject_document_workflow_tasks) applies.
+    #   not found       → _workflow_def is None; simple wf_agents path applies.
+    #                     This is the documented default for types without a
+    #                     pipeline.yaml (e.g. testing-only).
+    #
+    # A file that IS found but is malformed or invalid still exits with an error
+    # so the operator can fix it.
     #
     # Do NOT pass team_root as kanban_root. The workflows/ directory is shared
     # infrastructure that lives at the kanban root, not under any project subdir.
@@ -3886,11 +4348,51 @@ def main():
             file=sys.stderr,
         )
     except WorkflowError as _wf_err:
+        _wf_err_str = str(_wf_err)
+        if "not found" in _wf_err_str:
+            # No pipeline.yaml for this type — use the simple wf_agents path.
+            _workflow_def = None
+            print(
+                f"[pm-materialize] No pipeline.yaml for workflow_type '{workflow_type}'; "
+                "using simple wf_agents decomposition path.",
+                file=sys.stderr,
+            )
+        else:
+            # Pipeline file exists but is malformed or invalid — hard error.
+            print(
+                f"[pm-materialize] ERROR: invalid pipeline for workflow_type "
+                f"'{workflow_type}': {_wf_err}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    # Read the workflow plugin manifest (workflow.cfg [capabilities]) so the graph
+    # assembly below can derive bookend emission and roster validation from the
+    # plugin's declared capabilities — not from a hardcoded type switch.
+    #
+    # This implements the engine-queries-capabilities invariant (B39→B42→B45→B47→B51):
+    # the materializer must ask the plugin whether it needs CM bookends before
+    # injecting them, just as discovery asks the plugin about version_semantics
+    # and the wake script asks about git_mode before setting up worktrees.
+    #
+    # Note: do NOT pass team_root here — workflows/ lives at kanban root, not
+    # at the project subdirectory.  load_workflow_capabilities defaults to
+    # PGAI_AGENT_KANBAN_ROOT_PATH, which is correct for all project layouts.
+    _wf_caps = load_workflow_capabilities(workflow_type)
+    if _wf_caps:
         print(
-            f"[pm-materialize] ERROR: unrecognized workflow_type '{workflow_type}': {_wf_err}",
+            f"[pm-materialize] Workflow capabilities for '{workflow_type}': "
+            f"git_mode={_wf_caps.get('git_mode', '?')!r} "
+            f"finalize={_wf_caps.get('finalize', '?')!r} "
+            f"agents={_wf_caps.get('agents', '?')!r}",
             file=sys.stderr,
         )
-        sys.exit(1)
+    else:
+        print(
+            f"[pm-materialize] WARNING: workflow.cfg manifest not found for "
+            f"workflow_type '{workflow_type}'; defaulting to release-shaped behavior.",
+            file=sys.stderr,
+        )
 
     # Read source_branch (required for feature workflows).
     # Falls back to active RC from release-state.md when not set in the plan.
@@ -3920,11 +4422,21 @@ def main():
     print(f"[pm-materialize] test_required: {test_required}", file=sys.stderr)
 
     # Read parent_branch (used by feature workflow create-shared-branch ticket).
-    # Default: 'develop'.
-    parent_branch = (plan.get("parent_branch") or "develop").strip()
+    # Default: 'main'.
+    parent_branch = (plan.get("parent_branch") or "main").strip()
     if not parent_branch or parent_branch.lower() == "none":
-        parent_branch = "develop"
+        parent_branch = "main"
     print(f"[pm-materialize] parent_branch: {parent_branch}", file=sys.stderr)
+
+    # Step 1a: roster guard — verify every plan task's role is in the plugin's
+    # declared agents roster.  This is the fail-closed mirror to capability-gated
+    # bookend emission: if PM emitted an agent outside the roster, refuse loudly
+    # now rather than silently creating a task that the wake script would never
+    # dispatch (no queue, wrong role).  The guard fires BEFORE ID assignment so
+    # the error names the slug and role rather than a task ID the caller has never
+    # seen.  Synthetic tasks are not in the plan list at this point.
+    _manifest_roster = _parse_manifest_roster(_wf_caps)
+    _check_plan_roster_against_manifest(tasks, _manifest_roster, workflow_type)
 
     # Step 1: assign default workspace if needed (before assigning IDs).
     # Synthetic CM/HUMAN tasks have working_directory="none" intentionally;
@@ -3950,7 +4462,7 @@ def main():
             if wd.lower() in ("none", ""):
                 task["working_directory"] = str(_dry_default)
 
-    # Step 2: assign task IDs and feature branches to the original feature tasks.
+    # Step 2: assign task IDs and feature branches to the original work tasks.
     # Returns (date_str, start_seq) so we can compute non-colliding CM seq numbers.
     date_str, start_seq = assign_task_ids(tasks, args.owner, tasks_root)
 
@@ -3981,14 +4493,14 @@ def main():
     #   injection must not be conditioned on target_version; use an unconditional
     #   else branch so PM cannot omit target_version and silently skip bookends.
     #
-    # feature workflow: CODER create-shared-branch as ticket 1; TESTER appended
-    #                   when test_required=True; NO CM bookends regardless of
-    #                   target_version.
+    # feature workflow (shared-branch decomposition mode): CODER create-shared-branch
+    #                   as ticket 1; TESTER appended when test_required=True;
+    #                   NO CM bookends regardless of target_version.
     #
     # document workflow:
     #   Dispatches to inject_document_workflow_tasks() using the workflow
-    #   definition loaded from document.yaml (the superset pipeline with
-    #   when: gating for short-form vs long-form).
+    #   definition loaded from workflows/document/pipeline.yaml (the superset
+    #   pipeline with when: gating for short-form vs long-form).
     if workflow_type == "document":
         # Read sections from the plan — empty list → short-form, non-empty → long-form.
         _doc_sections = plan.get("sections") or []
@@ -4134,25 +4646,27 @@ def main():
                 file=sys.stderr,
             )
     else:
-        # release workflow (default): CM bookend injection is UNCONDITIONAL.
-        # Every release plan must have both CM-open-rc at position 1 and
-        # CM-release at the final position. No conditional path may bypass
-        # this for release workflows.
+        # All other workflow types (e.g. release, testing-only, custom plugins).
         #
-        # When target_version is "none" (PM omitted it or set it to "none"),
-        # use "unversioned" as a fallback label so bookends are still created
-        # and the invariant holds. A warning is emitted so the operator knows
-        # the plan is missing a version tag.
-        if target_version.lower() == "none":
-            print(
-                "[pm-materialize] WARNING: release workflow has target_version='none'. "
-                "CM bookends will still be injected using 'unversioned' as the version label. "
-                "PM should include target_version in the plan JSON for a properly named release.",
-                file=sys.stderr,
-            )
-            effective_version = "unversioned"
-        else:
-            effective_version = target_version
+        # Derive graph shape from the plugin's declared capabilities rather than
+        # hardcoding the release-shaped bookend pattern unconditionally.  This is
+        # the engine-queries-capabilities invariant (B39→B42→B45→B47→B51).
+        #
+        # Gate: emit CM bookends only when the plugin declares:
+        #   git_mode = rw   AND   finalize in {tag, publish}
+        # This matches exactly the release-lifecycle shape.  Plugins that declare
+        # git_mode=ro (testing-only) or finalize=report never need CM bookends.
+        #
+        # When the manifest is not found (empty _wf_caps), _workflow_requires_cm_bookends
+        # returns True — the conservative fallback preserves the previous behavior
+        # for custom plugins that predate the manifest contract.
+        _emit_cm_bookends = _workflow_requires_cm_bookends(_wf_caps)
+        print(
+            f"[pm-materialize] Capability check: emit_cm_bookends={_emit_cm_bookends} "
+            f"(git_mode={_wf_caps.get('git_mode', '?')!r} "
+            f"finalize={_wf_caps.get('finalize', '?')!r})",
+            file=sys.stderr,
+        )
 
         # Determine the git_repo from the first task that has one (or "none")
         plan_git_repo = "none"
@@ -4162,61 +4676,110 @@ def main():
                 plan_git_repo = gr
                 break
 
-        cm_base_seq = start_seq + len(tasks)
-        synthetic = inject_cm_bookends(
-            tasks,
-            target_version=effective_version,
-            date_str=date_str,
-            base_seq=cm_base_seq,
-            owner=args.owner,
-            git_repo=plan_git_repo,
-            human_approval_required=human_approval_required,
-            test_required=test_required,
-        )
-        if synthetic:
-            _har_norm = (human_approval_required or "auto").strip().lower()
-            if not test_required:
-                _bookend_label = "CM-open, CM-release"
-            elif _har_norm == "required":
-                _bookend_label = "CM-open, TESTER, HUMAN-APPROVE, CM-release"
+        if _emit_cm_bookends:
+            # Release-lifecycle shape: CM-open-rc at position 1 and CM-release at
+            # the final position.  When target_version is "none" (PM omitted it),
+            # use "unversioned" as a fallback label so bookends are still created
+            # and the invariant holds.  A warning is emitted so the operator knows
+            # the plan is missing a version tag.
+            if target_version.lower() == "none":
+                print(
+                    "[pm-materialize] WARNING: release-lifecycle workflow has "
+                    "target_version='none'. CM bookends will still be injected "
+                    "using 'unversioned' as the version label. PM should include "
+                    "target_version in the plan JSON for a properly named release.",
+                    file=sys.stderr,
+                )
+                effective_version = "unversioned"
             else:
-                _bookend_label = "CM-open, TESTER, CM-release"
-            print(
-                f"[pm-materialize] Injected {len(synthetic)} bookend tasks"
-                f" ({_bookend_label})",
-                file=sys.stderr,
-            )
+                effective_version = target_version
 
-        # Invariant assertion: verify bookends were actually injected.
-        # This catches any future regression where inject_cm_bookends silently
-        # returns without adding the required tasks.
-        _cm_open_present = any(
-            t.get("_synthetic") and t.get("cm_operation") == "open-rc" for t in tasks
-        )
-        _cm_release_present = any(
-            t.get("_synthetic") and t.get("cm_operation") == "release" for t in tasks
-        )
-        if not _cm_open_present or not _cm_release_present:
-            print(
-                "[pm-materialize] ERROR: release workflow bookend invariant violated — "
-                "CM-open-rc and/or CM-release missing after injection. "
-                f"cm_open_present={_cm_open_present} cm_release_present={_cm_release_present}",
-                file=sys.stderr,
+            cm_base_seq = start_seq + len(tasks)
+            synthetic = inject_cm_bookends(
+                tasks,
+                target_version=effective_version,
+                date_str=date_str,
+                base_seq=cm_base_seq,
+                owner=args.owner,
+                git_repo=plan_git_repo,
+                human_approval_required=human_approval_required,
+                test_required=test_required,
             )
-            sys.exit(1)
+            if synthetic:
+                _har_norm = (human_approval_required or "auto").strip().lower()
+                if not test_required:
+                    _bookend_label = "CM-open, CM-release"
+                elif _har_norm == "required":
+                    _bookend_label = "CM-open, TESTER, HUMAN-APPROVE, CM-release"
+                else:
+                    _bookend_label = "CM-open, TESTER, CM-release"
+                print(
+                    f"[pm-materialize] Injected {len(synthetic)} bookend tasks"
+                    f" ({_bookend_label})",
+                    file=sys.stderr,
+                )
 
-    # Step 4: separate synthetic bookend tasks from feature tasks, order features,
+            # Invariant assertion: verify bookends were actually injected.
+            # This catches any future regression where inject_cm_bookends silently
+            # returns without adding the required tasks.
+            _cm_open_present = any(
+                t.get("_synthetic") and t.get("cm_operation") == "open-rc" for t in tasks
+            )
+            _cm_release_present = any(
+                t.get("_synthetic") and t.get("cm_operation") == "release" for t in tasks
+            )
+            if not _cm_open_present or not _cm_release_present:
+                print(
+                    "[pm-materialize] ERROR: release-lifecycle bookend invariant violated — "
+                    "CM-open-rc and/or CM-release missing after injection. "
+                    f"cm_open_present={_cm_open_present} "
+                    f"cm_release_present={_cm_release_present}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+        else:
+            # Non-CM workflow (e.g. testing-only with finalize=report): no CM bookends.
+            # Inject a standalone TESTER task when test_required=True so verification
+            # still runs and the terminal task carries the finalize responsibility.
+            _finalize_mode = _wf_caps.get("finalize", "report")
+            if test_required:
+                simple_tester_base_seq = start_seq + len(tasks)
+                synthetic = inject_simple_tester_task(
+                    tasks,
+                    date_str=date_str,
+                    base_seq=simple_tester_base_seq,
+                    owner=args.owner,
+                    git_repo=plan_git_repo,
+                    target_version=target_version,
+                    finalize_mode=_finalize_mode,
+                )
+                if synthetic:
+                    print(
+                        f"[pm-materialize] Injected {len(synthetic)} simple tester task(s) "
+                        f"(finalize_mode={_finalize_mode!r}, no CM bookends)",
+                        file=sys.stderr,
+                    )
+            else:
+                print(
+                    f"[pm-materialize] Non-CM workflow with test_required=False: "
+                    "no TESTER and no CM bookends injected.",
+                    file=sys.stderr,
+                )
+
+    # Step 4: separate synthetic bookend tasks from work tasks, order work tasks,
     # then re-assemble in the correct bookend order.
     #
-    # release workflow:
-    #   [CM-open] + [ordered feature tasks] + [TESTER] + [HUMAN-APPROVE] + [CM-release]
-    # feature workflow:
-    #   [create-shared-branch] + [ordered feature tasks] + [TESTER (if test_required)]
+    # release-lifecycle (emit_cm_bookends=True):
+    #   [CM-open] + [ordered work tasks] + [TESTER] + [HUMAN-APPROVE] + [CM-release]
+    # non-CM workflow (emit_cm_bookends=False, e.g. testing-only with finalize=report):
+    #   [ordered work tasks] + [TESTER (if test_required)]
+    # feature workflow (shared-branch decomposition mode):
+    #   [create-shared-branch] + [ordered work tasks] + [TESTER (if test_required)]
     # document workflow:
     #   tasks list is already fully assembled in pipeline order by
     #   inject_document_workflow_tasks() — use it directly without re-ordering.
     #
-    # Synthetic tasks already have prerequisite_ids set; feature tasks need
+    # Synthetic tasks already have prerequisite_ids set; work tasks need
     # their sequence-number deps resolved after topological ordering.
     cm_open_tasks = [t for t in tasks if t.get("_synthetic") and t.get("cm_operation") == "open-rc"]
     tester_tasks = [t for t in tasks if t.get("_tester") and not t.get("_doc_review")]
@@ -4227,7 +4790,7 @@ def main():
 
     ordered_features = topological_order(feature_tasks)
 
-    # Step 5: resolve prerequisite sequence numbers to task IDs for feature tasks.
+    # Step 5: resolve prerequisite sequence numbers to task IDs for work tasks.
     resolve_prerequisites(ordered_features)
 
     # Final ordered list depends on workflow type.
@@ -4235,11 +4798,43 @@ def main():
         # document: fully assembled by inject_document_workflow_tasks() — use as-is.
         ordered_tasks = list(tasks)
     elif workflow_type == "feature":
-        # feature: create-shared-branch, features, TESTER (if injected)
+        # shared-branch decomposition mode: create-shared-branch, work tasks, TESTER (if injected)
         ordered_tasks = create_branch_tasks + ordered_features + tester_tasks
     else:
-        # release: CM-open, features, TESTER, HUMAN-APPROVE, CM-release
+        # release: CM-open, work tasks, TESTER, HUMAN-APPROVE, CM-release
         ordered_tasks = cm_open_tasks + ordered_features + tester_tasks + human_approve_tasks + cm_release_tasks
+
+    # Step 4a: default-fill plan-level source_branch onto every ticket that lacks one.
+    # This ensures tickets emitted by PM without an explicit source_branch (including
+    # synthetic TESTER tasks created with "source_branch": "none") inherit the plan's
+    # shared source ref.  Per-ticket explicit values are never overwritten.
+    _effective_plan_sb = _resolve_plan_source_branch(plan, requirements_path)
+    if _effective_plan_sb:
+        _sb_updated = _propagate_plan_source_branch(ordered_tasks, _effective_plan_sb)
+        print(
+            f"[pm-materialize] SOURCE-REF PROPAGATION: filled plan source_branch "
+            f"'{_effective_plan_sb}' onto {_sb_updated} ticket(s) that lacked an explicit value.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "[pm-materialize] SOURCE-REF PROPAGATION: no plan-level source_branch resolved; "
+            "per-ticket values used as-is.",
+            file=sys.stderr,
+        )
+
+    # Step 4b: fail-closed guard — refuse to write any task folders when a
+    # worktree-requiring role (e.g. TESTER) still has no resolvable source ref.
+    # This fires BEFORE create_task_folder so no partial output is written.
+    _validate_source_ref_for_worktree_roles(ordered_tasks, _wf_caps, workflow_type)
+
+    # Post-guard invariant: snapshot the task count after all injection (Step 3)
+    # and source-ref transformations (Step 4a/4b) have completed.  The count is
+    # verified immediately before folder creation to ensure no ticket-synthesis
+    # mutation occurs between the guard and create_task_folder.  Any code path
+    # that appends, removes, or replaces tasks in ordered_tasks after this point
+    # bypasses the source-ref propagation and guard, and will be caught here.
+    _guard_task_count = len(ordered_tasks)
 
     print(f"[pm-materialize] Materializing {len(ordered_tasks)} tasks into {team_root}/tasks/", file=sys.stderr)
     print(f"[pm-materialize] Owner: {args.owner}", file=sys.stderr)
@@ -4263,6 +4858,22 @@ def main():
     # When True, the materializer exits non-zero after writing all possible tasks,
     # so the PM task itself can go BLOCKED.
     option_b_blocked = False
+
+    # Enforce the post-guard invariant: ordered_tasks must not have been mutated
+    # since the snapshot taken immediately after Step 4b.  A mismatch means a
+    # ticket was added or removed after source-ref propagation and the guard ran,
+    # which would allow an uninspected ticket to reach create_task_folder.
+    if len(ordered_tasks) != _guard_task_count:
+        print(
+            f"[pm-materialize] ERROR: post-guard invariant violated — ordered_tasks "
+            f"length changed from {_guard_task_count} (after Step 4b) to "
+            f"{len(ordered_tasks)} (before folder creation). "
+            "No ticket-synthesis mutation is permitted between Step 4b and "
+            "create_task_folder. Check for injectors or list mutations added "
+            "after the source-ref guard.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     created_tasks = []
     for task in ordered_tasks:
@@ -4308,26 +4919,36 @@ def main():
 
     update_backlog(created_tasks, team_root, dry_run=args.dry_run)
 
-    # Approach A: write marker file after successful materialization so subsequent
-    # invocations with the same plan content are detected and skipped.
-    if not args.dry_run:
-        materialized_ids = [t["task_id"] for t in created_tasks]
-        marker = write_marker_file(plan_dir, plan_hash, materialized_ids)
-        print(f"[pm-materialize] Marker file written: {marker}", file=sys.stderr)
-
     print(f"\n[pm-materialize] === DONE ===", file=sys.stderr)
     print(f"[pm-materialize] Tasks created: {len(created_tasks)}", file=sys.stderr)
     for i, task in enumerate(created_tasks, 1):
         print(f"[pm-materialize]   {i}. {task['task_id']}", file=sys.stderr)
 
     if option_b_blocked:
+        # FATAL: one or more tasks blocked by active (non-terminal) collisions.
+        # The marker is NOT written — it is a success receipt; a run with blocked
+        # tasks is not a successful materialization.  Leaving the marker absent
+        # ensures the operator can fix the collision and re-materialize without
+        # first manually removing a stale marker.
         print(
             "\n[pm-materialize] FATAL: one or more tasks were blocked by active (role, slug) "
             "collisions (Option B). Materialization is incomplete. "
-            "Resolve collisions (run cancel-rc.sh to fully unwind the prior RC) and re-materialize.",
+            "Resolve the active colliding tasks (bring them to DONE or WONT-DO) "
+            "and re-materialize.",
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # Approach A: write marker file only after a fully-successful materialization
+    # so subsequent invocations with the same plan content are detected and skipped.
+    # The marker is a success receipt — written here, after all task folders, queue
+    # entries, and rename-map rewrites have landed, and only when no Option B block
+    # occurred.  Every FATAL exit path above returns before reaching this point,
+    # ensuring no partial marker is left behind.
+    if not args.dry_run:
+        materialized_ids = [t["task_id"] for t in created_tasks]
+        marker = write_marker_file(plan_dir, plan_hash, materialized_ids)
+        print(f"[pm-materialize] Marker file written: {marker}", file=sys.stderr)
 
 
 if __name__ == "__main__":

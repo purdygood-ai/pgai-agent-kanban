@@ -35,6 +35,9 @@
 # Environment:
 #   TERM=dumb  — disables all ANSI codes
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Resolve script dir ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -81,7 +84,7 @@ while [[ $_i -lt ${#_args[@]} ]]; do
 done
 
 # --- Source config (non-strict) ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 _i=0
 while [[ $_i -lt ${#_args[@]} ]]; do
   if [[ "${_args[$_i]}" == "--kanban-root" ]]; then
@@ -386,6 +389,7 @@ def queue_file_to_agent(stem):
         "tester": "tester",
         "cm":     "cm",
         "po":     "po",
+        "human":  "human",
         "bug":    "unknown",
     }
     return mapping.get(candidate, "unknown")
@@ -399,12 +403,18 @@ else:
     queues_dir = tasks_root / "queues" / "claude"
 
 # Pattern: "- [X] TASK-ID" where X is a single marker character.
-# Accepts BOTH task ID formats:
-#   Old format: CLAUDE-<AGENT>-YYYYMMDD-NNN-slug   (PARTICIPANT prefix)
-#   New format: <AGENT>-YYYYMMDD-NNN-slug            (no PARTICIPANT prefix)
+# Accepts BOTH standard task ID formats AND the HUMAN-APPROVE pseudo-queue format:
+#   Standard:      <AGENT>-YYYYMMDD-NNN-slug         (CODER, WRITER, TESTER, CM, …)
+#   Old format:    CLAUDE-<AGENT>-YYYYMMDD-NNN-slug  (PARTICIPANT prefix, legacy)
+#   HUMAN-APPROVE: HUMAN-APPROVE-vX.Y.Z-NNN          (gate task; version, not date)
 # The pattern is intentionally liberal on the non-date portion so that new
 # agent names introduced after this script was written still match.
-queue_line_pat = re.compile(r'^\s*-\s+\[(.)\]\s+([A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)?-\d{8}-\d+-\S+)\s*$')
+queue_line_pat = re.compile(
+    r'^\s*-\s+\[(.)\]\s+'
+    r'([A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)?'
+    r'-(?:\d{8}-\d+-\S+|v\d+[.\d]*-\d+))'
+    r'\s*$'
+)
 
 # Build a map of task_id -> queue marker for all active (non-skip) queue entries.
 # This is used later to reconcile status.md state against queue state.

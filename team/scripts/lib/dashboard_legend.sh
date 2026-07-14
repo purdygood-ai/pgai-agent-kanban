@@ -68,7 +68,7 @@
 #
 # Do not change this string without updating dashboard-column-render.sh
 # (which performs the substitution) and the matching section in
-# team/SOP.md "Dashboard color conventions".
+# docs/OPERATIONS.md "Dashboard Color Conventions".
 # ---------------------------------------------------------------------------
 DASHBOARD_LEGEND_TEMPLATE='PROJECT: {PROJECTS_BLOCK}   |   STATUS: {STATUS_BLOCK}'
 readonly DASHBOARD_LEGEND_TEMPLATE

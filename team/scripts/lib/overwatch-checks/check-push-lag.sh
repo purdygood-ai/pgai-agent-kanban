@@ -8,8 +8,12 @@
 #   - The local main branch is ahead of origin/main by at least one commit, OR
 #   - One or more local tags do not exist on origin.
 #
-# When push lag is detected and no CM agent flock is contended, OVERWATCH
-# pushes via overwatch_halt_first_fix to ensure origin stays in sync.
+# When push lag is detected, the check first reads push_to_remote from the
+# project config (project.cfg [project] push_to_remote).  When push_to_remote
+# is false the project is in local-only mode: local-ahead state is by design,
+# the action log receives a 'staged-by-design' entry, and no push is attempted.
+# When push_to_remote is true (the default) and no CM agent flock is contended,
+# OVERWATCH pushes via overwatch_halt_first_fix to ensure origin stays in sync.
 #
 # The per-repo flock ($KANBAN_ROOT/locks/repo-wake-pgai-kanban.lock) is the
 # proxy for "a CM or other agent is actively running." If that lock is held,
@@ -111,6 +115,46 @@ _cpl_resolve_env() {
     fi
 
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# _cpl_read_push_to_remote
+# Read the push_to_remote value from the project config file.
+# Echoes 'true' when CM should push to origin; echoes 'false' when the
+# project is configured for local-only mode.
+#
+# Reads from:
+#   $KANBAN_ROOT/projects/$OVERWATCH_PROJECT/project.cfg  (preferred)
+#   $KANBAN_ROOT/projects/$OVERWATCH_PROJECT/PROJECT.cfg  (legacy fallback)
+#
+# Default when absent or empty: 'true' (preserves existing behavior).
+# Only the exact string 'false' opts out of remote pushes.
+# ---------------------------------------------------------------------------
+_cpl_read_push_to_remote() {
+    local _proj_root="${KANBAN_ROOT}/projects/${OVERWATCH_PROJECT}"
+    local cfg_file=""
+    if [[ -f "${_proj_root}/project.cfg" ]]; then
+        cfg_file="${_proj_root}/project.cfg"
+    elif [[ -f "${_proj_root}/PROJECT.cfg" ]]; then
+        cfg_file="${_proj_root}/PROJECT.cfg"
+    fi
+
+    if [[ -z "${cfg_file}" ]]; then
+        echo "true"
+        return 0
+    fi
+
+    local raw
+    raw="$(grep -E '^[[:space:]]*push_to_remote[[:space:]]*=' "${cfg_file}" \
+        | head -n1 \
+        | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+
+    # Only the exact string 'false' opts out; everything else defaults to 'true'.
+    if [[ "${raw}" == "false" ]]; then
+        echo "false"
+    else
+        echo "true"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -352,6 +396,25 @@ overwatch_check_push_lag() {
     fi
 
     echo "check-push-lag: push lag detected (main ahead=${ahead}, unpushed tags=${tag_count})" >&2
+
+    # Read push_to_remote from project config.
+    # When false, the local-ahead state is by design (local-only mode): log
+    # 'staged-by-design' and exit without pushing.  This is the gate that
+    # prevents OVERWATCH from force-pushing deliberately staged local work to
+    # the remote repository on installs configured for operator-controlled pushes.
+    local push_to_remote
+    push_to_remote="$(_cpl_read_push_to_remote)"
+    if [[ "${push_to_remote}" == "false" ]]; then
+        echo "check-push-lag: push_to_remote=false; local-ahead state is by design; skipping push" >&2
+        overwatch_log_action \
+            "check-push-lag" \
+            "${dev_tree}" \
+            "staged-by-design" \
+            "none" \
+            "push_to_remote=false for project ${project_name}; local-ahead state is by design (ahead=${ahead}, unpushed_tags=${tag_count}); no push attempted" \
+        2>/dev/null || true
+        return 0
+    fi
 
     if (( dry_run == 1 )); then
         echo "check-push-lag: [dry-run] would push main=${push_main} tag_count=${tag_count} to origin" >&2

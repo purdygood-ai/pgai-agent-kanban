@@ -23,7 +23,7 @@ Missing keys return None.
 
 Usage::
 
-    from team.pgai_agent_kanban.dashboard._rejected import read_reason_sidecar
+    from pgai_agent_kanban.dashboard._rejected import read_reason_sidecar
 
     info = read_reason_sidecar("/path/to/rejected/BUG-0001-foo.md.reason")
     print(info["reason"])          # e.g. "malformed filename"

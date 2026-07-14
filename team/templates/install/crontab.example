@@ -59,5 +59,16 @@ PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
 # Uncomment to enable daily purge of small stale batch logs:
 # 15 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup.sh --trivial-only >> __KANBAN_ROOT__/logs/cron-cleanup-trivial.log 2>&1
 
+# --- OVERWATCH Tier-1 sweep (hourly at :30) ---
+# Fires once per hour at minute 30.  Operator-tunable: adjust the minute (30)
+# to any preferred slot; change the second field from * to */2 for every-2-hours.
+30 * * * * __KANBAN_ROOT__/scripts/overwatch-sweep.sh >> __KANBAN_ROOT__/logs/cron-overwatch-sweep.log 2>&1
+
+# --- OVERWATCH Tier-2 deep-clean (daily at 03:30) ---
+# LLM-driven review of the action log and any sweep-flagged anomalies.
+# The daily cadence keeps model cost bounded; the 03:30 slot avoids the
+# hourly sweep at :30 by an hour and sits during a low-traffic window.
+30 3 * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=overwatch --sleep=0 --max-tasks=1 >> __KANBAN_ROOT__/logs/cron-overwatch.log 2>&1
+
 # --- Log Cleanup (daily at 04:30) ---
 30 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup_logs.sh >> __KANBAN_ROOT__/logs/cron-cleanup-logs.log 2>&1

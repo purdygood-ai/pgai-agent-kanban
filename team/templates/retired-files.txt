@@ -1,0 +1,3 @@
+# retired in v1.3.0 (pipeline-in-plugin)
+workflows/release.yaml
+workflows/document.yaml

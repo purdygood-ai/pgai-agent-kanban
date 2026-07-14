@@ -13,6 +13,8 @@
 #   -h, --help        Show this help and exit
 
 set -euo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 # Source project_paths lib for pp_* helpers
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +29,7 @@ unset _SCRIPT_DIR
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 SESSION_NAME="pgai-kanban-dashboard"
 
 # ---------------------------------------------------------------------------

@@ -174,7 +174,7 @@ workflow_type = release          # release | document
 dev_tree_path = /home/rocky/develop/my-app
 git_repo_url = git@github.com:me/my-app.git
 git_remote_name = origin
-branch_prefix =                  # empty: main/develop/rc/v* ; "ai_": isolated lane
+branch_prefix =                  # empty: main/rc/v* ; "ai_": isolated lane
 push_to_remote = true            # false: local-only releases, operator pushes
 
 [versioning]
@@ -191,10 +191,12 @@ project at v3.59.x with `max_minor = 13` is gated on everything — when
 registering an existing project, set ceilings above where the project
 currently lives.
 
-`branch_prefix` decides the git lane: empty uses `main`/`develop`/`rc/vX.Y.Z`
+`branch_prefix` decides the git lane: empty uses `main`/`rc/vX.Y.Z`
 directly; a prefix like `ai_` gives the kanban an isolated lane
-(`ai_main`, `ai_develop`, `ai_rc/ai_vX.Y.Z`, prefixed tags) so a repo's
-human branches stay untouched.
+(`ai_main`, `ai_rc/ai_vX.Y.Z`, prefixed tags) so a repo's
+human branches stay untouched. The kanban ships single-lane:
+each RC branches from the (prefixed) main branch and returns to
+it in one squash — there is no develop hop.
 
 ### 2.2 create-project — new project from scratch
 
@@ -210,9 +212,11 @@ projects.cfg entry. Defaults: release workflow, empty branch_prefix,
 ceilings 21/13/0 (a fresh project demonstrates the chain immediately;
 majors stay gated). `--max-patch/--max-minor/--max-major` override.
 
-For a release project the git repo needs `main` and `develop` (or their
-prefixed equivalents) on origin — `scripts/init-project-git-repo.sh` sets
-up base branches; CM never creates base branches itself.
+For a release project the git repo needs the base `main` branch (or its
+prefixed equivalent) on origin — `scripts/init-project-git-repo.sh`
+sets up the base branch; CM never creates base branches itself. The
+single-lane flow branches every RC from that base and squashes back
+into it, so only one base branch is required.
 
 To have the kanban manage its own source, register it like anything else —
 nothing in the framework treats it specially:
@@ -234,24 +238,31 @@ from backup) into projects.cfg without recreating its contents.
 ### 2.4 remove-project
 
 ```bash
-scripts/remove-project.sh my-app
+scripts/remove-project.sh --project my-app             # unregister only (safe default)
+scripts/remove-project.sh --project my-app --force     # also rm -rf the directory
 ```
 
-Unregisters the project and removes its state under `projects/<name>/`.
-The project's git repo and dev tree are never touched. Export first if you
-may want it back.
+The safe default unregisters the project from `projects.cfg` and leaves the
+`projects/<name>/` directory in place. Add `--force` to also delete the
+project directory. The project's git repo and dev tree are never touched
+either way. Export first if you may want it back.
 
 ### 2.5 export-project / import-project
 
 ```bash
-scripts/export-project.sh my-app          # → tarball of projects/my-app/
-scripts/import-project.sh my-app.tar.gz   # → restores + registers
+scripts/export-project.sh --project my-app                       # → tarball in cwd
+scripts/import-project.sh --archive my-app-export-<ts>.tar.gz \
+                          --register                              # → restores + registers
 ```
 
-The export carries everything: project.cfg (ceilings included), queues,
-intake files, release-state, logs. Import is the sanctioned restore path —
-an imported project resumes exactly where it left off. This pair is also
-the migration path between installs.
+The export writes `<name>-export-<UTCstamp>.tar.gz` in the current
+directory by default (override with `--out <path>`) and carries
+everything: project.cfg (ceilings included), queues, intake files,
+release-state, logs. Import is the sanctioned restore path — an imported
+project resumes exactly where it left off; `--register` adds it to
+`projects.cfg` in the same step (without the flag, import extracts and
+prints the registration line for you to add manually). This pair is
+also the migration path between installs.
 
 ### 2.6 release-state.md
 
@@ -270,21 +281,45 @@ project in project.cfg.
 
 ### 3.1 release — software with the git RC lifecycle
 
-Requirements doc → PM decomposes → CM opens `rc/vX.Y.Z` → CODER (and
-WRITER for release notes) work per-task worktrees and merge back → TESTER
-verifies against the requirements and files findings → CM applies policy,
-runs project hooks, squashes to develop and main, tags, pushes, deletes
+Requirements doc → PM decomposes → CM opens `rc/vX.Y.Z` from the
+(prefixed) main branch → CODER (and WRITER for release notes) work
+per-task worktrees and merge back → TESTER verifies against the
+requirements and files findings → CM applies policy, runs project hooks,
+squashes the RC directly into the (prefixed) main branch (one squash, no
+develop hop), runs the post-squash fidelity gate, tags, pushes, deletes
 the RC. Output: a tag on origin and release notes.
 
 Per-project hooks customize finalization — executable scripts the framework
-discovers and runs:
+discovers and runs. Three resolution tiers, highest precedence first:
 
 ```
-projects/<name>/hooks/
+(a) project.cfg [hooks] cm_release_<phase>_hook            # explicit path
+(b) $KANBAN_ROOT/projects/<name>/hooks/cm-release-<phase>.sh  # kanban-side
+(c) <dev_tree_path>/.pgai/hooks/cm-release-<phase>.sh      # in-repo, portable
+```
+
+Tier (c) — the in-repo `.pgai/hooks/` location — is the **portable** tier:
+it travels with the managed repo, survives `remove-project` +
+`create-project` cycles, and is versioned and reviewed alongside application
+code. Prefer it for hooks that should always be present regardless of the
+kanban installation state (e.g., a version-bump wrapper).
+
+```
+<dev_tree_path>/.pgai/hooks/
 ├── cm-release-pre-squash.sh   # e.g. bump pyproject.toml to the target tag
 ├── cm-release-pre-tag.sh
 └── cm-release-post-tag.sh     # best-effort; failure logged, not blocking
 ```
+
+Every release prints one resolution line per phase (`<phase> hook: <path>
+(source: cfg|kanban-side|in-repo)` or `<phase> hook: none configured`).
+Setting `cm_release_<phase>_hook_required = true` in `project.cfg [hooks]`
+makes a missing hook at any tier a HALT before the phase — fail-loud on
+wiring loss. Full precedence, printing, required-flag semantics, and the
+hook environment contract (`PGAI_TARGET_VERSION`, `PGAI_PROJECT_NAME`,
+`PGAI_PROJECT_ROOT`, `PGAI_DEV_TREE_PATH`, `PGAI_RC_BRANCH`,
+`PGAI_KANBAN_ROOT`, cwd = dev tree) are in `docs/OPERATIONS.md` under
+"Release Lifecycle Hooks."
 
 ### 3.2 document — prose deliverables
 
@@ -696,6 +731,126 @@ $KANBAN_ROOT/scripts/upgrade.sh  # backs up, checks out latest tag, installs
 scripts/unhalt-global.sh
 scripts/dashboard/create.sh
 ```
+
+**Two-phase upgrade model (v1.7.0+).** The command above is unchanged
+from the operator's perspective. Under the hood, from v1.7.0 onward
+`upgrade.sh` runs in **two phases** — the installed script and the
+dev-tree script split the work so the piece that actually performs
+the upgrade always runs at *current* knowledge of the version being
+installed.
+
+- **Phase 1 — bootstrap** (the *installed* `scripts/upgrade.sh` when
+  invoked without `--phase2`). Parses operator args; resolves and
+  validates `<dev_tree>`; creates the pre-upgrade backup tarball;
+  runs `bash -n` on `<dev_tree>/team/scripts/upgrade.sh`; probes it
+  for `--phase2` support; then `exec`s into it as phase 2. **Phase 1
+  performs no deposit, no config changes, and no crontab work.** It
+  is a small, stable bootstrap that changes rarely.
+- **Phase 2 — the upgrade proper** (the *dev-tree*
+  `team/scripts/upgrade.sh` invoked with `--phase2 --phase2-protocol
+  1 --kanban-root <root> --backup <tarball>` plus the original
+  operator args). Does everything upgrade.sh does today — deposit,
+  state preservation, crontab tier handling, VERSION stamping,
+  divergence advisory — but it runs from the source tree, with
+  BASH_SOURCE-relative library sourcing, so the code executing the
+  upgrade knows about the version being installed. The deposit
+  writes into the kanban root; it never touches the executing file.
+
+The handoff protocol is versioned (`--phase2-protocol 1`) and
+fail-loud: a broken new script (syntax error), a dev-tree script
+that lacks `--phase2` support (e.g. a downgrade), or a phase-2 side
+that rejects the protocol number all cause phase 1 to exit non-zero
+**before anything is deposited**. Your pre-upgrade backup is
+untouched in every failure path.
+
+**One-final-lag transition note (v1.6.x → v1.7.0).** The *first*
+upgrade after v1.7.0 ships still runs the old monolithic
+`upgrade.sh` end-to-end, because your currently installed script
+does not know about phases. That final monolithic run is what
+**deposits** the new two-phase `upgrade.sh` into `scripts/`. Every
+upgrade after that uses the phase-1 → phase-2 handoff described
+above. There is one final generation of lag on the v1.6.x → v1.7.0
+step; from v1.7.0 onward, the class of "the installed script cannot
+correctly upgrade to newer code" is structurally extinct.
+
+**Retirement step (graveyard).** After the deposit, `upgrade.sh` runs a
+**retirement** step that moves obsolete managed files out of the live tree
+without deleting them. The only files touched are the exact relative paths
+listed in `$KANBAN_ROOT/templates/retired-files.txt` (the retirement
+manifest). For each manifest entry that exists at the live root, the file
+is moved — never `rm`'d — to
+`$KANBAN_ROOT/retired/<UTC-ts>/<original-relative-path>`, and one loud
+`[upgrade] Retired: ...` line prints per file; the summary block ends with
+a `Retired: N file(s) -> retired/<ts>/` line (or `Retired: none`). To
+restore a retired file, move the graveyard copy back to its original
+relative path — e.g. a retired
+`$KANBAN_ROOT/retired/20260707T143000Z/workflows/release.yaml` is restored
+with `mv "$KANBAN_ROOT/retired/20260707T143000Z/workflows/release.yaml"
+"$KANBAN_ROOT/workflows/release.yaml"`. **Operator-authored content is
+untouchable by construction**: the manifest is a strict allow-list of exact
+relative paths, so any file whose path is not named in
+`retired-files.txt` — custom workflow plugin dirs, wrappers, local
+edits — is byte-preserved by construction and never enters the graveyard.
+Manifest entries whose paths are absent from the live root are silent
+no-ops (fresh installs, already-cleaned installs). The graveyard plus the
+pre-upgrade backup tarball give you two independent recovery layers.
+
+**Phase 1 fail-loud: "Manual bootstrap: cp … scripts/ then retry".**
+From v1.7.0 onward, the phase-1 bootstrap refuses to hand off when
+the dev-tree `upgrade.sh` fails one of its probes. You will see one
+of these error lines on stderr and a non-zero exit, and **no deposit
+will have happened** (your pre-upgrade backup is intact):
+
+```
+[upgrade] Dev-tree upgrade.sh not found: <dev_tree>/team/scripts/upgrade.sh
+[upgrade] Manual bootstrap: cp <dev_tree>/team/scripts/upgrade.sh scripts/ then retry
+```
+
+```
+[upgrade] Dev-tree upgrade.sh failed bash -n syntax check:
+<syntax error output>
+[upgrade] Nothing has been deposited.  Your pre-upgrade backup is still intact.
+[upgrade] Manual bootstrap: cp <dev_tree>/team/scripts/upgrade.sh scripts/ then retry
+```
+
+```
+[upgrade] Dev-tree upgrade.sh does not appear to support --phase2 (this may be a pre-v1.7 script or a downgrade).
+[upgrade] Nothing has been deposited.  Your pre-upgrade backup is still intact.
+[upgrade] Manual bootstrap: cp <dev_tree>/team/scripts/upgrade.sh scripts/ then retry
+```
+
+Recovery is the same in every case: copy the dev-tree `upgrade.sh`
+into the installed `scripts/` directory by hand, then re-run the
+standard upgrade above. `<dev_tree>` in the error line is your local
+clone — the same one you `git pull`ed at the top of the upgrade
+procedure — and the message prints the absolute path in place of
+`<dev_tree>` so you can copy-paste it verbatim.
+
+```bash
+cd $KANBAN_ROOT
+cp <dev_tree>/team/scripts/upgrade.sh scripts/   # exact path from the error line
+$KANBAN_ROOT/scripts/upgrade.sh                  # retry the standard upgrade
+```
+
+**One-time cross-v1.2.3–v1.2.5 hand-copy** (only if your *installed*
+version is v1.2.3, v1.2.4, or v1.2.5). Installs on those three
+versions carry an `upgrade.sh` that deadlocks on the next upgrade
+and cannot be resolved without the manual bootstrap above. The
+symptom is the same "Manual bootstrap" message described in the
+previous entry; the fix is the same one-liner:
+
+```bash
+cd $KANBAN_ROOT
+cp ~/develop/pgai-agent-kanban/team/scripts/upgrade.sh scripts/
+$KANBAN_ROOT/scripts/upgrade.sh
+```
+
+This is a permanent troubleshooting entry rather than a transitional
+note: from v1.7.0 onward, the phase-1 fail-loud paths point every
+operator at exactly this recipe whenever the dev-tree script is
+missing, malformed, or missing `--phase2` support — the class of
+"the installed script cannot correctly hand off" is now a single
+recovery recipe rather than three separate incident postmortems.
 
 **One-time cross-v0.80.0 upgrade** (only if your *installed* version is
 older than v0.80.0): the standard upgrade above fails when crossing the

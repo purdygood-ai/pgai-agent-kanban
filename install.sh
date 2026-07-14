@@ -31,6 +31,7 @@
 #   ./install.sh --force                       # overwrite without prompting (clean reinstall)
 #   ./install.sh --dry-run                     # show what would happen, do nothing
 #   ./install.sh --wake-tier large             # install with large tier
+#   ./install.sh --stamp-version v9.9.9        # write VERSION verbatim, bypass git resolution
 #
 # NOTE: This script does NOT support --upgrade. To upgrade an existing
 # installation, use upgrade.sh instead.
@@ -102,6 +103,7 @@ NO_SYSTEM_CRON=false
 # Both flags together reproduce the pre-change default both-providers behavior.
 ADD_CLAUDE_AGENTS=false
 ADD_CODEX_AGENTS=false
+STAMP_VERSION=""      # non-empty = write verbatim, skip git resolution
 _print_install_usage() {
   cat <<EOF
 Usage: ./install.sh [--force] [--dry-run] [--wake-tier small|medium|large]
@@ -172,6 +174,8 @@ Options:
                          Also accepted as --wake-tier=<tier>.
   --no-system-cron       Skip OS crontab installation (pseudocron config is still installed).
                          Use for Docker / cron-less / customer-site deployments.
+  --stamp-version STRING Write STRING verbatim to VERSION; bypass git resolution
+                         and suppress divergence advisory.
   --help, -h             Show this help
 
 Deprecated flags (still accepted; emit a deprecation notice to stderr):
@@ -190,7 +194,7 @@ EOF
 # Value-taking flags: wake-tier (canonical), crontab-tier (deprecated alias).
 # Boolean flags: all others.
 # ---------------------------------------------------------------------------
-argparse_parse --value-flags "wake-tier crontab-tier" -- "$@"
+argparse_parse --value-flags "wake-tier crontab-tier stamp-version" -- "$@"
 
 # Emit clear errors for value-taking flags given with no value.
 if argparse_missing "wake-tier"; then
@@ -199,6 +203,10 @@ if argparse_missing "wake-tier"; then
 fi
 if argparse_missing "crontab-tier"; then
   err "--crontab-tier requires a value (small, medium, or large), or use --no-system-cron for none."
+  exit 1
+fi
+if argparse_missing "stamp-version"; then
+  err "--stamp-version requires a non-empty string argument."
   exit 1
 fi
 
@@ -217,7 +225,7 @@ unset _pos
 # Reject unknown flags.
 for _flag in "${!ARGPARSE_FLAGS[@]}"; do
   case "$_flag" in
-    force|dry-run|no-system-cron|add-claude-agents|add-codex-agents|wake-tier|help|no-crontab|crontab-tier) ;;
+    force|dry-run|no-system-cron|add-claude-agents|add-codex-agents|stamp-version|wake-tier|help|no-crontab|crontab-tier) ;;
     upgrade)
       err "--upgrade is not supported by install.sh."
       err "To upgrade an existing installation, use upgrade.sh instead."
@@ -247,6 +255,15 @@ if argparse_has "add-codex-agents";  then ADD_CODEX_AGENTS=true; fi
 if argparse_has "no-crontab"; then
   echo "[install] DEPRECATED: --no-crontab; use --no-system-cron instead." >&2
   NO_SYSTEM_CRON=true
+fi
+
+# Extract --stamp-version.
+if argparse_has "stamp-version"; then
+  STAMP_VERSION="${ARGPARSE_FLAGS[stamp-version]}"
+  if [[ -z "$STAMP_VERSION" ]]; then
+    err "--stamp-version requires a non-empty string."
+    exit 1
+  fi
 fi
 
 # Extract canonical --wake-tier value.
@@ -1352,58 +1369,48 @@ echo ""
 echo "See $KANBAN_ROOT/README.md for the full documentation."
 echo ""
 
-# --- Write VERSION file (last step before exit) ---
-# Design choice: option (a) — tree-honest label + loud warning when behind.
-# The installer copies the working tree as-is (it does NOT pin to a tag before copying,
-# unlike upgrade.sh). The version label therefore reflects the latest released tag on
-# origin/main (what the world calls "this release") rather than the nearest ancestor tag
-# reachable from HEAD (which is ancestry-bound and breaks after squash-merge releases).
-# When the source clone is behind the latest released tag we warn loudly so operators
-# know their installed code may not be current.
+# --- Write VERSION and VERSION_DETAIL files (last step before exit) ---
+# Uses the shared stamp helper to write VERSION (clean tag, suffix-stripped)
+# and VERSION_DETAIL (full describe + deposit SHA).  The helper is the single
+# implementation; upgrade.sh calls the same function.
+# When --stamp-version is supplied, VERSION is written verbatim (no suffix to
+# strip; no VERSION_DETAIL written) and the advisory is bypassed.
+_INSTALL_STAMP_LIB="${SCRIPT_DIR}/team/scripts/lib/version_stamp.sh"
+if [[ -f "$_INSTALL_STAMP_LIB" ]]; then
+  # shellcheck source=team/scripts/lib/version_stamp.sh
+  source "$_INSTALL_STAMP_LIB"
+fi
+unset _INSTALL_STAMP_LIB
+
 if [[ "$DRY_RUN" != "true" ]]; then
-  # Best-effort fetch — failure is not fatal (offline or read-only envs still get a version).
-  git -C "$SCRIPT_DIR" fetch origin --tags --quiet 2>/dev/null || true
-
-  # Resolve latest released tag using the canonical pattern from pp_last_released_version():
-  # list tags merged into origin/main, filter to strict semver, sort, take highest.
-  INSTALL_VERSION="$(git -C "$SCRIPT_DIR" tag --merged origin/main 2>/dev/null \
-    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-    | sort -V \
-    | tail -n1 || true)"
-
-  if [[ -z "$INSTALL_VERSION" ]]; then
-    # origin/main not available (fresh clone with no remote, or offline with no prior fetch).
-    # Fall back to short commit hash so the VERSION file is still written.
-    INSTALL_VERSION="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
-  fi
-
-  if [[ -n "$INSTALL_VERSION" ]]; then
-    # Warn only when the latest released tag is NOT reachable from HEAD — i.e. the
-    # source tree sits on a divergent or older line than the release (the genuine
-    # "installed code may not match the release" case). A HEAD at or *past* the tag
-    # on the same line — e.g. the post-tag release-summary commit CM writes on top
-    # of every release, which makes the dev tree tip permanently tag-plus-one — is
-    # CLEAN and must not warn. Reachability (merge-base --is-ancestor) replaces the
-    # old exact HEAD==tag comparison, which false-alarmed on every normal install.
-    HEAD_COMMIT="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || true)"
-    TAG_COMMIT="$(git -C "$SCRIPT_DIR" rev-parse "refs/tags/${INSTALL_VERSION}" 2>/dev/null || true)"
-    if [[ -n "$HEAD_COMMIT" ]] && [[ -n "$TAG_COMMIT" ]] \
-       && ! git -C "$SCRIPT_DIR" merge-base --is-ancestor "$TAG_COMMIT" HEAD 2>/dev/null; then
-      HEAD_DESC="$(git -C "$SCRIPT_DIR" describe --tags --always 2>/dev/null || echo "$HEAD_COMMIT")"
-      echo "" >&2
-      echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
-      echo "  WARNING: installed source tree is NOT at the latest tag." >&2
-      echo "  Installed tree HEAD : ${HEAD_DESC}" >&2
-      echo "  Latest released tag : ${INSTALL_VERSION}" >&2
-      echo "  The code copied to ${KANBAN_ROOT} may not match ${INSTALL_VERSION}." >&2
-      echo "  Run upgrade.sh to install the latest released code." >&2
-      echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
-      echo "" >&2
-    fi
-    echo "$INSTALL_VERSION" > "$KANBAN_ROOT/VERSION"
-    ok "Wrote VERSION: $INSTALL_VERSION -> $KANBAN_ROOT/VERSION"
+  if [[ -n "$STAMP_VERSION" ]]; then
+    # Operator override: write verbatim via shared helper; skip advisory.
+    ok "VERSION stamp: using --stamp-version override: $STAMP_VERSION"
+    stamp_version_files "$SCRIPT_DIR" "$KANBAN_ROOT" "$STAMP_VERSION"
+    ok "Wrote VERSION: $STAMP_VERSION -> $KANBAN_ROOT/VERSION"
   else
-    warn "Could not determine version (no tags and no commits); VERSION file not written"
+    # Resolve from HEAD via git describe; emit divergence advisory when the
+    # deployed tree is ahead of the latest published tag.
+    _INSTALL_FULL_DESCRIBE="$(git -C "$SCRIPT_DIR" describe --tags 2>/dev/null || true)"
+    _INSTALL_FULL_DESCRIBE="${_INSTALL_FULL_DESCRIBE:-unknown-dev}"
+
+    # Advisory: when the latest unprefixed tag merged to origin/main differs
+    # from the describe result, inform the operator of the staged-vs-published
+    # gap.  The advisory is one line only; never a prompt or a blocking error.
+    _OLD_VER="$(git -C "$SCRIPT_DIR" tag --merged origin/main 2>/dev/null \
+      | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+      | sort -V \
+      | tail -n1 || true)"
+    if [[ -n "$_OLD_VER" ]] && [[ "$_INSTALL_FULL_DESCRIBE" != "$_OLD_VER" ]]; then
+      info "deploying $_INSTALL_FULL_DESCRIBE ; latest published tag is $_OLD_VER"
+    fi
+    unset _OLD_VER
+
+    # Write VERSION (clean tag) and VERSION_DETAIL (forensics) via shared helper.
+    stamp_version_files "$SCRIPT_DIR" "$KANBAN_ROOT"
+    _INSTALL_CLEAN_TAG="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
+    ok "Wrote VERSION: ${_INSTALL_CLEAN_TAG} -> $KANBAN_ROOT/VERSION"
+    unset _INSTALL_FULL_DESCRIBE _INSTALL_CLEAN_TAG
   fi
 fi
 

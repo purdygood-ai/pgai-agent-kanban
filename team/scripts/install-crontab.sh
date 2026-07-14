@@ -72,6 +72,8 @@
 #   --tier=none                Use --no-system-cron instead.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Locate this script's directory so we can find lib/ and templates/install/ relative
@@ -288,18 +290,8 @@ unset _TEMP_SH
 
 # ---------------------------------------------------------------------------
 # Resolve kanban root
-#
-# Env var precedence:
-#   1. PGAI_AGENT_KANBAN_ROOT_PATH          (canonical env var override)
-#   2. $HOME/pgai_agent_kanban               (canonical default)
 # ---------------------------------------------------------------------------
-_KANBAN_ROOT_ENV="${PGAI_AGENT_KANBAN_ROOT_PATH:-}"
-if [[ -n "$_KANBAN_ROOT_ENV" ]]; then
-  KANBAN_ROOT="$_KANBAN_ROOT_ENV"
-else
-  KANBAN_ROOT="$HOME/pgai_agent_kanban"
-fi
-unset _KANBAN_ROOT_ENV
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 # Validate kanban root
 if [[ ! -d "$KANBAN_ROOT" ]]; then

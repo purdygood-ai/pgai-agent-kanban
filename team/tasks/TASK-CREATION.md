@@ -88,7 +88,7 @@ Fill in the fields. The most important ones:
   - `local-development-only` for throwaway work in `artifacts/`
   - `none` (same effect as `local-development-only`)
 - **Git Repo**: a repo URL or `none`
-- **Source Branch**: usually `develop`, or `none` if no git
+- **Source Branch**: usually the prefixed main branch (e.g. `main` or `ai_main`, per `project.cfg branch_prefix`), or `rc/vX.Y.Z` for release-workflow tasks (the materializer sets this), or `none` if no git
 - **Feature Branch**: `feature/<task-id>` if git is involved, or `none`
 - **Goal**: 1-2 sentences on what must be achieved
 - **Required Output**: exact files or deliverables that must exist when done

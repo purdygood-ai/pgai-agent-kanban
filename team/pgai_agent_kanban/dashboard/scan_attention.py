@@ -40,13 +40,21 @@ Usage (CLI):
     python3 team/pgai_agent_kanban/dashboard/scan_attention.py \\
         transient-tasks <tasks_root> [--color | --no-color]
 
+    python3 team/pgai_agent_kanban/dashboard/scan_attention.py \\
+        overwatch-section <kanban_root> [--color | --no-color] [--max-entries N]
+
+    python3 team/pgai_agent_kanban/dashboard/scan_attention.py \\
+        pending-approvals <kanban_root> [--color | --no-color]
+
 Usage (import):
-    from team.pgai_agent_kanban.dashboard.scan_attention import (
+    from pgai_agent_kanban.dashboard.scan_attention import (
         scan_blocked_tasks,
         scan_quarantine,
         scan_rejected,
         scan_stale_working_tasks,
         scan_transient_tasks,
+        scan_overwatch_section,
+        scan_pending_approvals_attention,
     )
     scan_blocked_tasks(tasks_root="/path/to/tasks", use_color=True)
     scan_quarantine(kanban_root="/path/to/kanban", use_color=True, threshold=3)
@@ -54,6 +62,8 @@ Usage (import):
     scan_stale_working_tasks(tasks_root="/path/to/tasks", use_color=True,
                              max_task_seconds=5400)
     scan_transient_tasks(tasks_root="/path/to/tasks", use_color=True)
+    scan_overwatch_section(kanban_root="/path/to/kanban", use_color=True)
+    scan_pending_approvals_attention(kanban_root="/path/to/kanban", use_color=True)
 
 Exit codes:
     0 — always (errors in individual task reads are silently skipped)
@@ -685,6 +695,294 @@ def scan_stale_working_tasks(
 
 
 # ---------------------------------------------------------------------------
+# Pending-approvals attention stratum
+# ---------------------------------------------------------------------------
+
+_APPROVAL_PENDING_STATES = frozenset({"WAITING", "BACKLOG"})
+_APPROVAL_SKIP_DIRS = frozenset({"archive", "queues", "plans"})
+
+
+def scan_pending_approvals_attention(kanban_root: str, use_color: bool) -> None:
+    """Scan all registered projects for pending HUMAN-APPROVE tasks and render them.
+
+    Renders each pending HUMAN-APPROVE gate task (state WAITING or BACKLOG) as a
+    needs-human row in the attention pane, using the raised-hand (✋) class and a
+    project label.  Designed to appear above the OVERWATCH ledger in attention.sh.
+
+    Each pending gate is identified by a task ID that starts with "HUMAN-APPROVE"
+    under any registered project's tasks/ directory.
+
+    Output format per gate (with color):
+        ✋  HUMAN-APPROVE-v1.10.0-001  [proj-name]
+           RC: v1.10.0
+           Approve: scripts/close.sh --project proj-name --key HUMAN-APPROVE-v1.10.0-001
+           Reject:  scripts/wontdo.sh --project proj-name --key HUMAN-APPROVE-v1.10.0-001
+
+    When no pending gates exist, emits a "(no pending approvals)" message so the
+    section is always present in the pane.
+
+    Args:
+        kanban_root: Path to the kanban root directory.
+        use_color:   When True, emit ANSI color codes and Unicode symbols.
+    """
+    kanban_root_path = pathlib.Path(kanban_root)
+
+    # ANSI codes — same palette as scan_blocked_tasks for visual consistency.
+    RESET  = "\033[0m"    if use_color else ""
+    C_RED  = "\033[0;31m" if use_color else ""
+    C_BOLD = "\033[1m"    if use_color else ""
+    C_DIM  = "\033[2m"    if use_color else ""
+    C_CYAN = "\033[0;36m" if use_color else ""
+    C_YEL  = "\033[0;33m" if use_color else ""
+    C_GRN  = "\033[0;32m" if use_color else ""
+    HAND   = "✋" if use_color else "!"  # ✋ raised hand
+
+    found_any = False
+
+    for proj_name, proj_root in _iter_projects(kanban_root_path):
+        tasks_dir = proj_root / "tasks"
+        if not tasks_dir.is_dir():
+            continue
+
+        for task_dir in sorted(tasks_dir.iterdir()):
+            if not task_dir.is_dir():
+                continue
+            task_id = task_dir.name
+            if task_id in _APPROVAL_SKIP_DIRS:
+                continue
+            if not task_id.startswith("HUMAN-APPROVE"):
+                continue
+
+            status_file = task_dir / "status.md"
+            if not status_file.is_file():
+                continue
+
+            try:
+                status_text = status_file.read_text(errors="replace")
+            except OSError:
+                continue
+
+            state = _read_field(status_text, "State").upper()
+            if state not in _APPROVAL_PENDING_STATES:
+                continue
+
+            found_any = True
+
+            # Read release version from README for context label.
+            readme_file = task_dir / "README.md"
+            release_ver = task_id  # fallback
+            if readme_file.is_file():
+                try:
+                    readme_text = readme_file.read_text(errors="replace")
+                    rv = _read_field(readme_text, "Release Version")
+                    if rv:
+                        release_ver = rv
+                except OSError:
+                    pass
+
+            # Header row: ✋ task-id [project]
+            print(
+                f"\n{HAND} {C_RED}{C_BOLD}{task_id}{RESET}"
+                f"  {C_DIM}[{proj_name}]{RESET}"
+            )
+            print(
+                f"   RC: {C_CYAN}{release_ver}{RESET}"
+                f"   state: {C_DIM}{state}{RESET}"
+            )
+            # Approve / reject commands
+            print(
+                f"   {C_GRN}Approve:{RESET}  "
+                f"scripts/close.sh --project {proj_name} --key {task_id}"
+            )
+            print(
+                f"   {C_RED}Reject: {RESET}  "
+                f"scripts/wontdo.sh --project {proj_name} --key {task_id}"
+            )
+            print("")
+
+    if not found_any:
+        print(f"\n  {C_DIM}(no pending approvals){RESET}")
+    print("")
+
+
+# ---------------------------------------------------------------------------
+# OVERWATCH section scanner
+# ---------------------------------------------------------------------------
+
+# Action names from check-transient-api-error.sh that map to TRANSIENT type.
+_OVERWATCH_TRANSIENT_ACTIONS = frozenset({
+    "transient-auto-requeued",
+    "dry-run-transient-would-requeue",
+})
+
+# Action names that map to needs-human type (ceiling reached, bug filed, etc.)
+_OVERWATCH_NEEDS_HUMAN_ACTIONS = frozenset({
+    "transient-ceiling-bug-filed",
+    "dry-run-transient-ceiling-would-bug-file",
+    "worktree-carries-commits-bug-filed",
+    "bug-filed",
+    "auto-fix-aborted",
+})
+
+
+def _parse_overwatch_action_log(
+    log_path: pathlib.Path,
+    max_entries: int,
+) -> list[dict]:
+    """Parse the OVERWATCH action log and return a list of structured entry dicts.
+
+    Each entry dict contains:
+        timestamp (str):  ISO 8601 timestamp as recorded
+        name      (str):  detection script name (e.g. "check-transient-api-error")
+        target    (str):  affected resource (task ID, path, or project name)
+        action    (str):  what was done (e.g. "transient-auto-requeued")
+        backup    (str):  backup path or "none"
+        reason    (str):  human-readable explanation
+        type      (str):  "TRANSIENT", "needs-human", or "info"
+
+    Records are returned in reverse-chronological order (newest first),
+    capped at max_entries.  Malformed lines (< 6 tab-separated fields) are
+    silently skipped.
+
+    Args:
+        log_path:    Path to the actions.log file.
+        max_entries: Maximum number of entries to return (0 = unlimited).
+    """
+    if not log_path.is_file():
+        return []
+
+    entries: list[dict] = []
+    try:
+        raw_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+
+    for line in reversed(raw_lines):
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) < 6:
+            continue
+        ts, name, target, action, backup, reason = (
+            parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
+        )
+
+        # Determine type from action name.
+        if action in _OVERWATCH_TRANSIENT_ACTIONS:
+            item_type = "TRANSIENT"
+        elif action in _OVERWATCH_NEEDS_HUMAN_ACTIONS:
+            item_type = "needs-human"
+        else:
+            item_type = "info"
+
+        entries.append({
+            "timestamp": ts,
+            "name": name,
+            "target": target,
+            "action": action,
+            "backup": backup,
+            "reason": reason,
+            "type": item_type,
+        })
+
+        if max_entries > 0 and len(entries) >= max_entries:
+            break
+
+    return entries
+
+
+def scan_overwatch_section(
+    kanban_root: str,
+    use_color: bool,
+    max_entries: int = 50,
+) -> None:
+    """Scan per-project OVERWATCH action logs and print an OVERWATCH section.
+
+    Reads ``kanban_root/projects/<name>/overwatch/actions.log`` for each
+    registered project.  Renders the most recent OVERWATCH actions grouped by
+    project, with TRANSIENT items (type="TRANSIENT") visually distinct from
+    needs-human items (type="needs-human").
+
+    The ``type`` field in the structured data is the machine-readable
+    discriminator: "TRANSIENT" for tasks auto-requeued after a transient API
+    error, "needs-human" for anomalies that require operator attention (ceiling
+    reached, bug filed, etc.), and "info" for routine sweep events.
+
+    Only TRANSIENT and needs-human entries are rendered; info entries
+    (sweep-start, sweep-end, check-ok) are suppressed in the display.
+
+    When no OVERWATCH data exists for any project, emits a "(no recent
+    OVERWATCH activity)" message so the section is always present.
+
+    Args:
+        kanban_root:  Path to the kanban root directory.
+        use_color:    When True, emit ANSI color codes and Unicode symbols.
+        max_entries:  Maximum action log entries to read per project (default 50).
+    """
+    kanban_root_path = pathlib.Path(kanban_root)
+
+    # ANSI codes — cyan for TRANSIENT (retryable), red for needs-human (alarm).
+    RESET  = "\033[0m"    if use_color else ""
+    C_RED  = "\033[0;31m" if use_color else ""
+    C_CYAN = "\033[0;36m" if use_color else ""
+    C_BOLD = "\033[1m"    if use_color else ""
+    C_DIM  = "\033[2m"    if use_color else ""
+    C_YEL  = "\033[0;33m" if use_color else ""
+    SHIELD = "\U0001f6e1" if use_color else "W"  # shield symbol for OVERWATCH
+
+    found_any = False
+
+    for proj_name, proj_root in _iter_projects(kanban_root_path):
+        log_path = proj_root / "overwatch" / "actions.log"
+        entries = _parse_overwatch_action_log(log_path, max_entries)
+
+        # Keep only TRANSIENT and needs-human entries for display.
+        visible = [e for e in entries if e["type"] in ("TRANSIENT", "needs-human")]
+        if not visible:
+            continue
+
+        found_any = True
+
+        proj_upper = proj_name.upper().replace("-", "_")
+        print(f"\n  {C_BOLD}{proj_upper}{RESET}")
+
+        for entry in visible:
+            ts       = entry["timestamp"]
+            target   = entry["target"]
+            action   = entry["action"]
+            reason   = entry["reason"]
+            etype    = entry["type"]
+
+            if etype == "TRANSIENT":
+                # Cyan palette: retryable, not alarming.
+                label_color = C_CYAN
+                label       = "TRANSIENT"
+                arrow       = "⟳" if use_color else ">"
+            else:
+                # Red palette: needs operator attention.
+                label_color = C_RED
+                label       = "needs-human"
+                arrow       = "⚠" if use_color else "!"
+
+            print(
+                f"\n  {arrow} {label_color}{C_BOLD}{label}{RESET}"
+                f"  {C_DIM}{ts}{RESET}"
+            )
+            print(f"    target: {target}")
+            print(f"    action: {action}")
+            if reason and reason != "none":
+                # Truncate long reason lines for display.
+                reason_display = reason[:100] + "…" if len(reason) > 100 else reason
+                print(f"    {C_YEL}reason:{RESET} {reason_display}")
+            print("")
+
+    if not found_any:
+        print(f"\n  {C_DIM}(no recent OVERWATCH activity){RESET}")
+    print("")
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -843,6 +1141,74 @@ def main() -> None:
         help="Disable ANSI color output.",
     )
 
+    # --- pending-approvals subcommand ---
+    p_pending = subparsers.add_parser(
+        "pending-approvals",
+        help=(
+            "Scan all registered projects for pending HUMAN-APPROVE gate tasks "
+            "and render them in the needs-human stratum of the attention pane.  "
+            "Each row shows the task ID, project label, RC version, and the "
+            "approve/reject commands.  Positioned above the OVERWATCH ledger."
+        ),
+    )
+    p_pending.add_argument(
+        "kanban_root",
+        help="Path to the kanban root directory.",
+    )
+    color_group_pa = p_pending.add_mutually_exclusive_group()
+    color_group_pa.add_argument(
+        "--color",
+        dest="use_color",
+        action="store_true",
+        default=True,
+        help="Enable ANSI color output (default).",
+    )
+    color_group_pa.add_argument(
+        "--no-color",
+        dest="use_color",
+        action="store_false",
+        help="Disable ANSI color output.",
+    )
+
+    # --- overwatch-section subcommand ---
+    p_overwatch = subparsers.add_parser(
+        "overwatch-section",
+        help=(
+            "Scan per-project OVERWATCH action logs and print an OVERWATCH "
+            "section.  TRANSIENT items (auto-requeued transient API errors) "
+            "are rendered in a distinct style from needs-human items (ceiling "
+            "reached, bug filed, etc.)."
+        ),
+    )
+    p_overwatch.add_argument(
+        "kanban_root",
+        help="Path to the kanban root directory.",
+    )
+    color_group_ow = p_overwatch.add_mutually_exclusive_group()
+    color_group_ow.add_argument(
+        "--color",
+        dest="use_color",
+        action="store_true",
+        default=True,
+        help="Enable ANSI color output (default).",
+    )
+    color_group_ow.add_argument(
+        "--no-color",
+        dest="use_color",
+        action="store_false",
+        help="Disable ANSI color output.",
+    )
+    p_overwatch.add_argument(
+        "--max-entries",
+        type=int,
+        default=50,
+        metavar="N",
+        help=(
+            "Maximum action log entries to read per project (default: 50). "
+            "0 means unlimited."
+        ),
+    )
+
     args = parser.parse_args()
 
     if args.command == "blocked-tasks":
@@ -863,6 +1229,17 @@ def main() -> None:
         )
     elif args.command == "transient-tasks":
         scan_transient_tasks(tasks_root=args.tasks_root, use_color=args.use_color)
+    elif args.command == "pending-approvals":
+        scan_pending_approvals_attention(
+            kanban_root=args.kanban_root,
+            use_color=args.use_color,
+        )
+    elif args.command == "overwatch-section":
+        scan_overwatch_section(
+            kanban_root=args.kanban_root,
+            use_color=args.use_color,
+            max_entries=args.max_entries,
+        )
 
 
 if __name__ == "__main__":

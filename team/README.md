@@ -177,7 +177,7 @@ Templates with inline documentation for every key:
 - `team/templates/kanban.cfg.example` — schema for `kanban.cfg`
 - `team/templates/project.cfg.example` — schema for `project.cfg`
 
-`install.sh` creates `kanban.cfg` from the template on a fresh install and migrates `config.cfg` → `kanban.cfg` (and `PROJECT.cfg` → `project.cfg`) on upgrade. See `team/SOP.md` "Configuration File System" for full operator guidance.
+`install.sh` creates `kanban.cfg` from the template on a fresh install and migrates `config.cfg` → `kanban.cfg` (and `PROJECT.cfg` → `project.cfg`) on upgrade. See `docs/OPERATIONS.md` "Configuration File System" for full operator guidance.
 
 ## Helpful Information
 

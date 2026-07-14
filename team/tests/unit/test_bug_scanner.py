@@ -363,7 +363,7 @@ def test_get_unbundled_bugs_returns_only_open_bugs(tmp_path: pathlib.Path) -> No
 def test_claim_next_bug_id_returns_bug_0001_in_empty_dir(
     tmp_path: pathlib.Path,
 ) -> None:
-    """claim_next_bug_id returns BUG-0001 as the first claim in an empty directory."""
+    """claim_next_bug_id returns an earlier defect as the first claim in an empty directory."""
     bugs_dir = tmp_path / "bugs"
     bugs_dir.mkdir()
     bug_id, bug_path, lock_path = claim_next_bug_id(str(bugs_dir), "first-bug")
@@ -378,7 +378,7 @@ def test_claim_next_bug_id_returns_bug_0001_in_empty_dir(
 def test_claim_next_bug_id_increments_past_existing_files(
     tmp_path: pathlib.Path,
 ) -> None:
-    """claim_next_bug_id allocates BUG-0002 when BUG-0001-*.md already exists."""
+    """claim_next_bug_id allocates an earlier defect when an earlier defect-*.md already exists."""
     bugs_dir = tmp_path / "bugs"
     bugs_dir.mkdir()
     _write_bug(bugs_dir, "BUG-0001-existing")

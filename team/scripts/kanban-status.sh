@@ -60,7 +60,7 @@ while [[ $_i -lt ${#_args[@]} ]]; do
 done
 
 # --- Source config (non-strict) ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 _i=0
 while [[ $_i -lt ${#_args[@]} ]]; do
   if [[ "${_args[$_i]}" == "--kanban-root" ]]; then
@@ -82,6 +82,8 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 # no dev tree access required. Global require_dev_tree removed (D5).
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- ANSI color support ---
 # Disable color if: --no-color flag, NO_COLOR env var (any non-empty value),

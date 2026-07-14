@@ -36,6 +36,8 @@
 #   projects_cfg_list (from lib/projects.sh) provides the project enumeration.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script dir and source helpers
@@ -121,7 +123,7 @@ AGENT_TYPE_LOWER="${AGENT_TYPE,,}"
 # ---------------------------------------------------------------------------
 # Resolve kanban root
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 # ---------------------------------------------------------------------------

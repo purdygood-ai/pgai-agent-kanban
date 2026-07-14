@@ -23,6 +23,8 @@
 # pgai_agent_kanban.ops.write (Python).  No mutation logic lives in this file.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Locate the lib directory relative to this script ---
 _DELETE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,7 +60,7 @@ fi
 operator_args_validate_known "delete.sh" OPERATOR_VALID_FLAGS || exit 1
 
 # --- Resolve kanban root ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 # --- Resolve project ---

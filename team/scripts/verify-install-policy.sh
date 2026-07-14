@@ -38,6 +38,8 @@
 #   2  Usage error or environment prerequisite missing.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Color helpers
@@ -174,7 +176,7 @@ _run_install_dry_run() {
 # ---------------------------------------------------------------------------
 info "=== Check 1: Canonical env var (live environment) ==="
 
-_new_var="${PGAI_AGENT_KANBAN_ROOT_PATH:-}"
+_new_var="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 if [[ -z "$_new_var" ]]; then
   note "PGAI_AGENT_KANBAN_ROOT_PATH is not set in the current shell."

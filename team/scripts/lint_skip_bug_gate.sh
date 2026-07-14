@@ -32,6 +32,8 @@
 # that a violation surfaces immediately — before the full test suite runs.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Locate the repo root relative to this script.
@@ -44,7 +46,7 @@ _LSG_REPO_ROOT="$(cd "${_LSG_SCRIPT_DIR}/../.." && pwd)"
 # ---------------------------------------------------------------------------
 _LSG_TESTS_DIR="${_LSG_REPO_ROOT}/team/tests"
 # Bugs dir: prefer PGAI_AGENT_KANBAN_ROOT_PATH if set; default to live install.
-_LSG_KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
+_LSG_KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 _LSG_BUGS_DIR="${_LSG_KANBAN_ROOT}/projects/pgai-agent-kanban/bugs"
 _LSG_VERBOSE=false
 

@@ -34,7 +34,7 @@ After the governance stack, read the requirements document referenced in `## Inp
 TESTER never touches origin. All git work happens in the local clone of the dev tree:
 
 - You read the local RC branch
-- You compare against local develop
+- You compare against the local prefixed main branch
 - If TESTER produces artifacts (report.md, gaps.md, priority requirements doc) that need committing, they go on a local feature branch that merges into the local RC
 
 Origin operations (push, pull, fetch) are CM's exclusive responsibility. If you find yourself reaching for `git push`, you are off-procedure.
@@ -44,6 +44,12 @@ The local RC branch (`rc/vX.Y.Z`) is the source of truth — it accumulates all 
 ## Core Principles
 
 These five principles guide every verification, regardless of workflow type. They emerged from many iterations of human-driven verification rounds and are the source of TESTER's reliability.
+
+> **PROTECTED SURFACE.** These five principles, Step 6.5 (behavioral
+> verification), and the Anti-Patterns list are the located source of
+> TESTER's report quality. Requirements docs that modify them must name
+> them explicitly and carry regression language; incidental edits to
+> these passages are forbidden.
 
 **1. Cheapest checks first, most expensive last.** Cost gradient: structural (`ls`, `find`, `test -f`) → grep-and-read → executable runtime → synthetic-input edge cases → judgment-based document review. Run them in that order so failures surface fast and you don't burn time on semantic analysis of obviously broken work.
 
@@ -75,6 +81,8 @@ These five principles guide every verification, regardless of workflow type. The
 
 This is a fail-fast check. Run it before full verification begins. If any DONE feature branch is not actually merged into the RC, the entire verification is invalid — catch this immediately rather than spending time on a broken RC.
 
+**Artifact-only DONE tasks are exempt from Check 2.** Some DONE tasks legitimately produce no source-tree commits — their entire deliverable lives inside the task folder (typically `artifacts/…`), and their README explicitly forbids source-tree edits. Their feature branches sit at the merge-base by design; flagging that as a BUG-92 anomaly is a false positive. Check 2 skips these tasks. See BUG-0024 for the false-positive lineage that prompted the exemption; `WRITER-20260710-013-sop-disposition-table` is the canonical example (`## Required Output` names only `artifacts/sop-disposition-table.md`, `## Constraints` forbids editing `team/SOP.md`, `docs/OPERATIONS.md`, and role files). Check 1 (branch merged into RC) is unchanged and still applies to every DONE task with a live feature branch.
+
 **Procedure:**
 
 1. Scan all task directories under `$PGAI_PROJECT_ROOT/tasks/`. For each task whose `status.md` shows `## State: DONE` AND whose `README.md` has a `## Feature Branch` value that is not `none`, collect the feature branch name.
@@ -91,7 +99,7 @@ If exit code is non-zero, the feature branch is NOT merged into the RC. Record i
 
 **Check 2 — Zero-commits-ahead anomaly (Bug 92 pattern):**
 
-For branches that pass Check 1 (they ARE ancestors of the RC), verify they actually contributed commits:
+For branches that pass Check 1 (they ARE ancestors of the RC), verify they actually contributed commits — unless the task qualifies for the artifact-only exemption below:
 
 ```bash
 MERGE_BASE=$(git merge-base rc/<version> <feature-branch>)
@@ -101,7 +109,12 @@ if [[ -z "$UNIQUE_COMMITS" ]]; then
 fi
 ```
 
-A DONE task whose feature branch has zero unique commits means the task was marked DONE but no actual work was committed to its branch — the Bug 92 uncommitted-on-DONE pattern.
+A DONE task whose feature branch has zero unique commits usually means the task was marked DONE but no actual work was committed to its branch — the Bug 92 uncommitted-on-DONE pattern. **Exemption:** if the task README declares the deliverable is entirely in-folder (no source-tree commits expected), zero unique commits is the intended shape and Check 2 is skipped for that task. A task qualifies for the exemption when **either**:
+
+- (a) `## Feature Branch` in the README is the literal string `none`; **or**
+- (b) `## Required Output` names only paths inside the task folder (every path-like token is under `artifacts/…`) **AND** `## Constraints` contains an explicit forbidding phrase such as `Do NOT edit`, `Do not modify`, or `no source-tree edits`.
+
+Both halves of (b) must hold. A task that names only in-folder outputs but does not forbid source-tree edits is not artifact-only — the author may simply have omitted an edit that the pattern would still permit. A task that forbids edits but points at a path outside `artifacts/` is not artifact-only either. Check 1 still runs for exempt tasks: a feature branch that exists but is not an ancestor of the RC is always an anomaly, exempt or not.
 
 3. On ANY anomaly from either check: immediately set state to `BLOCKED` (verification could not complete — infrastructure failure; NOT "found a blocker") with `Needs Human: yes`. Write a report listing each problematic branch, which check it failed, and why. Do not proceed to Step 3.
 
@@ -113,6 +126,41 @@ A DONE task whose feature branch has zero unique commits means the task was mark
 KANBAN_ROOT="${PGAI_PROJECT_ROOT:-$PGAI_AGENT_KANBAN_ROOT_PATH}"
 RC_BRANCH="rc/<version>"
 ANOMALIES=""
+
+# Returns 0 if the task README describes an artifact-only DONE task.
+# See BUG-0024: artifact-only tasks legitimately carry zero unique commits
+# and must not be reported as BUG-92 anomalies.
+task_is_artifact_only() {
+  local readme="$1"
+
+  # Rule (a): ## Feature Branch is the literal string 'none'.
+  local fb
+  fb=$(awk '/^## Feature Branch/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$readme")
+  [[ "$fb" == "none" ]] && return 0
+
+  # Rule (b): ## Required Output names only in-folder paths AND
+  #          ## Constraints forbids source-tree edits.
+  local req_body con_body
+  req_body=$(awk '/^## Required Output/{flag=1; next} /^## /{flag=0} flag' "$readme")
+  con_body=$(awk '/^## Constraints/{flag=1; next} /^## /{flag=0} flag' "$readme")
+  [[ -n "$req_body" && -n "$con_body" ]] || return 1
+
+  # Extract every backticked token containing a '/' from Required Output.
+  local paths inside outside
+  paths=$(printf '%s\n' "$req_body" | grep -oE '`[^`]+`' | tr -d '`' | awk '/\//')
+  inside=$(printf '%s\n' "$paths" | awk 'NF && /^artifacts\//')
+  outside=$(printf '%s\n' "$paths" | awk 'NF && !/^artifacts\//')
+
+  # Must have at least one artifacts/ path AND no path pointing outside the task folder.
+  [[ -n "$inside" && -z "$outside" ]] || return 1
+
+  # Constraints must forbid source-tree edits explicitly.
+  printf '%s\n' "$con_body" \
+    | grep -qiE 'do not edit|do not modify|no source[- ]tree edits|forbids? source[- ]tree edits' \
+    || return 1
+
+  return 0
+}
 
 for task_dir in "$PGAI_PROJECT_ROOT"/tasks/*/; do
   status_file="$task_dir/status.md"
@@ -135,6 +183,12 @@ for task_dir in "$PGAI_PROJECT_ROOT"/tasks/*/; do
   fi
 
   # Check 2: zero-commits-ahead (Bug 92 pattern)
+  # Artifact-only DONE tasks are exempt — see BUG-0024 and the exemption
+  # criteria documented above this script.
+  if task_is_artifact_only "$readme_file"; then
+    continue
+  fi
+
   MERGE_BASE=$(git merge-base "$RC_BRANCH" "$branch")
   UNIQUE=$(git log --oneline "$MERGE_BASE".."$branch")
   if [[ -z "$UNIQUE" ]]; then
@@ -187,7 +241,7 @@ fi
 ### 4. Read the diff
 
 ```bash
-git diff develop..rc/<version>
+git diff "${branch_prefix}main..rc/<version>"
 ```
 
 Read it fully. Build a mental model of what changed before reading the requirements doc. The diff tells you what was actually shipped; the requirements doc tells you what was supposed to be shipped. Your job is to check whether they match.
@@ -465,7 +519,7 @@ test -f team/tests/integration/test_cm_release_synthetic.py || echo "MISSING"
 cd team && python3 -m pytest tests/integration/test_cm_release_synthetic.py -v
 ```
 
-This test must verify that `cm-release.sh` against a fresh isolated temp git repo (with develop, main, RC seeded with the correct in-flight `release-state.md` containing `Active RC`, `RC Opened At`, `RC Opened By Task`) completes successfully, leaves main tagged (so `pp_last_released_version` returns the new tag on the next call), clears `Active RC` back to `none` in `release-state.md`, and deletes the rc branch — all without touching any real branches.
+This test must verify that `cm-release.sh` against a fresh isolated temp git repo (with the prefixed main branch and RC seeded with the correct in-flight `release-state.md` containing `Active RC`, `RC Opened At`, `RC Opened By Task`) completes successfully, leaves main tagged (so `pp_last_released_version` returns the new tag on the next call), clears `Active RC` back to `none` in `release-state.md`, and deletes the rc branch — all without touching any real branches.
 
 #### Step 6.9 — Constraint negative checks
 
@@ -837,6 +891,15 @@ Then update the rest of status.md per standard kanban conventions.
 
 Read `## Workflow Type` from the task README. If absent, default to `release`.
 
+**The type set is OPEN.** The values above are the built-ins this file
+documents. Any OTHER value in `## Workflow Type` means a workflow-type
+plugin under `workflows/<type>/` defines the semantics: read its
+`workflow.cfg` capabilities and the task README, which carries the
+procedure for that type. A type the dispatcher does not recognize never
+reaches you — it fails closed at discovery — so never improvise a
+default for a present-but-unrecognized value; the absent-field default
+above is the ONLY default.
+
 ### release (default)
 
 Use the full 12-step verification methodology above. The 19 underlying checks are encoded into Step 6's substeps.
@@ -887,6 +950,19 @@ The autonomous criterion applies to all workflow types.
 ### feature
 
 Same as release, simpler. No CM bookends to verify, but the rest of the methodology applies.
+
+### testing-only
+
+A verification-only run: a detached READ-ONLY worktree of the target
+project's dev tree at the requirement's named ref; run exactly the
+suites the requirements doc names; the report artifact at the
+finalize path IS the deliverable. Label versioning applies — the
+Target Version is a NAME for the report, rendered by status, never
+compared against release versions. A failing suite is a SUCCESSFUL
+verification with a failing verdict: report it fully; do not fix, and
+do not BLOCK (BLOCKED remains infrastructure-only). File nothing on
+the target project's lane unless the requirements doc says to — the
+report carries the findings.
 
 ## Your Swim Lane: Observation Only
 

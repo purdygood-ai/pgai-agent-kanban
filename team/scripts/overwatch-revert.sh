@@ -50,6 +50,8 @@
 
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Source required libraries for project name resolution
@@ -124,7 +126,7 @@ _or_resolve_env() {
     # KANBAN_ROOT: prefer env var, then command-line override (set before call),
     
     if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
+        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
     fi
 
     if [[ ! -d "${KANBAN_ROOT}" ]]; then

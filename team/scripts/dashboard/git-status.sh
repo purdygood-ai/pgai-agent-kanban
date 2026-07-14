@@ -10,7 +10,7 @@
 #   1. Dev tree path + current branch + sync-with-origin status
 #   2. Uncommitted changes summary (staged + unstaged counts)
 #   3. In-flight rc/* branches (filtered by branch_prefix when configured)
-#   4. Recent commits on develop (top 5)
+#   4. Recent commits on main (top 5)
 #   5. Recent tags (last 5, filtered by branch_prefix when configured)
 #
 # Document-workflow projects (workflow_type=document) are omitted.
@@ -36,6 +36,8 @@
 # next project.  The overall exit code is always 0 so `watch` does not spin.
 
 set -euo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -71,7 +73,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/../lib"
 
-KANBAN_ROOT="${KANBAN_ROOT_ARG:-${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}}"
+KANBAN_ROOT="${KANBAN_ROOT_ARG:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
 export KANBAN_ROOT
 
 # Source project_paths lib for pp_* helpers and _pp_* internals.
@@ -218,15 +220,6 @@ render_project_git_status() {
   _sync_status "$current_branch"
   printf '\n'
 
-  # Also show develop sync status if we're not already on develop
-  if [[ "$current_branch" != "develop" ]]; then
-    if git -C "$dev_tree" rev-parse --verify develop &>/dev/null; then
-      printf '  develop:  '
-      _sync_status develop
-      printf '\n'
-    fi
-  fi
-
   # Also show main sync status
   if [[ "$current_branch" != "main" ]]; then
     if git -C "$dev_tree" rev-parse --verify main &>/dev/null; then
@@ -294,17 +287,17 @@ render_project_git_status() {
   printf '\n'
 
   # -------------------------------------------------------------------------
-  # Section 4: Recent commits on develop (top 5)
+  # Section 4: Recent commits on main (top 5)
   # -------------------------------------------------------------------------
-  section_header "Recent Commits (develop, last 5)"
+  section_header "Recent Commits (main, last 5)"
 
-  if git -C "$dev_tree" rev-parse --verify develop &>/dev/null; then
-    git -C "$dev_tree" log develop --oneline -5 --format="%C(dim)%h%Creset  %s" 2>/dev/null \
+  if git -C "$dev_tree" rev-parse --verify main &>/dev/null; then
+    git -C "$dev_tree" log main --oneline -5 --format="%C(dim)%h%Creset  %s" 2>/dev/null \
       | while IFS= read -r line; do
           printf '  %s\n' "$line"
         done
   else
-    printf '  %s(develop branch not found)%s\n' "$DIM" "$RESET"
+    printf '  %s(main branch not found)%s\n' "$DIM" "$RESET"
   fi
 
   printf '\n'

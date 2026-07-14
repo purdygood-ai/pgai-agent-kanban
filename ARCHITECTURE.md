@@ -274,15 +274,59 @@ Token capture is provider-aware: each task's `tokens.json` records `provider`, `
 
 ## Workflow Types
 
-A workflow type is a YAML file defining inputs, the agent pipeline, outputs, and versioning behavior. Adding a workflow type is data, not code.
+A workflow type is a plugin — a directory under `$KANBAN_ROOT/workflows/<name>/` containing a manifest and a set of hook functions the engine calls. Adding a workflow type is a new directory, not an engine edit. The engine never reads the type's name to decide behavior; it reads capability values from the manifest and hook return values.
+
+### Plugin shape
+
+Each plugin is a directory with two files:
+
+```
+$KANBAN_ROOT/workflows/<name>/
+├── workflow.cfg   # manifest — capabilities and status
+└── workflow.sh    # eight bash hooks the engine calls
+```
+
+The manifest (`workflow.cfg`) declares:
+
+- `[workflow] name`, `description`, `status` (`scaffold` or `ready`)
+- `[capabilities] version_semantics` (`semver` | `label` | `none`), `git_mode` (`none` | `ro` | `rw`), `finalize` (`tag` | `publish` | `report`), `agents` (comma-separated ordered roster)
+
+The hook set (`workflow.sh`) defines eight `wf_*` functions: `wf_git_mode`, `wf_resolve_target_version`, `wf_pre_task`, `wf_post_task`, `wf_finalize`, `wf_agents`, `wf_bundle_source_branch`, `wf_dashboard_render`. Each hook does one thing. Policy lives inside the hook; the engine never dispatches on a type-name switch.
+
+### Discovery
+
+The dispatcher (`scripts/lib/workflow.sh`) resolves a project's workflow type by reading `project.cfg workflow_type`, discovery-scanning `<workflows-root>/*/workflow.cfg`, validating the matching manifest, and sourcing the plugin's `workflow.sh`. There is no central enum, no registration file, no engine-side list. Drop a directory in, the dispatcher finds it. Remove a directory, the dispatcher no longer offers it. Registration is directory existence.
+
+### Fail-closed routing
+
+The dispatcher is fail-closed on every load-time error:
+
+- Unknown workflow type (no matching directory) → the requirement routes to BLOCKED with a reason naming the type.
+- Missing or malformed `workflow.cfg` → BLOCKED with the manifest problem named.
+- `status = scaffold` (or any value other than the literal `ready`) → BLOCKED with the type name in the reason.
+
+This deliberately replaces the pre-v1.1 behavior in which the wake scripts defaulted to `release` on parse failure. Misconfigurations that used to silently succeed now fail loud; correct configurations behave byte-identically.
+
+### Upgrade-survival contract
+
+The framework's `upgrade.sh --force` refreshes shipped plugins in place and leaves operator-authored plugins untouched. The mechanism is an overlay copy (`cp -r "$src/." "$dst/"`) that copies files present in the new install onto the live tree; directories absent from the source tree are not affected. An operator-authored `$KANBAN_ROOT/workflows/acme-deploy/` survives every upgrade byte-identical.
+
+The one hazard: a custom plugin whose name collides with a shipped plugin (`release`, `document`, `testing-only`) is silently overwritten on upgrade. The generator refuses those names, `validate-workflow.sh` documents the rule, and `docs/public-contract.md` states the recommendation to use org-prefixed names.
+
+The upgrade-survival guarantee is a stable 1.x contract — see [docs/public-contract.md](docs/public-contract.md).
+
+### Shipped plugins
 
 | Workflow | Status | Description |
 |---|---|---|
-| `release` | Shipped | Software release with the git RC branch lifecycle. The default; where most daily activity happens. |
-| `document` | Shipped | Prose/document deliverables. Drives off the requirement's semver `## Target Version`; CM finalize publishes the main deliverable to `projects/<name>/artifacts/v<semver>-<name>.<ext>` (versioned library, every version kept). |
-| (future) | Planned post-v1.0 | Presentation, image, and other types as needs arise. |
+| `release` | Shipped | Software release with the git RC branch lifecycle. `version_semantics=semver`, `git_mode=rw`, `finalize=tag`, `agents=pm,coder,writer,tester,cm`. The default; where most daily activity happens. |
+| `document` | Shipped | Prose/document deliverables. `version_semantics=semver`, `finalize=publish`. Drives off the requirement's semver `## Target Version`; publishes to `projects/<name>/artifacts/v<semver>-<name>.<ext>` (versioned library, every version kept). |
+| `testing-only` | Shipped | Runs a project's test suites at a named ref. `version_semantics=label`, `git_mode=ro`, `finalize=report`, `agents=pm,tester`. Label semantics: the version is a name for the report artifact only — never enters release-state, never triggers ceiling checks, and the dashboard renders label items by open/running/done. No CM step. |
+| (operator-authored) | Custom | Any org-authored plugin under `$KANBAN_ROOT/workflows/<name>/` — see [docs/creating-a-workflow.md](docs/creating-a-workflow.md). |
 
-The agent roles work across all workflow types; their specialization adapts to the workflow context (TESTER runs unit tests for `release`, verifies completeness against an outline for `document`).
+The agent roles work across all workflow types; their specialization adapts to the workflow context by reading capability flags (TESTER runs unit tests for `release`, verifies completeness against an outline for `document`, runs the project's test suite for `testing-only`).
+
+For the full authoring walkthrough — live-operator (no git) and contributor (dev tree) paths — see [docs/creating-a-workflow.md](docs/creating-a-workflow.md).
 
 ---
 

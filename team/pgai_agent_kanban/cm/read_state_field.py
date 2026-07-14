@@ -18,7 +18,7 @@ Usage (CLI):
     python3 read_state_field.py <filepath> <heading>
 
 Usage (import):
-    from team.pgai_agent_kanban.cm.read_state_field import read_state_field
+    from pgai_agent_kanban.cm.read_state_field import read_state_field
     value = read_state_field("team/release-state.md", "Active RC")
 
 Both forms return/print the first non-blank, non-comment line after the

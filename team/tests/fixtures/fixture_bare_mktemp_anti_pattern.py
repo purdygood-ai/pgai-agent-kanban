@@ -2,7 +2,7 @@
 ======================================
 DELIBERATE BAD EXAMPLE -- DO NOT COPY THIS PATTERN INTO REAL TESTS.
 
-This file is a lint fixture for BUG-0168.  It contains a bare mktemp call
+This file is a lint fixture for an earlier defect.  It contains a bare mktemp call
 (no -p flag) inside an embedded shell string, which is exactly the
 anti-pattern that lint_test_anti_patterns.py must flag.
 
@@ -20,7 +20,7 @@ import textwrap
 
 
 def _bad_mock_wake_fragment(kanban_root_str: str) -> str:
-    """Build a bash fragment that reproduces the BUG-0168 anti-pattern.
+    """Build a bash fragment that reproduces the an earlier defect anti-pattern.
 
     The embedded shell string below uses a bare mktemp with no -p flag.
     This is the anti-pattern: the temp file lands in /tmp instead of under

@@ -28,6 +28,8 @@
 #   TERM=dumb                           — also disables ANSI colors
 
 set -euo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -58,7 +60,7 @@ VALID_QUEUES="pm coder writer tester cm bug priority"
 # Parse arguments
 # ---------------------------------------------------------------------------
 QUEUE_NAME=""
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 _args=("$@")
 _i=0

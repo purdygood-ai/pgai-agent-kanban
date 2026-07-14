@@ -64,14 +64,14 @@ def test_installed_root_has_no_team_shim_directory(
 def test_installed_root_contains_workflow_definitions(
     installed_root: pathlib.Path,
 ) -> None:
-    """installed_root fixture provides workflow YAML files under workflows/."""
+    """installed_root fixture provides workflow plugin directories under workflows/."""
     workflows_dir = installed_root / "workflows"
     assert workflows_dir.is_dir(), (
         "installed_root must contain a workflows/ directory"
     )
-    release_yaml = workflows_dir / "release.yaml"
-    assert release_yaml.exists(), (
-        "installed_root/workflows/release.yaml must exist (copied from dev tree)"
+    release_pipeline = workflows_dir / "release" / "pipeline.yaml"
+    assert release_pipeline.exists(), (
+        "installed_root/workflows/release/pipeline.yaml must exist (copied from dev tree)"
     )
 
 

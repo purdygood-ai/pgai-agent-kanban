@@ -56,7 +56,7 @@ def _minimal_task(seq: int = 1, slug: str = "my-task", role: str = "CODER",
         "assigned_agent": role,
         "working_directory": "$PGAI_DEV_TREE_PATH",
         "git_repo": git_repo,
-        "source_branch": "develop",
+        "source_branch": "main",
         "goal": "Do the work.",
         "inputs": ["requirements.md"],
         "context_paths": [],
@@ -272,21 +272,21 @@ def test_determine_source_branch_returns_rc_version_for_release_tasks(
     assert result == "rc/v0.5.0"
 
 
-def test_determine_source_branch_returns_develop_for_cm_open_task(
+def test_determine_source_branch_returns_main_for_cm_open_task(
     tmp_path: pathlib.Path,
 ) -> None:
-    """determine_source_branch returns 'develop' for the CM-open-rc task (creates the RC branch)."""
+    """determine_source_branch returns 'main' for the CM-open-rc task (creates the RC branch from main)."""
     task = {
         "slug": "open-rc-0-5-0",
         "role": "CM",
         "assigned_agent": "CM",
-        "source_branch": "develop",
+        "source_branch": "main",
         "cm_operation": "open-rc",
     }
     result = pm.determine_source_branch(
         task, str(tmp_path), workflow_type="release", target_version="v0.5.0"
     )
-    assert result == "develop"
+    assert result == "main"
 
 
 def test_determine_source_branch_release_tester_gets_rc_branch(
@@ -297,7 +297,7 @@ def test_determine_source_branch_release_tester_gets_rc_branch(
         "slug": "verify-0-5-0",
         "role": "TESTER",
         "assigned_agent": "TESTER",
-        "source_branch": "develop",
+        "source_branch": "main",
     }
     result = pm.determine_source_branch(
         task, str(tmp_path), workflow_type="release", target_version="v0.5.0"
@@ -313,7 +313,7 @@ def test_determine_source_branch_release_writer_gets_rc_branch(
         "slug": "docs",
         "role": "WRITER",
         "assigned_agent": "WRITER",
-        "source_branch": "develop",
+        "source_branch": "main",
     }
     result = pm.determine_source_branch(
         task, str(tmp_path), workflow_type="release", target_version="v0.5.0"
@@ -333,17 +333,17 @@ def test_determine_source_branch_feature_workflow_honors_task_source_branch(
     assert result == "feature/my-shared-branch"
 
 
-def test_determine_source_branch_feature_workflow_falls_back_to_develop(
+def test_determine_source_branch_feature_workflow_falls_back_to_main(
     tmp_path: pathlib.Path,
 ) -> None:
-    """determine_source_branch returns 'develop' when no task source_branch and no active RC."""
+    """determine_source_branch returns 'main' when no task source_branch and no active RC."""
     task = _minimal_task(slug="feat", role="CODER")
     task["source_branch"] = ""
     # No release-state.md in tmp_path — get_active_rc returns None.
     result = pm.determine_source_branch(
         task, str(tmp_path), workflow_type="feature", target_version=None
     )
-    assert result == "develop"
+    assert result == "main"
 
 
 def test_determine_source_branch_with_branch_prefix(
@@ -360,19 +360,19 @@ def test_determine_source_branch_with_branch_prefix(
     assert result == "myorcrc/v0.5.0" or result.startswith("myorg")
 
 
-def test_determine_source_branch_no_target_version_returns_develop(
+def test_determine_source_branch_no_target_version_returns_main(
     tmp_path: pathlib.Path,
 ) -> None:
-    """determine_source_branch returns 'develop' for release workflow without target_version."""
+    """determine_source_branch returns 'main' for release workflow without target_version."""
     task = _minimal_task(slug="feat", role="CODER")
     result = pm.determine_source_branch(
         task, str(tmp_path), workflow_type="release", target_version=None
     )
-    assert result == "develop"
+    assert result == "main"
 
 
 # ---------------------------------------------------------------------------
-# apply_git_repo_override — git_repo defensive guard (BUG-0156)
+# apply_git_repo_override — git_repo defensive guard (an earlier defect)
 # ---------------------------------------------------------------------------
 
 
@@ -632,7 +632,7 @@ def test_inject_feature_workflow_prepends_create_shared_branch_task() -> None:
     tasks = _stamp_ids(_make_tasks(2))
     pm.inject_feature_workflow_tasks(
         tasks, source_branch="feature/shared", test_required=True,
-        parent_branch="develop", date_str="20260101", base_seq=100,
+        parent_branch="main", date_str="20260101", base_seq=100,
         owner="CLAUDE"
     )
     assert tasks[0].get("_create_shared_branch") is True
@@ -644,7 +644,7 @@ def test_inject_feature_workflow_no_cm_tasks_present() -> None:
     tasks = _stamp_ids(_make_tasks(2))
     pm.inject_feature_workflow_tasks(
         tasks, source_branch="feature/shared", test_required=False,
-        parent_branch="develop", date_str="20260101", base_seq=100,
+        parent_branch="main", date_str="20260101", base_seq=100,
         owner="CLAUDE"
     )
     cm_tasks = [t for t in tasks if t.get("role") == "CM"]
@@ -656,7 +656,7 @@ def test_inject_feature_workflow_appends_tester_when_test_required() -> None:
     tasks = _stamp_ids(_make_tasks(2))
     pm.inject_feature_workflow_tasks(
         tasks, source_branch="feature/shared", test_required=True,
-        parent_branch="develop", date_str="20260101", base_seq=100,
+        parent_branch="main", date_str="20260101", base_seq=100,
         owner="CLAUDE"
     )
     tester_tasks = [t for t in tasks if t.get("role") == "TESTER"]
@@ -668,7 +668,7 @@ def test_inject_feature_workflow_no_tester_when_test_not_required() -> None:
     tasks = _stamp_ids(_make_tasks(2))
     pm.inject_feature_workflow_tasks(
         tasks, source_branch="feature/shared", test_required=False,
-        parent_branch="develop", date_str="20260101", base_seq=100,
+        parent_branch="main", date_str="20260101", base_seq=100,
         owner="CLAUDE"
     )
     tester_tasks = [t for t in tasks if t.get("role") == "TESTER"]
@@ -681,7 +681,7 @@ def test_inject_feature_workflow_feature_tasks_depend_on_create_branch() -> None
     feature_ids = [t["task_id"] for t in tasks]
     pm.inject_feature_workflow_tasks(
         tasks, source_branch="feature/shared", test_required=False,
-        parent_branch="develop", date_str="20260101", base_seq=100,
+        parent_branch="main", date_str="20260101", base_seq=100,
         owner="CLAUDE"
     )
     create_branch_id = tasks[0]["task_id"]
@@ -910,7 +910,7 @@ def test_get_active_rc_returns_none_when_file_missing(
 
 
 # ---------------------------------------------------------------------------
-# is_human_task / get_queue_path — HUMAN task queue exclusion
+# is_human_task / get_queue_path — HUMAN task queue routing
 # ---------------------------------------------------------------------------
 
 
@@ -926,13 +926,14 @@ def test_is_human_task_returns_false_for_coder_role() -> None:
     assert pm.is_human_task(task) is False
 
 
-def test_get_queue_path_returns_none_for_human_task(
+def test_get_queue_path_returns_human_backlog_for_human_task(
     tmp_path: pathlib.Path,
 ) -> None:
-    """get_queue_path returns None for HUMAN-role tasks (not routed to any queue)."""
+    """get_queue_path routes HUMAN-role gate tasks to human_backlog.md."""
     task = {"role": "HUMAN", "assigned_agent": "HUMAN"}
     result = pm.get_queue_path(task, str(tmp_path))
-    assert result is None
+    assert result is not None
+    assert "human_backlog.md" in str(result)
 
 
 def test_get_queue_path_returns_coder_backlog_for_coder_task(
@@ -953,6 +954,82 @@ def test_get_queue_path_uses_assigned_agent_over_role(
     result = pm.get_queue_path(task, str(tmp_path))
     assert result is not None
     assert "writer_backlog.md" in str(result)
+
+
+def test_update_backlog_writes_human_task_to_human_backlog(
+    tmp_path: pathlib.Path,
+) -> None:
+    """update_backlog writes a HUMAN-APPROVE gate task to human_backlog.md."""
+    queues_dir = tmp_path / "tasks" / "queues"
+    queues_dir.mkdir(parents=True)
+    human_task = {
+        "task_id": "HUMAN-APPROVE-v1.8.1-065",
+        "role": "HUMAN",
+        "assigned_agent": "HUMAN",
+        "prerequisite_ids": ["TESTER-20260708-005-verify-1-8-1"],
+    }
+    pm.update_backlog([human_task], str(tmp_path))
+    human_backlog = queues_dir / "human_backlog.md"
+    assert human_backlog.is_file(), "human_backlog.md was not created"
+    content = human_backlog.read_text()
+    assert "HUMAN-APPROVE-v1.8.1-065" in content
+    # WAITING marker because prerequisites are set
+    assert "- [W] HUMAN-APPROVE-v1.8.1-065" in content
+
+
+def test_update_backlog_coder_entry_byte_identical_with_human_also_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    """coder_backlog.md content is byte-identical whether or not a HUMAN task is also processed.
+
+    Proves that routing HUMAN tasks to human_backlog.md does not perturb
+    the coder queue entry.
+    """
+    queues_dir = tmp_path / "tasks" / "queues"
+    queues_dir.mkdir(parents=True)
+    coder_task = {
+        "task_id": "CODER-20260708-001-implement-feature",
+        "role": "CODER",
+        "assigned_agent": "CODER",
+        "prerequisite_ids": [],
+    }
+    # Baseline: write coder task alone
+    baseline_dir = tmp_path / "baseline"
+    baseline_queues = baseline_dir / "tasks" / "queues"
+    baseline_queues.mkdir(parents=True)
+    pm.update_backlog([coder_task], str(baseline_dir))
+    baseline_content = (baseline_queues / "coder_backlog.md").read_text()
+
+    # With HUMAN task also present
+    human_task = {
+        "task_id": "HUMAN-APPROVE-v1.8.1-065",
+        "role": "HUMAN",
+        "assigned_agent": "HUMAN",
+        "prerequisite_ids": ["TESTER-20260708-005-verify"],
+    }
+    pm.update_backlog([coder_task, human_task], str(tmp_path))
+    combined_content = (queues_dir / "coder_backlog.md").read_text()
+
+    assert combined_content == baseline_content, (
+        "coder_backlog.md content changed when HUMAN task was also routed"
+    )
+
+
+def test_validate_and_normalize_queue_catches_malformed_human_queue_marker(
+    tmp_path: pathlib.Path,
+) -> None:
+    """validate_and_normalize_queue rewrites a non-canonical human queue entry.
+
+    Proves the correctness check guards the human queue: a deliberately
+    malformed line (missing leading dash) is detected and rewritten.
+    """
+    human_backlog = tmp_path / "human_backlog.md"
+    # Deliberately malformed: missing leading '- '
+    human_backlog.write_text("[W] HUMAN-APPROVE-v1.8.1-065\n", encoding="utf-8")
+    rewritten = pm.validate_and_normalize_queue(human_backlog)
+    assert rewritten == 1, "malformed human queue marker was not detected by correctness check"
+    canonical = human_backlog.read_text()
+    assert "- [W] HUMAN-APPROVE-v1.8.1-065" in canonical
 
 
 # ---------------------------------------------------------------------------

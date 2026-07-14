@@ -48,11 +48,21 @@ The local source branch (typically `rc/vX.Y.Z`) is the source of truth between t
 
 ## Workflow Type Dispatch
 
-Read `## Workflow Type` from the task README. Four values dispatch to four procedures. If the field is absent, default to `release`.
+Read `## Workflow Type` from the task README. Three built-in values dispatch to the procedures below. If the field is absent, default to `release`.
 
 - **`release`** — Documentation tied to a software release branch. Branch from `rc/vX.Y.Z`, write, merge back, delete feature branch. **Common case for governance docs, release notes, README updates.** See "Procedure A — Release Workflow" below.
-- **`feature`** — Lightweight workflow without RC bookends. Same as release, but the source branch is `develop` (or whatever `## Source Branch` specifies). See "Procedure B — Feature Workflow" below.
+- **`feature`** — Lightweight workflow without RC bookends. Same as release, but the source branch is the prefixed main branch (or whatever `## Source Branch` specifies). See "Procedure B — Feature Workflow" below. (`feature` names a shared-branch DECOMPOSITION MODE at the PM layer, not a workflow-type plugin.)
 - **`document`** — Standalone document content: short creative pieces (stories, essays, articles) or long-form structured documents (whitepapers, SOPs, guides). Working directory is often a project's `artifacts/<project-name>/v<N>/` directory rather than a git repository. Long-form documents use per-section sub-tasks; short-form uses a single draft step. WRITER reads `## Sub-task` from the task README to know which stage to execute. See "Procedure C — Document Workflow" below.
+
+
+**The type set is OPEN.** The values above are the built-ins this file
+documents. Any OTHER value in `## Workflow Type` means a workflow-type
+plugin under `workflows/<type>/` defines the semantics: read its
+`workflow.cfg` capabilities and the task README, which carries the
+procedure for that type. A type the dispatcher does not recognize never
+reaches you — it fails closed at discovery — so never improvise a
+default for a present-but-unrecognized value; the absent-field default
+above is the ONLY default.
 
 The procedures share a structure: PHASE 1 (do the work) then PHASE 2 (deliver the work). The phases are explicit because the most common WRITER failure mode is doing PHASE 1 cleanly and skipping PHASE 2.
 
@@ -180,6 +190,10 @@ Use `-d` (not `-D`). The lowercase flag refuses to delete unmerged work, which p
 
 #### Step 9 — Update status to DONE
 
+**`## Model` is wake-stamped — do not write it.** The wake script records the
+resolved model string into `## Model` before spawning you. Leave `## Model`
+as the wake script wrote it.
+
 Update `status.md`:
 
 ```
@@ -220,7 +234,7 @@ If your summary does not mention both, you have not finished. Go back to whichev
 
 Identical to Procedure A, except:
 
-- `## Source Branch` is typically `develop` (or a shared feature parent), not `rc/vX.Y.Z`
+- `## Source Branch` is typically the prefixed main branch (or a shared feature parent), not `rc/vX.Y.Z`
 - No RC bookends (no CM-open-rc / CM-release tasks before/after)
 - All other steps are unchanged
 
@@ -352,7 +366,7 @@ Write it as two lines — the `## Status` heading on its own line, then `PENDING
 
 The placeholder removes the guess. WRITER states the facts it knows (what shipped, bugs resolved, known issues) and leaves the one field it cannot know as `PENDING-RELEASE`. CM stamps the real value at release time, after the decision exists — see "Release Notes" in `roles/CM.md`.
 
-**What CM does with the placeholder.** At release time, `cm-release.sh` replaces `PENDING-RELEASE` with the ship-policy decision and commits the stamped notes on the RC branch before the squash to develop and main. A guard HALTs the release if the placeholder survives the stamp step, so a forgotten or malformed placeholder fails loudly rather than shipping wrong. You do not run the stamp — CM does. Your job is to write the placeholder correctly.
+**What CM does with the placeholder.** At release time, `cm-release.sh` replaces `PENDING-RELEASE` with the ship-policy decision and commits the stamped notes on the RC branch before the single squash into the prefixed main branch. A guard HALTs the release if the placeholder survives the stamp step, so a forgotten or malformed placeholder fails loudly rather than shipping wrong. You do not run the stamp — CM does. Your job is to write the placeholder correctly.
 
 **Scope note.** This convention applies only to the `## Status` field of a release-notes file. Author every other section normally. If your task is not authoring release notes, this section does not apply.
 

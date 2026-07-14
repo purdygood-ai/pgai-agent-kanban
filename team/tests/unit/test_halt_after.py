@@ -10,7 +10,7 @@ Covers:
                             audit entry appended; graceful behavior when
                             HALT-AFTER or release-state.md is absent
   - halt_after/drain.py  — check_drain: versioned rc (drained/not drained),
-                           bare rc with no active RC (BUG-0309 — promote
+                           bare rc with no active RC (an earlier defect — promote
                            immediately), role tokens when no pending tasks,
                            pm-in-flight blocks role drain, unsupported token
                            raises ValueError
@@ -400,11 +400,11 @@ def test_check_drain_versioned_rc_returns_false_when_released_below_captured(
 def test_check_drain_bare_rc_promotes_immediately_when_no_active_rc(
     tmp_path: Path,
 ) -> None:
-    """check_drain (bare 'rc') promotes to HALT immediately when Active RC is 'none' (BUG-0309)."""
+    """check_drain (bare 'rc') promotes to HALT immediately when Active RC is 'none' (an earlier defect)."""
     root = _make_project_root_with_release_state(tmp_path, active_rc="none")
     (root / "HALT-AFTER").write_text("rc\n", encoding="utf-8")
     result = check_drain("rc", root)
-    # BUG-0309: should promote immediately and return True
+    # an earlier defect: should promote immediately and return True
     assert result is True
     assert (root / "HALT").exists()
 

@@ -31,6 +31,8 @@
 
 # Not using set -euo pipefail — we are a long-running tail pipeline and pipe
 # closes should not abort the process.
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -60,7 +62,7 @@ done
 # ---------------------------------------------------------------------------
 # Resolve kanban root
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 if [[ -n "$KANBAN_ROOT_OVERRIDE" ]]; then
   KANBAN_ROOT="$KANBAN_ROOT_OVERRIDE"
 fi

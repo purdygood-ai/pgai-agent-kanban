@@ -31,6 +31,8 @@
 # The right-column width is a shared constant defined in lib/dashboard_constants.sh.
 
 set -euo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script directory — needed to source lib files
@@ -51,7 +53,7 @@ if [[ -z "$SESSION_NAME" ]]; then
 fi
 shift
 
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --kanban-root)

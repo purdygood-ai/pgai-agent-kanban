@@ -17,6 +17,54 @@ OVERWATCH's deliverables are:
 
 OVERWATCH never replaces another agent. It is a safety net that runs underneath the chain.
 
+## Two-Tier Cadence
+
+OVERWATCH runs on two independent cron cadences plus an event-driven trigger. Each tier owns a distinct workload; together they give the chain both continuous coverage and periodic reasoning without either tier paying the other's cost.
+
+### Tier 1 — hourly deterministic sweep
+
+The Tier-1 sweep is plain bash. It runs the whitelist checks in `team/scripts/lib/overwatch-checks/`, writes the action log in the existing format, takes timestamped backups before any auto-fix, and honors `HALT` and `HALT_OVERWATCH`. It spends zero LLM cost.
+
+The sweep is driven by `team/scripts/overwatch-sweep.sh` — the aggregation runner. It iterates every project registered in `projects.cfg` (no `--project` argument; the runner sweeps all of them each firing) and writes per-project logs under `projects/<name>/logs/overwatch/sweep.log`. Cadence is operator-tunable: the installed crontab carries an hourly line, staggered off the agent wake minutes so sweep does not race the chain.
+
+Tier 1 is the workhorse. Nine of the twelve current checks are deterministic detections with narrow, whitelisted auto-fixes. If the sweep alone catches the anomaly, no LLM firing is needed and the fix lands within the hour.
+
+### Tier 2 — daily LLM deep-clean
+
+The Tier-2 deep-clean is the OVERWATCH agent wake — one daily cron line, standard provider/model resolution, no baked tier. Its job is to read the action log since the last deep-clean plus any anomalies the sweep flagged, then file quality bugs via the standard Path-C shapes for anything outside the whitelist. It also appends its own log entry so the operator can tell deterministic and reasoned actions apart at a glance.
+
+Tier 2 exists to catch shapes Tier 1's exact-match detection cannot see: repeated near-misses, ambiguous residues, action-log patterns that suggest a check needs widening. It is deliberately infrequent — most days it has nothing to add.
+
+### The event-driven nudge
+
+Between the hourly sweep and the daily deep-clean sits the on-BLOCK trigger described in the next section. It is not a third tier — it fires only when the block path runs — but it is the mechanism that closes the latency gap for fresh failures: instead of waiting up to an hour for the next sweep, a BLOCKED task wakes OVERWATCH within seconds.
+
+## On-BLOCK Trigger
+
+When any agent's task transitions to `BLOCKED`, the wake script's block path fires a non-blocking `wake-now.sh --agent overwatch` before returning. Fresh failures are inspected within seconds instead of at the next hourly tick. Both provider siblings (`scripts/wake/claude.sh` and `scripts/wake/codex.sh`) carry the identical hook — the sibling-equality gate is a hard regression guard.
+
+The fire-site is a fixed shape:
+
+```bash
+nohup "${KANBAN_ROOT}/scripts/wake-now.sh" --agent overwatch \
+  >>"${KANBAN_ROOT}/logs/overwatch-trigger.log" 2>&1 &
+```
+
+### The four load-bearing guards
+
+Every guard exists for a specific failure the trigger must not create.
+
+1. **No self-trigger.** The nudge fires only when `$AGENT != overwatch`. Without this guard, an OVERWATCH firing that itself set BLOCKED (rare but possible during a state-file wedge) would wake another OVERWATCH firing, which could wake another. This is the loop guard.
+2. **Fire-and-forget.** The invocation is fully backgrounded (`nohup ... &`) and its exit status is ignored. The trigger must not add any failure mode to the block path — a lost nudge degrades to next-hour coverage, which is a survivable regression; a broken block path is not. Even if `wake-now.sh` is missing, broken, or slow, the block path's own exit status is unchanged.
+3. **Storm dedupe via the wake flock.** When five tasks block within one cron tick, five nudges fire but only one OVERWATCH run acquires the per-agent wake flock. The late nudges find the lock held and exit 0 immediately. Storms produce one run, not five.
+4. **HALT respected at the wake, not the fire.** `HALT` and `HALT_OVERWATCH` do not suppress the nudge — the nudge is cheap and the fire path must stay tight. Instead, the woken OVERWATCH run honors both flags at its own pre-flight and exits at the gate. A HALT'd system produces trigger-log entries but no OVERWATCH work.
+
+### Why "trigger" and not "notify"
+
+The trigger does not carry a payload. It does not pass the blocked task ID, the block reason, or the agent that blocked. OVERWATCH's next firing scans the whole state, sees the fresh BLOCKED entries in the queue files, and reasons about them the same way it would on a scheduled tick. The nudge only shortens the latency; it does not change what OVERWATCH does.
+
+This is deliberate. A payload-carrying trigger would need to survive the fire-and-forget contract (or violate it), and OVERWATCH's job is exactly "scan the state fresh every firing" — a payload would create a second, parallel input path that could disagree with the primary scan.
+
 ## Governance Stack
 
 Read these in order before doing the work:
@@ -187,6 +235,73 @@ The HALT-first protocol applies. If any agent holds the per-repo flock, OVERWATC
 **Why:** PM cannot decompose a README. Letting the task burn an agent firing produces noise; setting it WONT-DO with a bug filed routes the issue to PM/discovery for the real fix.
 
 These eight checks are the entire Tier-1 auto-fix surface. New detections may be added in future releases as additional priority documents. Any check not on this list is outside scope.
+
+### Reactivation prerequisite: check-push-lag `push_to_remote` gate
+
+OVERWATCH's reactivation for v1.4.0 is gated on one modernization: `check-push-lag` (check 7 above) now reads the per-project `push_to_remote` key from `project.cfg` before it acts.
+
+- When `push_to_remote = false` (the local-first posture), local-ahead state on `main` and unpushed tags are **by design** — they are deliberately staged work, not lag. The check logs `staged-by-design` to the action log, changes nothing, and never pushes. The pre-modernization behavior — force-push the local ahead-state to origin — would have published deliberately staged work; the gate is what makes reactivation safe.
+- When `push_to_remote = true` (the default remote-mode posture), the legacy path is intact: OVERWATCH pushes `main` and tags to origin after the standard HALT-first protocol and flock check.
+
+Behavioral fixtures cover both modes. `staged-by-design` is a first-class action-log outcome, distinct from a successful push, so operators can tell the local-first log from a real replay of CM's work.
+
+Without this gate, no other reactivation work is safe to enable. The four new Tier-1 checks below all assume the sweep can run cleanly on a local-first install.
+
+## Additional Tier-1 Checks (v1.4.0 reactivation)
+
+Four checks were added alongside the reactivation. They follow the same module contract as checks 1-8 (sourceable, exported `overwatch_check_<slug>` function, backup-then-act, action-log entry per action) and extend the whitelist in the same conservative shape: exact-match detections, narrowly scoped auto-fixes, bug-file when in doubt.
+
+### 9. check-transient-api-error (with residue companion and ceiling)
+
+**Detects:** a task in `BLOCKED` state whose agent log tail matches known transient-failure signatures — `API Error: 5xx`, `Overloaded`, `overloaded_error`, `rate limit`, `429`, `503`, `529`.
+
+**Auto-fix (below ceiling):** back up `status.md`, reset state to `BACKLOG`, increment `## Transient Requeue Count` (appended if absent), append `TRANSIENT` to `## Labels` (appended if absent), log the action. The task returns to the queue and the next cron tick retries. In the attention pane, transient items are visually distinct from needs-human blocks so operators can tell a self-healing hiccup from a real stop.
+
+**Ceiling:** at most two auto-requeues per task. On the third occurrence, OVERWATCH bug-files instead of requeuing — the task is left BLOCKED and the bug references the retry history. Repeated transient failures are no longer transient; the ceiling prevents the auto-requeue loop from masking a real outage.
+
+**Residue companion:** after every transient-matched decision (requeue or bug-file), the check inspects for per-task residue. Orphaned worktrees with no commits ahead of their source branch are `git worktree prune`-class and get pruned. Worktrees that carry commits are bug-file only — OVERWATCH never destroys work.
+
+**Why:** transient provider errors are the largest source of spurious BLOCKED states. Requeuing them within seconds of the hourly sweep (or within seconds of the block, via the on-BLOCK trigger) keeps the chain moving without hiding real failures behind a permissive retry policy.
+
+### 10. check-leaked-listeners
+
+**Detects:** processes whose `/proc/<pid>/cwd` symlink resolves to a path under the framework temp root (`PGAI_AGENT_KANBAN_TEMP_DIR`, default `/tmp/pgai_kanban_tmp`). This is the BUG-0011 class — a fixture-spawned listener that outlives its test.
+
+**Auto-fix (cwd match):** send `SIGTERM` to the process, log the action. No file is modified, so no backup is required. The auto-kill fires **only** when the cwd is provably under the framework temp root — the strongest evidence available that the process belongs to a test fixture.
+
+**Bug-file (no cwd match):** when a listener is detected by other heuristics but its cwd is not under the temp root, OVERWATCH files a bug with the pid and cmdline and does not kill. Anything with an ambiguous provenance is out of scope for auto-fix.
+
+**Why:** leaked listeners consume ports that later fixtures need, and the resulting failures look like flaky tests. The cwd-under-temp-root heuristic is narrow enough to be safe and specific enough to catch the class in practice.
+
+### 11. check-version-divergence (REPORT-ONLY)
+
+**Detects:** the installed VERSION at `$KANBAN_ROOT/VERSION` differs from the dev tree's `git describe --tags HEAD` for the same project.
+
+**Action:** log an entry to the action log and emit a diagnostic. No auto-fix.
+
+**Why REPORT-ONLY:** deploys are operator verbs. Reinstalling to bring the installed version in line with the dev tree is a decision the operator owns — OVERWATCH's job is to make the divergence visible in the same audit trail as the rest of its scans, not to run `install.sh` on its own. When no dev tree is configured, the check skips silently; when the installed VERSION is absent, the check still reports if `git describe` produces a result.
+
+### 12. check-stale-worktrees
+
+**Detects:** entries in `git worktree list --porcelain` whose backing task is in a terminal state (`DONE`, `WONT-DO`, `BLOCKED`) **and** whose worktree directory mtime exceeds `OVERWATCH_STALE_WORKTREE_THRESHOLD_DAYS` (default 7 days).
+
+**Auto-fix (prune-class only):** call `git worktree remove --force` (or `git worktree prune` after removing the directory) on worktrees that carry no commits not reachable from another ref. Log the action.
+
+**Bug-file (branch-carrying worktree):** when the worktree branch has commits not reachable from any other ref, OVERWATCH files a bug and preserves the worktree. Anything that carries unmerged work is preserved; anything that is empty scaffolding is pruned.
+
+**Why:** worktrees accumulate under `$PGAI_AGENT_KANBAN_TEMP_DIR` faster than any operator wants to garbage-collect by hand. Terminal-task worktrees older than a week are almost always cleanup that never happened; the prune-class-only auto-fix is safe because it refuses to touch anything with unmerged commits.
+
+### 13. check-bare-tmp-litter (REPORT-ONLY)
+
+**Detects:** bare `/tmp` top-level entries that are (a) owned by the framework user, (b) created after the earliest known agent-session start epoch (derived from wake-bracket snapshot files under `$PGAI_AGENT_KANBAN_TEMP_DIR/tasks/*/litter/pre_dispatch_tmp_snapshot`), (c) absent from all known pre-session name sets (i.e., they appeared during or after a session, not before), and (d) not yet reported in the dedup state file.
+
+**Action:** log each newly-discovered entry to the project's actions.log via `overwatch_log_action`; append its basename to the dedup state file (`$KANBAN_ROOT/projects/$PROJECT/overwatch/litter-reported.txt`) so it is not re-reported on subsequent sweeps.
+
+**Exclusions (never flagged):** the framework temp root (`$PGAI_AGENT_KANBAN_TEMP_DIR`); allowlist patterns (`systemd-*`, `tmux-*`, `pytest-of-*`); entries not owned by the framework user; entries whose mtime predates all known session epochs.
+
+**Why REPORT-ONLY:** `/tmp` is also the operator's space and the OS's scratch space. Nothing is ever deleted. The check backstops the wake-bracket litter report: sessions that crash before the post-check runs leave entries the bracket never reports; this sweep catches them on the next hourly firing. Dedup ensures the same entry is flagged once, not once per sweep.
+
+With these additions, OVERWATCH's Tier-1 surface is thirteen checks. Six auto-fix, three auto-fix with bug-file fallback (checks 4, 9, 12), one auto-kill (check 10), two REPORT-ONLY (checks 11 and 13), and one origin-touching under the `push_to_remote` gate (check 7). The checks-lib README (`team/scripts/lib/overwatch-checks/README.md`) is the source of truth for the module list and per-module contract; this section is the role-level view of what each check protects against.
 
 ## Hard Rules
 

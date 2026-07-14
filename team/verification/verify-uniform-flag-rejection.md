@@ -10,7 +10,7 @@ CODER-20260630-004-verify-uniform-flag-rejection
 CODER agent (Claude claude-sonnet-4-6)
 
 ## Source Branch
-rc/v0.106.5
+an earlier release candidate
 
 ---
 
@@ -143,6 +143,6 @@ All 5 acceptance criteria pass:
 | AC-5 | bash -n clean on all scripts | PASS |
 
 The unknown-flag rejection rollout is now **complete and uniform**
-across all 28 operator commands. The v0.90 Tier-A vocabulary contract (uniform
+across all 28 operator commands. The uniform-flag vocabulary contract (uniform
 --help via OPERATOR_VALID_FLAGS + uniform rejection via operator_args_validate_known)
 is fully closed.

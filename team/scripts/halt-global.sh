@@ -13,6 +13,8 @@
 # unhalt-global.sh.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Locate lib directory relative to this script ---
 _HALT_GLOBAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +29,7 @@ source "${_HALT_GLOBAL_LIB_DIR}/operator_args.sh"
 OPERATOR_VALID_FLAGS=(help)
 
 # --- Resolve KANBAN_ROOT via standard env-var / default fallback ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 # --- Parse arguments ---

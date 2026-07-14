@@ -67,8 +67,11 @@ if [[ -z "$PROJECT_NAME" ]]; then
   exit 1
 fi
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Resolve kanban root ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${KANBAN_ROOT:-$HOME/pgai_agent_kanban}}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 # --- Source optional config files (BEFORE strict mode) ---
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"

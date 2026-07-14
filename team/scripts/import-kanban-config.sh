@@ -33,6 +33,8 @@
 #       --force, or extraction failure
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Capture script start time for backup stamp
@@ -45,7 +47,7 @@ START_TIMESTAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
 # Prefer the env var; fall back to the parent directory of this script's
 # own scripts/ directory (i.e., the kanban root that contains scripts/).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${SCRIPT_DIR%/scripts}}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 # Source operator_args.sh for parsing and uniform --help.
 # shellcheck source=lib/operator_args.sh

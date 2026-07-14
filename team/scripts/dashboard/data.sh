@@ -56,6 +56,9 @@
 #   PGAI_AGENT_KANBAN_ROOT_PATH — kanban root override
 #   PGAI_PROJECT_NAME           — project name (alternative to --project)
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Argument parsing ---
 KANBAN_ROOT_ARG=""
 PROJECT_NAME=""
@@ -76,7 +79,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Resolve kanban root ---
-KANBAN_ROOT="${KANBAN_ROOT_ARG:-${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}}"
+KANBAN_ROOT="${KANBAN_ROOT_ARG:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
 
 # --- Resolve script dir / repo root ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

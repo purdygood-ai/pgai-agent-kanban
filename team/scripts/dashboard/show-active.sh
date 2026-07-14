@@ -19,6 +19,9 @@
 #   TERM=dumb  — disables all ANSI codes
 #   NO_COLOR=1 — disables all ANSI codes
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Resolve script dir ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -44,7 +47,7 @@ while [[ $_i -lt ${#_args[@]} ]]; do
 done
 
 # --- Source config (non-strict) ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 _i=0
 while [[ $_i -lt ${#_args[@]} ]]; do
   if [[ "${_args[$_i]}" == "--kanban-root" ]]; then

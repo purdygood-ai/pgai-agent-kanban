@@ -18,10 +18,10 @@ Usage (CLI):
     python3 write_rc_state.py cancel <path> <rc> <closed_at>
 
 Usage (import):
-    from team.pgai_agent_kanban.cm.write_rc_state import write_open, write_ship, write_cancel
-    write_open("v0.38.0", "2026-05-27T12:00:00Z")
-    write_ship("/path/to/v0.38.0.json", "v0.38.0", "2026-05-27T13:00:00Z")
-    write_cancel("/path/to/v0.38.0.json", "v0.38.0", "2026-05-27T13:00:00Z")
+    from pgai_agent_kanban.cm.write_rc_state import write_open, write_ship, write_cancel
+    write_open("v1.8.0", "2026-07-07T12:00:00Z")
+    write_ship("/path/to/v1.8.0.json", "v1.8.0", "2026-07-07T13:00:00Z")
+    write_cancel("/path/to/v1.8.0.json", "v1.8.0", "2026-07-07T13:00:00Z")
 """
 
 import argparse
@@ -42,8 +42,8 @@ def write_open(rc: str, opened_at: str) -> None:
     Do NOT change key names or output format.
 
     Args:
-        rc:        The RC version string (e.g. "v0.38.0").
-        opened_at: ISO8601 UTC timestamp string (e.g. "2026-05-27T12:00:00Z").
+        rc:        The RC version string (e.g. "v1.8.0").
+        opened_at: ISO8601 UTC timestamp string (e.g. "2026-07-07T12:00:00Z").
     """
     payload = {
         'rc': rc,
@@ -69,7 +69,7 @@ def write_ship(path: str, rc: str, closed_at: str) -> None:
 
     Args:
         path:      Path to the JSON state file to read and update in-place.
-        rc:        The RC version string (e.g. "v0.38.0").
+        rc:        The RC version string (e.g. "v1.8.0").
         closed_at: ISO8601 UTC timestamp string for the ship time.
     """
     try:
@@ -101,7 +101,7 @@ def write_cancel(path: str, rc: str, closed_at: str) -> None:
 
     Args:
         path:      Path to the JSON state file to read and update in-place.
-        rc:        The RC version string (e.g. "v0.38.0").
+        rc:        The RC version string (e.g. "v1.8.0").
         closed_at: ISO8601 UTC timestamp string for the cancellation time.
     """
     try:
@@ -138,11 +138,11 @@ def main() -> None:
     )
     p_open.add_argument(
         'rc',
-        help="The RC version string (e.g. 'v0.38.0').",
+        help="The RC version string (e.g. 'v1.8.0').",
     )
     p_open.add_argument(
         'opened_at',
-        help="ISO8601 UTC timestamp string (e.g. '2026-05-27T12:00:00Z').",
+        help="ISO8601 UTC timestamp string (e.g. '2026-07-07T12:00:00Z').",
     )
 
     # ship subcommand
@@ -159,7 +159,7 @@ def main() -> None:
     )
     p_ship.add_argument(
         'rc',
-        help="The RC version string (e.g. 'v0.38.0').",
+        help="The RC version string (e.g. 'v1.8.0').",
     )
     p_ship.add_argument(
         'closed_at',
@@ -180,7 +180,7 @@ def main() -> None:
     )
     p_cancel.add_argument(
         'rc',
-        help="The RC version string (e.g. 'v0.38.0').",
+        help="The RC version string (e.g. 'v1.8.0').",
     )
     p_cancel.add_argument(
         'closed_at',

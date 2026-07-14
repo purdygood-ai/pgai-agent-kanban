@@ -125,7 +125,7 @@ ls "$PGAI_AGENT_KANBAN_ROOT_PATH"/projects/*/tasks/CM-*/status.md 2>/dev/null \
   | tail -3
 ```
 
-Read the most recent BLOCKED CM task's status.md. CM records the trigger (one of the eight enumerated in `team/SOP.md` "When the chain halts"): pre-squash hook failure, merge conflict, push failure, tag already on remote, three consecutive NON-FUNCTIONAL RCs, and so on. The trigger names the work you need to do before the chain can ship.
+Read the most recent BLOCKED CM task's status.md. CM records the trigger (one of the eight enumerated in `docs/OPERATIONS.md` "When the chain halts"): pre-squash hook failure, merge conflict, push failure, tag already on remote, three consecutive NON-FUNCTIONAL RCs, and so on. The trigger names the work you need to do before the chain can ship.
 
 ### 3. Check whether HALT is set
 
@@ -368,4 +368,4 @@ In the tmux dashboard, the debug-logs pane is Window 8. When more than one proje
 - `disk-hygiene.md` — the purge script, retention defaults, cron integration.
 - `dashboard.md` — dashboard layout and panes.
 - `DASHBOARD-PANES.md` — per-pane script and standalone-command reference.
-- `team/SOP.md` — full operator SOP, including the "When the chain halts" reference.
+- `docs/OPERATIONS.md` — full operator walkthrough, including the "When the chain halts" reference.

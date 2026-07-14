@@ -28,7 +28,7 @@
 #   W4: Git               — two vertical panes:
 #                           Left:  watch -n 10 dashboard-git-status.sh
 #                                  (branch, sync status, uncommitted changes, rc/* branches,
-#                                   recent commits on develop)
+#                                   recent commits on main)
 #                           Right: watch -n 10 dashboard-git-recent-tags.sh
 #                                  (Recent Tags listing, >=10 newest tags, refreshed every 10s)
 #   W5: Metadata          — single pane running watch -n 10 dashboard-metadata.sh
@@ -50,6 +50,11 @@
 #                           color-coded per agent, sorted by mtime (newest at top)
 #                           gated by PGAI_REASONING_TRACE=1; refreshed via watch -n 30
 #   W10: Terminal         — three interactive shell panes
+#   W14: human-review     — single-pane listing of all pending HUMAN-APPROVE gate
+#                           tasks across ALL projects; one row per pending gate
+#                           (project, RC, age, show content, approve cmd, reject cmd).
+#                           Empty state: "no approvals pending."
+#                           Refreshed via watch on the standard interval.
 #   W11+: drill-N         — one window per registered project (all workflow types),
 #                           numbered in projects.cfg registration order (drill-1, drill-2, ...).
 #                           Release/feature projects: 5-pane release layout scoped to
@@ -61,7 +66,7 @@
 #                           dashboard_color.
 #
 # Window order: main, visibility, attention, git, metadata, metrics (metrics.sh + show-metrics.sh),
-#               logs, debug-logs, training-logs, terminal, drill-1, drill-2, ...
+#               logs, debug-logs, training-logs, terminal, human-review, drill-1, drill-2, ...
 #
 # Per-project drill/overview toggle (Feature 4):
 #   Key binding: prefix + p
@@ -83,9 +88,11 @@
 #   PGAI_DASHBOARD_REFRESH_SECONDS  Refresh interval in seconds (default: 5, range: 1-3600)
 #
 # Requirements:
-#   tmux >= 2.0
+#   tmux >= 3.1
 
 set -euo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script directory
@@ -111,7 +118,7 @@ source "${SCRIPT_DIR}/../lib/dashboard_constants.sh"
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 SESSION_NAME="pgai-kanban-dashboard"
 NO_TMUX=false
 
@@ -166,7 +173,7 @@ if [[ -f "${KANBAN_ROOT}/shell-env" ]]; then
 fi
 # Export PGAI_AGENT_KANBAN_ROOT_PATH so spawned pane child processes inherit it
 # even when shell-env does not re-export it (belt-and-suspenders).
-export PGAI_AGENT_KANBAN_ROOT_PATH="${PGAI_AGENT_KANBAN_ROOT_PATH:-${KANBAN_ROOT}}"
+export PGAI_AGENT_KANBAN_ROOT_PATH
 
 # ---------------------------------------------------------------------------
 # Source config — INI format (kanban.cfg) replaces legacy config.cfg
@@ -342,6 +349,12 @@ if [[ "$NO_TMUX" == "true" ]]; then
     echo "(no log files found)"
   fi
 
+  echo ""
+  echo "$SEPARATOR"
+  echo "  HUMAN-REVIEW (PENDING APPROVALS)"
+  echo "$SEPARATOR"
+  "${SCRIPT_DIR}/human-review.sh" --kanban-root "${KANBAN_ROOT}" || true
+
   exit 0
 fi
 
@@ -355,11 +368,15 @@ if ! command -v tmux &>/dev/null; then
   exit 1
 fi
 
-# Check tmux version >= 2.0
+# Check tmux version >= 3.1 (split-window -l N% requires 3.1+)
 TMUX_VERSION="$(tmux -V 2>/dev/null | awk '{print $2}' | sed 's/[^0-9.]//g')"
 TMUX_MAJOR="$(echo "$TMUX_VERSION" | cut -d. -f1)"
-if [[ -z "$TMUX_MAJOR" ]] || [[ "$TMUX_MAJOR" -lt 2 ]]; then
-  echo "ERROR: tmux 2.0+ is required (found: tmux ${TMUX_VERSION:-unknown})." >&2
+TMUX_MINOR="$(echo "$TMUX_VERSION" | cut -d. -f2 | sed 's/[^0-9]//g')"
+TMUX_MINOR="${TMUX_MINOR:-0}"
+if [[ -z "$TMUX_MAJOR" ]] || \
+   [[ "$TMUX_MAJOR" -lt 3 ]] || \
+   { [[ "$TMUX_MAJOR" -eq 3 ]] && [[ "$TMUX_MINOR" -lt 1 ]]; }; then
+  echo "tmux >= 3.1 required (found ${TMUX_VERSION:-unknown}): the dashboard uses split-window -l N% sizing" >&2
   exit 1
 fi
 
@@ -445,6 +462,9 @@ METADATA_CMD="watch -t -c -n 10 -- ${SCRIPT_DIR}/metadata.sh --kanban-root ${KAN
 # Uses the same refresh interval as other dashboard panes.
 METRICS_CMD="watch -t -c -n ${REFRESH_INTERVAL} -- ${SCRIPT_DIR}/metrics.sh --kanban-root ${KANBAN_ROOT}"
 
+# Human-review window — single pane listing pending HUMAN-APPROVE gate tasks.
+HUMAN_REVIEW_CMD="watch -t -c -n ${REFRESH_INTERVAL} -- ${SCRIPT_DIR}/human-review.sh --kanban-root ${KANBAN_ROOT}"
+
 # Metrics window — right pane running watch against show-metrics.sh.
 # Shows historical RC metrics from history.csv (last 10 RCs): rc, wall time,
 # input/output/cache tokens, cache hit rate, task count.
@@ -465,10 +485,10 @@ _REASONING_TRACE="${PGAI_REASONING_TRACE:-}"
 # Create the session (detached) with Window 0 — dashboard
 # Split sequence (full-height right pane for per-project status):
 #   Step 1: session created  — pane 0 fills full window
-#   Step 2: split pane 0 -h -p $QUEUES_PCT — pane 0=left ~65%, pane 1=right ~35% (QUEUES, full height)
-#   Step 3: split pane 0 -v -p 40  — pane 0=left-top ~60%, pane 2=left-bottom 40% (LOGS)
-#   Step 4: split pane 0 -v -p 82  — pane 0=HEADER (~11% of left), pane 3=middle left (~49%)
-#   Step 5: split pane 3 -h -p 36  — pane 3=PROGRESS (~64% of mid-left), pane 4=CRON (~36%)
+#   Step 2: split pane 0 -h -l $QUEUES_PCT% — pane 0=left ~65%, pane 1=right ~35% (QUEUES, full height)
+#   Step 3: split pane 0 -v -l 40%  — pane 0=left-top ~60%, pane 2=left-bottom 40% (LOGS)
+#   Step 4: split pane 0 -v -l 82%  — pane 0=HEADER (~11% of left), pane 3=middle left (~49%)
+#   Step 5: split pane 3 -h -l 36%  — pane 3=PROGRESS (~64% of mid-left), pane 4=CRON (~36%)
 #   Step 6: send commands to all panes
 #
 # Target proportions at 120-char terminal:
@@ -572,15 +592,15 @@ tmux set-option -t "$SESSION_NAME" -g "status-format[2]" \
 # NOTE: after subsequent left-column vertical splits (steps 3-4), tmux renumbers panes
 # in top-to-bottom, left-to-right order — the right-column pane ends up as pane 4, NOT pane 1.
 # QUEUES_PCT is sourced from lib/dashboard_constants.sh (value 25).
-tmux split-window -t "${SESSION_NAME}:main.0" -h -p "${QUEUES_PCT}"
+tmux split-window -t "${SESSION_NAME}:main.0" -h -l "${QUEUES_PCT}%"
 
 # Step 3: split the left area (pane 0) vertically — left-bottom 40% = LOGS.
 # After split: left-top (pane 0), left-bottom (pane 1), right (pane 2 after renumber).
-tmux split-window -t "${SESSION_NAME}:main.0" -v -p 40
+tmux split-window -t "${SESSION_NAME}:main.0" -v -l 40%
 
 # Step 4: split the top-left area (pane 0) vertically — HEADER at top (~11%), middle below.
 # After split: pane 0=HEADER(top-left), pane 1=middle-left, pane 2=LOGS(bottom-left), pane 3=RIGHT.
-tmux split-window -t "${SESSION_NAME}:main.0" -v -p 82
+tmux split-window -t "${SESSION_NAME}:main.0" -v -l 82%
 
 # Step 5: split the bottom-left pane (pane 2) horizontally — PROGRESS left, CRON right.
 # After steps 2-4, tmux renumbers panes in top-to-bottom, left-to-right order:
@@ -591,14 +611,14 @@ tmux split-window -t "${SESSION_NAME}:main.0" -v -p 82
 #   pane 3=CRON(bottom-right), pane 4=QUEUES(right,full-height)
 # CRON (new pane 3) gets 36% of the left-column bottom width
 # PROGRESS (pane 2) keeps 64% of the left-column bottom width
-tmux split-window -t "${SESSION_NAME}:main.2" -h -p 36
+tmux split-window -t "${SESSION_NAME}:main.2" -h -l 36%
 
 # ---------------------------------------------------------------------------
 # Post-creation explicit resize for window 0 — absolute widths and heights.
 # Mirrors the window-2 approach: use explicit post-creation resize rather than
 # chained percentage splits.
 #
-# WHY NEEDED: chained "split-window -p N" applies each percentage against the
+# WHY NEEDED: chained "split-window -l N%" applies each percentage against the
 # shrinking remainder of the prior split, not the original window size.  Under
 # tmux 3.2a, integer rounding compounds at each step and produces scrambled
 # proportions.
@@ -726,7 +746,7 @@ tmux send-keys -t "${SESSION_NAME}:main.4" "${QUEUES_CMD}" Enter
 #
 # SIZING APPROACH — explicit absolute widths, not chained percentages
 # -----------------------------------------------------------------------
-# Chained "split-window -h -p N" applies each percentage against the
+# Chained "split-window -h -l N%" applies each percentage against the
 # shrinking remainder of the previous split, not against the original window
 # width.  Under tmux 3.2a, integer rounding compounds at each step and
 # produces catastrophically unequal panes.
@@ -753,19 +773,19 @@ tmux send-keys -t "${SESSION_NAME}:main.4" "${QUEUES_CMD}" Enter
 # Split sequence for 9 panes (horizontal LEFT/RIGHT first):
 #   Step 1: window created → pane 0 (full)
 #   Step 2: split pane 0 -v -l 1 → pane 0=content (top), pane 1=legend (1 row)
-#   Step 3: split pane 0 -h -p 60 → pane 0=left-40%, pane 1=right-60%,
+#   Step 3: split pane 0 -h -l 60% → pane 0=left-40%, pane 1=right-60%,
 #                                    legend renumbered → pane 2
-#   Step 4: split pane 0 -h -p 67 → pane 0=bugs, pane 1=prio+reqs,
+#   Step 4: split pane 0 -h -l 67% → pane 0=bugs, pane 1=prio+reqs,
 #                                    pane 2=right-60%, pane 3=legend
-#   Step 5: split pane 1 -h -p 50 → pane 1=priority, pane 2=requirements,
+#   Step 5: split pane 1 -h -l 50% → pane 1=priority, pane 2=requirements,
 #                                    pane 3=right-60%, pane 4=legend
-#   Step 6: split pane 3 -h -p 80 → pane 3=PM, pane 4=CODER+WRITER+TESTER+CM,
+#   Step 6: split pane 3 -h -l 80% → pane 3=PM, pane 4=CODER+WRITER+TESTER+CM,
 #                                    pane 5=legend
-#   Step 7: split pane 4 -h -p 75 → pane 4=CODER, pane 5=WRITER+TESTER+CM,
+#   Step 7: split pane 4 -h -l 75% → pane 4=CODER, pane 5=WRITER+TESTER+CM,
 #                                    pane 6=legend
-#   Step 8: split pane 5 -h -p 67 → pane 5=WRITER, pane 6=TESTER+CM,
+#   Step 8: split pane 5 -h -l 67% → pane 5=WRITER, pane 6=TESTER+CM,
 #                                    pane 7=legend
-#   Step 9: split pane 6 -h -p 50 → pane 6=TESTER, pane 7=CM, pane 8=legend
+#   Step 9: split pane 6 -h -l 50% → pane 6=TESTER, pane 7=CM, pane 8=legend
 #
 # After all splits, resize-pane -x/-y fixes every pane to the correct
 # absolute width and height.  Minimum guaranteed: 15 chars wide, 5 rows tall.
@@ -787,27 +807,27 @@ tmux split-window -t "${SESSION_NAME}:visibility.0" -v -l 1
 
 # Step 3: split content area (pane 0) into LEFT (~40%) and RIGHT (~60%) regions.
 # New right pane becomes pane 1; legend shifts to pane 2.
-tmux split-window -t "${SESSION_NAME}:visibility.0" -h -p 60
+tmux split-window -t "${SESSION_NAME}:visibility.0" -h -l 60%
 
 # Left region — 3 input columns (bugs / priority / requirements)
 # Step 4: split left region (pane 0) into bugs (left) and prio+reqs (right ~67%).
 # New right-sub becomes pane 1; right-60% shifts to pane 2; legend to pane 3.
-tmux split-window -t "${SESSION_NAME}:visibility.0" -h -p 67
+tmux split-window -t "${SESSION_NAME}:visibility.0" -h -l 67%
 # Step 5: split prio+reqs (pane 1) into priority (left) and requirements (right 50%).
 # New right-sub becomes pane 2; right-60% shifts to pane 3; legend to pane 4.
-tmux split-window -t "${SESSION_NAME}:visibility.1" -h -p 50
+tmux split-window -t "${SESSION_NAME}:visibility.1" -h -l 50%
 
 # Right region — 5 agent-queue columns (PM / CODER / WRITER / TESTER / CM)
 # After steps 4-5, the full-height right-60% area is pane 3.  Split it 4 times.
 # The legend pane shifts right with each split and ends up at pane 8.
 # Step 6: PM (left ~20% of right) vs. remaining 4 queue cols (right ~80%).
-tmux split-window -t "${SESSION_NAME}:visibility.3" -h -p 80
+tmux split-window -t "${SESSION_NAME}:visibility.3" -h -l 80%
 # Step 7: CODER (left ~25% of remaining) vs. WRITER+TESTER+CM (right ~75%).
-tmux split-window -t "${SESSION_NAME}:visibility.4" -h -p 75
+tmux split-window -t "${SESSION_NAME}:visibility.4" -h -l 75%
 # Step 8: WRITER (left ~33% of remaining) vs. TESTER+CM (right ~67%).
-tmux split-window -t "${SESSION_NAME}:visibility.5" -h -p 67
+tmux split-window -t "${SESSION_NAME}:visibility.5" -h -l 67%
 # Step 9: TESTER (left 50%) vs. CM (right 50%).
-tmux split-window -t "${SESSION_NAME}:visibility.6" -h -p 50
+tmux split-window -t "${SESSION_NAME}:visibility.6" -h -l 50%
 
 # ---------------------------------------------------------------------------
 # Post-creation explicit resize — compute absolute sizes from window dimensions.
@@ -943,7 +963,7 @@ tmux send-keys -t "${SESSION_NAME}:attention" "${ATTENTION_CMD}" Enter
 #     - Current branch + sync-with-origin status
 #     - Uncommitted changes summary
 #     - In-flight rc/* branches
-#     - Recent commits on develop (top 5)
+#     - Recent commits on main (top 5)
 #
 # Right pane: watch -n 10 dashboard-git-recent-tags.sh
 #   Shows Recent Tags listing (>=10 newest tags, newest first).
@@ -954,12 +974,12 @@ tmux send-keys -t "${SESSION_NAME}:attention" "${ATTENTION_CMD}" Enter
 #
 # Split sequence:
 #   Step 1: window created  → pane 0 (full width)
-#   Step 2: split pane 0 -h -p 35 → pane 0=left (~65%), pane 1=right (~35%)
+#   Step 2: split pane 0 -h -l 35% → pane 0=left (~65%), pane 1=right (~35%)
 #   The right pane is sized to show 10 tags comfortably; the left pane keeps
 #   the wider view for the full git-status output.
 # ---------------------------------------------------------------------------
 tmux new-window -t "${SESSION_NAME}" -n "git"
-tmux split-window -t "${SESSION_NAME}:git.0" -h -p 35
+tmux split-window -t "${SESSION_NAME}:git.0" -h -l 35%
 tmux send-keys -t "${SESSION_NAME}:git.0" "${GIT_STATUS_CMD}" Enter
 tmux send-keys -t "${SESSION_NAME}:git.1" "${GIT_RECENT_TAGS_CMD}" Enter
 
@@ -990,12 +1010,12 @@ tmux send-keys -t "${SESSION_NAME}:metadata" "${METADATA_CMD}" Enter
 #
 # Split sequence:
 #   Step 1: window created → pane 0 (full width)
-#   Step 2: split pane 0 -h -p 60 → pane 0=left ~40% (metrics.sh), pane 1=right ~60% (show-metrics.sh)
+#   Step 2: split pane 0 -h -l 60% → pane 0=left ~40% (metrics.sh), pane 1=right ~60% (show-metrics.sh)
 #   show-metrics.sh table pane gets ~60% so the cache-write column
 #   does not get truncated by tmux.
 # ---------------------------------------------------------------------------
 tmux new-window -t "${SESSION_NAME}" -n "metrics"
-tmux split-window -t "${SESSION_NAME}:metrics.0" -h -p 60
+tmux split-window -t "${SESSION_NAME}:metrics.0" -h -l 60%
 tmux send-keys -t "${SESSION_NAME}:metrics.0" "${METRICS_CMD}" Enter
 tmux send-keys -t "${SESSION_NAME}:metrics.1" "${SHOW_METRICS_CMD}" Enter
 
@@ -1056,10 +1076,25 @@ tmux send-keys -t "${SESSION_NAME}:training-logs.0" \
 # Layout: horizontal split, logs occupy 60% of width on the left.
 # ---------------------------------------------------------------------------
 tmux new-window -t "${SESSION_NAME}" -n "terminal"
-tmux split-window -t "${SESSION_NAME}:terminal.0" -h -p 40
+tmux split-window -t "${SESSION_NAME}:terminal.0" -h -l 40%
 
 tmux send-keys -t "${SESSION_NAME}:terminal.0" "${LOGS_WIN_CMD}" Enter
 tmux send-keys -t "${SESSION_NAME}:terminal.1" "cd ${KANBAN_ROOT} && exec bash" Enter
+
+# ---------------------------------------------------------------------------
+# Window 14: human-review — pending HUMAN-APPROVE gate tasks (single pane)
+#
+# Lists every pending HUMAN-APPROVE task across ALL registered projects.
+# Renders: project, target RC, age, show content, approve command,
+#          reject command.  Empty state: "no approvals pending."
+#
+# Single pane; refreshes on the standard dashboard interval via watch.
+# Index 14 is used to keep this distinct from the per-project drill windows
+# (W11+) that follow, while staying below the arbitrary high numbered indices
+# that might crowd the tmux status bar.
+# ---------------------------------------------------------------------------
+tmux new-window -t "${SESSION_NAME}" -n "human-review"
+tmux send-keys -t "${SESSION_NAME}:human-review" "${HUMAN_REVIEW_CMD}" Enter
 
 # ---------------------------------------------------------------------------
 # Windows W11+: Per-project drill windows (Feature 4 — per-project view selector)
@@ -1079,10 +1114,10 @@ tmux send-keys -t "${SESSION_NAME}:terminal.1" "cd ${KANBAN_ROOT} && exec bash" 
 # drill windows scope to ONE project and do not need the multi-project overflow
 # handling used by window 0):
 #   Step A: window created → pane 0 (full)
-#   Step B: split pane 0 -v -p 40 → pane 0 (top 60%), pane 1 (bottom LOGS 40%)
-#   Step C: split pane 0 -v -p 82 → pane 0 (HEADER ~11%), pane 2 (middle 49%)
-#   Step D: split pane 2 -h -p 70 → pane 2 (QUEUES ~30%), pane 3 (right 70%)
-#   Step E: split pane 3 -h -p 36 → pane 3 (PROGRESS ~45%), pane 4 (CRON ~25%)
+#   Step B: split pane 0 -v -l 40% → pane 0 (top 60%), pane 1 (bottom LOGS 40%)
+#   Step C: split pane 0 -v -l 82% → pane 0 (HEADER ~11%), pane 2 (middle 49%)
+#   Step D: split pane 2 -h -l 70% → pane 2 (QUEUES ~30%), pane 3 (right 70%)
+#   Step E: split pane 3 -h -l 36% → pane 3 (PROGRESS ~45%), pane 4 (CRON ~25%)
 #
 # Final pane indices:
 #   0 = HEADER (top ~11%)          — scoped to project N
@@ -1143,7 +1178,7 @@ for _DRILL_PROJ in "${_DRILL_PROJECTS[@]}"; do
     tmux new-window -t "${SESSION_NAME}" -n "${_DRILL_WIN}"
 
     # Split: bottom 45% = LOGS, top 55% = document drill pane
-    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.0" -v -p 45
+    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.0" -v -l 45%
 
     tmux send-keys -t "${SESSION_NAME}:${_DRILL_WIN}.0" "${_DRILL_DOC_CMD}" Enter
     tmux send-keys -t "${SESSION_NAME}:${_DRILL_WIN}.1" "${_DRILL_LOGS_CMD}" Enter
@@ -1166,13 +1201,13 @@ for _DRILL_PROJ in "${_DRILL_PROJECTS[@]}"; do
     tmux new-window -t "${SESSION_NAME}" -n "${_DRILL_WIN}"
 
     # Step B: bottom 40% = LOGS
-    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.0" -v -p 40
+    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.0" -v -l 40%
     # Step C: split top area — HEADER at top (~11%), middle below
-    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.0" -v -p 82
+    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.0" -v -l 82%
     # Step D: split middle — QUEUES left (~30%), right 70%
-    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.2" -h -p 70
+    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.2" -h -l 70%
     # Step E: split right half — PROGRESS (~45% total), CRON right (~25% total)
-    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.3" -h -p 36
+    tmux split-window -t "${SESSION_NAME}:${_DRILL_WIN}.3" -h -l 36%
 
     tmux send-keys -t "${SESSION_NAME}:${_DRILL_WIN}.0" "${_DRILL_HEADER_CMD}" Enter
     tmux send-keys -t "${SESSION_NAME}:${_DRILL_WIN}.2" "${_DRILL_QUEUES_CMD}" Enter

@@ -7,13 +7,13 @@
 #
 # What this script does:
 #   1. Saves the caller's kanban.cfg to a temp backup (trap EXIT restores it).
-#   2. Sets tmp_root=/home/rocky/tmp in the working kanban.cfg copy.
+#   2. Sets tmp_root=$HOME/tmp in the working kanban.cfg copy.
 #   3. Runs the full unit + integration test suite.
 #   4. Asserts acceptance criteria #4, #5, #6, #9 (and sub-checks from #7).
 #   5. Restores kanban.cfg even if the suite fails.
 #
 # Acceptance criteria verified:
-#   AC#4  — After a full suite run with tmp_root=/home/rocky/tmp, zero files or
+#   AC#4  — After a full suite run with tmp_root=$HOME/tmp, zero files or
 #           dirs under /tmp match 'pgai_kanban'
 #           (ls -A /tmp | grep -E 'pgai_kanban' | wc -l == 0).
 #   AC#5  — grep for the hardcoded fallback literal in team/scripts/ and team/tests/
@@ -33,7 +33,7 @@
 # Options:
 #   --kanban-root     Kanban root (default: $PGAI_AGENT_KANBAN_ROOT_PATH or
 #                     $HOME/pgai_agent_kanban).
-#   --relocated-root  The tmp_root value to inject (default: /home/rocky/tmp).
+#   --relocated-root  The tmp_root value to inject (default: $HOME/tmp).
 #   --verbose         Pass --verbose through to the test runners.
 #   --help, -h        Show this help and exit.
 #
@@ -49,6 +49,8 @@
 #     (sourced from the UNMODIFIED env/config before any relocation write).
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Locate this script and source shared helpers
@@ -76,8 +78,8 @@ unset _INI_SH
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
-RELOCATED_ROOT="/home/rocky/tmp"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+RELOCATED_ROOT="${HOME}/tmp"
 VERBOSE=false
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -141,7 +143,7 @@ Options:
   --kanban-root <path>      Kanban root (default: \$PGAI_AGENT_KANBAN_ROOT_PATH
                             or \$HOME/pgai_agent_kanban)
   --relocated-root <path>   The tmp_root to inject for the suite run
-                            (default: /home/rocky/tmp)
+                            (default: \$HOME/tmp)
   --verbose, -v             Pass --verbose through to the test runners
   --help, -h                Show this help and exit
 

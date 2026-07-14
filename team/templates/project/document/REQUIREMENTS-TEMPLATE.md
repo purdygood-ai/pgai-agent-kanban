@@ -13,7 +13,7 @@ document
 true
 
 ## Source Branch
-develop
+main
 
 ## Human Approval Required
 auto

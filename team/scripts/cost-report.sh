@@ -80,6 +80,8 @@
 #   1 -- usage error or unrecoverable configuration failure
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script location
@@ -229,7 +231,7 @@ done
 # ---------------------------------------------------------------------------
 # Resolve kanban root
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${KANBAN_ROOT_OVERRIDE:-${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}}"
+KANBAN_ROOT="${KANBAN_ROOT_OVERRIDE:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
 
 if [[ ! -d "$KANBAN_ROOT" ]]; then
     echo "ERROR: kanban root not found: ${KANBAN_ROOT}" >&2

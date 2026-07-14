@@ -34,6 +34,8 @@
 #   4   State mutation failed.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _LIB_DIR="${_SCRIPT_DIR}/lib"
@@ -174,7 +176,7 @@ esac
 # ---------------------------------------------------------------------------
 # Resolve kanban root and project root.
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 _project_root="$(pp_project_root "${_project_value}")" || exit 1

@@ -40,11 +40,20 @@ The local source branch (typically `rc/vX.Y.Z`) is the source of truth between t
 
 ## Workflow Type Dispatch
 
-Read `## Workflow Type` from the task README. Three values dispatch to three procedures. If the field is absent, default to `release`.
+Read `## Workflow Type` from the task README. Three built-in values dispatch to the procedures below. If the field is absent, default to `release`.
 
 - **`release`** — Software development tied to a release branch. Branch from `rc/vX.Y.Z`, work, merge back, delete feature branch. **Most common case.** See "Procedure A — Release Workflow" below.
-- **`feature`** — Lightweight workflow without RC bookends. Same as release, but the source branch is `develop` (or whatever `## Source Branch` specifies). See "Procedure B — Feature Workflow" below.
+- **`feature`** — Lightweight workflow without RC bookends. Same as release, but the source branch is the prefixed main branch (or whatever `## Source Branch` specifies). See "Procedure B — Feature Workflow" below. (`feature` names a shared-branch DECOMPOSITION MODE at the PM layer, not a workflow-type plugin — tasks still carry it in `## Workflow Type`, and this procedure applies.)
 - **`document`** — Content generation rather than code. Git workflow may not apply. See "Procedure C — Document Workflow" below.
+
+**The type set is OPEN.** The values above are the built-ins this file
+documents. Any OTHER value in `## Workflow Type` means a workflow-type
+plugin under `workflows/<type>/` defines the semantics: read its
+`workflow.cfg` capabilities and the task README, which carries the
+procedure for that type. A type the dispatcher does not recognize never
+reaches you — it fails closed at discovery — so never improvise a
+default for a present-but-unrecognized value; the absent-field default
+above is the ONLY default.
 
 The procedures share a structure: PHASE 1 (do the work) then PHASE 2 (deliver the work). The phases are explicit because the most common CODER failure mode is doing PHASE 1 cleanly and skipping PHASE 2.
 
@@ -114,8 +123,9 @@ If `git checkout "$SOURCE_BRANCH"` fails (branch does not exist locally), set st
 - Commit progress as you go: `git add` + `git commit -m "..."`.
 - Update `status.md` after each significant step.
 - Never use `git stash`. If you must switch branches, commit first or discard with `git checkout -- .`.
+- **When your change is supposed to PREVENT something, exercise the prevention once before DONE** — set up the failure scenario, run the protected operation, watch the guard fire. Happy-path behavior is not guard correctness; TESTER verifies this behaviorally (its Principle 4), so catch it first.
 
-When the work meets the acceptance criteria, run the Possible Stale Assertions check (Step 4b), then proceed to PHASE 2.
+When the work meets the acceptance criteria, run the Possible Stale Assertions check (Step 4b) and the Removal/rename completeness check (Step 4c), then proceed to PHASE 2.
 
 #### Step 4b — Possible Stale Assertions check
 
@@ -183,6 +193,20 @@ Each entry is one line: `<file>:<line> — literal <value> (<short note: what ch
 
 ---
 
+#### Step 4c — Removal/rename completeness check
+
+If this task removed or renamed anything — a function, a flag, a file,
+a script, a documented name — grep the WHOLE tree for the old
+identifier AND for its behavior pattern (a call shape, a flag usage,
+a path form), not just the literal name. Every hit is one of: updated
+to the new name, deleted along with what it referenced, or explicitly
+justified in `## Possible Stale Assertions`. Zero unexplained hits is
+part of DONE for removal work. (This is the cross-tree half of the
+same honesty contract as the comment/help-sync rule above: the most
+common failure mode is adding the new thing cleanly and leaving the
+old one's references alive in docs, demos, examples, and generated
+strings.)
+
 ### PHASE 2: Deliver the work
 
 This is where most CODER failures happen. Read this phase carefully. You are not done until every step in this phase completes.
@@ -243,7 +267,7 @@ Before finalizing your task status, run the stale-literal pre-flight script:
 
 ```bash
 bash $KANBAN_ROOT/scripts/coder-stale-literal-check.sh \
-    --diff develop..HEAD \
+    --diff "${branch_prefix}main..HEAD" \
     --project <project-name>
 ```
 
@@ -275,6 +299,12 @@ CODER tasks whose `status.md` does not include a `## Stale Literal Risks` sectio
 ---
 
 #### Step 9 — Update status to DONE
+
+**`## Model` is wake-stamped — do not write it.** The wake script records the
+resolved model string into `## Model` before spawning you. That field is an
+execution record owned by the wake script; writing it yourself produces an
+unreliable self-report (models cannot identify their own name accurately).
+Leave `## Model` as the wake script wrote it.
 
 Update `status.md`:
 
@@ -320,7 +350,7 @@ If your summary does not mention both, you have not finished. Go back to whichev
 
 Identical to Procedure A, except:
 
-- `## Source Branch` is typically `develop` (or a shared feature parent), not `rc/vX.Y.Z`
+- `## Source Branch` is typically the prefixed main branch (or a shared feature parent), not `rc/vX.Y.Z`
 - No RC bookends (no CM-open-rc / CM-release tasks before/after)
 - All other steps are unchanged
 
@@ -472,6 +502,17 @@ Skipping the merge because "a human should handle this" is the deferred-merge an
 Never run `git push`, `git pull`, or `git fetch`. Never reference origin in your work. The local source branch is the truth between tasks. CM reconciles with origin at release time.
 
 If a task seems to require touching origin, you are likely on the wrong task or reading the wrong instructions. Set BLOCKED with the discrepancy named, exit.
+
+### Principle 6 — Each tree finds itself
+
+Never write live-runtime code whose imports, sourcing, or path
+construction can resolve from a repository checkout (a dev tree, a
+worktree, any PGAI_DEV_TREE_* path). The live install imports itself
+and fails loud on its own brokenness; checkouts are data. If you are
+adding a path candidate "so it also works from the dev tree," stop:
+self-locate from $BASH_SOURCE / __file__ instead — each tree finds
+ITSELF, never the other. (SOP: Git Repositories — Roles and
+Boundaries.)
 
 ---
 

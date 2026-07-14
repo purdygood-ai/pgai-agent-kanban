@@ -41,8 +41,9 @@
 # Intake actions on accepted reset (delegated to Python reset_item):
 #   bug:         Rewrite ## Status to 'open'; flip [x] to [ ] in bug_backlog.md
 #   priority:    Rewrite ## Status to 'open'; flip [x] to [ ] in priority_backlog.md
-#   requirement: Rewrite ## Status to 'open'; flip [x] to [ ] in pm_backlog.md;
-#                delete PM materializer's .materialized.<sha256> hash-marker
+#   requirement: Rewrite ## Status to 'open'; clear ## PM Task to 'none';
+#                pm_backlog UNTOUCHED; delete PM materializer's .materialized.<sha256>
+#                hash-marker; discovery mints a fresh decompose ticket next tick.
 #
 # Refusals (non-zero exit, no changes):
 #   agent-task resets:  WORKING state (an agent may currently hold the task)
@@ -55,6 +56,8 @@
 #   2  WORKING state refusal (agent-task resets only)
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -167,7 +170,7 @@ fi
 # ---------------------------------------------------------------------------
 # Resolve kanban root and project root.
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 _project_root="$(pp_project_root "${_project_value}")" || exit 1

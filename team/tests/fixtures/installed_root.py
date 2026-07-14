@@ -3,7 +3,7 @@ installed_root.py
 =================
 Test-fidelity helper: simulate the installed kanban tree layout.
 
-WHY THIS EXISTS (BUG-0158)
+WHY THIS EXISTS (an earlier defect)
 --------------------------
 Before this helper, integration tests ran against the *dev tree* where the
 Python shim package (team/pgai_agent_kanban/) is always present on sys.path
@@ -22,13 +22,15 @@ As a plain function (any test file):
     root = build_installed_root(tmp_path)
     # root is a pathlib.Path to a directory that mirrors the installed layout:
     #   root/
-    #     kanban.cfg          — minimal INI config
-    #     workflows/          — release.yaml, document.yaml (copied from real src)
-    #     roles/              — empty directory (no team/ shim present)
-    #     scripts/            — empty directory placeholder
-    #     logs/               — runtime log directory
-    #     locks/              — runtime lock directory
-    #     projects/           — empty projects registry root
+    #     kanban.cfg                — minimal INI config
+    #     workflows/
+    #       release/pipeline.yaml  — release pipeline (copied from real src)
+    #       document/pipeline.yaml — document pipeline (copied from real src)
+    #     roles/                   — empty directory (no team/ shim present)
+    #     scripts/                 — empty directory placeholder
+    #     logs/                    — runtime log directory
+    #     locks/                   — runtime lock directory
+    #     projects/                — empty projects registry root
 
 As a pytest fixture (import into conftest.py or request in a test):
 
@@ -41,7 +43,8 @@ WHAT "INSTALLED LAYOUT" MEANS
 ------------------------------
 The installed root produced by install.sh (without --self-project) contains:
   - kanban.cfg            (seeded from kanban.cfg_example)
-  - workflows/            (copied from team/workflows/ by install.sh)
+  - workflows/            (copied from team/workflows/ by install.sh; includes
+                           plugin subdirs release/ and document/ with pipeline.yaml)
   - roles/                (copied from team/roles/)
   - scripts/              (copied from team/scripts/)
   - logs/, locks/         (runtime directories created by install.sh)
@@ -65,7 +68,6 @@ from __future__ import annotations
 
 import pathlib
 import shutil
-from typing import Optional
 
 import pytest
 
@@ -80,10 +82,11 @@ _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 # Real workflow definitions in the dev tree
 _REAL_WORKFLOWS_DIR = _TEAM_DIR / "workflows"
 
-# Workflow files to copy into the simulated installed root
-# workflow token — document.yaml is the document-workflow definition and the only
-# canonical token for that workflow type.
-_WORKFLOW_FILES = ["release.yaml", "document.yaml"]
+# Workflow plugin directories to copy into the simulated installed root.
+# Each entry is a subdirectory of _REAL_WORKFLOWS_DIR containing at minimum
+# workflow.cfg and workflow.sh; types with a pipeline.yaml (release, document)
+# also carry it inside the directory so load_workflow() can resolve them.
+_WORKFLOW_PLUGIN_DIRS = ["release", "document"]
 
 
 # ---------------------------------------------------------------------------
@@ -116,8 +119,14 @@ def build_installed_root(
         <parent>/<subdir>/
             kanban.cfg          — minimal INI kanban config
             workflows/
-                release.yaml    — copied from dev tree (real definitions)
-                document.yaml   — copied from dev tree (document-workflow definition)
+                release/        — plugin directory copied from dev tree
+                    pipeline.yaml
+                    workflow.cfg
+                    workflow.sh
+                document/       — plugin directory copied from dev tree
+                    pipeline.yaml
+                    workflow.cfg
+                    workflow.sh
             roles/              — empty (no scripts sourced; placeholder)
             scripts/            — empty (no scripts sourced; placeholder)
             logs/               — runtime log directory (mirrors install.sh)
@@ -149,15 +158,19 @@ def build_installed_root(
         encoding="utf-8",
     )
 
-    # --- workflows/: copy real definitions (mirror install.sh behaviour) ---
+    # --- workflows/: copy plugin directories (mirror install.sh behaviour) ---
+    # install.sh copies team/workflows/ contents to $KANBAN_ROOT/workflows/.
+    # After v1.3.0, the layout uses plugin directories (workflows/<type>/)
+    # containing workflow.cfg, workflow.sh, and optionally pipeline.yaml.
     wf_dir = root / "workflows"
     wf_dir.mkdir(parents=True, exist_ok=True)
-    for wf_name in _WORKFLOW_FILES:
-        src = _REAL_WORKFLOWS_DIR / wf_name
-        if src.exists():
-            (wf_dir / wf_name).write_text(
-                src.read_text(encoding="utf-8"), encoding="utf-8"
-            )
+    for plugin_name in _WORKFLOW_PLUGIN_DIRS:
+        src_plugin = _REAL_WORKFLOWS_DIR / plugin_name
+        if src_plugin.is_dir():
+            dest_plugin = wf_dir / plugin_name
+            if dest_plugin.exists():
+                shutil.rmtree(dest_plugin)
+            shutil.copytree(src_plugin, dest_plugin)
 
     # --- Skeleton runtime directories (present in a real install) ---
     for dirname in ("roles", "scripts", "logs", "locks", "projects"):
@@ -186,14 +199,14 @@ def installed_root(tmp_path: pathlib.Path) -> pathlib.Path:
 
     Example usage in a test:
 
-        def test_workflow_yaml_present(installed_root):
-            assert (installed_root / "workflows" / "release.yaml").exists()
+        def test_workflow_pipeline_present(installed_root):
+            assert (installed_root / "workflows" / "release" / "pipeline.yaml").exists()
 
         def test_no_shim_package(installed_root):
             # The installed root must not have team/ (no shim).
             assert not (installed_root / "team").exists()
 
-    BUG-0158: this fixture closes the test-fidelity gap where tests ran
+    an earlier defect: this fixture closes the test-fidelity gap where tests ran
     in the dev tree (shim always importable) instead of the installed tree
     (shim absent).
     """

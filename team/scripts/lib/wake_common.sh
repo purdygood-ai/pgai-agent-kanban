@@ -60,6 +60,13 @@ source "${SCRIPT_DIR}/../lib/task_ids.sh"
 # shellcheck source=scripts/lib/discovery.sh
 source "${SCRIPT_DIR}/../lib/discovery.sh"
 
+# --- Source workflow-type dispatcher (wf_load_plugin and wf_* surface) ---
+# Must be sourced after discovery.sh; provides wf_load_plugin and the uniform
+# wf_* call surface used by CODER/WRITER task dispatch to select worktree
+# behavior by capability rather than by workflow_type string comparison.
+# shellcheck source=scripts/lib/workflow.sh
+source "${SCRIPT_DIR}/../lib/workflow.sh"
+
 # --- Source config loader (single source of truth for kanban.cfg keys) ---
 # config_loader.sh defines load_config and config_get.  It self-bootstraps
 # ini_parser.sh if read_ini is not yet available.  Must be sourced before
@@ -87,10 +94,38 @@ else
     export PGAI_PROJECT_NAME=""
 fi
 
-# --- Source optional shell-env (PATH, venv source line, KANBAN_ROOT export) ---
-# shell-env holds operator PATH, Python venv activation, and KANBAN_ROOT
-# Python venv activation, and KANBAN_ROOT export here. Optional — wake
-# scripts work without it as long as cron inherits a usable PATH.
+# --- Bootstrap: delegate root absolutization to env_bootstrap.sh, then source
+# shell-env for PATH/venv side effects.
+#
+# Why pre-export before sourcing env_bootstrap.sh:
+#   env_bootstrap.sh walks up from BASH_SOURCE[1] to derive the kanban root.
+#   When wake_common.sh is sourced (a lib file), BASH_SOURCE[1] resolves to
+#   scripts/lib/wake_common.sh — pointing to the lib directory, not the root.
+#   Sourcing env_bootstrap.sh without pre-setting the env var would cause the
+#   walk to land at scripts/lib/ (not a recognized scripts-layer dir), produce
+#   a wrong candidate, and fail loud — breaking cron's protected entry point.
+#
+#   By pre-exporting from TEAM_ROOT (already resolved by the caller via
+#   ${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}), we trigger
+#   env_bootstrap.sh's idempotency guard: it absolutizes the pre-set value and
+#   returns 0 immediately without walking BASH_SOURCE or sourcing shell-env.
+#   The result: env_bootstrap.sh handles absolutization for all its callers in
+#   a single consistent path; wake gets the same treatment without a separate
+#   implementation.
+#
+#   Operator-env-wins is preserved: if PGAI_AGENT_KANBAN_ROOT_PATH was already
+#   set by the operator (cron, explicit export), the ${:-} below is a no-op and
+#   env_bootstrap.sh absolutizes the operator's value; TEAM_ROOT carries the
+#   default and never overwrites the operator's choice.
+export PGAI_AGENT_KANBAN_ROOT_PATH="${PGAI_AGENT_KANBAN_ROOT_PATH:-$TEAM_ROOT}"
+# shellcheck source=scripts/lib/env_bootstrap.sh
+source "${SCRIPT_DIR}/../lib/env_bootstrap.sh"
+
+# --- Source optional shell-env for PATH and Python venv activation ---
+# Root resolution is now env_bootstrap.sh's responsibility (above).
+# Shell-env's remaining side effects — PATH adjustments and venv activation —
+# still need a direct source here.  Optional: wake scripts work without it
+# when cron inherits a usable PATH and shell-env is absent.
 [[ -f "$TEAM_ROOT/shell-env" ]] && source "$TEAM_ROOT/shell-env"
 
 # --- Python >= 3.12 guard (after shell-env so post-venv interpreter is checked) ---
@@ -920,6 +955,67 @@ path.write_text(text_new)
 PY
 }
 
+# --- stamp_model_field <status_file> <model_string> ---
+# Write the resolved model string into the ## Model section of a task status file.
+# If the section is absent it is inserted after ## Role (or after ## Participant
+# when ## Role is absent, or at the end when neither anchor is found).
+# Only ## Model is touched; all other sections are preserved byte-identically.
+# Best-effort: on failure a warning is logged to stderr and the task continues.
+stamp_model_field() {
+  local status_file="$1"
+  local model_value="$2"
+  python3 - "$status_file" "$model_value" <<'PY'
+import pathlib, re, sys
+
+path = pathlib.Path(sys.argv[1])
+model_value = sys.argv[2].strip()
+
+try:
+    text = path.read_text()
+except OSError as e:
+    raise SystemExit(f"stamp_model_field: cannot read {path}: {e}")
+
+# If ## Model section already exists, replace its body (section-scoped update).
+if re.search(r'^## Model\s*$', text, flags=re.M):
+    text_new, n = re.subn(
+        r'(^## Model\s*\n)(.*?)(\n+##|\Z)',
+        lambda m: m.group(1) + model_value + "\n" + (m.group(3) if m.group(3) else ''),
+        text,
+        flags=re.S | re.M,
+    )
+    if n == 0:
+        raise SystemExit("stamp_model_field: found ## Model header but subn matched 0 times")
+    path.write_text(text_new)
+    raise SystemExit(0)
+
+# Section absent — insert after ## Role, or ## Participant, or at end.
+# The replacement captures (anchor-header + body)(newline(s) + next-##) and
+# injects the new ## Model section between them, normalising spacing so the
+# output reads as two blank-line-separated sections.
+new_section = f"## Model\n{model_value}\n"
+for anchor in (r'^(## Role\s*\n.*?)(\n+##)', r'^(## Participant\s*\n.*?)(\n+##)'):
+    text_new, n = re.subn(
+        anchor,
+        lambda m: m.group(1) + "\n\n" + new_section + "\n" + m.group(2).lstrip('\n'),
+        text,
+        count=1,
+        flags=re.S | re.M,
+    )
+    if n > 0:
+        # Collapse any run of 3+ newlines introduced by the splice.
+        text_new = re.sub(r'\n{3,}', '\n\n', text_new)
+        path.write_text(text_new)
+        raise SystemExit(0)
+
+# Fallback: append at end.
+path.write_text(text.rstrip('\n') + "\n\n" + new_section)
+PY
+  local _stamp_exit=$?
+  if [[ $_stamp_exit -ne 0 ]]; then
+    echo "WARNING: stamp_model_field failed (exit ${_stamp_exit}) for ${status_file}; continuing" >&2
+  fi
+}
+
 mark_backlog() {
   local task_id="$1"
   local marker="$2"
@@ -1502,6 +1598,198 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# close_intake_on_finalize_report
+#   <task_id> <task_readme> <project_root> <tasks_root> <wf_manifest_finalize>
+#
+# Closure-parity helper for testing-only (finalize=report) workflows.
+# Mirrors the CM intake-item closure that cm/release.sh Step 16b performs for
+# release workflows via cm/promote_bundled_items.py, but keyed on:
+#   (a) the workflow plugin's finalize=report capability (WF_MANIFEST_FINALIZE)
+#   (b) the terminal roster ticket's README carrying "finalize_mode: report"
+#       in its ## Constraints section (written by inject_simple_tester_task)
+#
+# Both guards must be true before any closure is attempted — neither fires in
+# isolation.  This dual-gate prevents the closure from triggering on release
+# or document workflows (finalize != report).
+#
+# Reference: BUG-0066 (this fix), BUG-0063 (report half), BUG-0051 (design).
+# Parity with: cm/release.sh Step 16b + cm/promote_bundled_items.py.
+#
+# Behaviour:
+#   1. Guard 1: <wf_manifest_finalize> must equal "report".  Any other value
+#      (tag, publish, …) exits immediately — no-op for release/document paths.
+#   2. Guard 2: <task_readme> ## Constraints section must contain the line
+#      "finalize_mode: report" (written by inject_simple_tester_task).
+#   3. Requirements path: the first absolute-path entry in <task_readme>'s
+#      ## Inputs section (requirements file prepended by create_task_folder).
+#   4. Mid-run failure check: scan <tasks_root> for any task whose README
+#      lists the same requirements path in ## Inputs.  If any such sibling
+#      task has ## State: BLOCKED, abort — item stays running.
+#   5. Closure: invoke the canonical close_item helper via the ops package:
+#        python3 -m pgai_agent_kanban.ops close_item <project_root> <key>
+#      where <key> is the requirements file's basename (without .md extension).
+#
+# Returns 0 on success (closure fired or legitimately skipped).
+# Returns non-zero only on unexpected internal errors (best-effort: never
+# fails the task that called it).
+# ---------------------------------------------------------------------------
+close_intake_on_finalize_report() {
+  local _task_id="${1:-}"
+  local _task_readme="${2:-}"
+  local _project_root="${3:-}"
+  local _tasks_root="${4:-}"
+  local _wf_finalize="${5:-}"
+
+  # Guard 1: finalize capability must be "report".
+  # All other values (tag, publish, none) skip this block entirely so that
+  # release workflows and document workflows are byte-identical to their prior
+  # behaviour.
+  if [[ "$_wf_finalize" != "report" ]]; then
+    return 0
+  fi
+
+  # Guard 2: task README ## Constraints must contain "finalize_mode: report".
+  # inject_simple_tester_task writes this constraint on the TESTER finalizer
+  # task; regular TESTER tasks in release workflows do not carry it.
+  local _readme_has_finalize_report=false
+  if [[ -f "$_task_readme" ]]; then
+    _readme_has_finalize_report="$(python3 - "$_task_readme" <<'PY'
+import pathlib, re, sys
+try:
+    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+except Exception:
+    print("false"); raise SystemExit(0)
+# Parse ## Constraints section (ends at next ## heading or EOF)
+m = re.search(
+    r'^##\s+Constraints\s*\n(.*?)(?=\n##|\Z)',
+    text, flags=re.S | re.M
+)
+if m and re.search(r'^\s*[-*]?\s*finalize_mode\s*:\s*report\s*$', m.group(1), re.M):
+    print("true")
+else:
+    print("false")
+PY
+)"
+  fi
+
+  if [[ "$_readme_has_finalize_report" != "true" ]]; then
+    log "task ${_task_id}: close_intake_on_finalize_report: finalize_mode:report not found in README constraints — skipping intake closure (not a finalize=report terminal ticket)"
+    return 0
+  fi
+
+  # Extract requirements file path: the first absolute path in ## Inputs.
+  # create_task_folder prepends requirements_path to inputs so it is always
+  # the first entry when present.
+  local _req_path=""
+  _req_path="$(python3 - "$_task_readme" <<'PY'
+import pathlib, re, sys
+try:
+    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+except Exception:
+    raise SystemExit(1)
+m = re.search(r'^##\s+Inputs\s*\n(.*?)(?=\n##|\Z)', text, flags=re.S | re.M)
+if not m:
+    raise SystemExit(1)
+for line in m.group(1).splitlines():
+    line = line.strip()
+    if line.startswith('-'):
+        line = line[1:].strip()
+    if line.startswith('/') and line.endswith('.md'):
+        print(line)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+)" || true
+
+  if [[ -z "$_req_path" ]]; then
+    log "task ${_task_id}: close_intake_on_finalize_report: could not extract requirements path from README ## Inputs — skipping intake closure"
+    return 0
+  fi
+
+  if [[ ! -f "$_req_path" ]]; then
+    log "task ${_task_id}: close_intake_on_finalize_report: requirements file not found at ${_req_path} — skipping intake closure"
+    return 0
+  fi
+
+  log "task ${_task_id}: close_intake_on_finalize_report: requirements file identified: ${_req_path}"
+
+  # Mid-run failure check: scan sibling tasks (same requirements file in
+  # ## Inputs) for BLOCKED state.  A BLOCKED sibling means the run did not
+  # complete cleanly; intake item must remain running.
+  local _blocked_sibling=false
+  if [[ -d "$_tasks_root" ]]; then
+    _blocked_sibling="$(python3 - "$_tasks_root" "$_req_path" <<'PY'
+import pathlib, re, sys
+
+tasks_root = pathlib.Path(sys.argv[1])
+req_path   = sys.argv[2]
+
+for task_dir in sorted(tasks_root.iterdir()):
+    if not task_dir.is_dir() or task_dir.name == "queues":
+        continue
+    readme = task_dir / "README.md"
+    status_file = task_dir / "status.md"
+    if not readme.is_file() or not status_file.is_file():
+        continue
+    try:
+        readme_text = readme.read_text(encoding="utf-8")
+    except OSError:
+        continue
+    # Check if this task's ## Inputs contains the same requirements path
+    m = re.search(r'^##\s+Inputs\s*\n(.*?)(?=\n##|\Z)', readme_text, flags=re.S | re.M)
+    if not m:
+        continue
+    inputs_text = m.group(1)
+    if req_path not in inputs_text:
+        continue
+    # Sibling task found — check its state
+    try:
+        status_text = status_file.read_text(encoding="utf-8")
+    except OSError:
+        continue
+    state_m = re.search(r'^##\s+State\s*\n\s*(\S+)', status_text, re.M)
+    if state_m and state_m.group(1).strip().upper() == "BLOCKED":
+        print("true")
+        raise SystemExit(0)
+
+print("false")
+PY
+)" || true
+  fi
+
+  if [[ "$_blocked_sibling" == "true" ]]; then
+    log "task ${_task_id}: close_intake_on_finalize_report: BLOCKED sibling task found — intake item stays running (mid-run failure guard)"
+    return 0
+  fi
+
+  # All guards passed: invoke canonical close_item helper.
+  # Key is the requirements file basename without the .md extension.
+  local _req_key
+  _req_key="$(basename "$_req_path" .md)"
+
+  log "task ${_task_id}: close_intake_on_finalize_report: closing intake item '${_req_key}' (finalize=report terminal ticket complete; parity with CM Step 16b)"
+
+  local _close_exit=0
+  set +e
+  python3 -m pgai_agent_kanban.ops close_item "$_project_root" "$_req_key" done 2>&1 | \
+    while IFS= read -r _line; do log "close_intake_on_finalize_report: ${_line}"; done
+  _close_exit="${PIPESTATUS[0]}"
+  set -e
+
+  if [[ $_close_exit -eq 0 ]]; then
+    log "task ${_task_id}: close_intake_on_finalize_report: intake item '${_req_key}' closed done (BUG-0066 fix)"
+  elif [[ $_close_exit -eq 2 ]]; then
+    log "task ${_task_id}: close_intake_on_finalize_report: WARNING: ambiguous key '${_req_key}' — could not uniquely identify intake item; item left at running"
+  elif [[ $_close_exit -eq 3 ]]; then
+    log "task ${_task_id}: close_intake_on_finalize_report: WARNING: intake item '${_req_key}' not found — nothing to close"
+  else
+    log "task ${_task_id}: close_intake_on_finalize_report: WARNING: close_item exited ${_close_exit} for '${_req_key}'; item may not have been closed"
+  fi
+
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # _build_feature_branch <task_id> <project_name>
 # Calls pp_prefix_branch() to produce the prefixed feature branch name.
 # Returns "<prefix>feature/<task_id>" when branch_prefix is set in project.cfg.
@@ -1642,11 +1930,13 @@ _check_halt_after_for_project() {
 #
 # Called AFTER pp_load_config so PP_dev_tree_path and PP_workflow_type are set.
 #
-# For release-workflow projects: if PP_dev_tree_path is empty or not a
-# directory, log the canonical skip line and return 1 (caller must skip this
-# project and continue to the next).
+# For git-workflow projects (git_mode != none): if PP_dev_tree_path is empty
+# or not a directory, log the canonical skip line and return 1 (caller must
+# skip this project and continue to the next).
 #
-# Document-workflow projects are exempt — they have no dev tree by design.
+# Projects whose workflow plugin declares git_mode=none are exempt — they have
+# no dev tree by design (e.g. document workflow).  The plugin is loaded
+# best-effort; a failed load is treated conservatively (dev tree required).
 #
 # Return values:
 #   0 — dev tree present (or exempt); caller continues normally
@@ -1655,9 +1945,20 @@ _check_halt_after_for_project() {
 _check_project_dev_tree() {
     local project_name="${1:-}"
 
-    # Document-workflow projects have no dev tree by design — exempt.
+    # Determine the workflow's git mode by loading its plugin.
+    # Projects with git_mode=none have no dev tree by design — exempt.
     local _wf="${PP_workflow_type:-release}"
-    if [[ "$_wf" == "document" ]]; then
+    local _wf_git_mode="rw"   # conservative default: require dev tree
+    local _wf_load_exit=0
+    set +e
+    wf_load_plugin "$_wf" 2>/dev/null
+    _wf_load_exit=$?
+    set -e
+    if [[ $_wf_load_exit -eq 0 ]]; then
+        _wf_git_mode="$(wf_git_mode 2>/dev/null || echo "rw")"
+    fi
+
+    if [[ "$_wf_git_mode" == "none" ]]; then
         return 0
     fi
 

@@ -627,3 +627,400 @@ pgai_tmp_cleanliness_check() {
     echo "[pgai-cleanliness] Use pgai_mktemp_d / pgai_mktemp from temp.sh instead of bare /tmp paths." >&2
     return 1
 }
+
+# ---------------------------------------------------------------------------
+# pgai_listener_cleanliness_check [project_subtree]
+# Scan for TCP listeners whose owning process cwd or cmdline is under the
+# project's temp subtree (or the full framework temp root when no subtree is
+# given) and fail non-zero if any are found.
+#
+# This gates the class of listener-leak residue — the same philosophy as
+# pgai_tmp_cleanliness_check does for files.  A test that spawns a network
+# server and fails (or skips teardown on an exception path) will leave a
+# listener bound to a port.  This check surfaces such leaks after pytest
+# exits so the runner can fail non-zero with enough context for the operator
+# to correlate the leaked listener to its fixture.
+#
+# Scope narrowing:
+#   When multiple projects share the same framework temp root (e.g.
+#   /tmp/pgai_kanban_tmp), a sibling project's leaked listener would be
+#   falsely attributed to whichever project's runner happens to check next if
+#   only the temp root basename is used.  To prevent cross-project false
+#   positives, callers should supply the per-project subtree path so the check
+#   matches only listeners rooted in that project's own portion of the temp
+#   tree.  When no subtree is supplied the check falls back to the wide-scope
+#   basename match (backward-compatible behavior).
+#
+# Detection mechanism:
+#   1. Enumerate TCP listeners via "ss -tlnp" (preferred; RHEL9 standard).
+#      Falls back to "lsof -iTCP -sTCP:LISTEN" when ss is absent.
+#   2. For each unique listener pid, read /proc/<pid>/cwd (symlink target)
+#      and /proc/<pid>/cmdline (NUL-delimited, converted to spaces).
+#   3a. When a project subtree is set (see "Arguments" below): flag the pid
+#       only when cwd starts with that subtree prefix OR cmdline contains it.
+#       This prevents listeners from sibling projects' subtrees from being
+#       attributed to this project.
+#   3b. When no project subtree is set: flag the pid if cwd or cmdline
+#       contains the framework temp root basename (wide-scope fallback, same
+#       as pre-narrowing behavior).
+#   4. For every flagged pid, print its pid and full cmdline to stderr.
+#   5. Return non-zero when at least one flagged listener is found; return 0
+#      when no flagged listeners exist.
+#
+# Scope constraint:
+#   The check examines ONLY pids whose /proc entry is readable by the current
+#   user.  Listeners owned by root, systemd, sshd, or other users are either
+#   unreadable (skipped silently) or lack the temp-root footprint (not flagged).
+#   This prevents false positives on foreign system services.
+#
+# Arguments:
+#   $1 (optional) — absolute path to the project's temp subtree
+#                   (e.g. /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban).
+#                   When provided, only listeners under this prefix are flagged.
+#                   Overrides PGAI_PROJECT_TEMP_SUBTREE when both are set.
+#
+# Environment variables:
+#   PGAI_PROJECT_TEMP_SUBTREE (optional) — same as $1; used when the positional
+#                   argument is not supplied.  Set by gated runners to scope the
+#                   check to the project being tested.
+#
+# Returns:
+#   0  — no project-scoped listeners found (or no listeners found under the
+#        framework temp root when running in wide-scope fallback mode)
+#   1  — at least one scoped listener found (details printed to stderr)
+#
+# Usage:
+#   pgai_listener_cleanliness_check
+#   pgai_listener_cleanliness_check "/tmp/pgai_kanban_tmp/projects/my-project"
+#   PGAI_PROJECT_TEMP_SUBTREE="/tmp/pgai_kanban_tmp/projects/my-project" \
+#       pgai_listener_cleanliness_check
+# ---------------------------------------------------------------------------
+pgai_listener_cleanliness_check() {
+    local root root_basename
+    root="$(pgai_temp_dir)"
+    root_basename="$(basename "$root")"
+
+    # Resolve the project subtree scope.  Precedence: positional arg > env var > none.
+    # When a subtree is set, the match is a full path-prefix check against cwd and a
+    # substring check against cmdline.  When no subtree is set, fall back to the
+    # basename substring match (wide-scope; catches all projects sharing this temp root).
+    local project_subtree=""
+    if [[ -n "${1:-}" ]]; then
+        project_subtree="${1%/}"   # strip trailing slash for consistent prefix matching
+    elif [[ -n "${PGAI_PROJECT_TEMP_SUBTREE:-}" ]]; then
+        project_subtree="${PGAI_PROJECT_TEMP_SUBTREE%/}"
+    fi
+
+    # Enumerate listening TCP pids.  We try ss first (iproute2, always present
+    # on RHEL9); fall back to lsof for environments where ss is absent.
+    local raw_pids=()
+    if command -v ss >/dev/null 2>&1; then
+        # ss -tlnp output includes pid fields like: users:(("python3",pid=12345,fd=9))
+        # Extract all numeric pid values from the users:() columns.
+        while IFS= read -r pid_val; do
+            [[ -n "$pid_val" ]] && raw_pids+=("$pid_val")
+        done < <(ss -tlnp 2>/dev/null \
+            | grep -oP 'pid=\K[0-9]+' \
+            | sort -u)
+    elif command -v lsof >/dev/null 2>&1; then
+        # lsof -iTCP -sTCP:LISTEN outputs one line per fd; column 2 is the pid.
+        while IFS= read -r pid_val; do
+            [[ -n "$pid_val" ]] && raw_pids+=("$pid_val")
+        done < <(lsof -iTCP -sTCP:LISTEN -n -P 2>/dev/null \
+            | awk 'NR>1 {print $2}' \
+            | sort -u)
+    else
+        # Neither tool is available — skip the check rather than block the run.
+        echo "[pgai-listener] WARNING: neither ss nor lsof found; skipping listener cleanliness check." >&2
+        return 0
+    fi
+
+    # For each listener pid, inspect /proc/<pid>/cwd and /proc/<pid>/cmdline.
+    local flagged_pids=() flagged_cmdlines=()
+    local pid cwd_target cmdline
+    for pid in "${raw_pids[@]}"; do
+        # Skip if we cannot read this pid's proc entry (foreign user / race).
+        [[ -d "/proc/${pid}" ]] || continue
+
+        # Read cwd symlink target; empty when unreadable.
+        cwd_target="$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)"
+
+        # Read cmdline: NUL-delimited arguments; tr converts NULs to spaces so
+        # the result is a printable single line.  We pipe through tr rather than
+        # using $() on the raw binary file to avoid bash's "ignored null byte"
+        # warnings (bash command substitution silently drops NULs but emits the
+        # warning; tr handles the conversion cleanly before bash ever sees it).
+        cmdline="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
+        # Trim trailing space produced by the final NUL-to-space conversion.
+        cmdline="${cmdline% }"
+
+        # Flag based on the resolved scope:
+        #   - Project subtree set: match cwd against the subtree prefix; match
+        #     cmdline requiring a directory boundary after the subtree path so that
+        #     a sibling project whose name is a prefix extension of this project
+        #     (e.g. pgai-agent-kanban-ui vs pgai-agent-kanban) is not falsely
+        #     matched.  The cmdline check accepts the subtree followed by '/'
+        #     (another path component), ' ' (next whitespace-delimited token), or
+        #     at the end of the string (subtree is the final argument).
+        #   - No subtree: fall back to the basename substring check (wide scope).
+        local matched=0
+        if [[ -n "${project_subtree}" ]]; then
+            if [[ "$cwd_target" == "${project_subtree}" || \
+                  "$cwd_target" == "${project_subtree}/"* || \
+                  "$cmdline" == *"${project_subtree}/"* || \
+                  "$cmdline" == *"${project_subtree} "* || \
+                  "$cmdline" == *"${project_subtree}" ]]; then
+                matched=1
+            fi
+        else
+            if [[ "$cwd_target" == *"${root_basename}"* || \
+                  "$cmdline" == *"${root_basename}"* ]]; then
+                matched=1
+            fi
+        fi
+
+        if [[ "${matched}" -eq 1 ]]; then
+            flagged_pids+=("$pid")
+            flagged_cmdlines+=("$cmdline")
+        fi
+    done
+
+    if [[ "${#flagged_pids[@]}" -eq 0 ]]; then
+        return 0
+    fi
+
+    # Flagged listeners found: report and return non-zero.
+    local scope_label
+    if [[ -n "${project_subtree}" ]]; then
+        scope_label="${project_subtree}"
+    else
+        scope_label="${root}"
+    fi
+    echo "[pgai-listener] FAIL: framework-rooted TCP listeners survived the test suite." >&2
+    echo "[pgai-listener] The following listeners have cwd or cmdline under the scoped temp root (${scope_label}):" >&2
+    local i
+    for i in "${!flagged_pids[@]}"; do
+        echo "[pgai-listener]   pid=${flagged_pids[$i]}  cmdline=${flagged_cmdlines[$i]}" >&2
+    done
+    echo "[pgai-listener] Tests must stop any server they start; use a teardown-guaranteed fixture." >&2
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# wake_tmp_litter_take_snapshot <snapshot_file> [session_epoch]
+# Capture the current top-level entries under /tmp (names + mtimes) to a
+# state file so the post-session check can diff against them.
+#
+# Called pre-dispatch, before the provider CLI runs. The state file lives
+# under the task's own temp subtree — never under bare /tmp.
+#
+# Arguments:
+#   $1  Absolute path for the snapshot file (write, create parent dirs).
+#   $2  Optional: session start epoch (seconds since Unix epoch).  Defaults
+#       to "$(date +%s)".  Stored as a header line so the post-check can
+#       apply the age filter.
+#
+# Output format (written to the snapshot file):
+#   Line 1: epoch=<N>          — session start epoch
+#   Lines 2+: <mtime_epoch>\t<basename>  — one entry per /tmp top-level item
+#             sorted by basename so comm(1) can be used on the name column.
+#
+# Returns 0 on success; non-zero (and writes an error to stderr) on failure.
+# The wake bracket calls this inside a fire-and-forget guard: failure here
+# must not block the task.
+# ---------------------------------------------------------------------------
+wake_tmp_litter_take_snapshot() {
+    local snapshot_file="${1:-}"
+    local session_epoch="${2:-$(date +%s)}"
+
+    if [[ -z "$snapshot_file" ]]; then
+        echo "temp.sh: wake_tmp_litter_take_snapshot: snapshot_file argument required" >&2
+        return 1
+    fi
+
+    # Create parent directory; refuse to write to bare /tmp.
+    local snap_dir
+    snap_dir="$(dirname "$snapshot_file")"
+    if [[ -z "$snap_dir" || "$snap_dir" == "/tmp" ]]; then
+        echo "temp.sh: wake_tmp_litter_take_snapshot: refusing to write snapshot to /tmp directly — use a subdirectory" >&2
+        return 1
+    fi
+    mkdir -p "$snap_dir" || {
+        echo "temp.sh: wake_tmp_litter_take_snapshot: cannot create snapshot directory ${snap_dir}" >&2
+        return 1
+    }
+
+    # Write header and mtime+name pairs for all current /tmp top-level entries.
+    {
+        echo "epoch=${session_epoch}"
+        # stat -c '%Y\t%n' reads mtime epoch and basename in one pass.
+        # Use find to enumerate, then stat each; fall back gracefully when /tmp
+        # is inaccessible or empty.
+        for _f in /tmp/*; do
+            [[ -e "$_f" || -L "$_f" ]] || continue
+            local _bn _mt
+            _bn="$(basename "$_f")"
+            _mt="$(stat -c '%Y' "$_f" 2>/dev/null || echo 0)"
+            printf '%s\t%s\n' "$_mt" "$_bn"
+        done | sort -k2
+    } > "$snapshot_file" || {
+        echo "temp.sh: wake_tmp_litter_take_snapshot: failed to write ${snapshot_file}" >&2
+        return 1
+    }
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# wake_tmp_litter_check_and_report \
+#     <snapshot_file> <task_status_path> <task_id> \
+#     <log_func_name> <project_name> <kanban_root>
+#
+# Post-session litter check: diff /tmp top-level entries against the
+# pre-dispatch snapshot and report new entries that are not on the allowlist
+# or under the framework temp root.
+#
+# Reporting only — never deletes anything. Fire-and-forget: any internal
+# error is logged and the function returns 0 so the wake tail is unaffected.
+#
+# Arguments:
+#   $1  snapshot_file        — path written by wake_tmp_litter_take_snapshot
+#   $2  task_status_path     — absolute path to the task's status.md
+#   $3  task_id              — task identifier string
+#   $4  log_func_name        — name of the log() function in the calling scope
+#                              (called as: "$log_func_name" "message")
+#   $5  project_name         — project name (for overwatch actions.log path)
+#   $6  kanban_root          — kanban root directory (for overwatch actions.log)
+#
+# Side effects when litter is found:
+#   - Appends a `## Temp Litter` section to status.md naming each file
+#   - Calls log_func_name with a one-line summary
+#   - Appends one info entry to <kanban_root>/projects/<project_name>/overwatch/actions.log
+#
+# Allowlist (entries created during the session are NOT flagged):
+#   systemd-*   — systemd runtime artifacts
+#   tmux-*      — tmux socket/session directories
+#   pytest-of-* — pytest temporary directories
+#   <framework_temp_root> and descendants — kanban's own temp space
+#   Entries whose mtime <= session_start_epoch (pre-existed; not flagged)
+#
+# Returns 0 always (fire-and-forget).
+# ---------------------------------------------------------------------------
+wake_tmp_litter_check_and_report() {
+    # Wrap everything in a subshell so any unhandled error returns 0 to caller.
+    (
+    set +e
+
+    local snapshot_file="${1:-}"
+    local task_status_path="${2:-}"
+    local task_id="${3:-}"
+    local log_func="${4:-}"
+    local project_name="${5:-}"
+    local kanban_root="${6:-}"
+
+    # Validate required arguments; bail silently when missing.
+    if [[ -z "$snapshot_file" || -z "$task_status_path" || -z "$task_id" ]]; then
+        echo "temp.sh: wake_tmp_litter_check_and_report: missing required arguments" >&2
+        exit 0
+    fi
+
+    # Snapshot must be readable; if not (e.g. pre-snapshot failed), log and exit.
+    if [[ ! -f "$snapshot_file" ]]; then
+        if [[ -n "$log_func" ]] && command -v "$log_func" >/dev/null 2>&1; then
+            "$log_func" "litter check: snapshot file not found (${snapshot_file}); skipping check for ${task_id}"
+        else
+            echo "temp.sh: wake_tmp_litter_check_and_report: snapshot file not found: ${snapshot_file}" >&2
+        fi
+        exit 0
+    fi
+
+    # Read session epoch from snapshot header.
+    local session_epoch=0
+    local header_line
+    header_line="$(head -1 "$snapshot_file" 2>/dev/null || echo "")"
+    if [[ "$header_line" == epoch=* ]]; then
+        session_epoch="${header_line#epoch=}"
+    fi
+
+    # Resolve the framework temp root so we can exclude it and its descendants.
+    local fw_root
+    fw_root="$(pgai_temp_dir 2>/dev/null || echo "/tmp/pgai_kanban_tmp")"
+    local fw_root_basename
+    fw_root_basename="$(basename "$fw_root")"
+
+    # Build the set of basenames that existed before the session (from snapshot).
+    # Snapshot lines 2+ have format: <mtime>\t<basename>
+    declare -A _pre_names
+    while IFS=$'\t' read -r _mt _bn; do
+        [[ -z "$_bn" || "$_bn" == epoch=* ]] && continue
+        _pre_names["$_bn"]=1
+    done < <(tail -n +2 "$snapshot_file" 2>/dev/null)
+
+    # Scan current /tmp top-level and identify litter.
+    local litter=()
+    for _f in /tmp/*; do
+        [[ -e "$_f" || -L "$_f" ]] || continue
+        local _bn _mt
+        _bn="$(basename "$_f")"
+        _mt="$(stat -c '%Y' "$_f" 2>/dev/null || echo 0)"
+
+        # Skip if it was present before the session.
+        [[ -n "${_pre_names[$_bn]+_}" ]] && continue
+
+        # Skip the framework temp root.
+        [[ "$_bn" == "$fw_root_basename" ]] && continue
+
+        # Skip entries whose mtime predates the session (clock skew guard).
+        if [[ "$session_epoch" -gt 0 && "$_mt" -le "$session_epoch" ]]; then
+            continue
+        fi
+
+        # Allowlist patterns: systemd-*, tmux-*, pytest-of-*
+        case "$_bn" in
+            systemd-*|tmux-*|pytest-of-*)
+                continue
+                ;;
+        esac
+
+        litter+=("/tmp/${_bn}")
+    done
+
+    # Nothing to report — clean session.
+    if [[ "${#litter[@]}" -eq 0 ]]; then
+        exit 0
+    fi
+
+    # --- Report to status.md ---
+    if [[ -f "$task_status_path" ]]; then
+        {
+            printf '\n## Temp Litter\n'
+            for _lf in "${litter[@]}"; do
+                printf 'created %s — SOP Temporary File Convention\n' "$_lf"
+            done
+        } >> "$task_status_path" 2>/dev/null || true
+    fi
+
+    # --- Log one summary line ---
+    local _count="${#litter[@]}"
+    local _summary="litter check: ${task_id} left ${_count} bare /tmp entry(ies): ${litter[*]}"
+    if [[ -n "$log_func" ]] && command -v "$log_func" >/dev/null 2>&1; then
+        "$log_func" "$_summary"
+    else
+        echo "temp.sh: ${_summary}" >&2
+    fi
+
+    # --- Surface to OVERWATCH actions.log ---
+    if [[ -n "$project_name" && -n "$kanban_root" ]]; then
+        local _ow_log_dir="${kanban_root}/projects/${project_name}/overwatch"
+        local _ow_log="${_ow_log_dir}/actions.log"
+        mkdir -p "$_ow_log_dir" 2>/dev/null || true
+        local _ts
+        _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")"
+        # Format: timestamp<TAB>name<TAB>target<TAB>action<TAB>backup<TAB>reason
+        printf '%s\tcheck-bare-tmp-litter\t%s\tlitter-reported\tnone\t%d bare /tmp entry(ies) created during session: %s\n' \
+            "$_ts" "$task_id" "$_count" "${litter[*]}" >> "$_ow_log" 2>/dev/null || true
+    fi
+
+    exit 0
+    )
+    return 0
+}

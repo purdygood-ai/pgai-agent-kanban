@@ -5,8 +5,14 @@
 #
 # A stale Active RC is defined as:
 #   - release-state.md shows "Active RC: vX.Y.Z" (non-none), AND
-#   - a git tag matching that version exists in the dev tree, AND
-#   - no local rc/<version> branch exists in the dev tree.
+#   - a git tag matching that version (with branch_prefix applied) exists in
+#     the dev tree, AND
+#   - no local rc/<version> branch (with branch_prefix applied) exists in the
+#     dev tree.
+#
+# Branch names and tag names are resolved using the project's branch_prefix
+# from project.cfg (e.g. branch_prefix=ai_ → branch is ai_rc/vX.Y.Z, tag is
+# ai_vX.Y.Z).  When branch_prefix is empty the bare names are used.
 #
 # This condition indicates a release completed (tag exists) but the RC state
 # was never reset (branch gone, tag present, state file stuck). OVERWATCH
@@ -110,6 +116,17 @@ _csarc_resolve_env() {
         return 1
     fi
 
+    # Read branch_prefix from project config; default to empty (no prefix).
+    # Strips surrounding double-quotes so that `branch_prefix = ""` is treated as empty.
+    _CSARC_BRANCH_PREFIX=""
+    if [[ -n "${cfg_file}" ]]; then
+        local _raw_prefix
+        _raw_prefix="$(grep -E '^[[:space:]]*branch_prefix[[:space:]]*=' "${cfg_file}" \
+            | head -n1 \
+            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+        _CSARC_BRANCH_PREFIX="${_raw_prefix:-}"
+    fi
+
     return 0
 }
 
@@ -135,30 +152,34 @@ _csarc_read_active_rc() {
 }
 
 # ---------------------------------------------------------------------------
-# _csarc_tag_exists <dev_tree> <version>
-# Returns 0 if a git tag exactly matching <version> exists in the dev tree.
-# <version> is e.g. "v0.21.42".
+# _csarc_tag_exists <dev_tree> <version> [prefix]
+# Returns 0 if a git tag matching <prefix><version> exists in the dev tree.
+# <version> is the bare version string e.g. "v0.21.42".
+# <prefix> is the optional branch_prefix (e.g. "ai_"); default is empty.
 # Uses git plumbing (git tag --list) per task constraints.
 # ---------------------------------------------------------------------------
 _csarc_tag_exists() {
     local dev_tree="$1"
     local version="$2"
+    local prefix="${3:-}"
     local result
-    result="$(git -C "${dev_tree}" tag --list "${version}" 2>/dev/null)" || return 1
+    result="$(git -C "${dev_tree}" tag --list "${prefix}${version}" 2>/dev/null)" || return 1
     [[ -n "${result}" ]]
 }
 
 # ---------------------------------------------------------------------------
-# _csarc_rc_branch_exists <dev_tree> <version>
-# Returns 0 if a local branch named rc/<version> exists in the dev tree.
-# <version> is e.g. "v0.21.42".
+# _csarc_rc_branch_exists <dev_tree> <version> [prefix]
+# Returns 0 if a local branch named <prefix>rc/<version> exists in the dev tree.
+# <version> is the bare version string e.g. "v0.21.42".
+# <prefix> is the optional branch_prefix (e.g. "ai_"); default is empty.
 # Uses git plumbing (git branch --list) per task constraints.
 # ---------------------------------------------------------------------------
 _csarc_rc_branch_exists() {
     local dev_tree="$1"
     local version="$2"
+    local prefix="${3:-}"
     local result
-    result="$(git -C "${dev_tree}" branch --list "rc/${version}" 2>/dev/null)" || return 1
+    result="$(git -C "${dev_tree}" branch --list "${prefix}rc/${version}" 2>/dev/null)" || return 1
     [[ -n "${result}" ]]
 }
 
@@ -215,7 +236,7 @@ _csarc_do_reset() {
         "${rs_file}" \
         "active-rc-reset-to-none" \
         "${backup_path}" \
-        "Stale Active RC ${stale_rc}: tag exists, rc/ branch absent; reset to none" \
+        "Stale Active RC ${stale_rc}: prefixed tag and rc/ branch confirmed absent; reset to none" \
     || true
 
     return 0
@@ -271,6 +292,9 @@ overwatch_check_stale_active_rc() {
         fi
     fi
 
+    local branch_prefix="${_CSARC_BRANCH_PREFIX:-}"
+    echo "check-stale-active-rc: project=${project_name} branch_prefix='${branch_prefix}'" >&2
+
     # Read current Active RC
     local active_rc
     active_rc="$(_csarc_read_active_rc "${rs_file}")"
@@ -282,19 +306,22 @@ overwatch_check_stale_active_rc() {
 
     echo "check-stale-active-rc: Active RC is ${active_rc}; checking for stale state" >&2
 
-    # Condition 1: tag must exist
-    if ! _csarc_tag_exists "${_CSARC_DEV_TREE}" "${active_rc}"; then
-        echo "check-stale-active-rc: tag ${active_rc} does not exist; no stale state" >&2
-        return 0
-    fi
-    echo "check-stale-active-rc: tag ${active_rc} exists" >&2
+    local prefixed_tag="${branch_prefix}${active_rc}"
+    local prefixed_rc_branch="${branch_prefix}rc/${active_rc}"
 
-    # Condition 2: rc/ branch must NOT exist
-    if _csarc_rc_branch_exists "${_CSARC_DEV_TREE}" "${active_rc}"; then
-        echo "check-stale-active-rc: branch rc/${active_rc} still exists; Active RC is not stale" >&2
+    # Condition 1: tag must exist (using project's branch_prefix)
+    if ! _csarc_tag_exists "${_CSARC_DEV_TREE}" "${active_rc}" "${branch_prefix}"; then
+        echo "check-stale-active-rc: tag ${prefixed_tag} does not exist; no stale state" >&2
         return 0
     fi
-    echo "check-stale-active-rc: branch rc/${active_rc} absent — stale Active RC confirmed" >&2
+    echo "check-stale-active-rc: tag ${prefixed_tag} exists" >&2
+
+    # Condition 2: rc/ branch must NOT exist (using project's branch_prefix)
+    if _csarc_rc_branch_exists "${_CSARC_DEV_TREE}" "${active_rc}" "${branch_prefix}"; then
+        echo "check-stale-active-rc: branch ${prefixed_rc_branch} still exists; Active RC is not stale" >&2
+        return 0
+    fi
+    echo "check-stale-active-rc: branch ${prefixed_rc_branch} absent — stale Active RC confirmed" >&2
 
     if (( dry_run == 1 )); then
         echo "check-stale-active-rc: [dry-run] would reset Active RC from ${active_rc} to none in ${rs_file}" >&2
@@ -303,7 +330,7 @@ overwatch_check_stale_active_rc() {
             "${rs_file}" \
             "dry-run-stale-active-rc-detected" \
             "none" \
-            "Stale Active RC ${active_rc} detected (tag exists, rc/ branch absent); dry-run, no action taken" \
+            "Stale Active RC ${active_rc} detected (tag ${prefixed_tag} exists, branch ${prefixed_rc_branch} absent); dry-run, no action taken" \
         2>/dev/null || true
         return 0
     fi

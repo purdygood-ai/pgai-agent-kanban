@@ -62,7 +62,7 @@ Two vertical panes covering the dev tree's git state. Both panes need `PGAI_DEV_
 | Left (~65%, git status) | `git-status.sh` | `PGAI_DEV_TREE_PATH=$PGAI_DEV_TREE_PATH git-status.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
 | Right (~35%, recent tags) | `git-recent-tags.sh` | `PGAI_DEV_TREE_PATH=$PGAI_DEV_TREE_PATH git-recent-tags.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
 
-The left pane reports current branch and sync state, develop and main sync state, uncommitted changes, and recent rc/* branches. The right pane lists the newest tags (at least 10) sorted newest first.
+The left pane reports current branch and sync state, main sync state, uncommitted changes, and recent rc/* branches. The right pane lists the newest tags (at least 10) sorted newest first.
 
 ## Window 5 — metadata
 
@@ -147,6 +147,46 @@ The cron firings pane is shared with window 1 because cron is a system-level sch
 | Right (CRON, ~25%) | `next-cron-firings.sh` | `next-cron-firings.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
 | Bottom (LOGS, ~40%) | `logs.sh` | `logs.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --stdout` |
 
+## Window 14 — human-review
+
+Single pane: every pending HUMAN-APPROVE gate task across every registered project, with the two verbatim commands the operator uses to approve or reject each gate. Empty state renders one line — `no approvals pending.`.
+
+| Pane position | Populating script | Standalone command |
+|---|---|---|
+| single | `human-review.sh` | `human-review.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
+
+The header line reads `✋ PENDING APPROVALS`. Each pending gate renders as a block with the following rows, in this order:
+
+| Row | Source | Meaning |
+|---|---|---|
+| `project` | task folder's project directory | Name of the project the gate belongs to. |
+| `RC/target` | `## Release Version` in the task README | The RC version awaiting approval (falls back to the task ID if the field is absent). |
+| `age` | `status.md` mtime | Human-readable elapsed time since the task last changed state (`45s`, `12m`, `3h 4m`, `2d 1h`). |
+| `state` | `## State` in the task's `status.md` | Either `WAITING` or `BACKLOG` — both mean pending human action. |
+| Goal lines | `## Goal` in the task README | Up to four lines describing what is being approved and where the report lives. |
+| `Review:` block | `scan_human_approvals.py` `_build_review_cmds` | Ordered, verbatim inspect-before-deciding commands (see below). **Rendered above `Approve:` / `Reject:`** so the operator reads before pasting. |
+| `Approve:` | fixed command template | `scripts/close.sh --project <proj> --key <task-id>` — copy-paste to advance the gate to DONE. |
+| `Reject:` | fixed command template | `scripts/wontdo.sh --project <proj> --key <task-id>` — copy-paste to mark the gate WONT-DO. |
+
+### `Review:` block — ordered commands, omit-when-unknown rule
+
+The `Review:` block sits **immediately above** the `Approve:` / `Reject:` lines, completing the read-decide-paste loop in a single pane. Its command lines are printed verbatim, one per line, indented under the `Review:` label — the same formatting the `Approve:` and `Reject:` lines use, so a copy-paste is safe.
+
+The block is built in a fixed order and follows an omit-when-unknown rule:
+
+1. **`scripts/show.sh --project <proj> --key <task-id>`** — always present. Shows the gate task itself (goal, prerequisites, notes).
+2. **`scripts/show-test-report.sh --project <proj> --key <rc-version>`** — present **only when the target RC version is known**, identified by starting with `v`. Omitted rather than invented when the version is unknown; the fallback value for `## Release Version` is the task ID itself, which starts with `HUMAN-APPROVE` and therefore never satisfies the `v` check.
+
+The block never guesses. When TESTER's report cannot be addressed by a version key the scanner can trust, the show-test-report line is dropped and only the `show.sh` line renders — a missing line is honest, an invented key is not. The same rule applies to the `review_cmds` array on `GET /approvals` (documented in `operator-api.md`); both surfaces are populated by the same scanner call and therefore emit byte-identical strings for the same gate.
+
+Empty state (no HUMAN-APPROVE tasks are `WAITING` or `BACKLOG` in any project) renders exactly one indented line:
+
+```
+  no approvals pending.
+```
+
+Rows are sorted first by project name, then by task ID. A task counts as pending when its folder name starts with `HUMAN-APPROVE` and its `status.md` `## State` field is `WAITING` or `BACKLOG`.
+
 ## tmux status bar
 
 The bottom status line of every tmux window is not a pane — it is populated via tmux's `status-format` mechanism — but it surfaces a visible dashboard element, so it is documented here for completeness.
@@ -156,3 +196,31 @@ The bottom status line of every tmux window is not a pane — it is populated vi
 | Bottom status line (all windows) | `status-bottom.sh` | `status-bottom.sh $PGAI_AGENT_KANBAN_ROOT_PATH` |
 
 Note: `status-bottom.sh` takes the kanban root as a positional argument, not via `--kanban-root`.
+
+The status line surfaces two conditional indicators that are otherwise easy to miss. Both segments are absent under normal state and precede the date/time on the right:
+
+- **HALT** — an all-caps bracketed marker (for example `[HALT GLOBAL]` or `[HALT-AFTER:PROJECT <event>]`) rendered when a halt file is present.
+- **APPROVAL** — `✋ APPROVAL(n)` in yellow when `n>=1` HUMAN-APPROVE gate tasks are `WAITING` or `BACKLOG` across all registered projects (`[APPROVAL(n)]` on `NO_COLOR` or dumb terminals). Absent when no gates are pending. Drill into window 14 for the row-level detail.
+
+When both indicators fire, HALT is emitted first.
+
+### Rich-mode glyph legend
+
+In rich mode (color-capable terminal, `NO_COLOR` unset), each status-bar segment is prefixed with a leading glyph so the segment kind is scannable at a glance. Segment order and field content are unchanged from prior versions — only the leading glyph is new. The two siblings (`status-bottom.sh` and `status-right.sh`) source a single library, `team/scripts/lib/status_glyphs.sh`, so the glyph literals live in exactly one place; edits there reflow both siblings on the next render.
+
+| Segment | Rich mode | NO_COLOR / TERM=dumb (unchanged) |
+|---|---|---|
+| install version | 📝 v1.12.0 | v1.12.0 |
+| install version — unknown | 📝 unknown | unknown |
+| project:version | 📝 proj:v0.8.0 | proj:v0.8.0 |
+| project:version — unknown | 📝 unknown | unknown |
+| PM mode — auto | 🟢 PM:auto | PM:auto |
+| PM mode — manual | 🟡 PM:manual | PM:manual |
+| approval (n>=1 pending) | ✋ APPROVAL(n) | [APPROVAL(n)] |
+| HALT (full stop) | 🛑 HALT GLOBAL / 🛑 HALT PROJECT ... | [HALT GLOBAL] / [HALT PROJECT ...] |
+| HALT-AFTER (draining) | ⚠️ HALT-AFTER ... | [HALT-AFTER ...] |
+| timestamp | 📅 Wed 2026-07-09T... | Wed 2026-07-09T... |
+
+The version segments render `📝 unknown` (rich) or `unknown` (dumb) when the version cannot be resolved — no silent blank segment. The 🛑 (HALT) vs ⚠️ (HALT-AFTER) distinction is deliberate: HALT is a full stop, HALT-AFTER is a soft drain to the current RC boundary, and the two must be tellable apart at a glance.
+
+**NO_COLOR / TERM=dumb output is byte-identical to prior versions.** Setting either variable (or running under a dumb terminal) suppresses every glyph prefix; the resulting segments are the exact strings the status bar produced before the glyph set landed. If a terminal renders emoji double-width and misaligns the bar, set `NO_COLOR` for that session — the dumb-mode bar is unchanged by design and is the intended fallback.

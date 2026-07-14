@@ -401,3 +401,174 @@ def test_list_workflows_includes_project_local_overrides(tmp_path: pathlib.Path)
     result = list_workflows(kanban_root=tmp_path)
     assert "release" in result
     assert "custom" in result
+
+
+# ---------------------------------------------------------------------------
+# Helpers for plugin-directory (pipeline.yaml) layout tests
+# ---------------------------------------------------------------------------
+
+
+def _write_plugin_pipeline(
+    root: pathlib.Path,
+    type_name: str,
+    content: str,
+) -> pathlib.Path:
+    """Write a pipeline YAML to $root/team/workflows/<type_name>/pipeline.yaml.
+
+    This mirrors the canonical plugin-directory layout: each workflow type is a
+    subdirectory of team/workflows/ containing at minimum workflow.cfg and
+    workflow.sh; types with a decomposition pipeline carry pipeline.yaml inside
+    that directory.  load_workflow() resolves this via its second search
+    candidate: $KANBAN_ROOT/team/workflows/<name>/pipeline.yaml.
+    """
+    plugin_dir = root / "team" / "workflows" / type_name
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    pipeline_path = plugin_dir / "pipeline.yaml"
+    pipeline_path.write_text(content, encoding="utf-8")
+    return pipeline_path
+
+
+# ---------------------------------------------------------------------------
+# load_workflow() — plugin-directory (pipeline.yaml) layout (litmus)
+#
+# These tests mirror the v1.1.0 synthetic-plugin litmus at the loader layer:
+# a plugin directory carrying pipeline.yaml must load through the same
+# team/workflows/<type>/pipeline.yaml code path as "document", with zero
+# special-casing for the type name.  The loader resolves the path generically
+# from the type string supplied by the caller.
+# ---------------------------------------------------------------------------
+
+
+def test_plugin_with_pipeline_loads_via_plugin_directory_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A synthetic plugin dir with pipeline.yaml loads via the plugin-directory search path.
+
+    Confirms that load_workflow resolves team/workflows/<type>/pipeline.yaml for
+    any type string, with no per-type special-casing.  The same code path that
+    serves 'document' serves every plugin carrying a pipeline.yaml.
+    """
+    _write_plugin_pipeline(
+        tmp_path, "my-plugin", _MINIMAL_YAML.format(name="my-plugin")
+    )
+    result = load_workflow("my-plugin", kanban_root=tmp_path)
+    assert isinstance(result, WorkflowDefinition)
+    assert result.name == "my-plugin"
+
+
+def test_plugin_with_pipeline_resolves_same_path_as_document(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Synthetic plugin and 'document' both resolve from team/workflows/<type>/pipeline.yaml.
+
+    The loader must use the type string, not a hardcoded filename list, to find
+    the pipeline.  Both types succeed through the identical code path; neither
+    requires PM edits beyond the generic load_workflow() call.
+    """
+    _write_plugin_pipeline(
+        tmp_path, "my-plugin", _MINIMAL_YAML.format(name="my-plugin")
+    )
+    _write_plugin_pipeline(
+        tmp_path, "document", _MINIMAL_YAML.format(name="document")
+    )
+    plugin_result = load_workflow("my-plugin", kanban_root=tmp_path)
+    doc_result = load_workflow("document", kanban_root=tmp_path)
+    # Both resolved via the plugin-directory path — same WorkflowDefinition type.
+    assert isinstance(plugin_result, WorkflowDefinition)
+    assert isinstance(doc_result, WorkflowDefinition)
+    assert plugin_result.name == "my-plugin"
+    assert doc_result.name == "document"
+
+
+def test_plugin_with_pipeline_populates_pipeline_steps(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A synthetic plugin's pipeline.yaml is parsed into PipelineStep objects."""
+    yaml_with_two_steps = textwrap.dedent("""\
+        name: dual-step-plugin
+        description: Synthetic plugin with two pipeline steps.
+
+        inputs:
+          required:
+            - brief.md
+          optional: []
+          context: []
+
+        agents:
+          primary: WRITER
+          manage: CM
+
+        pipeline:
+          - role: CM
+            name: open-doc
+            operation: open_doc
+
+          - role: WRITER
+            name: draft
+            deliverable: draft.md
+
+        outputs:
+          format: markdown
+          location: output/
+
+        versioning: auto-increment
+    """)
+    _write_plugin_pipeline(tmp_path, "dual-step-plugin", yaml_with_two_steps)
+    result = load_workflow("dual-step-plugin", kanban_root=tmp_path)
+    assert len(result.pipeline) == 2
+    assert result.pipeline[0].role == "CM"
+    assert result.pipeline[0].name == "open-doc"
+    assert result.pipeline[1].role == "WRITER"
+    assert result.pipeline[1].name == "draft"
+
+
+# ---------------------------------------------------------------------------
+# load_workflow() — scaffold-fresh plugin (no pipeline.yaml) uses simple path
+#
+# A plugin directory without a pipeline.yaml raises WorkflowError("not found").
+# pm_materialize.py catches this and sets _workflow_def = None, routing the
+# plan through the simple wf_agents decomposition path.  The test asserts the
+# error signal rather than pm_materialize internals, keeping the test
+# boundary at the loader interface.
+# ---------------------------------------------------------------------------
+
+
+def test_plugin_without_pipeline_raises_not_found(
+    tmp_path: pathlib.Path,
+) -> None:
+    """load_workflow raises WorkflowError for a type with no pipeline.yaml.
+
+    A scaffold-fresh plugin dir (workflow.cfg + workflow.sh, no pipeline.yaml)
+    decomposes via the simple wf_agents path in pm_materialize.  The loader
+    signals this with WorkflowError('not found'), which the caller interprets
+    as 'use the simple path'.  This test confirms the signal is raised, not
+    the pm_materialize dispatch logic itself.
+    """
+    # Create a plugin directory with no pipeline.yaml inside it.
+    plugin_dir = tmp_path / "team" / "workflows" / "scaffold-plugin"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    # workflow.cfg and workflow.sh are present (a real scaffold has them);
+    # pipeline.yaml is intentionally absent.
+    (plugin_dir / "workflow.cfg").write_text(
+        "[workflow]\nname = scaffold-plugin\nstatus = active\n",
+        encoding="utf-8",
+    )
+    (plugin_dir / "workflow.sh").write_text(
+        "#!/usr/bin/env bash\n# scaffold stub\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(WorkflowError, match="not found"):
+        load_workflow("scaffold-plugin", kanban_root=tmp_path)
+
+
+def test_completely_absent_plugin_raises_not_found(
+    tmp_path: pathlib.Path,
+) -> None:
+    """load_workflow raises WorkflowError when the plugin directory does not exist at all.
+
+    Ensures the 'not found' error surfaces for any type with no YAML files in
+    any of the three search locations, not only for directories that exist
+    without a pipeline.yaml.
+    """
+    with pytest.raises(WorkflowError, match="not found"):
+        load_workflow("nonexistent-plugin", kanban_root=tmp_path)

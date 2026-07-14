@@ -42,6 +42,9 @@
 #   TERM=dumb  — disables ANSI codes
 #   NO_COLOR=1 — disables ANSI codes
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Resolve script dir ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -83,7 +86,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-KANBAN_ROOT="${KANBAN_ROOT_ARG:-${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}}"
+KANBAN_ROOT="${KANBAN_ROOT_ARG:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
 # Source config — INI format (kanban.cfg) replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
 if [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
@@ -241,7 +244,10 @@ case "$MODE" in
     # Cron firings (global, rendered once at the bottom)
     CRONTAB_TEXT="$(crontab -l 2>/dev/null || true)"
     if [[ -n "$CRONTAB_TEXT" ]]; then
-      CRON_PARSER="${PGAI_DEV_TREE_PATH}/team/pm-agent/lib/cron_parser.py"
+      # cron_parser.py is resolved from the live-install anchor only.
+      # The dev tree is DATA to the live runtime; executing python code under
+      # PGAI_DEV_TREE_PATH is prohibited for live-runtime scripts.
+      CRON_PARSER="${KANBAN_ROOT}/pm-agent/lib/cron_parser.py"
       if [[ -f "$CRON_PARSER" ]]; then
         printf '%sNext cron firings:%s ' "$C_HEADER" "$RESET"
         python3 - "$CRONTAB_TEXT" "$CRON_PARSER" <<'PY' 2>/dev/null || echo ""

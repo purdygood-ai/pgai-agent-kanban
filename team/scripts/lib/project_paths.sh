@@ -58,10 +58,15 @@
 #                               default 'false' when absent
 #   pp_training_agents [name] — echoes comma-separated agents list from [training] training_agents;
 #                               default '' (empty string) when absent
+#   pp_workflow_type  [name]  — echoes the workflow type string from [project] workflow_type;
+#                               default 'release' when absent or empty
 #   pp_branch_prefix  [name]  — optional branch name prefix from [project] branch_prefix;
 #                               returns empty string when key is absent or empty
 #   pp_push_to_remote [name]  — echoes 'true' or 'false' from [project] push_to_remote;
 #                               default 'true' when absent, blank, or malformed
+#   pp_hook_required  [name] <phase> — echoes 'true' or 'false' from [hooks]
+#                               cm_release_<phase>_hook_required; default 'false' when absent.
+#                               <phase>: pre-squash | pre-tag | post-tag
 #   validate_branch_prefix <value> — returns 0 for valid prefix (empty or [a-zA-Z0-9_-]+);
 #                               returns non-zero and prints error for unsafe characters
 #   pp_prefix_branch  [name] <branch> — returns PREFIX+branch; identity when prefix is empty
@@ -303,14 +308,12 @@ pp_release_state() {
 
 # ---------------------------------------------------------------------------
 # pp_last_released_version [name]
-# Echoes the highest bare semver tag (vX.Y.Z) that has been merged into
-# origin/<main_branch> on the project's dev tree, after stripping the
-# configured branch_prefix from candidate tags.
+# Echoes the highest bare semver tag (vX.Y.Z) reachable in the project's dev
+# tree, after stripping the configured branch_prefix from candidate tags.
 #
-# When branch_prefix is non-empty (e.g. "ai_"), <main_branch> is
-# "${prefix}main" (e.g. "ai_main").  This matches the production layout
-# where release.sh squashes and tags on the prefixed main branch.
-# When branch_prefix is empty, <main_branch> is "main".
+# When branch_prefix is non-empty (e.g. "ai_"), the preferred source is the
+# local "${prefix}main" branch (e.g. "ai_main") for merged-tag lookups.
+# When branch_prefix is empty, the preferred source is "main".
 #
 # Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
 #
@@ -320,25 +323,32 @@ pp_release_state() {
 #   3. Runs git -C "$dev_tree" fetch origin --tags --quiet (best-effort;
 #      failure is ignored so callers in air-gapped or read-only environments
 #      are not broken).
-#   4. Lists git tags merged into origin/<main_branch>.
-#   5. When prefix is non-empty: filters to tags starting with PREFIX followed
+#   4. Tries to list git tags merged into origin/<main_branch> (e.g. origin/ai_main).
+#      When prefix is non-empty: filters to tags starting with PREFIX followed
 #      by 'v'; strips the prefix from each candidate before semver comparison.
 #      Tags from a different prefix (e.g. human_v0.31.0 when prefix=ai_) are
 #      excluded.
 #      When prefix is empty: filters to bare ^v[0-9]+\.[0-9]+\.[0-9]+$ tags.
-#   6. Sorts stripped candidates with sort -V, returns the highest as bare
-#      vX.Y.Z (prefix never appears in the return value).
-#   7. Falls back to release-state.md '## Last Released' when no git repo is
-#      available: document-workflow projects have no git repo, so the git-tag
+#      Sorts stripped candidates with sort -V, returns the highest as bare vX.Y.Z.
+#   5. When origin/<main_branch> is unavailable (remote not configured, not yet
+#      pushed, or air-gapped), retries the same tag scan against the local
+#      <main_branch> ref (e.g. ai_main) instead of origin/<main_branch>.
+#   6. When neither origin nor local <main_branch> is available, falls back to
+#      scanning ALL local tags in the repo that match the prefix pattern, and
+#      returns the highest.  This covers a repo that has real release tags but
+#      whose main branch is absent locally (e.g. a shallow clone or a
+#      re-registered project that was never pushed from this machine).
+#   7. Falls back to release-state.md '## Last Released' only when no git repo
+#      is available: document-workflow projects have no git repo, so the git-tag
 #      path always misses; finalize.sh writes '## Last Released' to
 #      release-state.md after publishing, and this resolver honours it.
 #      The release-state.md fallback is skipped for projects that have a
-#      working git repo — code projects prefer the git tag.
-#   8. Falls back to "v0.0.0" on any error:
+#      working git repo — code projects prefer git tags.
+#   8. Falls back to "v0.0.0" sentinel when:
 #        - project.cfg/PROJECT.cfg missing or unreadable
 #        - dev_tree_path unset or not a git repo AND release-state.md absent
 #          or has no Last Released value (or it is 'none')
-#        - no matching tags found and no valid release-state.md entry
+#        - no matching tags found anywhere in the repo
 #
 # The function does NOT change the caller's CWD.  All git operations use
 # git -C "$dev_tree" rather than cd.
@@ -347,8 +357,8 @@ pp_release_state() {
 #
 # Example:
 #   pp_last_released_version "pgai-agent-kanban"
-#   # -> v0.31.0  (from tag ai_v0.31.0 on origin/ai_main when branch_prefix=ai_)
-#   # -> v0.30.1  (from tag v0.30.1 on origin/main when branch_prefix is empty)
+#   # -> v1.2.2  (from tag ai_v1.2.2 when branch_prefix=ai_, even without origin/ai_main)
+#   # -> v0.30.1  (from tag v0.30.1 when branch_prefix is empty)
 #   pp_last_released_version "pgai-three-bears"
 #   # -> v0.0.1   (from release-state.md ## Last Released when no git repo)
 # ---------------------------------------------------------------------------
@@ -401,6 +411,41 @@ else:
 PY
 )"
         echo "${_val:-}"
+    }
+
+    # ---------------------------------------------------------------------------
+    # Internal helper: _pp_scan_tags_from_ref <dev_tree> <ref> <prefix>
+    # Lists tags merged into <ref> (or all tags when ref is empty), filtered to
+    # the given prefix, strips the prefix, sorts by semver, and echoes the
+    # highest.  Echoes empty string when no matching tags are found.
+    # When <ref> is empty, scans ALL local tags (unrestricted merge filter).
+    # ---------------------------------------------------------------------------
+    _pp_scan_tags_from_ref() {
+        local _dt="$1"
+        local _ref="$2"
+        local _pfx="$3"
+        local _escaped_pfx
+        _escaped_pfx="$(printf '%s' "$_pfx" | sed 's/[.[\*^${}|()]/\\&/g')"
+
+        local _raw_tags
+        if [[ -n "$_ref" ]]; then
+            _raw_tags="$(git -C "$_dt" tag --merged "$_ref" 2>/dev/null || true)"
+        else
+            _raw_tags="$(git -C "$_dt" tag -l 2>/dev/null || true)"
+        fi
+
+        if [[ -n "$_pfx" ]]; then
+            printf '%s\n' "$_raw_tags" \
+                | grep -E "^${_escaped_pfx}v[0-9]+\.[0-9]+\.[0-9]+\$" \
+                | sed "s|^${_escaped_pfx}||" \
+                | sort -V \
+                | tail -n1
+        else
+            printf '%s\n' "$_raw_tags" \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                | sort -V \
+                | tail -n1
+        fi
     }
 
     if [[ -z "$cfg_file" ]]; then
@@ -464,50 +509,27 @@ PY
     # Resolve the canonical main branch name for this project.
     # When branch_prefix is non-empty (e.g. "ai_"), release.sh operates on
     # ai_main rather than bare main.  Tags are created on ai_main commits, so
-    # we must query origin/ai_main (not origin/main) to find merged tags.
+    # we prefer origin/ai_main for the merged-tag scan.
     local main_branch
     main_branch="${prefix}main"
 
-    # Resolve origin/<main_branch>.  If the remote tracking ref does not exist
-    # (fresh repo with no remote, or the branch was never pushed), fall back to
-    # release-state.md rather than returning the sentinel directly.
-    if ! git -C "$dev_tree" rev-parse --verify "origin/${main_branch}" &>/dev/null 2>&1; then
-        local _rs_val
-        _rs_val="$(_pp_read_last_released_from_state "$project_root")"
-        if [[ -n "$_rs_val" ]]; then
-            echo "$_rs_val"
-        else
-            echo "$_sentinel"
-        fi
-        return 0
+    local highest=""
+
+    # --- Tier 1: tags merged into origin/<main_branch> ---
+    if git -C "$dev_tree" rev-parse --verify "origin/${main_branch}" &>/dev/null 2>&1; then
+        highest="$(_pp_scan_tags_from_ref "$dev_tree" "origin/${main_branch}" "$prefix")"
     fi
 
-    # List tags merged into origin/<main_branch>, filter to tags matching this
-    # project's prefix, strip the prefix, sort by semver, take the highest.
-    #
-    # When prefix is non-empty:
-    #   - Accept only tags whose literal prefix is exactly "$prefix" followed by
-    #     a 'v', e.g. "ai_v0.31.0" for prefix "ai_".
-    #   - Tags from a different prefix (e.g. "human_v0.31.0") are excluded.
-    #   - The prefix is stripped before semver comparison and before output.
-    # When prefix is empty:
-    #   - Accept only bare vX.Y.Z tags.
-    #   - main_branch is "main" (the literal, unchanged).
-    local highest
-    if [[ -n "$prefix" ]]; then
-        # Build an anchored pattern matching PREFIX + strict semver.
-        # We strip the prefix inline so sort -V and tail operate on bare semver.
-        highest="$(git -C "$dev_tree" tag --merged "origin/${main_branch}" 2>/dev/null \
-            | grep -E "^$(printf '%s' "$prefix" | sed 's/[.[\*^${}|()]/\\&/g')v[0-9]+\.[0-9]+\.[0-9]+\$" \
-            | sed "s|^$(printf '%s' "$prefix" | sed 's/[.[\*^${}|()]/\\&/g')||" \
-            | sort -V \
-            | tail -n1)"
-    else
-        # No prefix — legacy behaviour: match bare vX.Y.Z only.
-        highest="$(git -C "$dev_tree" tag --merged "origin/${main_branch}" 2>/dev/null \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-            | sort -V \
-            | tail -n1)"
+    # --- Tier 2: tags merged into local <main_branch> (when origin unavailable) ---
+    if [[ -z "$highest" ]]; then
+        if git -C "$dev_tree" rev-parse --verify "${main_branch}" &>/dev/null 2>&1; then
+            highest="$(_pp_scan_tags_from_ref "$dev_tree" "${main_branch}" "$prefix")"
+        fi
+    fi
+
+    # --- Tier 3: scan ALL local tags (covers repos with tags but no local main) ---
+    if [[ -z "$highest" ]]; then
+        highest="$(_pp_scan_tags_from_ref "$dev_tree" "" "$prefix")"
     fi
 
     if [[ -z "$highest" ]]; then
@@ -674,6 +696,41 @@ pp_max_priorities_per_run() {
     if ! [[ "$raw" =~ ^[0-9]+$ ]]; then
         echo "project_paths.sh: pp_max_priorities_per_run: invalid value '${raw}' for project '${name}' (expected non-negative integer)" >&2
         return 1
+    fi
+
+    echo "$raw"
+}
+
+# ---------------------------------------------------------------------------
+# pp_workflow_type [name]
+# Echoes the configured workflow type from project.cfg for the named project.
+# Returns 'release' when the field is absent or empty (backward-compat default).
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+#
+# Source in project.cfg: [project] workflow_type
+#
+# Example:
+#   pp_workflow_type "pgai-agent-kanban"   # -> 'release'
+#   pp_workflow_type "my-testing-project"  # -> 'testing-only'
+# ---------------------------------------------------------------------------
+pp_workflow_type() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || { echo "release"; return 0; }
+    local project_root cfg_file
+    project_root="$(pp_project_root "$name" 2>/dev/null)" || { echo "release"; return 0; }
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    [[ -n "$cfg_file" ]] || { echo "release"; return 0; }
+
+    # Source: project.cfg [project] workflow_type
+    local raw
+    raw="$(_pp_read_cfg_key "$cfg_file" project workflow_type "")"
+
+    # Empty / absent — default to 'release' (backward-compat).
+    if [[ -z "$raw" ]]; then
+        echo "release"
+        return 0
     fi
 
     echo "$raw"
@@ -1335,4 +1392,75 @@ pp_queue_path() {
     tasks_dir="$(pp_tasks_dir "$name")" || return 1
 
     echo "${tasks_dir}/queues/${agent}_backlog.md"
+}
+
+# ---------------------------------------------------------------------------
+# pp_hook_required [name] <phase>
+#
+# Reads the cm_release_<phase>_hook_required key from project.cfg [hooks]
+# and echoes 'true' or 'false'.
+#
+# Arguments:
+#   [name]  — project name; resolved from PGAI_PROJECT_NAME when absent.
+#   <phase> — one of: pre-squash | pre-tag | post-tag
+#
+# Returns 'false' (the safe default) when:
+#   - project.cfg is not found
+#   - the key is absent from [hooks]
+#   - the value is unrecognized
+#
+# This function requires the project's config file to be present.  It does NOT
+# load the config into the environment; it reads only the required flag.
+#
+# Example:
+#   required="$(pp_hook_required my-project pre-squash)"
+#   if [[ "$required" == "true" ]]; then ...
+# ---------------------------------------------------------------------------
+pp_hook_required() {
+    local name phase
+
+    if [[ $# -ge 2 ]]; then
+        name="$(pp_require_project_context "${1:-}")" || return 1
+        phase="${2:-}"
+    else
+        name="$(pp_require_project_context "")" || return 1
+        phase="${1:-}"
+    fi
+
+    if [[ -z "$phase" ]]; then
+        echo "project_paths.sh: pp_hook_required: phase argument is required (pre-squash | pre-tag | post-tag)" >&2
+        return 1
+    fi
+
+    # Map phase to the config key name.
+    local required_key
+    case "$phase" in
+        pre-squash)  required_key="cm_release_pre_squash_hook_required" ;;
+        pre-tag)     required_key="cm_release_pre_tag_hook_required"    ;;
+        post-tag)    required_key="cm_release_post_tag_hook_required"   ;;
+        *)
+            echo "project_paths.sh: pp_hook_required: unknown phase '${phase}'; expected pre-squash | pre-tag | post-tag" >&2
+            return 1
+            ;;
+    esac
+
+    local project_root cfg_file
+    project_root="$(pp_project_root "$name")" || { echo "false"; return 0; }
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    if [[ -z "$cfg_file" || ! -f "$cfg_file" ]]; then
+        echo "false"
+        return 0
+    fi
+
+    local raw_val
+    raw_val="$(_pp_read_cfg_key "$cfg_file" "hooks" "$required_key" "false")"
+    # Normalize to lowercase; default to 'false' when absent or unrecognized.
+    raw_val="${raw_val,,}"
+    if [[ "$raw_val" == "true" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+    return 0
 }

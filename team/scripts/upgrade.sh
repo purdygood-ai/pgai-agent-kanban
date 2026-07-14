@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
 # upgrade.sh — Upgrade an existing pgai-agent-kanban installation.
 #
-# This is the UPGRADE path only.  It performs the same code deposit as
-# install.sh but preserves the PROTECTED SET (operator-owned state) and backs
-# up the kanban root before touching anything.
+# This is the UPGRADE path only.  If the target is NOT an existing kanban
+# installation, upgrade.sh refuses and directs the operator to install.sh.
 #
-# If the target is NOT an existing kanban installation, upgrade.sh refuses and
-# directs the operator to install.sh instead.
+# TWO-PHASE UPGRADE ARCHITECTURE
+# --------------------------------
+# When invoked WITHOUT --phase2 (the normal operator invocation), this script
+# acts as the PHASE 1 BOOTSTRAP: it parses args, validates the dev tree,
+# creates the pre-upgrade backup tarball, probes the dev-tree's upgrade.sh
+# (bash -n syntax check and --phase2 support check), then hands off execution
+# via exec to <dev_tree>/team/scripts/upgrade.sh with --phase2 and the
+# versioned protocol flags.  Phase 1 performs NO deposit, NO config changes,
+# and NO crontab work — it is a small, stable bootstrap that changes rarely.
+#
+# PHASE 2 (the actual upgrade — deposit, state preservation, crontab, VERSION
+# stamp) runs inside the DEV TREE's upgrade.sh, which executes with full
+# knowledge of the version being installed.
+#
+# If the dev-tree script fails the bash -n probe or lacks --phase2 support,
+# phase 1 fails loud with the manual-bootstrap instruction (cp + retry) and
+# exits non-zero before depositing anything.
 #
 # Usage:
 #   upgrade.sh [OPTIONS]
@@ -20,6 +34,8 @@
 #   --add-claude-agents    Deploy provider-agent wrappers to ~/.claude/agents/.
 #   --add-codex-agents     Deploy provider-agent wrappers to ~/.codex/agents/.
 #   --dev-tree PATH        Explicit path to dev tree (overrides kanban.cfg and env).
+#   --stamp-version STRING Write STRING verbatim to VERSION; bypass git resolution
+#                          and suppress divergence advisory.
 #   --help, -h             Show this help.
 #
 # DEPRECATED OPTIONS (still accepted; emit a deprecation notice to stderr):
@@ -51,12 +67,61 @@
 #   The tarball is chmod 600 on creation.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+
+# ---------------------------------------------------------------------------
+# PHASE 2 EARLY DETECTION
+#
+# Scan $@ before anything else.  When --phase2 is present this script is
+# running as the dev-tree upgrade body: it was exec'd by the installed
+# bootstrap (phase 1).  We extract --kanban-root now so that KANBAN_ROOT is
+# correct for the root-relative config sourcing that follows.
+#
+# The phase2 flags recognised here are removed from the argument list later
+# by the main argparse block; this early scan is read-only — it never shifts.
+# ---------------------------------------------------------------------------
+_PHASE2_MODE=false
+_PHASE2_PROTOCOL=""
+_PHASE2_KANBAN_ROOT=""
+_PHASE2_BACKUP=""
+
+for _p2_arg in "$@"; do
+  [[ "$_p2_arg" == "--phase2" ]] && _PHASE2_MODE=true && break
+done
+unset _p2_arg
+
+if [[ "$_PHASE2_MODE" == "true" ]]; then
+  # Extract --kanban-root, --phase2-protocol, --backup from positional scan.
+  _p2_prev=""
+  for _p2_arg in "$@"; do
+    case "$_p2_prev" in
+      --kanban-root)    _PHASE2_KANBAN_ROOT="$_p2_arg" ;;
+      --phase2-protocol) _PHASE2_PROTOCOL="$_p2_arg" ;;
+      --backup)          _PHASE2_BACKUP="$_p2_arg" ;;
+    esac
+    _p2_prev="$_p2_arg"
+  done
+  unset _p2_arg _p2_prev
+
+  # In phase 2 the kanban root comes from the --kanban-root argument (the
+  # installed root), NOT from the executing dev-tree path or environment.
+  if [[ -z "$_PHASE2_KANBAN_ROOT" ]]; then
+    echo "[upgrade] ERROR: --phase2 requires --kanban-root <path>" >&2
+    exit 1
+  fi
+
+  # Override KANBAN_ROOT immediately — all root-relative sourcing below uses it.
+  KANBAN_ROOT="$_PHASE2_KANBAN_ROOT"
+fi
 
 # ---------------------------------------------------------------------------
 # Resolve install location and source config helpers (BEFORE strict mode
 # so that sourcing failures do not kill the script prematurely).
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+if [[ "$_PHASE2_MODE" != "true" ]]; then
+  KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+fi
 
 # Source optional config files.
 [[ -f "$KANBAN_ROOT/bashrc"     ]] && source "$KANBAN_ROOT/bashrc"
@@ -77,7 +142,11 @@ unset _UPG_INI_SH
 
 # ---------------------------------------------------------------------------
 # Source the shared argument parser.
-# upgrade.sh lives at team/scripts/; argparse.sh is at team/scripts/lib/.
+# Phase 1 (installed script): BASH_SOURCE[0] is the installed upgrade.sh.
+# Phase 2 (dev-tree script):  BASH_SOURCE[0] is the dev-tree upgrade.sh.
+# In both cases BASH_SOURCE resolves to the correct directory — no re-exec
+# indirection required since the two-phase architecture eliminated the
+# self-overwrite problem that necessitated the temp-copy guard.
 # ---------------------------------------------------------------------------
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _UPG_ARGPARSE_SH="${_SCRIPT_DIR}/lib/argparse.sh"
@@ -174,6 +243,7 @@ WAKE_TIER=""          # empty = detect and preserve existing tier
 ADD_CLAUDE_AGENTS=false
 ADD_CODEX_AGENTS=false
 BACKUP_PATH=""
+STAMP_VERSION=""      # non-empty = write verbatim, skip git resolution
 
 # ---------------------------------------------------------------------------
 # Cleanup handler — runs on EXIT (success or failure).
@@ -201,7 +271,9 @@ Usage: $(basename "$0") [OPTIONS]
 
 Upgrade an existing pgai-agent-kanban installation.
 
-This is the UPGRADE path only.  If the target is not an existing installation,
+This is the UPGRADE path only (phase-1 bootstrap).  It validates the dev tree,
+creates a pre-upgrade backup, and hands execution to the dev tree's upgrade.sh
+as phase 2 (the actual upgrade).  If the target is not an existing installation,
 use install.sh instead.
 
 OPTIONS:
@@ -213,6 +285,8 @@ OPTIONS:
   --add-claude-agents     Deploy provider-agent wrappers to ~/.claude/agents/.
   --add-codex-agents      Deploy provider-agent wrappers to ~/.codex/agents/.
   --dev-tree PATH         Explicit path to dev tree (overrides env and kanban.cfg).
+  --stamp-version STRING  Write STRING verbatim to VERSION; bypass git resolution
+                          and suppress divergence advisory.
   --help, -h              Show this help.
 
 DEPRECATED OPTIONS (still accepted; emit a deprecation notice to stderr):
@@ -234,8 +308,11 @@ EOF
 
 # ---------------------------------------------------------------------------
 # Parse arguments
+# phase2 value flags (phase2-protocol, kanban-root, backup) are registered
+# here so the parser consumes them cleanly; they are validated in the phase-2
+# dispatch block below.
 # ---------------------------------------------------------------------------
-argparse_parse --value-flags "wake-tier crontab-tier dev-tree" -- "$@"
+argparse_parse --value-flags "wake-tier crontab-tier dev-tree stamp-version phase2-protocol kanban-root backup" -- "$@"
 
 # Validate value-taking flags were given a value.
 if argparse_missing "wake-tier"; then
@@ -248,6 +325,22 @@ if argparse_missing "crontab-tier"; then
 fi
 if argparse_missing "dev-tree"; then
   err "--dev-tree requires a path argument."
+  exit 1
+fi
+if argparse_missing "stamp-version"; then
+  err "--stamp-version requires a non-empty string argument."
+  exit 1
+fi
+if argparse_missing "phase2-protocol"; then
+  err "--phase2-protocol requires a protocol number."
+  exit 1
+fi
+if argparse_missing "kanban-root"; then
+  err "--kanban-root requires a path argument."
+  exit 1
+fi
+if argparse_missing "backup"; then
+  err "--backup requires a path argument."
   exit 1
 fi
 
@@ -277,7 +370,8 @@ unset _pos
 # Reject unknown flags.
 for _flag in "${!ARGPARSE_FLAGS[@]}"; do
   case "$_flag" in
-    force|no-backup|add-claude-agents|add-codex-agents|dev-tree|wake-tier|crontab-tier|help|h) ;;
+    force|no-backup|add-claude-agents|add-codex-agents|dev-tree|stamp-version|wake-tier|crontab-tier|help|h) ;;
+    phase2|phase2-protocol|kanban-root|backup) ;;
     *)
       err "Unknown option: --${_flag}"
       err "Run '$(basename "$0") --help' for usage."
@@ -296,6 +390,15 @@ if argparse_has "add-codex-agents";  then ADD_CODEX_AGENTS=true; fi
 # Extract --dev-tree.
 if argparse_has "dev-tree"; then
   PGAI_DEV_TREE_PATH="${ARGPARSE_FLAGS[dev-tree]}"
+fi
+
+# Extract --stamp-version.
+if argparse_has "stamp-version"; then
+  STAMP_VERSION="${ARGPARSE_FLAGS[stamp-version]}"
+  if [[ -z "$STAMP_VERSION" ]]; then
+    err "--stamp-version requires a non-empty string."
+    exit 1
+  fi
 fi
 
 # Extract canonical --wake-tier value.
@@ -327,6 +430,65 @@ if argparse_has "crontab-tier"; then
   fi
   unset _dep_ct
 fi
+
+# ---------------------------------------------------------------------------
+# PHASE 2 DISPATCH
+#
+# When invoked with --phase2 (exec'd by the phase-1 bootstrap), skip the
+# precondition check, backup creation, dev-tree validation, and the phase-1
+# exec handoff — those steps already ran in phase 1.  Validate the protocol
+# number, resolve KANBAN_ROOT and BACKUP_PATH from the phase-2 args, then
+# fall through to the upgrade body (tier detection, deposit, scheduler hooks,
+# VERSION stamp, divergence advisory).
+#
+# Lib sourcing is BASH_SOURCE-relative: in phase 2 BASH_SOURCE[0] is the
+# dev-tree upgrade.sh and _SCRIPT_DIR resolves to its directory correctly.
+#
+# The manual-bootstrap instruction is the one-liner the operator can paste
+# to recover from a protocol-mismatch: copy the new upgrade.sh into the
+# installed scripts/ and retry.
+# ---------------------------------------------------------------------------
+if [[ "$_PHASE2_MODE" == "true" ]]; then
+  # Validate the protocol number — only 1 is accepted in this version.
+  _p2_proto="${_PHASE2_PROTOCOL:-}"
+  if [[ -z "$_p2_proto" ]]; then
+    err "Phase-2 error: --phase2-protocol is required."
+    err "Manual bootstrap: cp \$(dirname \"\${BASH_SOURCE[0]}\")/upgrade.sh \"\$KANBAN_ROOT/scripts/\" then retry"
+    exit 1
+  fi
+  if [[ "$_p2_proto" != "1" ]]; then
+    err "Phase-2 error: unknown protocol version '$_p2_proto' (only protocol 1 is supported by this script)."
+    err "Manual bootstrap: cp \$(dirname \"\${BASH_SOURCE[0]}\")/upgrade.sh \"\$KANBAN_ROOT/scripts/\" then retry"
+    exit 1
+  fi
+  unset _p2_proto
+
+  # KANBAN_ROOT is already set from the early detection block; confirm it is
+  # accessible.  The phase-1 bootstrap already created the pre-upgrade backup,
+  # so we only record its path here for the _cleanup error handler.
+  if [[ -n "$_PHASE2_BACKUP" ]]; then
+    BACKUP_PATH="$_PHASE2_BACKUP"
+  fi
+
+  # Infer DEV_TREE from BASH_SOURCE (this script lives at <dev_tree>/team/scripts/).
+  DEV_TREE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+  info "Phase 2 running (protocol 1): kanban root = $KANBAN_ROOT"
+  info "Dev tree (BASH_SOURCE-relative): $DEV_TREE"
+
+  # Fall through to the upgrade body below — tier detection, deposit,
+  # scheduler hooks, VERSION stamp, divergence advisory all proceed normally.
+fi
+
+# ---------------------------------------------------------------------------
+# PHASE 1 ONLY: precondition check, backup, dev-tree validation, exec handoff.
+#
+# These steps run when upgrade.sh is invoked normally (no --phase2).  They
+# are the full phase-1 bootstrap: validate the install, back it up, probe
+# the dev-tree script, and exec into it as phase 2.  Phase 2 (the actual
+# upgrade body) runs the rest of this file; these steps are skipped there.
+# ---------------------------------------------------------------------------
+if [[ "$_PHASE2_MODE" != "true" ]]; then
 
 # ---------------------------------------------------------------------------
 # PRECONDITION: fail loud if target is NOT an existing kanban install.
@@ -422,6 +584,7 @@ DEV_TREE="${PGAI_DEV_TREE_PATH:-}"
 if [[ -z "$DEV_TREE" ]]; then
   # Fallback: upgrade.sh may itself live in the dev tree.
   # team/scripts/upgrade.sh → repo root is two levels up.
+  # BASH_SOURCE[0] is always the installed upgrade.sh in phase 1.
   _candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)" || true
   if [[ -f "${_candidate}/install.sh" ]]; then
     DEV_TREE="$_candidate"
@@ -451,6 +614,72 @@ if [[ ! -f "$INSTALL_SH" ]]; then
 fi
 
 ok "Dev tree: $DEV_TREE"
+
+# ---------------------------------------------------------------------------
+# PHASE 1 BOOTSTRAP: probe and exec handoff to the dev-tree upgrade.sh.
+#
+# This is the phase-1 (bootstrap) code path.  Phase 1 performs NO deposit,
+# NO config changes, and NO crontab work.  It validates the dev-tree script,
+# then replaces itself (via exec) with the dev-tree script running as phase 2.
+#
+# Steps:
+#   1. Locate <dev_tree>/team/scripts/upgrade.sh.
+#   2. Run bash -n on it — a syntax error means the new script is broken;
+#      fail loud before anything is deposited.
+#   3. Probe for --phase2 support (grep -q) — an older or wrong script
+#      without --phase2 would silently run as a standalone upgrade; fail loud.
+#   4. exec the dev-tree script as phase 2, passing versioned protocol flags
+#      and all original operator args.  exec replaces this process so phase 1
+#      performs no deposit, no config change, no crontab work.
+# ---------------------------------------------------------------------------
+_DEV_UPGRADE_SH="${DEV_TREE}/team/scripts/upgrade.sh"
+
+if [[ ! -f "$_DEV_UPGRADE_SH" ]]; then
+  err "Dev-tree upgrade.sh not found: $_DEV_UPGRADE_SH"
+  err "Manual bootstrap: cp ${_DEV_UPGRADE_SH} scripts/ then retry"
+  exit 1
+fi
+
+info "Probing dev-tree upgrade.sh: bash -n check..."
+if ! bash -n "$_DEV_UPGRADE_SH" 2>/dev/null; then
+  # Run again capturing stderr for the error message.
+  _bash_n_err="$(bash -n "$_DEV_UPGRADE_SH" 2>&1 || true)"
+  err "Dev-tree upgrade.sh failed bash -n syntax check:"
+  err "$_bash_n_err"
+  err "Nothing has been deposited.  Your pre-upgrade backup is still intact."
+  err "Manual bootstrap: cp ${_DEV_UPGRADE_SH} scripts/ then retry"
+  unset _bash_n_err _DEV_UPGRADE_SH
+  exit 1
+fi
+info "bash -n: OK"
+
+info "Probing dev-tree upgrade.sh: --phase2 support check..."
+if ! grep -q -- '--phase2' "$_DEV_UPGRADE_SH"; then
+  err "Dev-tree upgrade.sh does not appear to support --phase2 (this may be a pre-v1.7 script or a downgrade)."
+  err "Nothing has been deposited.  Your pre-upgrade backup is still intact."
+  err "Manual bootstrap: cp ${_DEV_UPGRADE_SH} scripts/ then retry"
+  unset _DEV_UPGRADE_SH
+  exit 1
+fi
+info "--phase2 support: OK"
+
+# Build the --backup argument: only pass it when a backup was actually created.
+_phase2_backup_args=()
+if [[ -n "$BACKUP_PATH" ]]; then
+  _phase2_backup_args=("--backup" "$BACKUP_PATH")
+fi
+
+info "Handing off to dev-tree upgrade.sh (phase 2, protocol 1)..."
+exec bash "$_DEV_UPGRADE_SH" \
+  --phase2 \
+  --phase2-protocol 1 \
+  --kanban-root "$KANBAN_ROOT" \
+  "${_phase2_backup_args[@]+"${_phase2_backup_args[@]}"}" \
+  "$@"
+
+# End of phase-1-only block (exec above replaces this process; the fi below
+# is only reached in phase 2 where the if-block was skipped entirely).
+fi  # [[ "$_PHASE2_MODE" != "true" ]]
 
 # ---------------------------------------------------------------------------
 # Detect the installed crontab tier (when --wake-tier was NOT supplied).
@@ -926,37 +1155,113 @@ fi
 unset _INSTALL_PSEUDOCRON_SH _is_temp_root
 
 # ---------------------------------------------------------------------------
-# Write VERSION file.
+# Write VERSION and VERSION_DETAIL files.
 # ---------------------------------------------------------------------------
-# Best-effort: determine the latest released tag from the dev tree using the
-# shared reachability-independent resolver.  Do NOT fail the upgrade if
-# version resolution fails.
-#
-# We source team/scripts/dashboard/lib/version.sh and call
-# get_latest_released_tag() DIRECTLY — never get_kanban_version(), which
-# short-circuits on the existing $KANBAN_ROOT/VERSION (Tier 1) and would echo
-# the currently-installed stamp rather than the target tag.  The entire point
-# of the upgrade path is to stamp the target (latest released) tag, not to
-# echo back what is already installed.
-#
-# get_latest_released_tag() uses:
-#   git -C <repo_root> tag --merged origin/main | sort -V | tail -1
-# This is reachability-independent: the result is the same regardless of which
-# branch the dev tree is checked out on.
-if [[ -d "$DEV_TREE/.git" ]]; then
-  _VER_SH="$DEV_TREE/team/scripts/dashboard/lib/version.sh"
-  if [[ -f "$_VER_SH" ]]; then
-    # shellcheck source=team/scripts/dashboard/lib/version.sh
-    source "$_VER_SH"
-    _cur_version="$(get_latest_released_tag "$DEV_TREE" || true)"
-  fi
-  _cur_version="${_cur_version:-unknown-dev}"
-  unset _VER_SH
-  ok "Target tag resolved: $_cur_version"
-  printf '%s\n' "$_cur_version" > "$KANBAN_ROOT/VERSION"
-  ok "VERSION updated: $_cur_version"
-  unset _cur_version
+# Uses the shared stamp helper to write VERSION (clean tag, suffix-stripped)
+# and VERSION_DETAIL (full describe + deposit SHA).  The helper is the single
+# implementation; install.sh calls the same function.
+# When --stamp-version is supplied, VERSION is written verbatim (no suffix to
+# strip; no VERSION_DETAIL written) and the advisory is bypassed.
+_UPG_STAMP_LIB="$DEV_TREE/team/scripts/lib/version_stamp.sh"
+if [[ -f "$_UPG_STAMP_LIB" ]]; then
+  # shellcheck source=team/scripts/lib/version_stamp.sh
+  source "$_UPG_STAMP_LIB"
 fi
+unset _UPG_STAMP_LIB
+
+if [[ -d "$DEV_TREE/.git" ]]; then
+  if [[ -n "$STAMP_VERSION" ]]; then
+    # Operator override: write verbatim via shared helper; skip advisory.
+    ok "VERSION stamp: using --stamp-version override: $STAMP_VERSION"
+    stamp_version_files "$DEV_TREE" "$KANBAN_ROOT" "$STAMP_VERSION"
+    ok "VERSION updated: $STAMP_VERSION"
+  else
+    # Resolve from HEAD via git describe; emit divergence advisory when the
+    # deployed tree is ahead of the latest published tag.
+    _cur_full_describe="$(git -C "$DEV_TREE" describe --tags 2>/dev/null || true)"
+    _cur_full_describe="${_cur_full_describe:-unknown-dev}"
+
+    # Advisory: when the latest unprefixed tag merged to origin/main differs
+    # from the describe result, inform the operator of the staged-vs-published
+    # gap.  The advisory is one line only; never a prompt or a blocking error.
+    _VER_SH="$DEV_TREE/team/scripts/dashboard/lib/version.sh"
+    if [[ -f "$_VER_SH" ]]; then
+      # shellcheck source=team/scripts/dashboard/lib/version.sh
+      source "$_VER_SH"
+      _old_answer="$(get_latest_released_tag "$DEV_TREE" || true)"
+      if [[ -n "$_old_answer" ]] && [[ "$_cur_full_describe" != "$_old_answer" ]]; then
+        info "deploying $_cur_full_describe ; latest published tag is $_old_answer"
+      fi
+      unset _old_answer
+    fi
+    unset _VER_SH
+
+    # Write VERSION (clean tag) and VERSION_DETAIL (forensics) via shared helper.
+    stamp_version_files "$DEV_TREE" "$KANBAN_ROOT"
+    _upg_clean_tag="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
+    ok "Target version resolved: $_cur_full_describe"
+    ok "VERSION updated: ${_upg_clean_tag} (clean tag; detail in VERSION_DETAIL)"
+    unset _cur_full_describe _upg_clean_tag
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Retired-file migration: move manifest-listed fossils to the graveyard.
+#
+# The retirement manifest ($KANBAN_ROOT/templates/retired-files.txt) lists
+# kanban-root-relative paths that the framework once deposited and has since
+# retired.  For each entry that exists at the live root, this step MOVES
+# (never deletes) the file into $KANBAN_ROOT/retired/<UTC-ts>/<relative-path>
+# so that two independent recovery layers are always available: the graveyard
+# and the pre-upgrade backup tarball.
+#
+# Only exact manifest-listed paths are touched.  Operator-authored files
+# (custom workflow plugins, wrappers, anything not listed in the manifest)
+# are untouchable by construction.  A manifest entry whose path is absent
+# from the live root is a silent no-op.
+#
+# The hygiene lint runs before any file is moved; a malformed manifest
+# (glob characters, absolute paths, ".." segments) aborts the upgrade here.
+# ---------------------------------------------------------------------------
+_RETIRED_MANIFEST="${KANBAN_ROOT}/templates/retired-files.txt"
+_RETIRED_LINT_SH="${KANBAN_ROOT}/scripts/lib/retired_files_lint.sh"
+_RETIRED_TS="$(date -u +%Y%m%dT%H%M%SZ)"
+_RETIRED_COUNT=0
+_RETIRED_DEST_LABEL=""
+
+if [[ -f "$_RETIRED_MANIFEST" ]]; then
+  # Hygiene pre-check: abort if the manifest is malformed.
+  if [[ -f "$_RETIRED_LINT_SH" ]]; then
+    # shellcheck source=team/scripts/lib/retired_files_lint.sh
+    source "$_RETIRED_LINT_SH"
+    if ! lint_retired_files_manifest "$_RETIRED_MANIFEST"; then
+      err "Manifest hygiene check failed: $_RETIRED_MANIFEST"
+      err "Fix the manifest entries listed above, then re-run the upgrade."
+      exit 1
+    fi
+  else
+    warn "Retired-files lint helper not found; skipping manifest hygiene check: $_RETIRED_LINT_SH"
+  fi
+
+  # Retire each manifest-listed path that exists at the live root.
+  while IFS= read -r _ret_line || [[ -n "$_ret_line" ]]; do
+    # Skip blank lines and comment lines.
+    [[ -z "$_ret_line" ]]       && continue
+    [[ "$_ret_line" == \#* ]]   && continue
+
+    _ret_src="${KANBAN_ROOT}/${_ret_line}"
+    if [[ -f "$_ret_src" ]]; then
+      _ret_dst_dir="${KANBAN_ROOT}/retired/${_RETIRED_TS}/$(dirname "$_ret_line")"
+      mkdir -p "$_ret_dst_dir"
+      mv -- "$_ret_src" "${KANBAN_ROOT}/retired/${_RETIRED_TS}/${_ret_line}"
+      warn "Retired: ${_ret_line} -> retired/${_RETIRED_TS}/${_ret_line} (restore by moving back)"
+      _RETIRED_COUNT=$(( _RETIRED_COUNT + 1 ))
+      _RETIRED_DEST_LABEL="retired/${_RETIRED_TS}/"
+    fi
+  done < "$_RETIRED_MANIFEST"
+fi
+
+unset _RETIRED_MANIFEST _RETIRED_LINT_SH _RETIRED_TS _ret_line _ret_src _ret_dst_dir
 
 # ---------------------------------------------------------------------------
 # Success summary
@@ -971,6 +1276,11 @@ if [[ -n "$BACKUP_PATH" && -f "$BACKUP_PATH" ]]; then
 fi
 echo "  Dev tree:          $DEV_TREE"
 echo "  Wake tier:         ${WAKE_TIER}"
+if [[ "$_RETIRED_COUNT" -gt 0 ]]; then
+  echo "  Retired:           ${_RETIRED_COUNT} file(s) -> ${_RETIRED_DEST_LABEL}"
+else
+  echo "  Retired:           none"
+fi
 echo ""
 echo "${C_BOLD}Protected (preserved):${C_RESET}"
 echo "  kanban.cfg, projects.cfg, secrets, shell-env, pseudocron.env"
@@ -980,5 +1290,7 @@ echo "  agent wrappers (pass --add-claude-agents / --add-codex-agents to refresh
 echo ""
 echo "See $KANBAN_ROOT/README.md for post-upgrade notes."
 echo ""
+
+unset _RETIRED_COUNT _RETIRED_DEST_LABEL
 
 exit 0

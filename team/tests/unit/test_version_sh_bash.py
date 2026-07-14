@@ -11,13 +11,13 @@ tree and live kanban install are never read or written.
 Key behavioral requirement covered:
   get_latest_released_tag() returns the latest tag merged into origin/main
   independently of which branch is currently checked out.  This is the
-  regression fixture for BUG-0017, which confirmed that the old `git describe
+  regression fixture for an earlier defect, which confirmed that the old `git describe
   HEAD` query returned an OLDER tag when the dev tree was on `develop` even
   though the latest released tag was visible via `git tag --merged origin/main`.
 
 Fixture design
 --------------
-The git fixture reproduces tonight's exact state (per BUG-0017 "Notes for TESTER"):
+The git fixture reproduces tonight's exact state (per an earlier defect "Notes for TESTER"):
 
   1. Create a local git repo with two commits.
   2. Tag the first commit v0.101.2 (older tag, reachable from the feature branch).
@@ -132,7 +132,7 @@ def test_get_latest_released_tag_returns_newest_tag_independent_of_branch(
 ) -> None:
     """get_latest_released_tag returns the latest main-merged tag regardless of branch.
 
-    This is the regression fixture for BUG-0017.  With HEAD on a branch where
+    This is the regression fixture for an earlier defect.  With HEAD on a branch where
     `git describe HEAD` resolves to an older tag (v0.101.2), the function must
     still return the latest main-merged tag (v0.106.3).
 

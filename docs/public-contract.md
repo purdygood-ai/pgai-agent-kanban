@@ -56,13 +56,40 @@ filename's ID. Malformed files are quarantined to `.rejected/` with a
   WONT-DO. There is no review state; anything needing human eyes is BLOCKED
   with a reason.
 - Task IDs: `<AGENT>-YYYYMMDD-NNN-slug`.
-- Workflow types `release` (git RC lifecycle, tags on main) and `document`
-  (versioned deliverables published to `projects/<name>/artifacts/`).
+- Workflow types are plugins under `$KANBAN_ROOT/workflows/<name>/`. The
+  framework ships `release` (git RC lifecycle, tags on main), `document`
+  (versioned deliverables published to `projects/<name>/artifacts/`), and
+  `testing-only` (label-versioned, read-only, report finalize). Operators
+  may add their own — see the workflows-dir contract below.
 - Git contract: working agents never push, pull, or fetch; CM is the sole
   origin-toucher; per-project `branch_prefix` isolates managed branches and
   tags.
 - The governance reading order: DIRECTIVES → OVERVIEW → SOP → README → role
   file → task README → task status → requirements.
+
+## Custom workflow types (workflows-dir survival and naming)
+
+Operators may author their own workflow-type plugins under
+`$KANBAN_ROOT/workflows/<name>/` — the same directory the framework's own
+plugins live in. Two contract guarantees apply across the 1.x line.
+
+- **Upgrade survival.** A plugin directory absent from the shipped source
+  tree survives `upgrade.sh --force` byte-identical. The mechanism is an
+  overlay copy that refreshes shipped files and leaves operator-authored
+  directories untouched. A custom `$KANBAN_ROOT/workflows/acme-deploy/`
+  does not need to be backed up, git-tracked, or re-installed after an
+  upgrade.
+- **Naming rule.** A custom plugin whose name matches a shipped plugin
+  (`release`, `document`, `testing-only`) is silently overwritten by the
+  upgrade's overlay copy. The generator (`create_new_workflow`) refuses
+  these names to prevent the collision at authoring time. Operators
+  authoring custom types should use org-prefixed names (e.g.
+  `acme-deploy`, `contoso-audit`) so future shipped types cannot collide
+  with them either.
+
+See [creating-a-workflow.md](creating-a-workflow.md) for the full authoring
+walkthrough (both the live-operator no-git path and the contributor
+dev-tree path).
 
 ## Environment
 

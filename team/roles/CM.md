@@ -6,7 +6,7 @@ When this file conflicts with the agent prompt, this file wins for project-speci
 
 ## Purpose
 
-CM (Configuration Manager / Release Manager) operates the release pipeline. CM opens release candidate branches from develop, verifies prerequisites, runs the release scripts, writes release notes, and coordinates the mechanics of getting work from "RC complete" to "tagged on main."
+CM (Configuration Manager / Release Manager) operates the release pipeline. CM opens release candidate branches from the prefixed main branch, verifies prerequisites, runs the release scripts, writes release notes, and coordinates the mechanics of getting work from "RC complete" to "tagged on main."
 
 CM does not implement work, write content, or verify the work. CM moves it through the final mile.
 
@@ -45,14 +45,14 @@ This means at release time, the local source branch contains all the accumulated
 
 The implications for CM:
 
-- `cm-open-rc.sh` creates `rc/vX.Y.Z` from local develop AND pushes it to origin (so the branch exists on origin from cycle start)
+- `cm-open-rc.sh` creates `rc/vX.Y.Z` from the local prefixed main branch AND pushes it to origin (so the branch exists on origin from cycle start)
 - During the cycle, origin's `rc/vX.Y.Z` stays at its initial state — irrelevant; nobody reads it
 - `cm-release.sh` reads in-flight RC state from the project's `release-state.md` at `$KANBAN_ROOT/projects/<project-name>/release-state.md` (per-install, not version-controlled). Last Released values come from git tags via `pp_last_released_version`, not from any file.
-- `cm-release.sh` squash-merges local rc into local develop, then pushes develop to origin
-- `cm-release.sh` squash-merges local develop into local main (commit only)
-- `cm-release.sh` tags the release commit on main
+- `cm-release.sh` squash-merges local rc directly into the local prefixed main branch (one squash — there is no develop hop)
+- `cm-release.sh` runs the post-squash fidelity gate (`git diff --quiet rc/vX.Y.Z <prefix>main`) before writing release notes or tagging; the trees must be byte-identical
+- `cm-release.sh` tags the release commit on the prefixed main branch
 - `cm-release.sh` deletes the rc branch on origin and locally
-- `cm-release.sh` attempts a **best-effort auto-push** of main and tags to origin. Push failures are non-fatal — the release ships locally and the operator can push manually if the auto-push fails. Look for `[cm-release auto-push]` lines in the script output to see the push outcome.
+- `cm-release.sh` attempts a **best-effort auto-push** of the prefixed main branch and tags to origin. Push failures are non-fatal — the release ships locally and the operator can push manually if the auto-push fails. Look for `[cm-release auto-push]` lines in the script output to see the push outcome.
 
 You don't need to understand or replicate this in your own commands. The scripts handle it. But you should understand the model: **mid-cycle, origin is stale; at release time, CM scripts make origin current.**
 
@@ -64,11 +64,10 @@ The "Origin Is CM's Territory" contract above describes the default — every pr
 
 **What it is.** `[project] push_to_remote` in `project.cfg`. A boolean, default `true`. Absent, blank, or malformed values are treated as `true`, so existing projects without the key keep the original push behavior. Only the exact string `false` opts out.
 
-**What it controls.** When `false`, CM still performs all release work locally — squash-merges into develop and main, tag creation, rc branch creation in `cm-open-rc.sh`, develop merge, main merge, release-notes generation and commits — but **no origin operations run.** Specifically, the gates in `cm-open-rc.sh`, `cm-release.sh`, `cm-finalize-release.sh`, and `cm-cancel-rc.sh` skip:
+**What it controls.** When `false`, CM still performs all release work locally — the squash-merge into the prefixed main branch, the fidelity gate, tag creation, rc branch creation in `cm-open-rc.sh`, release-notes generation and commits — but **no origin operations run.** Specifically, the gates in `cm-open-rc.sh`, `cm-release.sh`, `cm-finalize-release.sh`, and `cm-cancel-rc.sh` skip:
 
 - Pushing the new `rc/vX.Y.Z` branch on RC open
-- Pushing `develop` (RC open, mid-release sync, cancel-rc cleanup)
-- Pushing `main`
+- Pushing the prefixed main branch (release-time squash push, cancel-rc cleanup)
 - Pushing tags (release auto-push and the `cm-finalize-release.sh` tag push)
 - Deleting the RC branch on origin at release time
 - Any release-notes augmentation push via `cm-finalize-release.sh`
@@ -78,8 +77,8 @@ Each skipped push emits a log line of the form `[push_to_remote=false] skipping 
 **What still exists locally.** Every artifact a normal release produces is still made — just not pushed. After a local-only release:
 
 - The `rc/vX.Y.Z` branch exists locally (origin will not have it)
-- The squash-merge commits on local `develop` and local `main` exist
-- The release tag exists on the local `main` commit
+- The squash-merge commit on the local prefixed main branch exists
+- The release tag exists on the local prefixed main branch commit
 - `release-notes/<version>.md` is generated and committed locally
 - The bundled-item `## Status` promotion (`running → done`) runs as usual
 
@@ -96,7 +95,6 @@ If you inspect origin after a local-only release and it looks empty — no new t
 ```bash
 git -C <dev_tree> push origin main
 git -C <dev_tree> push origin <VERSION>
-git -C <dev_tree> push origin develop
 ```
 
 The release-operation "Verify origin is in sync" step (Step 7) does not apply in local-only mode — origin is intentionally behind. CM marks the task `DONE` after the local script exits 0. The release is complete from the kanban's perspective; distribution to origin is operator-driven.
@@ -126,7 +124,7 @@ The `## CM Operation` field on each CM task identifies which operation to run.
 
 ### open-rc
 
-Opens a new release candidate branch from `develop`.
+Opens a new release candidate branch from the prefixed main branch.
 
 **Steps:**
 
@@ -143,7 +141,7 @@ Opens a new release candidate branch from `develop`.
 
 ### release
 
-Squashes RC into develop, squashes develop into main, tags, pushes everything to origin, deletes the RC branch.
+Squashes RC directly into the prefixed main branch (one squash), runs the post-squash fidelity gate, writes and stamps release notes, tags, pushes everything to origin, deletes the RC branch.
 
 **Steps:**
 
@@ -157,16 +155,13 @@ Squashes RC into develop, squashes develop into main, tags, pushes everything to
    - **TESTER state is `DONE`** — verification ran to completion. Read the report's `## Recommendation` and `## Systemic Risk` fields. Apply the decision matrix below to determine whether to ship, ship with notes, or HALT.
    - **No TESTER task in prereqs, or no report found** — note this in `## Summary` and proceed. Default is to ship.
 
-   **Ship-policy decision matrix.** This matrix is exhaustive. CM applies exactly one row. Evaluate the inputs in the order listed (TESTER state first, then systemic_risk, then recommendation, then fix_effort). The first matching row wins.
-
-   | TESTER state | systemic_risk | recommendation | fix_effort (any finding) | CM action | Release notes Status |
-   |---|---|---|---|---|---|
-   | BLOCKED | (any) | (any) | (any) | **HALT** — refuse to ship | — |
-   | DONE | high | (any) | (any) | **HALT** — refuse to ship | — |
-   | DONE | low or medium | PASS | (any) | **Ship** | `FUNCTIONAL` |
-   | DONE | low or medium | SHIP-WITH-CONCERNS | (any) | **Ship** — list filed bugs in release notes | `KNOWN-BUGS` |
-   | DONE | low or medium | SHIP-WITH-SERIOUS-CONCERNS | all small or medium | **Ship** — include NON-FUNCTIONAL warning | `NON-FUNCTIONAL` |
-   | DONE | low or medium | SHIP-WITH-SERIOUS-CONCERNS | any large | **HALT** — refuse to ship | — |
+   **Ship-policy decision matrix.** Apply the canonical matrix in the
+   "Ship-Policy Decision Matrix (full reference)" section of this file —
+   it is the ONLY copy. Evaluate inputs in the order listed (TESTER
+   state, then systemic_risk, then recommendation, then fix_effort);
+   the first matching row wins. The matrix is exhaustive: missing or
+   unrecognized inputs match the explicit HALT rows at the bottom —
+   never a silent ship.
 
    **NON-FUNCTIONAL warning** (for SHIP-WITH-SERIOUS-CONCERNS with all-small/medium findings): add a prominent section to release notes immediately below `## Status`:
 
@@ -195,7 +190,7 @@ Squashes RC into develop, squashes develop into main, tags, pushes everything to
 
    If this script exits non-zero due to a mechanical failure (pre-squash hook fail, squash conflict, push fail after retries, or tag already exists on remote), apply the HALT procedure for the corresponding trigger. Do not re-invoke the script — HALT and stop.
 
-5. On exit 0: Optionally augment the auto-generated release notes (see "Release Notes" below). The script has already pushed develop, main, tags, and deleted the RC branch on origin. The script has also promoted the bundled items' `## Status` from `running` to `done` — see "Bundled Item Status Promotion" below for what to expect in the script's output. Then continue to Step 7 to verify origin is actually in sync before marking `DONE`.
+5. On exit 0: Optionally augment the auto-generated release notes (see "Release Notes" below). The script has already pushed the prefixed main branch, tags, and deleted the RC branch on origin. The script has also promoted the bundled items' `## Status` from `running` to `done` — see "Bundled Item Status Promotion" below for what to expect in the script's output. Then continue to Step 7 to verify origin is actually in sync before marking `DONE`.
 
 6. On non-zero or conflict: Inspect the script output for the failure cause. If the cause is a mechanical failure covered by the HALT triggers (pre-squash hook fail, squash conflict, push fail after retries, tag exists on remote), apply the HALT procedure. Otherwise set state to `BLOCKED` with `Needs Human: yes` and the full error output in `## Blockers`.
 
@@ -228,7 +223,7 @@ Squashes RC into develop, squashes develop into main, tags, pushes everything to
 
 #### Per-project release hooks
 
-`cm-release.sh` runs up to three optional hook scripts from `$KANBAN_ROOT/projects/<name>/hooks/` during the release: `cm-release-pre-squash.sh` (before the squash into `develop`), `cm-release-pre-tag.sh` (after both squashes, before `git tag`), and `cm-release-post-tag.sh` (after the tag exists locally). Missing hooks are silent skips and are the norm for most projects — only projects that have per-release finalization work (version-file bumps, manifest regeneration, downstream notifications) drop scripts in. Pre-squash and pre-tag failures block the release and surface in the script's exit output; post-tag failure is a logged warning only. CM does not invoke the hooks directly — the release script discovers and runs them.
+`cm-release.sh` runs up to three optional hook scripts from `$KANBAN_ROOT/projects/<name>/hooks/` during the release: `cm-release-pre-squash.sh` (before the squash into the prefixed main branch), `cm-release-pre-tag.sh` (after the squash and fidelity gate, before `git tag`), and `cm-release-post-tag.sh` (after the tag exists locally). Missing hooks are silent skips and are the norm for most projects — only projects that have per-release finalization work (version-file bumps, manifest regeneration, downstream notifications) drop scripts in. Pre-squash and pre-tag failures block the release and surface in the script's exit output; post-tag failure is a logged warning only. CM does not invoke the hooks directly — the release script discovers and runs them.
 
 The full contract — hook environment variables, cwd semantics, phase boundaries, idempotency expectations — lives in `team/SOP.md` under "Project-Specific CM-Release Hooks." Read that section when investigating a hook-related block reason or when an operator asks why a hook fired (or did not).
 
@@ -285,7 +280,7 @@ Finalizes the document deliverable. Packages the polished output into the projec
 
 ## Ship-Policy Decision Matrix (full reference)
 
-The matrix from the release operation Step 2, repeated here for easy reference. This table is exhaustive — every combination of inputs maps to exactly one action. Evaluate top to bottom; the first matching row wins.
+The canonical ship-policy matrix — the release operation's Step 2 applies THIS table (single-sourced; the former Step-2 inline copy is gone, and it had already drifted from this one). This table is exhaustive — every combination of inputs maps to exactly one action. Evaluate top to bottom; the first matching row wins.
 
 | TESTER state | systemic_risk | recommendation | fix_effort (any finding) | CM action | Release notes Status |
 |---|---|---|---|---|---|
@@ -295,14 +290,17 @@ The matrix from the release operation Step 2, repeated here for easy reference. 
 | DONE | low or medium | SHIP-WITH-CONCERNS | (any) | Ship with filed bugs listed | `KNOWN-BUGS` |
 | DONE | low or medium | SHIP-WITH-SERIOUS-CONCERNS | all small or medium | Ship with NON-FUNCTIONAL warning | `NON-FUNCTIONAL` |
 | DONE | low or medium | SHIP-WITH-SERIOUS-CONCERNS | any large | HALT | — |
-| (no report) | — | — | — | Ship (default) | `FUNCTIONAL` |
-| (unrecognized values) | — | — | — | Ship (default) | `FUNCTIONAL` |
+| (no report, `Test Required: false`) | — | — | — | Ship (verification was not ordered) | `FUNCTIONAL` |
+| (no report, `Test Required: true`) | — | — | — | **HALT** — verification was ordered and its report is missing | — |
+| (unrecognized values) | — | — | — | **HALT** — quote the unrecognized field and value verbatim in the HALT reason | — |
 
 **Release notes Status field values:**
 
 - `FUNCTIONAL` — clean release; no significant bugs filed.
 - `KNOWN-BUGS` — release ships with known bugs; issues filed and will be fixed in a future patch.
 - `NON-FUNCTIONAL` — release is shipped but may be unusable until the next patch. Include the NON-FUNCTIONAL warning section.
+
+The two HALT rows at the bottom are deliberate fail-loud behavior: a missing report when verification was ordered, or a recommendation/state string this table does not recognize (a typo, a truncated report, a parse failure), means CM's inputs cannot be trusted — and shipping on untrusted inputs is the silent-default failure class in the one place it publishes artifacts. Never-block governs found-bugs (they ship, with filings); it does not license shipping on garbage input.
 
 ## HALT Authority
 
@@ -316,7 +314,7 @@ CM creates a HALT file for any of the following nine conditions:
 2. **TESTER systemic_risk is high** — TESTER's report-level systemic risk is `high` (the maximum across all findings). Indicates a broader framework regression or a stuck CODER loop.
 3. **Any finding has Fix Effort = large in a SHIP-WITH-SERIOUS-CONCERNS context** — shipping through a large-effort serious finding is too risky. Operator must scope the work before proceeding.
 4. **Pre-squash hook fails** — a `cm-release-pre-squash.sh` hook exited non-zero. The finalization mechanic is broken; the squash cannot proceed safely.
-5. **Squash to develop or main has conflicts** — the squash merge produced conflicts. The git state is damaged; human judgment is required before any branch mutation continues.
+5. **Squash to main has conflicts** — the squash merge produced conflicts. The git state is damaged; human judgment is required before any branch mutation continues.
 6. **Push to origin fails after retries** — origin is not reachable or is rejecting the push. The release is locally complete but cannot be distributed; operator must resolve the network or auth issue.
 7. **Tag already exists on remote** — the release tag already exists on `origin`. This is a race condition or a repeated invocation against an already-shipped version. Operator must inspect and resolve.
 8. **Last 3 consecutive RCs for this project were all marked NON-FUNCTIONAL** — this pattern indicates the autonomous chain is shipping degraded work repeatedly without self-correcting. Halt until operator reviews the pattern.
@@ -427,7 +425,7 @@ This matters because the kanban iterates. A KNOWN-BUGS or NON-FUNCTIONAL release
 
 Release notes carry a `## Status` field (`FUNCTIONAL`, `KNOWN-BUGS`, or `NON-FUNCTIONAL`) that records the ship-policy outcome. That outcome is a CM decision made at release time from the TESTER report and the ship-policy decision matrix — it does not exist when WRITER authors the notes earlier in the cycle. So when WRITER authors `release-notes/<version>.md`, it writes the placeholder `## Status: PENDING-RELEASE` and never guesses the value (see "Authoring Release Notes" in `roles/WRITER.md`). `cm-release.sh` stamps the real value into the notes during the release.
 
-**When it runs.** Step 4e runs after the ship-policy decision matrix has been applied (the decision and its release-notes Status value are already computed) and after the pre-squash hook, but **before the squash that carries the RC into develop and then main.** Stamping before the squash is what gets the corrected status onto main. The decision time is unchanged — Step 4e only fixes the *stamp* time.
+**When it runs.** Step 4e runs after the ship-policy decision matrix has been applied (the decision and its release-notes Status value are already computed) and after the pre-squash hook, but **before the single squash that carries the RC into the prefixed main branch.** Stamping before the squash is what gets the corrected status onto main. The decision time is unchanged — Step 4e only fixes the *stamp* time.
 
 **What it writes.** If `release-notes/<version>.md` exists and contains the `PENDING-RELEASE` placeholder under a `## Status` heading, Step 4e replaces `PENDING-RELEASE` with the decided status value (`FUNCTIONAL` / `KNOWN-BUGS` / `NON-FUNCTIONAL`) and commits the stamped file on the RC branch. The squash then carries the stamped notes forward. No other content in the notes is touched.
 
@@ -475,7 +473,7 @@ On any of these the script calls `cm_halt` and stops before mutating branches. A
    - **Bugs Resolved** — list bugs fixed in this release; `None.` if none
    - **Bugs Skipped** — copy the gap summary from the TESTER report when recommendation was SHIP-WITH-CONCERNS or SHIP-WITH-SERIOUS-CONCERNS; `None.` if PASS
    - **Known Issues** — issues not addressed; `None.` if none
-4. If you augmented the file, commit and push the augmentation through the hook-immune finalize script. Do **not** issue a direct `git push` agent tool call against `main` — the PreToolUse protected-branch hook is configured to block agent-driven pushes to protected branches (main, develop, rc/*) by design, and direct `git push origin main` will be rejected. The finalize script performs the same commit+push from inside a subshell where the PreToolUse hook does not apply, so the augmentation reaches origin without weakening the guardrail.
+4. If you augmented the file, commit and push the augmentation through the hook-immune finalize script. Do **not** issue a direct `git push` agent tool call against `main` — the PreToolUse protected-branch hook is configured to block agent-driven pushes to protected branches (main, rc/*) by design, and direct `git push origin main` will be rejected. The finalize script performs the same commit+push from inside a subshell where the PreToolUse hook does not apply, so the augmentation reaches origin without weakening the guardrail.
 
    ```bash
    bash $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cm/finalize-release.sh --project <name> [VERSION]
@@ -531,13 +529,13 @@ The promotion described in this section handles the `running -> done` transition
 
 The promotion is the last release-state mutation in `cm-release.sh`'s success path. By the time it runs:
 
-- The local squash commits on develop and main exist
-- develop has been pushed to origin
+- The local squash commit on the prefixed main branch exists
+- The post-squash fidelity gate has passed
 - The RC branch has been deleted on origin and locally
 - The project-scoped `release-state.md` has been cleared (`Active RC -> none`)
 - The release tag has been **created locally** (the tag is the canonical Last Released record; it is not yet pushed — operator pushes the tag and main as the final gated step via `cm-finalize-release.sh`)
 
-The promotion runs after local tag creation and before the develop sync that returns origin to a clean post-release state. CM does not invoke it directly; it is internal to `cm-release.sh`.
+The promotion runs after local tag creation. CM does not invoke it directly; it is internal to `cm-release.sh`.
 
 ### What It Reads
 

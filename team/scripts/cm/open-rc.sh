@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cm-open-rc.sh
-# Human-invoked or CM-agent-invoked: opens a release candidate branch from develop.
+# Human-invoked or CM-agent-invoked: opens a release candidate branch from main.
 #
 # Usage:
 #   cm-open-rc.sh [--project <name>] <version> [task-id]
@@ -22,16 +22,15 @@
 #   3. Refuses if Active RC != none
 #   4. Checks rc/<version> does not already exist locally or on origin
 #   5. git fetch origin                      (skipped when push_to_remote=false)
-#   6. git checkout develop && git pull --ff-only   (pull skipped when push_to_remote=false)
+#   6. git checkout main && git pull --ff-only    (pull skipped when push_to_remote=false)
 #   7. Writes project-scoped release-state.md using here-doc template (canonical format)
 #      Only RC fields are written (Active RC, RC Opened At, RC Opened By Task).
 #      Last Released* fields are NOT read from or written to release-state.md;
 #      the canonical Last Released record is the git tag created by cm-release.sh.
 #   8. git checkout -b rc/<version>
 #   9. git push -u origin rc/<version>
-#  10. git checkout develop
-#  11. git push origin develop
-#  12. Prints success message and exits 0
+#  10. git checkout main
+#  11. Prints success message and exits 0
 #
 # Release-state.md is the project-scoped live install file only:
 #   $KANBAN_ROOT/projects/<name>/release-state.md
@@ -91,14 +90,17 @@ if [[ -z "$VERSION" ]]; then
   exit 1
 fi
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Resolve script directory ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Source optional config files (BEFORE strict mode) ---
 # The kanban bashrc/env may have unset vars, non-zero returns, or interactive
 # aliases that would trip strict mode. Source them first.
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
-TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
 [[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
@@ -148,21 +150,20 @@ if [[ -z "${REPO_ROOT:-}" ]]; then
   fi
 fi
 
-# --- Resolve base branch names via pp_prefix_branch ---
-# For projects with branch_prefix=ai_, DEVELOP_BRANCH=ai_develop and MAIN_BRANCH=ai_main.
-# For projects with no branch_prefix, these are 'develop' and 'main' unchanged.
-DEVELOP_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "develop")"
+# --- Resolve base branch name via pp_prefix_branch ---
+# For projects with branch_prefix=ai_, MAIN_BRANCH=ai_main.
+# For projects with no branch_prefix, MAIN_BRANCH=main unchanged.
 MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
 
 # --- Read push_to_remote flag via pp_push_to_remote helper ---
-# Default: 'true' — pushes rc branch and develop to origin (existing behavior preserved).
+# Default: 'true' — pushes rc branch to origin (existing behavior preserved).
 # Set [project] push_to_remote = false in project.cfg to complete the full local
 # open-rc operation without any git push origin calls.
 _CM_PUSH_TO_REMOTE="$(KANBAN_ROOT="$KANBAN_ROOT" pp_push_to_remote "$PROJECT_NAME")"
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  echo "[cm-open-rc] Push policy: push_to_remote=true — rc branch and develop will be pushed to origin."
+  echo "[cm-open-rc] Push policy: push_to_remote=true — rc branch will be pushed to origin."
 else
-  echo "[cm-open-rc] Push policy: push_to_remote=false — rc branch and develop stay local. Operator must push manually."
+  echo "[cm-open-rc] Push policy: push_to_remote=false — rc branch stays local. Operator must push manually."
 fi
 
 # --- Rollback state tracking ---
@@ -195,7 +196,7 @@ cleanup_on_exit() {
     # Rollback: delete local rc branch if it was created
     if [[ $RC_BRANCH_CREATED -eq 1 ]]; then
       echo "  Rolling back: deleting local branch $RC_BRANCH..." >&2
-      if git -C "$REPO_ROOT" checkout "$DEVELOP_BRANCH" 2>/dev/null && \
+      if git -C "$REPO_ROOT" checkout "$MAIN_BRANCH" 2>/dev/null && \
          git -C "$REPO_ROOT" branch -D "$RC_BRANCH" 2>/dev/null; then
         echo "  Rolled back: local branch $RC_BRANCH deleted." >&2
       else
@@ -311,16 +312,16 @@ else
   echo "push_to_remote=false — skipping git fetch origin (local-only install)."
 fi
 
-# --- Checkout develop and pull ---
+# --- Checkout main and pull ---
 # Gated by push_to_remote flag: the ff-only pull from origin is skipped when
-# push_to_remote=false (origin/$DEVELOP_BRANCH need not exist).  The checkout
-# still runs — the rc branch is cut from DEVELOP_BRANCH as current HEAD.
-echo "Checking out $DEVELOP_BRANCH and pulling..."
-git -C "$REPO_ROOT" checkout "$DEVELOP_BRANCH"
+# push_to_remote=false (origin/$MAIN_BRANCH need not exist).  The checkout
+# still runs — the rc branch is cut from MAIN_BRANCH as current HEAD.
+echo "Checking out $MAIN_BRANCH and pulling..."
+git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  git -C "$REPO_ROOT" merge --ff-only "origin/$DEVELOP_BRANCH"
+  git -C "$REPO_ROOT" merge --ff-only "origin/$MAIN_BRANCH"
 else
-  echo "push_to_remote=false — skipping ff-only pull from origin/$DEVELOP_BRANCH (local-only install)."
+  echo "push_to_remote=false — skipping ff-only pull from origin/$MAIN_BRANCH (local-only install)."
 fi
 
 # --- Write project-scoped release-state.md using here-doc template (canonical format) ---
@@ -351,8 +352,8 @@ RELEASE_STATE_WRITTEN=1
 # release-state.md is written to the project-scoped live install path only;
 # no git commit of release-state.md is made in the dev tree.
 
-# Create the RC branch from develop (or the prefixed equivalent)
-echo "Creating branch $RC_BRANCH from $DEVELOP_BRANCH..."
+# Create the RC branch from main (or the prefixed equivalent)
+echo "Creating branch $RC_BRANCH from $MAIN_BRANCH..."
 git -C "$REPO_ROOT" checkout -b "$RC_BRANCH"
 RC_BRANCH_CREATED=1
 
@@ -377,17 +378,9 @@ else
   echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: git push -u origin $RC_BRANCH"
 fi
 
-# Switch back to develop
-echo "Switching back to $DEVELOP_BRANCH..."
-git -C "$REPO_ROOT" checkout "$DEVELOP_BRANCH"
-
-# Push develop to origin (gated by push_to_remote flag)
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  echo "Pushing $DEVELOP_BRANCH to origin..."
-  git -C "$REPO_ROOT" push origin "$DEVELOP_BRANCH"
-else
-  echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: git push origin $DEVELOP_BRANCH"
-fi
+# Switch back to main
+echo "Switching back to $MAIN_BRANCH..."
+git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
 
 echo ""
 echo "RC branch opened successfully."

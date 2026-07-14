@@ -231,6 +231,13 @@ source "${SCRIPT_DIR}/../lib/wake_common.sh"
 # shellcheck source=scripts/lib/worktree.sh
 source "${SCRIPT_DIR}/../lib/worktree.sh"
 
+# --- Source wake-bracket shared lib ---
+# Provides wake_bracket_compute_temp_subtree, wake_bracket_pre_dispatch, and
+# wake_bracket_post_session — shared across both wake provider siblings so
+# the bracket functions live in exactly one place.
+# shellcheck source=scripts/lib/wake_bracket.sh
+source "${SCRIPT_DIR}/../lib/wake_bracket.sh"
+
 # --- Read active provider and exit immediately if not claude ---
 # Done after wake_common.sh is sourced so TEAM_ROOT, PGAI_*,
 # and log() are all available.
@@ -594,18 +601,47 @@ process_one_task() {
     log "task ${task_id}: feature branch: ${_task_feature_branch}"
 
     # --- Worktree lifecycle: CODER/WRITER git-workflow tasks ---
-    # Detect workflow type; only release and feature workflows need a worktree.
-    # Document tasks use a local artifacts directory and skip git worktree.
+    # Detect workflow type and query the plugin for git mode to decide whether
+    # a git worktree is required.  Fail-closed: a missing or broken plugin blocks
+    # the task rather than silently defaulting to release behavior.
     local _wt_exit=0
     set +e
     _task_workflow_type="$(get_workflow_type_from_readme "$task_readme")"
     _wt_exit=$?
     set -e
-    if [[ $_wt_exit -ne 0 ]]; then
-      _task_workflow_type="release"   # safe default on parse failure
+    if [[ $_wt_exit -ne 0 || -z "$_task_workflow_type" ]]; then
+      log "task ${task_id}: ERROR: cannot parse '## Workflow Type' from ${task_readme}; blocking task (fail-closed)"
+      set_state "$task_status" "BLOCKED"
+      set_block "$task_status" "Blockers" "Wake script could not parse '## Workflow Type' from ${task_readme}. Ensure the field is present and non-empty."
+      set_block "$task_status" "Needs Human" "yes"
+      normalize_status_file "$task_status"
+      mark_backlog "$task_id" "B"
+      LAST_TASK_FINAL_STATE="BLOCKED"
+      return 0
     fi
 
-    if [[ "$_task_workflow_type" != "document" ]]; then
+    # Load the workflow plugin to query git mode via wf_git_mode.
+    # Plugins with git_mode != "none" require an isolated git worktree.
+    # Fail-closed: unknown type, missing/invalid manifest, or status=scaffold
+    # routes the task to BLOCKED — never silently defaults to release behavior.
+    local _wf_load_exit=0 _wf_git_mode="none"
+    set +e
+    wf_load_plugin "$_task_workflow_type"
+    _wf_load_exit=$?
+    set -e
+    if [[ $_wf_load_exit -ne 0 ]]; then
+      log "task ${task_id}: ERROR: workflow plugin '${_task_workflow_type}' failed to load: ${WF_LOAD_ERROR}"
+      set_state "$task_status" "BLOCKED"
+      set_block "$task_status" "Blockers" "Workflow plugin for type '${_task_workflow_type}' could not be loaded: ${WF_LOAD_ERROR}. Ensure team/workflows/${_task_workflow_type}/ has a valid workflow.cfg (status=ready) and workflow.sh."
+      set_block "$task_status" "Needs Human" "yes"
+      normalize_status_file "$task_status"
+      mark_backlog "$task_id" "B"
+      LAST_TASK_FINAL_STATE="BLOCKED"
+      return 0
+    fi
+    _wf_git_mode="$(wf_git_mode)"
+
+    if [[ "$_wf_git_mode" != "none" ]]; then
       # Git-workflow task: create an isolated worktree and park the canonical tree.
 
       # Extract the source (RC) branch from the task README.
@@ -629,11 +665,10 @@ process_one_task() {
 
       # Park the canonical dev tree off the RC branch so git will not refuse
       # to create a worktree that checks out the same branch.
-      # Park the canonical dev tree using the project's resting branch
-      # (prefix+develop, then prefix+main) via pp_prefix_branch, falling back
-      # to --detach only when neither prefixed branch exists locally. The resting
-      # branch is recorded in _park_resting_branch and restored after the worktree
-      # is torn down.
+      # Park the canonical dev tree on the project's resting branch (prefix+main)
+      # via pp_prefix_branch, falling back to --detach when the branch does not
+      # exist locally. The resting branch is recorded in _park_resting_branch and
+      # restored after the worktree is torn down.
       #
       # Sandbox guard: skip parking when the kanban root (TEAM_ROOT) is under a
       # temp directory. Integration tests build a synthetic kanban root under /tmp
@@ -657,14 +692,7 @@ process_one_task() {
         else
           # Compute prefix-aware resting branch via pp_prefix_branch.
           local _pb_exit=0
-          local _resting_develop="" _resting_main=""
-          set +e
-          _resting_develop="$(pp_prefix_branch "${_CURRENT_PROJECT:-}" "develop" 2>/dev/null)"
-          _pb_exit=$?
-          set -e
-          if [[ $_pb_exit -ne 0 || -z "$_resting_develop" ]]; then
-            _resting_develop="develop"   # safe fallback when helper fails
-          fi
+          local _resting_main=""
           set +e
           _resting_main="$(pp_prefix_branch "${_CURRENT_PROJECT:-}" "main" 2>/dev/null)"
           _pb_exit=$?
@@ -675,26 +703,17 @@ process_one_task() {
 
           local _park_exit=0
           set +e
-          git -C "$_dev_tree" checkout "$_resting_develop" 2>/dev/null
+          git -C "$_dev_tree" checkout "$_resting_main" 2>/dev/null
           _park_exit=$?
           set -e
           if [[ $_park_exit -eq 0 ]]; then
-            _park_resting_branch="$_resting_develop"
+            _park_resting_branch="$_resting_main"
           else
-            # Prefixed develop does not exist locally; try prefixed main.
+            # Resting branch does not exist locally; detach HEAD so the branch is free.
             set +e
-            git -C "$_dev_tree" checkout "$_resting_main" 2>/dev/null
+            git -C "$_dev_tree" checkout --detach 2>/dev/null
             _park_exit=$?
             set -e
-            if [[ $_park_exit -eq 0 ]]; then
-              _park_resting_branch="$_resting_main"
-            else
-              # Neither resting branch exists locally; detach HEAD so the branch is free.
-              set +e
-              git -C "$_dev_tree" checkout --detach 2>/dev/null
-              _park_exit=$?
-              set -e
-            fi
           fi
           if [[ $_park_exit -ne 0 ]]; then
             log "task ${task_id}: WARNING: could not park canonical dev tree at ${_dev_tree}; worktree creation may fail if RC branch is currently checked out there"
@@ -744,21 +763,21 @@ process_one_task() {
 Feature branch for this task: ${_task_feature_branch}
 Your working directory is an isolated git worktree at ${_task_worktree_path} that is already checked out on the feature branch. Do NOT run 'git checkout -b' — the branch is already active. All git operations (commit, merge, branch -d) happen inside this worktree."
     else
-      # Document workflow: no worktree; keep the existing git checkout-b reminder.
+      # No worktree (git_mode=none): keep the existing git checkout-b reminder.
       role_reminder="${role_reminder}
 
 Feature branch for this task: ${_task_feature_branch}
 Use this exact name when running: git checkout -b"
     fi
   elif [[ "$SUBAGENT" == "tester" ]]; then
-    # --- Worktree lifecycle: TESTER git-workflow (release) tasks ---
+    # --- Worktree lifecycle: TESTER git-workflow tasks ---
     # TESTER reads the RC branch at its current tip in a detached worktree.
-    # No feature branch is created.  Document tasks (workflow_type=document)
-    # are out of scope for this path.
+    # No feature branch is created.  Tasks whose plugin declares git_mode=none
+    # (e.g. document workflow) are out of scope for this path.
     #
     # TESTER parks the canonical dev tree onto the project's resting branch
-    # (${prefix}develop → ${prefix}main → --detach) and restores it after the
-    # task, so the dev tree is never left parked or detached.
+    # (${prefix}main → --detach) and restores it after the task, so the dev
+    # tree is never left parked or detached.
     local _wt_exit=0
     set +e
     _task_workflow_type="$(get_workflow_type_from_readme "$task_readme")"
@@ -768,7 +787,26 @@ Use this exact name when running: git checkout -b"
       _task_workflow_type="release"   # safe default on parse failure
     fi
 
-    if [[ "$_task_workflow_type" != "document" ]]; then
+    # Load the workflow plugin to determine git mode via wf_git_mode.
+    # Tasks with git_mode=none have no git worktree (e.g. document workflow).
+    local _wf_tester_load_exit=0 _wf_tester_git_mode="none"
+    set +e
+    wf_load_plugin "$_task_workflow_type"
+    _wf_tester_load_exit=$?
+    set -e
+    if [[ $_wf_tester_load_exit -ne 0 ]]; then
+      log "task ${task_id}: ERROR: workflow plugin '${_task_workflow_type}' failed to load for tester: ${WF_LOAD_ERROR}"
+      set_state "$task_status" "BLOCKED"
+      set_block "$task_status" "Blockers" "Wake script could not load workflow plugin '${_task_workflow_type}' for tester: ${WF_LOAD_ERROR}. Ensure team/workflows/${_task_workflow_type}/ has a valid workflow.cfg (status=ready) and workflow.sh."
+      set_block "$task_status" "Needs Human" "yes"
+      normalize_status_file "$task_status"
+      mark_backlog "$task_id" "B"
+      LAST_TASK_FINAL_STATE="BLOCKED"
+      return 0
+    fi
+    _wf_tester_git_mode="$(wf_git_mode)"
+
+    if [[ "$_wf_tester_git_mode" != "none" ]]; then
       # Extract the source (RC) branch from the task README.
       local _task_source_branch=""
       local _sb_exit=0
@@ -804,14 +842,7 @@ Use this exact name when running: git checkout -b"
           log "task ${task_id}: skipping dev-tree parking: kanban root (${TEAM_ROOT}) is a temp/sandbox tree — will not mutate ${_dev_tree}"
         else
           local _pb_exit=0
-          local _resting_develop="" _resting_main=""
-          set +e
-          _resting_develop="$(pp_prefix_branch "${_CURRENT_PROJECT:-}" "develop" 2>/dev/null)"
-          _pb_exit=$?
-          set -e
-          if [[ $_pb_exit -ne 0 || -z "$_resting_develop" ]]; then
-            _resting_develop="develop"
-          fi
+          local _resting_main=""
           set +e
           _resting_main="$(pp_prefix_branch "${_CURRENT_PROJECT:-}" "main" 2>/dev/null)"
           _pb_exit=$?
@@ -822,24 +853,16 @@ Use this exact name when running: git checkout -b"
 
           local _park_exit=0
           set +e
-          git -C "$_dev_tree" checkout "$_resting_develop" 2>/dev/null
+          git -C "$_dev_tree" checkout "$_resting_main" 2>/dev/null
           _park_exit=$?
           set -e
           if [[ $_park_exit -eq 0 ]]; then
-            _park_resting_branch="$_resting_develop"
+            _park_resting_branch="$_resting_main"
           else
             set +e
-            git -C "$_dev_tree" checkout "$_resting_main" 2>/dev/null
+            git -C "$_dev_tree" checkout --detach 2>/dev/null
             _park_exit=$?
             set -e
-            if [[ $_park_exit -eq 0 ]]; then
-              _park_resting_branch="$_resting_main"
-            else
-              set +e
-              git -C "$_dev_tree" checkout --detach 2>/dev/null
-              _park_exit=$?
-              set -e
-            fi
           fi
           if [[ $_park_exit -ne 0 ]]; then
             log "task ${task_id}: WARNING: could not park canonical dev tree at ${_dev_tree}"
@@ -905,6 +928,11 @@ Your working directory is an isolated git worktree at ${_task_worktree_path} che
     fi
   fi
 
+  # Resolve the per-project temp subtree at dispatch time so the emitted prompt
+  # contains the absolute path rather than an unexpanded variable reference.
+  local _project_temp_subtree
+  _project_temp_subtree="$(wake_bracket_compute_temp_subtree "${_CURRENT_PROJECT:-}")"
+
   prompt=$(cat <<EOF
 Use the ${SUBAGENT} subagent to process the kanban task at ${task_dir}.
 
@@ -915,6 +943,7 @@ Before starting, read the governance stack: ${TEAM_ROOT}/DIRECTIVES.md, ${TEAM_R
 Read the task README at ${task_readme} for the assignment. Read the status at ${task_status} to determine whether this is a fresh start (state BACKLOG) or a resume from an interrupted prior session (state WORKING). Clean up any stale status fields before beginning. Do the work, place artifacts in the working directory specified by the task README (or in ${task_artifact_dir} if working directory is none/local-development-only), and update ${task_status} with the final state when done.
 
 ${_prompt_working_dir_override}
+Scratch/diagnostic output goes under ${_project_temp_subtree} — never bare /tmp (SOP: Temporary File Convention).
 
 You are running autonomously. No human is reviewing your output in real time. Your terminal states are exactly: DONE (work shipped), BLOCKED (specific named obstacle), or WONT-DO (cancelled). There is no third state for "I want a human to look at this." If you find yourself reaching for one, either name a concrete obstacle and BLOCK, or finish the work and document any concerns in the status Summary while marking DONE.
 
@@ -1025,6 +1054,14 @@ This trace is for human prompt-engineering analysis, not for orchestration. It d
   set_state "$task_status" "WORKING"
   log "task ${task_id}: transitioned to WORKING [A]"
 
+  # --- Wake-stamp resolved model into status.md ## Model section ---
+  # The wake script holds the authoritative resolved model string at this point.
+  # Stamping here (before spawn) makes the field an execution record written by
+  # the party that knows, not a self-report from the agent (which cannot reliably
+  # self-identify). Only ## Model is written; all other status fields are preserved.
+  stamp_model_field "$task_status" "${selected_model:-<provider default>}"
+  log "task ${task_id}: stamped ## Model = '${selected_model:-<provider default>}' into status.md"
+
   # --- Stale-artifact preservation on re-run ---
   _rotate_artifact() {
     local artifact_path="$1"
@@ -1075,6 +1112,10 @@ This trace is for human prompt-engineering analysis, not for orchestration. It d
   export PGAI_PROJECT_NAME="$_CURRENT_PROJECT"
   export PGAI_TASKS_DIR="$(pp_tasks_dir "$_CURRENT_PROJECT")"
 
+  # --- Pre-dispatch /tmp litter snapshot ---
+  local _litter_snapshot_file
+  _litter_snapshot_file="$(wake_bracket_pre_dispatch "$task_id")"
+
   # --- Pre-task pollution snapshot ---
   # Snapshot the canonical dev tree's porcelain state before the agent runs.
   # The diff is compared post-task to detect files left behind.
@@ -1086,13 +1127,26 @@ This trace is for human prompt-engineering analysis, not for orchestration. It d
       _pollution_pre_snapshot="$(git -C "${_sweep_canonical_tree}" status --porcelain=v1 --untracked-files=all 2>/dev/null)"
       _pollution_snapshot_ok=true
     else
-      # Distinguish intentional absence (document workflow / no dev_tree_path configured)
-      # from a misconfiguration (release workflow with a set-but-missing path).
-      # Document-workflow projects have no dev tree by design; skip silently
-      # at info level. Reserve WARNING for release-workflow projects whose
-      # configured dev_tree_path does not resolve.
-      if [[ -z "${_sweep_canonical_tree:-}" || "${PP_workflow_type:-release}" == "document" ]]; then
-        log "INFO: pollution sweep: no dev tree configured for this project (${PP_workflow_type:-release} workflow); snapshot not applicable"
+      # Distinguish intentional absence (git_mode=none workflow / no dev_tree_path
+      # configured) from a misconfiguration (git_mode=rw project with missing path).
+      # Workflows with git_mode=none have no dev tree by design; skip silently at
+      # info level. Reserve WARNING for git-workflow projects whose configured
+      # dev_tree_path does not resolve.
+      # Use WF_MANIFEST_GIT_MODE from the plugin loaded for this task when
+      # available; otherwise attempt a best-effort load of PP_workflow_type.
+      local _sweep_wf_git_mode="${WF_MANIFEST_GIT_MODE:-}"
+      if [[ -z "$_sweep_wf_git_mode" && -n "${PP_workflow_type:-}" ]]; then
+        local _sweep_wf_load_exit=0
+        set +e
+        wf_load_plugin "${PP_workflow_type}"
+        _sweep_wf_load_exit=$?
+        set -e
+        if [[ $_sweep_wf_load_exit -eq 0 ]]; then
+          _sweep_wf_git_mode="$(wf_git_mode)"
+        fi
+      fi
+      if [[ -z "${_sweep_canonical_tree:-}" || "${_sweep_wf_git_mode:-rw}" == "none" ]]; then
+        log "INFO: pollution sweep: no dev tree configured for this project (${PP_workflow_type:-release} workflow; git_mode=${_sweep_wf_git_mode:-unknown}); snapshot not applicable"
       else
         log "WARNING: pollution sweep: canonical dev tree '${_sweep_canonical_tree}' not found; pre-task snapshot skipped"
       fi
@@ -1360,7 +1414,22 @@ PY_POL
   fi
 
   case "$final_state" in
-    BLOCKED)      mark_backlog "$task_id" "B" ;;
+    BLOCKED)
+      mark_backlog "$task_id" "B"
+      # --- on-BLOCK overwatch trigger ---
+      # Fire a non-blocking wake-now overwatch nudge so fresh blocks are
+      # inspected within seconds rather than at the next hourly sweep tick.
+      # Guards: (a) never self-trigger when running as overwatch, (b) fully
+      # backgrounded with exit status ignored — must not add any failure mode
+      # to the block path, (c) storm dedupe via the existing per-agent wake
+      # flock (concurrent overwatch runs find it held and exit 0), (d) HALT
+      # and HALT_OVERWATCH gate the woken run at its own pre-flight, not here.
+      if [[ "$AGENT" != "overwatch" ]]; then
+        mkdir -p "${KANBAN_ROOT}/logs"
+        nohup "${KANBAN_ROOT}/scripts/wake-now.sh" --agent overwatch \
+          >>"${KANBAN_ROOT}/logs/overwatch-trigger.log" 2>&1 &
+      fi
+      ;;
     WAITING)      mark_backlog "$task_id" "W" ;;
     DONE|WONT-DO) mark_backlog "$task_id" "x" ;;
     BACKLOG|WORKING) mark_backlog "$task_id" " " ;;
@@ -1370,6 +1439,9 @@ PY_POL
       exit 1
       ;;
   esac
+
+  # --- Post-session /tmp litter check ---
+  wake_bracket_post_session "$final_state" "${_litter_snapshot_file:-}" "$task_status" "$task_id" "${_CURRENT_PROJECT:-}" "${KANBAN_ROOT:-}"
 
   # --- Post-task training corpus copy ---
   # Gate: per-project [training] reasoning_trace=true AND current SUBAGENT in
@@ -1405,6 +1477,21 @@ PY_POL
         fi
       fi
     fi
+  fi
+
+  # --- Post-TESTER finalize=report intake closure (BUG-0066) ---
+  # When the terminal roster ticket of a testing-only (finalize=report) run
+  # completes DONE, flip the originating intake item from running to done.
+  # Guards: SUBAGENT==tester, final_state==DONE, WF_MANIFEST_FINALIZE==report,
+  # plus README constraint "finalize_mode: report" (written by inject_simple_tester_task).
+  # Release/document workflow closure paths are byte-identical (no change here).
+  if [[ "$SUBAGENT" == "tester" && "$final_state" == "DONE" ]]; then
+    close_intake_on_finalize_report \
+      "$task_id" \
+      "$task_readme" \
+      "${PGAI_PROJECT_ROOT:-}" \
+      "${TASKS_ROOT:-}" \
+      "${WF_MANIFEST_FINALIZE:-}"
   fi
 
   # --- Post-PM auto-materialization ---

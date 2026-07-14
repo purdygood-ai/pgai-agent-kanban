@@ -28,6 +28,8 @@
 #   1 — usage error, missing project, missing file, or rename collision
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -83,7 +85,7 @@ operator_args_validate_known "recover-rejected.sh" OPERATOR_VALID_FLAGS || exit 
 PROJECT=""
 FILENAME=""
 RENAME_TO=""
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 PROJECT="$(operator_args_project)"
 if argparse_has "file";   then FILENAME="${ARGPARSE_FLAGS[file]}"; fi

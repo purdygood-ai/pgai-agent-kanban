@@ -22,7 +22,7 @@ Path layout (mirrors project_paths.sh):
 
 Usage:
 
-    ctx = OpsContext(kanban_root=Path("/home/rocky/pgai_agent_kanban"))
+    ctx = OpsContext(kanban_root=Path("/home/<operator>/pgai_agent_kanban"))
     # or resolve from the environment:
     ctx = OpsContext.from_env()
 
@@ -36,6 +36,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pgai_agent_kanban.env import resolve_kanban_root
+
 
 @dataclass
 class OpsContext:
@@ -47,11 +49,7 @@ class OpsContext:
             and other top-level kanban directories.
     """
 
-    kanban_root: Path = field(default_factory=lambda: Path(
-        os.environ.get("KANBAN_ROOT")
-        or os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-        or Path.home() / "pgai_agent_kanban"
-    ))
+    kanban_root: Path = field(default_factory=resolve_kanban_root)
 
     def __post_init__(self) -> None:
         # Normalize to an absolute Path regardless of how the caller supplied it.
@@ -67,19 +65,24 @@ class OpsContext:
 
         Resolution order for the kanban root (highest to lowest precedence):
 
-        1. ``KANBAN_ROOT`` environment variable
-        2. ``PGAI_AGENT_KANBAN_ROOT_PATH`` environment variable
-        3. ``~/pgai_agent_kanban`` (default installation path)
+        1. ``KANBAN_ROOT`` environment variable (legacy alias)
+        2. ``PGAI_AGENT_KANBAN_ROOT_PATH`` environment variable, resolved
+           through the canonical resolver in :mod:`pgai_agent_kanban.env`
+
+        Raises:
+            RuntimeError: When neither ``KANBAN_ROOT`` nor
+                ``PGAI_AGENT_KANBAN_ROOT_PATH`` is set in the environment.
 
         Returns:
             A new OpsContext with kanban_root resolved from the environment.
         """
-        root = (
-            os.environ.get("KANBAN_ROOT")
-            or os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-            or str(Path.home() / "pgai_agent_kanban")
-        )
-        return cls(kanban_root=Path(root))
+        # KANBAN_ROOT is a legacy alias honored for backward compatibility.
+        # When present it takes precedence; otherwise the canonical resolver
+        # reads PGAI_AGENT_KANBAN_ROOT_PATH and fails loud when unset.
+        legacy = os.environ.get("KANBAN_ROOT", "").strip()
+        if legacy:
+            return cls(kanban_root=Path(legacy))
+        return cls(kanban_root=resolve_kanban_root())
 
     # ------------------------------------------------------------------
     # Project-scoped path helpers (mirror of project_paths.sh pp_* functions)

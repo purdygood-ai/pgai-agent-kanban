@@ -33,6 +33,8 @@
 #   1  Usage error or unrecoverable configuration failure.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script location and module path
@@ -74,7 +76,7 @@ done
 # ---------------------------------------------------------------------------
 # Export kanban root for the Python module
 # ---------------------------------------------------------------------------
-_KANBAN_ROOT_RESOLVED="${KANBAN_ROOT_OVERRIDE:-${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}}"
+_KANBAN_ROOT_RESOLVED="${KANBAN_ROOT_OVERRIDE:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
 export PGAI_AGENT_KANBAN_ROOT_PATH="$_KANBAN_ROOT_RESOLVED"
 unset _KANBAN_ROOT_RESOLVED
 

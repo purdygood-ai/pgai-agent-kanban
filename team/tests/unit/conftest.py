@@ -34,6 +34,12 @@ hierarchy.  This file adds only what is specific to the unit scope:
   - log_stub_capture  — LogStubCapture context manager fixture; from
                         tests/fixtures/log_stub.py.
 
+  - api_server        — teardown-guaranteed API server on an ephemeral port;
+                        from tests/fixtures/api_server.py.  Starts a real
+                        uvicorn subprocess, yields a ServerHandle(port, pid),
+                        and stops it in a finally block, asserting the port is
+                        free before returning.  Never binds port 8300.
+
   Unit-specific fixtures:
 
   - minimal_kanban_root — a leaner kanban tree than tmp_kanban_root, suitable
@@ -67,6 +73,7 @@ from tests.fixtures.installed_root import installed_root  # noqa: F401
 from tests.fixtures.two_project import two_project_root  # noqa: F401
 from tests.fixtures.log_stub import log_stub_fragment  # noqa: F401
 from tests.fixtures.log_stub import log_stub_capture  # noqa: F401
+from tests.fixtures.api_server import api_server  # noqa: F401
 
 
 # ---------------------------------------------------------------------------

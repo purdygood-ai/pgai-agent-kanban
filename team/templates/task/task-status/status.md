@@ -9,6 +9,11 @@ CLAUDE | HUMAN
 ## Role
 CODER | WRITER | TESTER | CM | PM | PO
 
+## Model
+<!-- Wake-stamped at spawn time from the resolved model string. Agents must NOT
+     write this field — it is an execution record written by the wake script. -->
+<wake-stamped>
+
 ## State
 <!-- One of: BACKLOG WAITING WORKING BLOCKED DONE WONT-DO -->
 BACKLOG

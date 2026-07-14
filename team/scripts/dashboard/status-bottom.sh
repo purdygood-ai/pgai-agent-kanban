@@ -18,14 +18,21 @@
 # Output (single line, no trailing newline):
 #
 #   Global bar (PROJECT_NAME not supplied):
-#     Normal:   v<version> | PM:<mode> | <day> <HH:MM>
-#     Draining: v<version> | PM:<mode> | HALT-AFTER GLOBAL <event> | <day> <HH:MM>
-#     Halted:   v<version> | PM:<mode> | HALT GLOBAL | <day> <HH:MM>
+#     Normal:   📝 v<version> | 🟢 PM:auto | 📅 <day> <HH:MM>        (rich mode)
+#               v<version> | PM:auto | <day> <HH:MM>                   (NO_COLOR/dumb)
+#     Draining: 📝 v<version> | 🟢 PM:auto | ⚠️ HALT-AFTER GLOBAL <event> | 📅 <day> <HH:MM>
+#     Halted:   📝 v<version> | 🟢 PM:auto | 🛑 HALT GLOBAL | 📅 <day> <HH:MM>
+#     Pending:  📝 v<version> | 🟢 PM:auto | ✋ APPROVAL(n) | 📅 <day> <HH:MM>
 #
 #   Per-project bar (PROJECT_NAME supplied):
-#     Normal:   v<version> | <project>:<version> | workflow:<type> | PM:<mode> | <day> <HH:MM>
-#     Draining: v<version> | <project>:<version> | workflow:<type> | PM:<mode> | HALT-AFTER GLOBAL <event> | <day> <HH:MM>
-#     Halted:   v<version> | <project>:<version> | workflow:<type> | PM:<mode> | HALT GLOBAL | <day> <HH:MM>
+#     Normal:   📝 v<ver> | 📝 <proj>:<ver> | workflow:<type> | 🟢 PM:auto | 📅 <day> <HH:MM>
+#     (NO_COLOR/dumb forms are unchanged from pre-glyph baseline)
+#
+#   Glyphs are rendered in rich mode only; NO_COLOR / TERM=dumb output is
+#   byte-identical to the pre-glyph baseline.  Glyph literals live exclusively
+#   in team/scripts/lib/status_glyphs.sh (sourced below).
+#
+#   HALT and APPROVAL segments may appear together.  HALT is emitted first.
 #
 #   <version> is the live install's ${KANBAN_ROOT}/VERSION file content (D2 fix).
 #
@@ -40,10 +47,15 @@
 # Color mode:
 #   USE_COLOR (default): HALT indicator rendered in tmux native #[fg=red] /
 #     #[fg=yellow] / #[default] markup so tmux interprets the color instead of
-#     displaying raw ANSI escape sequences.
+#     displaying raw ANSI escape sequences.  APPROVAL indicator rendered in
+#     tmux native #[fg=yellow] markup.
 #   NO_COLOR / TERM=dumb: bracketed text marker  [HALT GLOBAL] / [HALT PROJECT]
-#     or [HALT-AFTER:GLOBAL <event>].
+#     or [HALT-AFTER:GLOBAL <event>]; APPROVAL marker as [APPROVAL(n)].
 #   When no halt files exist the output is empty for the halt segment.
+#   When no pending approvals exist the APPROVAL segment is omitted.
+#
+# Approval detection: scans $KANBAN_ROOT/projects/*/tasks/HUMAN-APPROVE-*/status.md
+#   for tasks whose State field is WAITING or BACKLOG.  Cross-project scan.
 #
 # Sources read (all optional — fallback values used if missing or unreadable):
 #   $KANBAN_ROOT/VERSION                              — deployed version
@@ -60,11 +72,13 @@
 #   0   Always. Missing sources produce fallback values; the script never fails.
 
 set -uo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Arguments
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${1:-${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}}"
+KANBAN_ROOT="${1:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
 PROJECT_NAME="${2:-}"
 # Track whether an explicit project name was provided.  When PROJECT_NAME is
 # empty here (not provided as $2), HALT detection will scan all project roots.
@@ -96,6 +110,9 @@ source "${_DSB_SCRIPT_DIR}/lib/halt_scope.sh"
 source "${_DSB_SCRIPT_DIR}/lib/version.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${_DSB_SCRIPT_DIR}/../lib/dev_tree.sh"
+# Source glyph map (single home for all status-bar glyph literals)
+# shellcheck source=../lib/status_glyphs.sh
+source "${_DSB_SCRIPT_DIR}/../lib/status_glyphs.sh"
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
     export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
 fi
@@ -173,6 +190,16 @@ if [[ "$PM_RAW" == "manual" ]]; then
     PM_MODE="manual"
 else
     PM_MODE="auto"
+fi
+
+# ---------------------------------------------------------------------------
+# Rich-mode glyph detection — re-evaluated here (before HALT rendering).
+# Glyphs are prepended in rich (color-capable) mode only; NO_COLOR / TERM=dumb
+# output is byte-identical to the pre-glyph baseline (regression lock).
+# ---------------------------------------------------------------------------
+_DSB_RICH=false
+if [[ -z "${NO_COLOR:-}" ]] && [[ "${TERM:-}" != "dumb" ]]; then
+    _DSB_RICH=true
 fi
 
 # ---------------------------------------------------------------------------
@@ -257,14 +284,14 @@ HALT_DISPLAY=""
 if [[ -n "$HALT_TEXT" ]]; then
     if [[ "$_DSB_USE_COLOR" == "true" ]]; then
         if [[ "$HALT_TEXT" == HALT\ GLOBAL || "$HALT_TEXT" == HALT\ PROJECT ]]; then
-            # halted — red, matching column-render's HALT color palette
-            HALT_DISPLAY="#[fg=red]${HALT_TEXT}#[default]"
+            # halted — red, with HALT glyph prefix in rich mode
+            HALT_DISPLAY="#[fg=red]${GLYPH_HALT} ${HALT_TEXT}#[default]"
         else
-            # draining: "HALT-AFTER GLOBAL/PROJECT <event>" — yellow
-            HALT_DISPLAY="#[fg=yellow]${HALT_TEXT}#[default]"
+            # draining: "HALT-AFTER GLOBAL/PROJECT <event>" — yellow, with draining glyph
+            HALT_DISPLAY="#[fg=yellow]${GLYPH_HALT_AFTER} ${HALT_TEXT}#[default]"
         fi
     else
-        # NO_COLOR / dumb terminal: bracketed text marker.
+        # NO_COLOR / dumb terminal: bracketed text marker — byte-identical to pre-RC.
         # "HALT GLOBAL"               → [HALT GLOBAL]
         # "HALT PROJECT"              → [HALT PROJECT]
         # "HALT-AFTER GLOBAL <event>" → [HALT-AFTER:GLOBAL <event>]
@@ -283,17 +310,86 @@ fi
 unset _DSB_USE_COLOR
 
 # ---------------------------------------------------------------------------
+# APPROVAL state — count pending HUMAN-APPROVE tasks (WAITING or BACKLOG)
+# across all registered projects.  Uses a cross-project filesystem glob over
+# the standard layout (projects/*/tasks/HUMAN-APPROVE-*/status.md) — matches
+# HALT detection's pattern of direct file inspection rather than registry lookup.
+#
+# State field is read with awk: first non-blank line after "## State".
+# WAITING and BACKLOG both indicate the gate is pending operator action.
+#
+# APPROVAL_DISPLAY is set to one of:
+#   ""                       — no pending approvals (n=0; segment omitted)
+#   "#[fg=yellow]✋ APPROVAL(n)#[default]" — n pending (USE_COLOR mode; tmux markup)
+#   "[APPROVAL(n)]"          — n pending (NO_COLOR / dumb terminal mode)
+# ---------------------------------------------------------------------------
+APPROVAL_DISPLAY=""
+_dsb_approval_count=0
+for _dsb_sf in "${KANBAN_ROOT}/projects"/*/tasks/HUMAN-APPROVE-*/status.md; do
+    [[ -f "$_dsb_sf" ]] || continue
+    _dsb_state="$(awk '
+        /^## State[[:space:]]*$/ { found=1; next }
+        found && /^## / { exit }
+        found && /[^[:space:]]/ { print; exit }
+    ' "$_dsb_sf" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+    if [[ "$_dsb_state" == "WAITING" || "$_dsb_state" == "BACKLOG" ]]; then
+        _dsb_approval_count=$(( _dsb_approval_count + 1 ))
+    fi
+done
+
+# Re-read color mode (USE_COLOR was unset above).
+_dsb_approval_use_color=true
+if [[ -n "${NO_COLOR:-}" ]] || [[ "${TERM:-}" == "dumb" ]]; then
+    _dsb_approval_use_color=false
+fi
+
+if [[ "$_dsb_approval_count" -ge 1 ]]; then
+    if [[ "$_dsb_approval_use_color" == "true" ]]; then
+        APPROVAL_DISPLAY="#[fg=yellow]${GLYPH_APPROVAL} APPROVAL(${_dsb_approval_count})#[default]"
+    else
+        # NO_COLOR / dumb: bracketed text — byte-identical to pre-RC (no glyph).
+        APPROVAL_DISPLAY="[APPROVAL(${_dsb_approval_count})]"
+    fi
+fi
+unset _dsb_approval_count _dsb_approval_use_color _dsb_sf _dsb_state
+
+# ---------------------------------------------------------------------------
 # Day + time — ISO 8601 with day-of-week prefix (e.g. Sun 2026-05-10T04:55:23)
 # ---------------------------------------------------------------------------
 DATETIME="$(date '+%a %Y-%m-%dT%H:%M:%S')"
+
+# ---------------------------------------------------------------------------
+# Rich-mode display variants for version, PM mode, and timestamp segments.
+# Glyphs are prepended in rich (color-capable) mode; NO_COLOR / dumb output
+# is the plain text form — byte-identical to the pre-RC baseline.
+#
+# _DSB_RICH was set in the PM mode block above.
+# ---------------------------------------------------------------------------
+if [[ "$_DSB_RICH" == "true" ]]; then
+    _DSB_FRAMEWORK_DISPLAY="${GLYPH_VERSION} ${FRAMEWORK_VERSION}"
+    _DSB_PROJECT_VER_PREFIX="${GLYPH_VERSION} "
+    if [[ "$PM_MODE" == "manual" ]]; then
+        _DSB_PM_DISPLAY="${GLYPH_PM_MANUAL} PM:manual"
+    else
+        _DSB_PM_DISPLAY="${GLYPH_PM_AUTO} PM:auto"
+    fi
+    _DSB_DATETIME_DISPLAY="${GLYPH_TIMESTAMP} ${DATETIME}"
+else
+    # NO_COLOR / dumb: plain text — no glyph prefix (regression lock).
+    _DSB_FRAMEWORK_DISPLAY="${FRAMEWORK_VERSION}"
+    _DSB_PROJECT_VER_PREFIX=""
+    _DSB_PM_DISPLAY="PM:${PM_MODE}"
+    _DSB_DATETIME_DISPLAY="${DATETIME}"
+fi
+unset _DSB_RICH
 
 # ---------------------------------------------------------------------------
 # Emit single formatted line — no trailing newline.
 #
 # The global bottom bar (PROJECT_NAME not explicitly supplied)
 # renders install-global info only: framework version, PM mode, HALT/HALT-AFTER,
-# and date+time.  The per-project <project>:<version> | workflow:<type> segment
-# is suppressed in the global bar to avoid showing one arbitrary project's data.
+# APPROVAL flag (when pending), and date+time.  The per-project segment is
+# suppressed in the global bar.
 #
 # D2 fix: the live framework version (v<FRAMEWORK_VERSION>) is prepended to
 # BOTH the global bar and the per-project bar.  FRAMEWORK_VERSION is resolved
@@ -302,42 +398,82 @@ DATETIME="$(date '+%a %Y-%m-%dT%H:%M:%S')"
 # When PROJECT_NAME was explicitly supplied (per-project drill window caller),
 # the project segment is included — preserving B319/B320 behavior.
 #
-# The HALT segment is omitted entirely when HALT_TEXT is empty (normal state).
+# HALT segment is omitted when HALT_TEXT is empty (normal state).
+# APPROVAL segment is omitted when APPROVAL_DISPLAY is empty (no pending gates).
+# HALT and APPROVAL may both appear; HALT is emitted first.
 # ---------------------------------------------------------------------------
 if [[ -n "$_DSB_HAS_EXPLICIT_PROJECT" ]]; then
     # Per-project drill bar: include <version> | <project>:<version> | workflow:<type>
-    if [[ -n "$HALT_TEXT" ]]; then
-        printf '%s | %s:%s | workflow:%s | PM:%s | %s | %s' \
-            "$FRAMEWORK_VERSION" \
+    # _DSB_FRAMEWORK_DISPLAY, _DSB_PROJECT_VER_PREFIX, _DSB_PM_DISPLAY, and
+    # _DSB_DATETIME_DISPLAY carry rich-mode glyphs or plain text (NO_COLOR).
+    if [[ -n "$HALT_TEXT" && -n "$APPROVAL_DISPLAY" ]]; then
+        printf '%s | %s%s:%s | workflow:%s | %s | %s | %s | %s' \
+            "$_DSB_FRAMEWORK_DISPLAY" \
+            "$_DSB_PROJECT_VER_PREFIX" \
             "$DISPLAY_PROJECT" \
             "$PROJECT_VERSION" \
             "$WORKFLOW_TYPE" \
-            "$PM_MODE" \
+            "$_DSB_PM_DISPLAY" \
             "$HALT_DISPLAY" \
-            "$DATETIME"
-    else
-        printf '%s | %s:%s | workflow:%s | PM:%s | %s' \
-            "$FRAMEWORK_VERSION" \
+            "$APPROVAL_DISPLAY" \
+            "$_DSB_DATETIME_DISPLAY"
+    elif [[ -n "$HALT_TEXT" ]]; then
+        printf '%s | %s%s:%s | workflow:%s | %s | %s | %s' \
+            "$_DSB_FRAMEWORK_DISPLAY" \
+            "$_DSB_PROJECT_VER_PREFIX" \
             "$DISPLAY_PROJECT" \
             "$PROJECT_VERSION" \
             "$WORKFLOW_TYPE" \
-            "$PM_MODE" \
-            "$DATETIME"
+            "$_DSB_PM_DISPLAY" \
+            "$HALT_DISPLAY" \
+            "$_DSB_DATETIME_DISPLAY"
+    elif [[ -n "$APPROVAL_DISPLAY" ]]; then
+        printf '%s | %s%s:%s | workflow:%s | %s | %s | %s' \
+            "$_DSB_FRAMEWORK_DISPLAY" \
+            "$_DSB_PROJECT_VER_PREFIX" \
+            "$DISPLAY_PROJECT" \
+            "$PROJECT_VERSION" \
+            "$WORKFLOW_TYPE" \
+            "$_DSB_PM_DISPLAY" \
+            "$APPROVAL_DISPLAY" \
+            "$_DSB_DATETIME_DISPLAY"
+    else
+        printf '%s | %s%s:%s | workflow:%s | %s | %s' \
+            "$_DSB_FRAMEWORK_DISPLAY" \
+            "$_DSB_PROJECT_VER_PREFIX" \
+            "$DISPLAY_PROJECT" \
+            "$PROJECT_VERSION" \
+            "$WORKFLOW_TYPE" \
+            "$_DSB_PM_DISPLAY" \
+            "$_DSB_DATETIME_DISPLAY"
     fi
 else
     # Global bar: install-global info only — no per-project segment.
     # Prepends live framework version (VERSION-file-first via get_kanban_version).
-    if [[ -n "$HALT_TEXT" ]]; then
-        printf '%s | PM:%s | %s | %s' \
-            "$FRAMEWORK_VERSION" \
-            "$PM_MODE" \
+    if [[ -n "$HALT_TEXT" && -n "$APPROVAL_DISPLAY" ]]; then
+        printf '%s | %s | %s | %s | %s' \
+            "$_DSB_FRAMEWORK_DISPLAY" \
+            "$_DSB_PM_DISPLAY" \
             "$HALT_DISPLAY" \
-            "$DATETIME"
+            "$APPROVAL_DISPLAY" \
+            "$_DSB_DATETIME_DISPLAY"
+    elif [[ -n "$HALT_TEXT" ]]; then
+        printf '%s | %s | %s | %s' \
+            "$_DSB_FRAMEWORK_DISPLAY" \
+            "$_DSB_PM_DISPLAY" \
+            "$HALT_DISPLAY" \
+            "$_DSB_DATETIME_DISPLAY"
+    elif [[ -n "$APPROVAL_DISPLAY" ]]; then
+        printf '%s | %s | %s | %s' \
+            "$_DSB_FRAMEWORK_DISPLAY" \
+            "$_DSB_PM_DISPLAY" \
+            "$APPROVAL_DISPLAY" \
+            "$_DSB_DATETIME_DISPLAY"
     else
-        printf '%s | PM:%s | %s' \
-            "$FRAMEWORK_VERSION" \
-            "$PM_MODE" \
-            "$DATETIME"
+        printf '%s | %s | %s' \
+            "$_DSB_FRAMEWORK_DISPLAY" \
+            "$_DSB_PM_DISPLAY" \
+            "$_DSB_DATETIME_DISPLAY"
     fi
 fi
-unset _DSB_HAS_EXPLICIT_PROJECT
+unset _DSB_HAS_EXPLICIT_PROJECT _DSB_FRAMEWORK_DISPLAY _DSB_PROJECT_VER_PREFIX _DSB_PM_DISPLAY _DSB_DATETIME_DISPLAY

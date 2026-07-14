@@ -49,6 +49,8 @@ tasks/HUMAN-*/
 # Multi-queue runtime artifacts (team/ layout)
 team/tasks/queues/claude/logs/
 team/tasks/queues/claude/locks/
+# API server durable state (pidfile lives here; runtime output, not source)
+team/run/
 
 # Temp
 /tmp/
@@ -65,3 +67,7 @@ projects/
 # projects/<name>/artifacts/, never in the dev tree.
 artifacts/
 tester-reports/
+
+# Exception: team/tests/artifacts/ is part of the test suite (verification
+# logs and test data) and IS tracked in version control.
+!team/tests/artifacts/

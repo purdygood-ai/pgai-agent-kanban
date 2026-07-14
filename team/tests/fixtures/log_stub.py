@@ -3,7 +3,7 @@ log_stub.py
 ===========
 Test-fidelity helper: a faithful stub of the production log() bash function.
 
-WHY THIS EXISTS (BUG-0161)
+WHY THIS EXISTS (an earlier defect)
 --------------------------
 The production log() in team/scripts/lib/wake_common.sh is:
 
@@ -18,7 +18,7 @@ value:
 
     result=$(some_function_that_calls_log)
 
-This is the command-substitution contamination bug that BUG-0161 describes.
+This is the command-substitution contamination bug that an earlier defect describes.
 
 A previous test stub implemented log() as stderr-only:
 
@@ -143,7 +143,7 @@ def make_log_stub_fragment(log_file: pathlib.Path) -> str:
         assert "[log-stub]" in result.stdout   # stdout contamination reproduced
         assert "hello world" in result.stdout
 
-    BUG-0161: the previous stderr-only stub did not produce stdout output,
+    an earlier defect: the previous stderr-only stub did not produce stdout output,
     so command-substitution contamination tests always passed even when the
     real code was broken.  This stub faithfully reproduces the tee-to-stdout
     path so the contamination is detectable.
@@ -271,7 +271,7 @@ def log_stub_fragment() -> "LogStubFragmentFactory":
             # "hello" appears inside $output because log() tees to stdout
             assert "[log-stub]" in result.stdout
 
-    BUG-0161: the previous stderr-only stub would have produced empty $output
+    an earlier defect: the previous stderr-only stub would have produced empty $output
     in the scenario above, hiding the contamination bug.  This stub faithfully
     reproduces the tee-to-stdout path.
     """
@@ -301,7 +301,7 @@ def log_stub_capture(tmp_path: pathlib.Path) -> "LogStubCapture":
             assert "[log-stub] test message" in cap.stdout
             assert "[log-stub] test message" in cap.log_content
 
-    BUG-0161: use this fixture to assert that a script's log() calls appear
+    an earlier defect: use this fixture to assert that a script's log() calls appear
     in BOTH stdout and the log file, confirming the contamination path is
     reproduced.
     """

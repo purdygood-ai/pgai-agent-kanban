@@ -41,6 +41,7 @@ from pgai_agent_kanban.ops.resolve import (
     _read_task_state,
     resolve_item,
 )
+from pgai_agent_kanban.lib.terminal_states import is_terminal, normalize
 from pgai_agent_kanban.ops.write import (
     halt,
     halt_after,
@@ -805,3 +806,185 @@ def test_reset_item_raises_not_found_for_missing_task(tmp_path: Path) -> None:
     project_root, ctx = _make_project_tree(tmp_path)
     with pytest.raises(NotFound):
         reset_item(ctx, "my-project", "CODER-ghost-task")
+
+
+# ---------------------------------------------------------------------------
+# ops/write — reset_item requirement intake (fresh-decompose recipe, an earlier defect)
+# ---------------------------------------------------------------------------
+
+
+def _write_requirement_file(
+    project_root: Path,
+    stem: str,
+    status: str = "running",
+    pm_task_id: str = "PM-20260101-001-decompose-v0-5-0",
+) -> Path:
+    """Write a requirement intake .md file with ## Status and ## PM Task fields."""
+    req_dir = project_root / "requirements"
+    req_dir.mkdir(parents=True, exist_ok=True)
+    p = req_dir / f"{stem}.md"
+    p.write_text(
+        f"# {stem}\n\n"
+        f"## Status\n{status}\n\n"
+        f"## PM Task\n{pm_task_id}\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+def test_reset_item_requirement_sets_status_to_open(tmp_path: Path) -> None:
+    """reset_item sets ## Status to 'open' in a requirement file."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    req_path = _write_requirement_file(project_root, "v0.5.0-my-feature", status="running")
+    reset_item(ctx, "my-project", "v0.5.0-my-feature")
+    text = req_path.read_text(encoding="utf-8")
+    assert "## Status\nopen" in text
+
+
+def test_reset_item_requirement_clears_pm_task_to_none(tmp_path: Path) -> None:
+    """reset_item clears ## PM Task to 'none' in a requirement file (fresh-decompose recipe)."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    req_path = _write_requirement_file(
+        project_root,
+        "v0.5.0-my-feature",
+        status="running",
+        pm_task_id="PM-20260101-001-decompose-v0-5-0",
+    )
+    reset_item(ctx, "my-project", "v0.5.0-my-feature")
+    text = req_path.read_text(encoding="utf-8")
+    assert "## PM Task\nnone" in text
+
+
+def test_reset_item_requirement_leaves_pm_backlog_untouched(tmp_path: Path) -> None:
+    """reset_item does NOT flip pm_backlog.md marker for requirement resets (an earlier defect).
+
+    The fresh-decompose recipe leaves pm_backlog.md byte-identical so GUARD 4
+    does not see a dangling non-[x] entry and defer all project selection.
+    """
+    project_root, ctx = _make_project_tree(tmp_path)
+    pm_task_id = "PM-20260101-001-decompose-v0-5-0"
+    _write_requirement_file(
+        project_root, "v0.5.0-my-feature", status="running", pm_task_id=pm_task_id
+    )
+    # Pre-populate pm_backlog with the PM task marked done ([x]).
+    pm_backlog = project_root / "tasks" / "queues" / "pm_backlog.md"
+    original_backlog = f"- [x] {pm_task_id}\n"
+    pm_backlog.write_text(original_backlog, encoding="utf-8")
+
+    reset_item(ctx, "my-project", "v0.5.0-my-feature")
+
+    # pm_backlog.md must be byte-identical after the reset.
+    assert pm_backlog.read_text(encoding="utf-8") == original_backlog, (
+        "reset_item must not modify pm_backlog.md for requirement resets"
+    )
+
+
+# ---------------------------------------------------------------------------
+# lib.terminal_states — normalize and is_terminal
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_lowercases_and_strips() -> None:
+    """normalize returns a lowercased, stripped string."""
+    assert normalize("DONE") == "done"
+    assert normalize("  WONT-DO  ") == "wont-do"
+    assert normalize("wont-do") == "wont-do"
+    assert normalize("WORKING") == "working"
+
+
+def test_is_terminal_accepts_lowercase_done() -> None:
+    """is_terminal returns True for lowercase 'done'."""
+    assert is_terminal("done") is True
+
+
+def test_is_terminal_accepts_uppercase_done() -> None:
+    """is_terminal returns True for uppercase 'DONE' (task form)."""
+    assert is_terminal("DONE") is True
+
+
+def test_is_terminal_accepts_lowercase_wont_do() -> None:
+    """is_terminal returns True for lowercase 'wont-do' (intake form written by close.sh)."""
+    assert is_terminal("wont-do") is True
+
+
+def test_is_terminal_accepts_uppercase_wont_do() -> None:
+    """is_terminal returns True for uppercase 'WONT-DO' (task form)."""
+    assert is_terminal("WONT-DO") is True
+
+
+def test_is_terminal_rejects_running() -> None:
+    """is_terminal returns False for 'running' (non-terminal intake state)."""
+    assert is_terminal("running") is False
+
+
+def test_is_terminal_rejects_open() -> None:
+    """is_terminal returns False for 'open' (non-terminal intake state)."""
+    assert is_terminal("open") is False
+
+
+def test_is_terminal_rejects_working() -> None:
+    """is_terminal returns False for 'WORKING' (non-terminal task state)."""
+    assert is_terminal("WORKING") is False
+
+
+def test_is_terminal_rejects_blocked() -> None:
+    """is_terminal returns False for 'blocked' (non-terminal state)."""
+    assert is_terminal("blocked") is False
+
+
+def test_is_terminal_rejects_superseded() -> None:
+    """is_terminal returns False for 'superseded' (close state but not terminal for delete)."""
+    assert is_terminal("superseded") is False
+
+
+# ---------------------------------------------------------------------------
+# delete_item — an earlier defect regression: wont-do intake item
+# ---------------------------------------------------------------------------
+
+
+def test_delete_item_accepts_wont_do_intake_item(tmp_path: Path) -> None:
+    """delete_item deletes an intake item with state 'wont-do' without --force (an earlier defect)."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    bug_path = _write_intake_file(project_root / "bugs", "BUG-0029", status="wont-do")
+    delete_item(ctx, "my-project", "BUG-0029")
+    assert not bug_path.exists()
+
+
+def test_delete_item_accepts_done_intake_item(tmp_path: Path) -> None:
+    """delete_item deletes an intake item with state 'done' without --force."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    bug_path = _write_intake_file(project_root / "bugs", "BUG-0099", status="done")
+    delete_item(ctx, "my-project", "BUG-0099")
+    assert not bug_path.exists()
+
+
+def test_delete_item_refuses_running_intake_item(tmp_path: Path) -> None:
+    """delete_item raises Refused for a 'running' intake item (negative preserved)."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    bug_path = _write_intake_file(project_root / "bugs", "BUG-0100", status="running")
+    with pytest.raises(Refused, match="not a terminal state"):
+        delete_item(ctx, "my-project", "BUG-0100")
+    assert bug_path.exists()
+
+
+def test_delete_item_accepts_wont_do_task(tmp_path: Path) -> None:
+    """delete_item deletes a task in WONT-DO state without --force."""
+    task_id = "CODER-20260101-010-wontdo"
+    project_root, ctx = _setup_task_with_queue(tmp_path, task_id, "WONT-DO")
+    task_dir = project_root / "tasks" / task_id
+    delete_item(ctx, "my-project", task_id)
+    assert not task_dir.exists()
+
+
+def test_delete_item_refusal_message_uses_lowercase_canonical_form(
+    tmp_path: Path,
+) -> None:
+    """delete_item's refusal message names terminal states in canonical lowercase form."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    bug_path = _write_intake_file(project_root / "bugs", "BUG-0101", status="running")
+    with pytest.raises(Refused) as exc_info:
+        delete_item(ctx, "my-project", "BUG-0101")
+    message = str(exc_info.value)
+    # The remedy text must mention the canonical lowercase names.
+    assert "done" in message
+    assert "wont-do" in message

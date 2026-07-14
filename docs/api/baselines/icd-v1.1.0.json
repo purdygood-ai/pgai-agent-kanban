@@ -1,0 +1,2250 @@
+{
+  "components": {
+    "schemas": {
+      "AddProjectBody": {
+        "description": "Body for POST /operations/add-project.\n\nMirrors every operator flag accepted by add-project.sh verbatim\n(body fields use underscores; script flags use hyphens where applicable).\n\nFields:\n    project:    Project name (required).  The project directory must already\n                exist under ``$KANBAN_ROOT/projects/<name>/``; add-project.sh\n                only updates the registry, not the directory.\n    priority:   Registry priority integer.  Passed as ``--priority <int>``.\n    color:      Registry display color (e.g. ``'#RRGGBB'``).  Passed as ``--color``.\n    no_migrate: When True, suppresses projects.cfg auto-migration.\n                Passed as ``--no-migrate``.\n    dry_run:    When True, prints the plan without mutating projects.cfg.\n                Passed as ``--dry-run``.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "dry_run": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dry Run"
+          },
+          "no_migrate": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No Migrate"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "title": "AddProjectBody",
+        "type": "object"
+      },
+      "CloseBody": {
+        "description": "Body for POST /operations/close.\n\nFields:\n    project: Project name.\n    key:     Task key or intake identifier to close.\n    state:   Close state override (``done``, ``wont-do``, ``superseded``).\n             Passed as ``--state`` to close.sh; intake-only.\n    note:    Optional note text.  Passed as ``--note`` to close.sh.\n    dry_run: When True, passes ``--dry-run`` to close.sh (preview without mutation).",
+        "properties": {
+          "dry_run": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dry Run"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "project",
+          "key"
+        ],
+        "title": "CloseBody",
+        "type": "object"
+      },
+      "CreateProjectBody": {
+        "description": "Body for POST /operations/create-project.\n\nMirrors every operator flag accepted by create-project.sh verbatim\n(body fields use underscores; script flags use hyphens where applicable).\n\nNote on path flags: ``dev_tree`` (``--dev-tree``) and ``git_repo`` (``--git-repo``)\nare included for API-parity completeness.  create-project.sh deliberately rejects\nthese flags with a clear message pointing operators at manual project.cfg editing.\nIf supplied, the script's refusal propagates unchanged in the envelope (HTTP 500,\nexit_code non-zero).  No server-side re-implementation of that guard.\n\nFields:\n    project:       Project name (required).\n    workflow_type: Workflow type override (``release`` or ``document``; default: ``release``).\n                   Passed as ``--workflow-type``.\n    max_patch:     max_patch ceiling override.  Passed as ``--max-patch N``.\n    max_minor:     max_minor ceiling override.  Passed as ``--max-minor N``.\n    max_major:     max_major ceiling override.  Passed as ``--max-major N``.\n    git_remote:    git_remote_name override.  Passed as ``--git-remote <name>``.\n    priority:      Registry priority integer.  Passed as ``--priority <int>``.\n    color:         Registry display color (e.g. ``'#RRGGBB'``).  Passed as ``--color``.\n    no_migrate:    When True, suppresses projects.cfg auto-migration.\n                   Passed as ``--no-migrate``.\n    dry_run:       When True, prints the plan without creating anything.\n                   Passed as ``--dry-run``.\n    dev_tree:      Rejected by create-project.sh with a clear message; included for\n                   parity lint.  Passed as ``--dev-tree`` if supplied; script refuses.\n    git_repo:      Rejected by create-project.sh with a clear message; included for\n                   parity lint.  Passed as ``--git-repo`` if supplied; script refuses.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "dev_tree": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dev Tree"
+          },
+          "dry_run": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dry Run"
+          },
+          "git_remote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Remote"
+          },
+          "git_repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Repo"
+          },
+          "max_major": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Major"
+          },
+          "max_minor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Minor"
+          },
+          "max_patch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Patch"
+          },
+          "no_migrate": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No Migrate"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "workflow_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Type"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "title": "CreateProjectBody",
+        "type": "object"
+      },
+      "DeleteBody": {
+        "description": "Body for POST /operations/delete.\n\nFields:\n    project: Project name.\n    key:     Item key to delete (task folder name or intake file base name).\n    force:   When True, passes ``--force`` to delete.sh, overriding terminal-state guard.\n    dry_run: When True, passes ``--dry-run`` to delete.sh (preview without mutation).",
+        "properties": {
+          "dry_run": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dry Run"
+          },
+          "force": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Force"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "key"
+        ],
+        "title": "DeleteBody",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HaltAfterBody": {
+        "description": "Body for POST /operations/halt-after.\n\nFields:\n    project: Project name to arm with the HALT-AFTER signal.\n    key:     Drain event token (e.g. ``rc``, ``pm``, ``coder``).\n             Passed verbatim as ``--key`` to halt-after.sh.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "key"
+        ],
+        "title": "HaltAfterBody",
+        "type": "object"
+      },
+      "HaltBody": {
+        "description": "Body for POST /operations/halt and POST /operations/unhalt.",
+        "properties": {
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "title": "HaltBody",
+        "type": "object"
+      },
+      "HaltGlobalBody": {
+        "description": "Body for POST /operations/halt-global and POST /operations/unhalt-global.\n\nThese scripts accept no project or key arguments.  The body is accepted but\nignored, allowing callers to POST an empty JSON object ``{}`` or omit the body.",
+        "properties": {},
+        "title": "HaltGlobalBody",
+        "type": "object"
+      },
+      "IntakeBody": {
+        "description": "Body for POST /operations/intake.\n\nFields:\n    project:  Project name.\n    filename: Name for the intake file (used as the temp file name; must follow\n              the intake routing convention: BUG-*, PRIORITY-*, or v[0-9]*.md).\n    content:  Text content to write into the temp file before invoking intake.sh.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "filename",
+          "content"
+        ],
+        "title": "IntakeBody",
+        "type": "object"
+      },
+      "RemoveProjectBody": {
+        "description": "Body for POST /operations/remove-project.\n\nMirrors every operator flag accepted by remove-project.sh verbatim.\n\nAPI-layer force guard: when ``dry_run`` is not True, ``force`` must be\nexplicitly True.  The guard fires at the API layer before any subprocess is\nspawned, returning 422 with a message naming ``force``.  This matches the\nspirit of remove-project.sh's interactive safety: the API is not gentler\nthan the script.\n\nFields:\n    project: Project name (required).\n    force:   When True, passes ``--force`` to remove-project.sh, which also\n             deletes the project directory.  Required (must be True) when\n             ``dry_run`` is not True \u2014 the API refuses with 422 otherwise.\n    dry_run: When True, passes ``--dry-run`` (preview, no changes).  When\n             ``dry_run`` is True, ``force`` is not required.",
+        "properties": {
+          "dry_run": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dry Run"
+          },
+          "force": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Force"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "title": "RemoveProjectBody",
+        "type": "object"
+      },
+      "ResetBody": {
+        "description": "Body for POST /operations/reset.\n\nExactly one of the kind selectors (``key``, ``agent``, ``bug``, ``priority``,\n``requirement``) must be supplied.  Supplying two or more returns a 422 that\nnames all conflicting fields.  Supplying none also returns a 422.\n\nThe resolved selector value is forwarded as ``--key`` to reset.sh.  reset.sh\ndetermines the item type from the key prefix (agent tasks are ``ROLE-YYYYMMDD-NNN``\nprefixed; bug intake is ``BUG-*``; priority intake is ``PRIORITY-*``; requirement\nintake is a version string such as ``v0.1.2``).\n\nFields:\n    project:        Project name.\n    key:            Task key or intake identifier (kind-agnostic selector).\n    agent:          Agent task ID (e.g. ``CODER-20260101-001-slug``).\n    bug:            Bug intake key (e.g. ``BUG-0042``).\n    priority:       Priority intake key (e.g. ``PRIORITY-0007``).\n    requirement:    Requirement intake version (e.g. ``v0.1.2``).\n    keep_artifacts: When True, passes ``--keep-artifacts`` to reset.sh.",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "bug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bug"
+          },
+          "keep_artifacts": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Artifacts"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "requirement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirement"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "title": "ResetBody",
+        "type": "object"
+      },
+      "SetVersionCeilingBody": {
+        "description": "Body for POST /operations/set-version-ceiling.\n\nMirrors the operator flags of set-version-ceiling.sh verbatim\n(body fields use underscores; script flags use hyphens).\n\nFields:\n    project:  Project name (required).\n    show:     When True, passes ``--show`` to print current ceiling values.\n    minor:    Non-negative integer; sets ``max_minor`` in project.cfg.\n              Passed as ``--minor N`` to the script.\n    major:    Non-negative integer; sets ``max_major`` in project.cfg.\n              Passed as ``--major N`` to the script.\n    no_minor: When True, passes ``--no-minor`` to remove ``max_minor``.\n    no_major: When True, passes ``--no-major`` to remove ``max_major``.\n    dry_run:  When True, passes ``--dry-run`` (preview without writing).",
+        "properties": {
+          "dry_run": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dry Run"
+          },
+          "major": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Major"
+          },
+          "minor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minor"
+          },
+          "no_major": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No Major"
+          },
+          "no_minor": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No Minor"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "show": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Show"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "title": "SetVersionCeilingBody",
+        "type": "object"
+      },
+      "ShipRcBody": {
+        "description": "Body for POST /operations/ship-rc.\n\nMirrors the operator flags accepted by ship-rc.sh, plus a mandatory\nconfirm field that implements a double-gate: the caller must echo the\nexact string ``ship-rc <project> <key>`` to proceed.\n\nThe confirm-gate fires at the API layer BEFORE ship-rc.sh is invoked.\nA wrong or missing confirm string returns 422 and never reaches the\nscript.  The comparison is byte-for-byte exact \u2014 no trimming, no\ncase-folding.\n\nFields:\n    project: Project name (required).  Passed as ``--project`` to ship-rc.sh.\n    key:     Release version in format ``vX.Y.Z`` (required).\n             Passed as ``--key`` to ship-rc.sh.\n    confirm: Confirmation string (required).  Must equal exactly\n             ``ship-rc <project> <key>`` (byte-for-byte).  Designed so\n             a future dashboard \"Ship\" button echoes the string verbatim.\n    dry_run: When True, passes ``--dry-run`` to ship-rc.sh.  The script\n             prints the plan (project, version, branch names) and exits 0\n             without performing any git operations.  The non-dry-run path\n             is reserved for direct operator use; tests always use dry_run.",
+        "properties": {
+          "confirm": {
+            "title": "Confirm",
+            "type": "string"
+          },
+          "dry_run": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dry Run"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "key",
+          "confirm"
+        ],
+        "title": "ShipRcBody",
+        "type": "object"
+      },
+      "SwitchProviderBody": {
+        "description": "Body for POST /operations/switch-provider.\n\nFields:\n    provider: LLM provider name (e.g. ``claude``, ``codex``, ``gemini``).\n              Passed verbatim as ``--provider`` to switch-provider.sh.\n              Provider validation is performed by the script; no server-side\n              re-implementation of the allowed-value list.",
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "SwitchProviderBody",
+        "type": "object"
+      },
+      "UnwindRcBody": {
+        "description": "Body for POST /operations/unwind-rc.\n\nFields:\n    project: Project name.\n    key:     RC version to unwind (e.g. ``v1.2.0``).\n    dry_run: When True, passes ``--dry-run`` to unwind-rc.sh (prints plan, no mutation).\n    force:   When True, passes ``--force`` to unwind-rc.sh, bypassing Active-RC\n             version-mismatch check.  Does NOT bypass HALT, project-existence,\n             version-format, or shipped-tag checks.",
+        "properties": {
+          "dry_run": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dry Run"
+          },
+          "force": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Force"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "key"
+        ],
+        "title": "UnwindRcBody",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WontdoBody": {
+        "description": "Body for POST /operations/wontdo.\n\nFields:\n    project: Project name.\n    key:     Task ID to mark WONT-DO (folder name under tasks/).",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "key"
+        ],
+        "title": "WontdoBody",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Localhost-only REST API exposing the pgai-agent-kanban operator command surface.  Each endpoint shells out to the canonical operator script and returns the result in a JSON envelope.",
+    "title": "pgai-agent-kanban operator API",
+    "version": "1.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/approvals": {
+      "get": {
+        "description": "Return pending HUMAN-APPROVE gate tasks as a structured JSON array.\n\nReads task state directly from the kanban filesystem \u2014 no shell-out.\nOne implementation (collect_pending_approvals) backs both this endpoint\nand the window-14 dashboard renderer.\n\nQuery parameters:\n\n- ``project`` (optional) \u2014 project name; when absent, all projects are\n  aggregated (no default project, per house rule).  When supplied and the\n  project does not exist, returns 422.\n\nResponse body (HTTP 200):\n  ``[{\"task_id\": str, \"project\": str, \"state\": str, \"rc\": str,\n      \"target_version\": str, \"age\": str, \"review\": str,\n      \"review_cmds\": list[str], \"approve_cmd\": str, \"reject_cmd\": str}, ...]``\n\n  ``review_cmds`` is an ordered list of verbatim copy-paste-ready command\n  strings: ``scripts/show.sh --project <p> --key <task-id>`` always first;\n  ``scripts/show-test-report.sh --project <p> --key <rc>`` appended when the\n  target RC version is known (starts with \"v\").  Always non-empty.\n\n  Returns an empty array ``[]`` when no approvals are pending.\n\nHTTP status:\n  200 \u2014 success (including empty array).\n  422 \u2014 project parameter supplied but project does not exist.",
+        "operationId": "get_approvals_approvals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON array of pending approval records (ICD 1.1.0); empty array on a clean system. Each record includes review_cmds (ordered list of copy-paste-ready review command strings), approve_cmd, and reject_cmd."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pending HUMAN-APPROVE gate tasks"
+      }
+    },
+    "/board": {
+      "get": {
+        "description": "Return the unified kanban board aggregation view.\n\nReturns all registered projects and all eight columns with structured items.\nStatus classification mirrors the tmux dashboard renderer exactly \u2014 see\nboard_classifier.py for the shared logic.\n\nColumn order (fixed): BUGS, PRIORITIES, REQUIREMENTS, PM, CODER, WRITER, TESTER, CM.\n\nItem composite id format: ``<project>/<kind>/<key>``\n\nItem status vocabulary: ``open | working | done | wont-do | blocked | label``\n- ``label``   \u2014 requirements item targeting the currently active RC\n- ``working`` \u2014 task in WORKING state (renderer calls this \"running\")\n- ``blocked`` \u2014 task in BLOCKED state, or a quarantined intake file\n- ``done``    \u2014 task in DONE state, or a shipped requirements item\n- ``wont-do`` \u2014 task in WONT-DO state\n- ``open``    \u2014 all other items\n\nPer-column per-project item caps mirror the tmux renderer's\n``dashboard_max_rows`` setting (from projects.cfg; default 20).\nItems beyond the cap are counted in ``truncated``, not returned.\n\nQuarantined files (in ``bugs/.rejected/`` and ``priority/.rejected/``)\nsurface as kind=quarantine items with status=blocked.\n\nQuery parameters:\n\n- ``project`` (forbidden) \u2014 returns 422; the board is always unfiltered.\n\nResponse fields:\n\n- ``generated_at``  \u2014 ISO-8601 UTC timestamp of this response.\n- ``projects``      \u2014 list of registered projects with name, color, halt.\n- ``columns``       \u2014 list of eight column objects (name, items, truncated).\n\nHTTP status: 200 on success, 422 when ``?project=`` is supplied.",
+        "operationId": "get_board_board_get",
+        "parameters": [
+          {
+            "description": "Not accepted. GET /board is the unfiltered aggregation view; the UI filters client-side.  Supplying this parameter returns 422.",
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Not accepted. GET /board is the unfiltered aggregation view; the UI filters client-side.  Supplying this parameter returns 422.",
+              "title": "Project"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON board with project list and eight columns (BUGS, PRIORITIES, REQUIREMENTS, PM, CODER, WRITER, TESTER, CM), each with structured item objects carrying composite ids, server-classified statuses, and per-column truncation counts."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unified kanban board aggregation view",
+        "tags": [
+          "board"
+        ]
+      }
+    },
+    "/costs": {
+      "get": {
+        "description": "Return cost report data for the requested project and scope.\n\nWhen ``format`` is omitted, delegates to ``cost-report.sh`` and returns the\nstandard text envelope.  The text output is byte-identical to the pre-v1.6.0\nbehavior.\n\nWhen ``format=json`` is supplied, returns a JSON array of per-RC row objects\nread from the same ``usage/rc/`` files that the text renderer uses (sibling\nrule: one source, two formats).  A ``project`` parameter is required for\n``format=json``; omitting it returns 422.\n\nScope selection (at most one of ``month``, ``day``, ``rc``):\n\n- ``rc``    \u2014 single RC; the JSON array contains one row for that RC.\n- ``month`` \u2014 all RC files whose shipped_at starts with ``YYYY-MM``.\n- ``day``   \u2014 all RC files whose shipped_at starts with ``YYYY-MM-DD``.\n- (none)   \u2014 text: current month-to-date (cost-report.sh default);\n              JSON: all RC files in usage/rc/.\n\nQuery parameters:\n\n- ``project`` (optional) \u2014 project name.\n- ``month``   (optional) \u2014 calendar month ``YYYY-MM``.\n- ``day``     (optional) \u2014 single day ``YYYY-MM-DD``.\n- ``rc``      (optional) \u2014 RC version string (e.g. ``v1.2.0``).\n- ``format``  (optional) \u2014 when ``json``, returns a JSON array instead of the\n                           text envelope.\n\nText response envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nJSON response (``?format=json``):\n  ``[{\"version\": str, \"tokens_in\": int, \"est_cost\": float, ...}, ...]``\n  Fields present only when the underlying source has a non-empty value.",
+        "operationId": "get_costs_costs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          },
+          {
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Day"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rc",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from cost-report.sh; or a JSON array of per-RC row objects when ?format=json is supplied."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cost report"
+      }
+    },
+    "/dashboard/{pane}": {
+      "get": {
+        "description": "Return the rendered output for a named dashboard pane.\n\nAccepted pane names (case-sensitive):\n\n- ``input``         \u2014 Calls ``column-render.sh input`` (discovery-pipeline input column).\n- ``queue``         \u2014 Calls ``column-render.sh queue`` (agent queue column).\n- ``metrics``       \u2014 Calls ``dashboard/show-metrics.sh``.\n- ``attention``     \u2014 Calls ``dashboard/show-attention.sh``.\n- ``header``        \u2014 Calls ``dashboard/show-header.sh``.\n- ``status-window`` \u2014 Calls ``dashboard/show-status-window.sh``.\n\nQuery parameters:\n\n- ``project`` (optional) \u2014 project name.  When supplied for\n  ``column-render``-backed panes (input, queue), the script is invoked with\n  ``--all-projects`` mode against the kanban root; for flag-style scripts the\n  ``--project`` flag is passed through.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 422 when an unknown pane is requested; otherwise 200/500 from\nthe underlying script.",
+        "operationId": "get_dashboard_pane_dashboard__pane__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pane",
+            "required": true,
+            "schema": {
+              "title": "Pane",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from the pane's render script."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Render a dashboard pane"
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Return service liveness information.\n\nResponse body fields:\n\n- ``service``      \u2014 fixed string identifying this API service.\n- ``kanban_root``  \u2014 resolved kanban root path (from PGAI_AGENT_KANBAN_ROOT_PATH).\n- ``version``      \u2014 installed kanban version read from the VERSION file\n                     on each request (same value as ``installed``; kept for\n                     backward compatibility with existing consumers).\n- ``installed``    \u2014 kanban version currently on disk (read from VERSION on each\n                     request); reflects the most recent install.\n- ``running``      \u2014 kanban version that was on disk when this server process\n                     started; baked once at startup and never re-read.  An\n                     orphaned server that survived a deploy will report its\n                     true startup-time version here, allowing callers to detect\n                     version skew between running code and installed code.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "JSON object with service name, kanban root path, installed version, and running version."
+          }
+        },
+        "summary": "Service liveness check"
+      }
+    },
+    "/logs/{kind}": {
+      "get": {
+        "description": "Return the tail of a named log file.\n\nPath parameter:\n\n- ``kind`` \u2014 log kind selector.  One of: ``wake``, ``cm``, ``agent``,\n             ``debug``, ``overwatch``, ``api-server``.\n             Unknown kind \u2192 404.\n\nQuery parameters (all optional unless noted):\n\n- ``agent``   \u2014 required for ``wake``, ``agent``, ``debug`` kinds.\n                Must be one of the fixed agent-role names:\n                pm, po, coder, writer, tester, cm, overwatch.\n                Traversal sequences \u2192 422 before any file access.\n- ``project`` \u2014 required for ``agent``, ``debug`` kinds.\n                Must match a name in the project registry.\n                For ``overwatch``, accepts a registered project name or\n                the literal ``global`` for the global overwatch log.\n                Traversal sequences \u2192 422 before any file access.\n- ``tail``    \u2014 number of lines to return from the end of the file.\n                Default: 200.  Hard cap: 2000 (values above are clamped).\n                ``tail == 0`` or negative \u2192 422.\n\nResponse envelope (HTTP 200 on success):\n\n- ``exit_code`` \u2014 0 when the file was found and read; 1 when not found.\n- ``stdout``    \u2014 the tail text (empty when exit_code is 1).\n- ``stderr``    \u2014 error description when exit_code is 1; empty otherwise.\n\nHTTP status:\n\n- 200  \u2014 successful response (file found or not; see exit_code).\n- 404  \u2014 unknown kind value.\n- 422  \u2014 validation failure (missing param, traversal, invalid agent/project,\n          invalid tail value).\n\nPath confinement:\n\nThe (kind, params) tuple is mapped to a KNOWN path via a server-side table.\nNo client-supplied string is concatenated into a filesystem path without first\nbeing validated against a whitelist.  Traversal attempts return 422 before\nany filesystem access.",
+        "operationId": "get_log_tail_logs__kind__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tail",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tail"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout (tail text), and stderr."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tail a named log file",
+        "tags": [
+          "logs"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Return historical RC metrics for the requested project(s).\n\nWhen ``format`` is omitted, delegates to ``dashboard/show-metrics.sh`` and\nreturns the standard text envelope.  The text output is byte-identical to\nthe pre-v1.6.0 behavior.\n\nWhen ``format=json`` is supplied and ``project`` is specified, returns a JSON\narray of per-RC row objects read from the same ``metrics/history.csv`` that\nthe text renderer uses (sibling rule: one source, two formats).  A ``project``\nparameter is required for ``format=json``; omitting it returns 422.\n\nQuery parameters:\n\n- ``project``   (optional) \u2014 project name; omit to iterate all projects (text only).\n- ``last``      (optional, int) \u2014 show last N rows (default: 10).\n- ``per_agent`` (optional, bool) \u2014 when true, passes ``--per_agent`` to the text\n                renderer; per-agent breakdown for the most recent RC.\n                Not applicable for ``format=json``.\n- ``format``    (optional) \u2014 when ``json``, returns a JSON array of row objects\n                instead of the text envelope.\n\nText response envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nJSON response (``?format=json``):\n  ``[{\"version\": str, \"tasks\": int, \"tokens_in\": int, ...}, ...]``\n  Fields present only when the underlying source has a non-empty value.",
+        "operationId": "get_metrics_metrics_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
+            }
+          },
+          {
+            "in": "query",
+            "name": "last",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Per Agent"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from dashboard/show-metrics.sh; or a JSON array of per-RC row objects when ?format=json is supplied."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Historical RC metrics"
+      }
+    },
+    "/operations/add-project": {
+      "post": {
+        "description": "Register an existing project directory in projects.cfg.\n\nThin passthrough to add-project.sh.  The project directory must already\nexist; add-project.sh does not create anything on disk \u2014 it only updates\nthe registry.  Script guards (directory not found, already registered)\npropagate unchanged in the envelope as non-zero exit_code.\n\nBody fields:\n\n- ``project``    (required) \u2014 project name.\n- ``priority``   (optional, int) \u2014 registry priority (next available if absent).\n- ``color``      (optional) \u2014 registry display color (e.g. ``'#RRGGBB'``).\n- ``no_migrate`` (optional, bool) \u2014 when True, suppresses projects.cfg migration.\n- ``dry_run``    (optional, bool) \u2014 when True, prints plan without mutating registry.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero, 422 on validation failure.",
+        "operationId": "post_add_project_operations_add_project_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddProjectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from add-project.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register an existing on-disk project directory in the kanban registry",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/close": {
+      "post": {
+        "description": "Close or resolve a task or intake item.\n\nRefuses when the key cannot be identified as a single target (not found or\nambiguous); the refusal propagates unchanged in the envelope.\n\nBody fields:\n\n- ``project`` (required) \u2014 project name.\n- ``key``     (required) \u2014 task key or intake identifier.\n- ``state``   (optional) \u2014 close state (``done``, ``wont-do``, ``superseded``);\n                           intake-only; passed as ``--state``.\n- ``note``    (optional) \u2014 note text; passed as ``--note``.\n- ``dry_run`` (optional, bool) \u2014 when True, passes ``--dry-run`` (preview).\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "post_close_operations_close_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from close.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Close or resolve a task or intake item",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/create-project": {
+      "post": {
+        "description": "Bootstrap a new project directory and register it in projects.cfg.\n\nThin passthrough to create-project.sh.  All script guards (project already\nexists, invalid workflow type, bad ceiling values, rejected path flags)\npropagate unchanged in the envelope as non-zero exit_code.\n\nThe ``dev_tree`` and ``git_repo`` body fields are forwarded to the script\nwhen supplied; create-project.sh rejects them with a clear message pointing\nat manual project.cfg editing \u2014 that refusal propagates unchanged in the\nenvelope.  No server-side re-implementation of that guard.\n\nBody fields:\n\n- ``project``       (required) \u2014 project name.\n- ``workflow_type`` (optional) \u2014 ``release`` or ``document``; default ``release``.\n- ``max_patch``     (optional, int) \u2014 max_patch ceiling override.\n- ``max_minor``     (optional, int) \u2014 max_minor ceiling override.\n- ``max_major``     (optional, int) \u2014 max_major ceiling override.\n- ``git_remote``    (optional) \u2014 git_remote_name override; default ``origin``.\n- ``priority``      (optional, int) \u2014 registry priority (next available if absent).\n- ``color``         (optional) \u2014 registry display color (e.g. ``'#RRGGBB'``).\n- ``no_migrate``    (optional, bool) \u2014 when True, suppresses projects.cfg migration.\n- ``dry_run``       (optional, bool) \u2014 when True, prints plan without writing.\n- ``dev_tree``      (optional) \u2014 parity-lint placeholder; script rejects this flag.\n- ``git_repo``      (optional) \u2014 parity-lint placeholder; script rejects this flag.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero, 422 on validation failure.",
+        "operationId": "post_create_project_operations_create_project_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from create-project.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bootstrap a new project in the kanban registry",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/delete": {
+      "post": {
+        "description": "Delete a task or intake item by key.\n\nThe script refuses to delete items that are not in a terminal state (DONE or\nWONT-DO) unless ``force`` is True.  On ambiguous keys, the script emits its\nrefusal message in stderr and exits non-zero; that propagates unchanged as\nHTTP 500 in the envelope.\n\nBody fields:\n\n- ``project`` (required) \u2014 project name.\n- ``key``     (required) \u2014 item key (task folder name or intake file base name).\n- ``force``   (optional, bool) \u2014 when True, passes ``--force`` (override terminal-state guard).\n- ``dry_run`` (optional, bool) \u2014 when True, passes ``--dry-run`` (preview without deletion).\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 200 on success, 500 on refusal or non-zero exit, 422 on validation failure.",
+        "operationId": "post_delete_operations_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from delete.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete a task or intake item by key",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/halt": {
+      "post": {
+        "description": "Set the per-project HALT flag, stopping the wake loop cleanly at its next iteration.\n\nBody fields:\n\n- ``project`` (required) \u2014 project name.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero, 422 on validation failure.",
+        "operationId": "post_halt_operations_halt_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaltBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from halt.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create the HALT signal for a project",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/halt-after": {
+      "post": {
+        "description": "Arm the HALT-AFTER soft-drain signal.\n\nThe signal causes the wake loop to promote to a hard HALT once the named\ndrain event is satisfied (e.g. after the current RC ships).\n\nBody fields:\n\n- ``project`` (required) \u2014 project name.\n- ``key``     (required) \u2014 drain event token (``rc``, ``pm``, ``coder``,\n                           ``writer``, ``tester``, ``cm``).\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "post_halt_after_operations_halt_after_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaltAfterBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from halt-after.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Arm the HALT-AFTER soft-drain signal for a project",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/halt-global": {
+      "post": {
+        "description": "Set the global HALT flag at ``<kanban_root>/HALT``.\n\nBlocks all projects at the next wake-loop iteration.  Idempotent and\nfully reversible via ``POST /operations/unhalt-global``.\n\nBody: empty (no fields required).\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "post_halt_global_operations_halt_global_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaltGlobalBody",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from halt-global.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create the global HALT signal",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/intake": {
+      "post": {
+        "description": "Write the supplied content to a temp file and deposit it via intake.sh.\n\nThe temp file is written under the framework temp root (``PGAI_AGENT_KANBAN_TEMP_DIR``\nor ``/tmp/pgai_kanban_tmp`` as fallback) in an ``intake/`` subdirectory, using\n``filename`` as the file name.  intake.sh then routes the file by its name prefix\n(``BUG-*``, ``PRIORITY-*``, ``v[0-9]*.md``) and deposits it into the appropriate\nproject sub-directory.  The temp file is left in place per existing intake semantics;\ncleanup is the operator's responsibility.\n\nBody fields:\n\n- ``project``  (required) \u2014 project name.\n- ``filename`` (required) \u2014 intake file name; governs routing inside intake.sh.\n- ``content``  (required) \u2014 text content to write into the temp file.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nThe temp file path appears in the invocation argv (as a positional argument to\nintake.sh, not via ``--file``), consistent with the script's positional-arg mode.",
+        "operationId": "post_intake_operations_intake_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from intake.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deposit a staged intake file into a project",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/remove-project": {
+      "post": {
+        "description": "Unregister a project from projects.cfg; with force, also delete its directory.\n\nAPI-layer force guard: when ``dry_run`` is not True, ``force`` must be\nexplicitly True.  This guard fires before any subprocess is spawned and\nreturns 422 with a detail message naming ``force``.  The API is not\ngentler than the underlying script \u2014 explicit opt-in is required for any\nlive removal.\n\nScript guards (Active RC in flight, project absent) propagate unchanged in\nthe envelope as non-zero exit_code when the force guard is satisfied.\n\nBody fields:\n\n- ``project`` (required) \u2014 project name.\n- ``force``   (optional, bool) \u2014 when True, passes ``--force`` to the script,\n              which also deletes the project directory.  Required (must be True)\n              when ``dry_run`` is not True.\n- ``dry_run`` (optional, bool) \u2014 when True, passes ``--dry-run`` (preview only).\n              When True, ``force`` is not required.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero, 422 on validation failure\nor when force guard is triggered.",
+        "operationId": "post_remove_project_operations_remove_project_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveProjectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from remove-project.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unregister a project from the kanban registry",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/reset": {
+      "post": {
+        "description": "Reset a task or intake item, returning it to a re-processable state.\n\nThe script refuses on filesystem races (WORKING state, ambiguous key)\nand those refusals propagate unchanged in the envelope.\n\nBody fields (exactly one kind selector is required):\n\n- ``project``        (required) \u2014 project name.\n- ``key``            (optional) \u2014 kind-agnostic task or intake key.\n- ``agent``          (optional) \u2014 agent task ID (e.g. ``CODER-20260101-001-slug``).\n- ``bug``            (optional) \u2014 bug intake key (e.g. ``BUG-0042``).\n- ``priority``       (optional) \u2014 priority intake key (e.g. ``PRIORITY-0007``).\n- ``requirement``    (optional) \u2014 requirement intake version (e.g. ``v0.1.2``).\n- ``keep_artifacts`` (optional, bool) \u2014 when True, passes ``--keep-artifacts``.\n\nExactly one of ``key``, ``agent``, ``bug``, ``priority``, or ``requirement`` must\nbe supplied.  Supplying two or more returns 422 naming the conflicting fields.\nSupplying none returns 422 naming the missing choice.  No silent precedence.\n\nThe resolved value is forwarded as ``--key`` to reset.sh; reset.sh determines the\nitem type from the key prefix.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero, 422 on validation failure.",
+        "operationId": "post_reset_operations_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from reset.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset a task or intake item to its initial state",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/set-version-ceiling": {
+      "post": {
+        "description": "Read or mutate max_minor / max_major version ceilings in a project's project.cfg.\n\nThin passthrough to set-version-ceiling.sh.  All script guards (project not\nfound, missing action, invalid integer value) propagate unchanged in the envelope.\n\nBody fields:\n\n- ``project``  (required) \u2014 project name.\n- ``show``     (optional, bool) \u2014 when True, passes ``--show`` to print current values.\n- ``minor``    (optional, int) \u2014 sets ``max_minor``; passed as ``--minor N``.\n- ``major``    (optional, int) \u2014 sets ``max_major``; passed as ``--major N``.\n- ``no_minor`` (optional, bool) \u2014 when True, passes ``--no-minor`` to remove ``max_minor``.\n- ``no_major`` (optional, bool) \u2014 when True, passes ``--no-major`` to remove ``max_major``.\n- ``dry_run``  (optional, bool) \u2014 when True, passes ``--dry-run`` (preview only).\n\nThe script requires at least one action (``show``, ``minor``, ``major``,\n``no_minor``, or ``no_major``).  Supplying none returns a non-zero exit_code\nwith the script's own refusal in stderr.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero, 422 on validation failure.",
+        "operationId": "post_set_version_ceiling_operations_set_version_ceiling_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVersionCeilingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from set-version-ceiling.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read or set max_minor / max_major version ceilings for a project",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/ship-rc": {
+      "post": {
+        "description": "Ship a release candidate by squash-merging it directly into main.\n\nThis is the one origin-touching verb in the operator API.  To prevent\naccidental invocation, the endpoint requires a ``confirm`` string whose\nvalue must equal exactly ``ship-rc <project> <key>`` (byte-for-byte \u2014\nno trimming, no case-folding).  The confirm-gate fires at the API layer\nBEFORE ship-rc.sh is invoked: a wrong or missing confirm string returns\n422 and never reaches the script.\n\nCorrect confirm string \u2192 thin passthrough to ship-rc.sh.\n\nBody fields:\n\n- ``project``  (required) \u2014 project name.  Passed as ``--project``.\n- ``key``      (required) \u2014 release version in format ``vX.Y.Z``.\n                           Passed as ``--key``.\n- ``confirm``  (required) \u2014 must equal exactly ``ship-rc <project> <key>``\n                           (byte-for-byte).  Any mismatch \u2192 422 naming\n                           ``confirm``, no subprocess spawned.\n- ``dry_run``  (optional, bool) \u2014 when True, passes ``--dry-run`` to\n                           ship-rc.sh; the script prints the plan and exits 0\n                           without performing any git operations.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero, 422 on validation\nfailure or confirm-gate mismatch.",
+        "operationId": "post_ship_rc_operations_ship_rc_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipRcBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from ship-rc.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ship a release candidate (double-gated)",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/switch-provider": {
+      "post": {
+        "description": "Switch the active LLM provider for the kanban framework.\n\nThin passthrough to switch-provider.sh.  Provider name validation (allowed\nvalues, CLI binary presence check) is performed entirely by the script;\nno server-side re-implementation of that logic.  Script refusals propagate\nunchanged in the envelope as non-zero exit_code.\n\nBody fields:\n\n- ``provider`` (required) \u2014 LLM provider name (e.g. ``claude``, ``codex``, ``gemini``).\n                           Passed verbatim as ``--provider`` to switch-provider.sh.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero (unknown provider, CLI not in PATH),\n422 on validation failure (empty provider string).",
+        "operationId": "post_switch_provider_operations_switch_provider_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchProviderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from switch-provider.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Switch the active LLM provider for the kanban framework",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/unhalt": {
+      "post": {
+        "description": "Remove the per-project HALT flag, allowing the wake loop to resume.\n\nBody fields:\n\n- ``project`` (required) \u2014 project name.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "post_unhalt_operations_unhalt_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaltBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from unhalt.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove the HALT signal for a project",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/unhalt-global": {
+      "post": {
+        "description": "Remove the global HALT flag from ``<kanban_root>/HALT``.\n\nAllows the wake loop to resume processing all projects at the next iteration.\nIdempotent.\n\nBody: empty (no fields required).\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "post_unhalt_global_operations_unhalt_global_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaltGlobalBody",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from unhalt-global.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove the global HALT signal",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/unwind-rc": {
+      "post": {
+        "description": "Unwind an in-flight release candidate across all state stores.\n\nPre-flight guards enforced by unwind-rc.sh propagate unchanged in the envelope:\n\n- HALT must be set (per-project or global) before unwinding.\n- Active RC in release-state.md must match ``key`` (bypassable with ``force``).\n\nThese guards surface as non-zero exit_code and populated stderr, mapped to HTTP 500.\n\nBody fields:\n\n- ``project`` (required) \u2014 project name.\n- ``key``     (required) \u2014 RC version to unwind (e.g. ``v1.2.0``).\n- ``dry_run`` (optional, bool) \u2014 when True, passes ``--dry-run`` (prints plan, no mutation).\n- ``force``   (optional, bool) \u2014 when True, passes ``--force`` (bypass Active-RC version\n                                 mismatch check; does NOT bypass HALT or other guards).\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "post_unwind_rc_operations_unwind_rc_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnwindRcBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from unwind-rc.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fully unwind an in-flight release candidate",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/operations/wontdo": {
+      "post": {
+        "description": "Mark a task as WONT-DO (cancelled without completion).\n\nBody fields:\n\n- ``project`` (required) \u2014 project name.\n- ``key``     (required) \u2014 task ID (folder name under tasks/).\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "post_wontdo_operations_wontdo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WontdoBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from wontdo.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark a task as WONT-DO",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/projects": {
+      "get": {
+        "description": "Return the list of registered projects from the projects.cfg registry.\n\nNo shell-out: reads projects.cfg directly using the Python INI parser.\nProjects are returned in priority order (ascending ``priority`` value),\nwith registration order as the tie-break for equal-priority entries.\n\nResponse body:\n  ``{\"projects\": [\"name1\", \"name2\", ...]}``\n\nHTTP status: always 200 (even when the list is empty).",
+        "operationId": "get_projects_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "List of project names in priority order."
+          }
+        },
+        "summary": "List registered projects"
+      }
+    },
+    "/projects/{name}": {
+      "get": {
+        "description": "Return the metadata card for a registered project.\n\nPath parameter:\n\n- ``name`` \u2014 the registered project name (must match an entry in projects.cfg).\n\nResponse fields (HTTP 200):\n\n- ``name``          \u2014 project name.\n- ``workflow_type`` \u2014 release | feature | document (from project.cfg).\n- ``branch_prefix`` \u2014 git branch prefix (e.g. \"ai_\") or \"\" when empty.\n- ``dev_tree_path`` \u2014 absolute path to the git checkout (from project.cfg).\n- ``git_repo``      \u2014 remote repository URL (from project.cfg; never redacted).\n- ``priority``      \u2014 sort priority from projects.cfg (lower = higher priority).\n- ``color``         \u2014 hex color string (#RRGGBB) from projects.cfg; palette\n                      fallback when absent.\n- ``ceilings``      \u2014 version ceiling object with max_major, max_minor,\n                      max_patch (each int or null when unconfigured).\n- ``last_released`` \u2014 vX.Y.Z string from release-state.md ## Last Released;\n                      null when absent or sentinel \"none\"/\"v0.0.0\".\n- ``active_rc``     \u2014 vX.Y.Z string from release-state.md ## Active RC;\n                      null when absent or sentinel \"none\".\n- ``halt``          \u2014 true when the per-project HALT file is present.\n- ``queue_counts``  \u2014 object keyed by agent role (pm, coder, writer, tester,\n                      cm); each value is ``{open, working, done}`` integer counts.\n\nHTTP status:\n\n- 200 when the project exists.\n- 404 when the project name is not registered, with ``name`` echoed in the body.",
+        "operationId": "get_project_metadata_projects__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON metadata card for the named project: configuration, release state, version ceilings, and per-agent queue counts."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Project metadata card",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/rejected": {
+      "get": {
+        "description": "Return the output of ``list-rejected.sh``.\n\nQuery parameters:\n\n- ``project`` (optional) \u2014 project name; omit to show all projects.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "get_rejected_rejected_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from list-rejected.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inventory of quarantined (rejected) intake files"
+      }
+    },
+    "/show": {
+      "get": {
+        "description": "Return the output of ``show.sh --project <name> --key <key> [--file ...]``.\n\nQuery parameters:\n\n- ``project`` (required) \u2014 project name.\n- ``key``     (required) \u2014 task key or intake item identifier.\n- ``file``    (optional) \u2014 ``status`` (default) or ``readme``; selects\n                           which file to emit for task keys.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "get_show_show_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "title": "Project",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "file",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "File"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from show.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Show a task or intake item"
+      }
+    },
+    "/status": {
+      "get": {
+        "description": "Return the output of ``kanban-status.sh --project <name>``.\n\nQuery parameters:\n\n- ``project`` (required) \u2014 project name.\n- ``no_color`` (optional, bool) \u2014 when true, passes ``--no_color`` to the script.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``\n\nHTTP status:\n  200 on exit_code 0, 500 on non-zero, 422 on parameter validation failure.",
+        "operationId": "get_status_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "title": "Project",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "no_color",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "No Color"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from kanban-status.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Kanban status summary"
+      }
+    },
+    "/test-report": {
+      "get": {
+        "description": "Return the output of ``show-test-report.sh --project <name> --key <key>``.\n\nQuery parameters:\n\n- ``project`` (required) \u2014 project name.\n- ``key``     (required) \u2014 TESTER task key or RC version (e.g. ``v1.2.0``).\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str}``",
+        "operationId": "get_test_report_test_report_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "title": "Project",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON envelope with exit_code, stdout, and stderr from show-test-report.sh."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Show a TESTER verification report"
+      }
+    },
+    "/traces": {
+      "get": {
+        "description": "Return the training-trace index sorted newest-first.\n\nQuery parameters (all optional):\n\n- ``project`` \u2014 filter by project name; absent = all projects.\n                Traversal sequences \u2192 422 before any filesystem access.\n- ``agent``   \u2014 filter by agent role.  Must be one of the fixed agent-role\n                names when provided: pm, po, coder, writer, tester, cm,\n                overwatch.  Traversal sequences \u2192 422.\n- ``limit``   \u2014 maximum number of entries to return.  Default: 50.\n                Hard cap: 2000 (values above are clamped).\n                ``limit == 0`` or negative \u2192 422.\n\nResponse: JSON array of trace objects, newest-first::\n\n  [\n    {\n      \"id\":            \"<opaque server-minted id>\",\n      \"project\":       \"<project name>\",\n      \"agent\":         \"<agent role>\",\n      \"task_key\":      \"<TASK-KEY from filename>\",\n      \"timestamp\":     \"<ISO-8601 timestamp from filename>\",\n      \"path_basename\": \"<filename.md>\"\n    },\n    ...\n  ]\n\nHTTP status:\n\n- 200 \u2014 always (empty array when no traces match the filters).\n- 422 \u2014 traversal sequence in project or agent param; invalid limit;\n        agent value not in the fixed agent-role set.\n\nSecurity:\n\nThe project and agent query parameters are validated for traversal sequences\nbefore any filesystem access.  The agent parameter is validated against the\nfixed agent-role whitelist.  Unknown project or agent names result in an\nempty array (not an error).",
+        "operationId": "get_traces_index_traces_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "JSON array of trace objects sorted newest-first."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List training-trace index",
+        "tags": [
+          "traces"
+        ]
+      }
+    },
+    "/traces/{trace_id}": {
+      "get": {
+        "description": "Return the markdown body of a training trace by its opaque id.\n\nPath parameter:\n\n- ``trace_id`` \u2014 opaque server-minted id returned by GET /traces.\n                 Resolved ONLY against the server's own enumeration of\n                 known trace files.  A fabricated or traversal-shaped id\n                 that is not in the enumeration returns HTTP 404 \u2014 path\n                 components inside the id are NEVER interpreted as\n                 filesystem navigation.\n\nResponse envelope (HTTP 200 when found)::\n\n  {\"exit_code\": 0, \"stdout\": \"<markdown body>\", \"stderr\": \"\"}\n\nHTTP status:\n\n- 200 \u2014 trace found; markdown body in stdout.\n- 404 \u2014 id not in the server's enumeration (includes traversal-shaped ids\n        and fabricated ids).\n\nSecurity:\n\nThe id is resolved ONLY by enumerating the server's known trace files and\nmatching against their stems.  No path component from the id reaches the\nfilesystem \u2014 the only filesystem read is ``path.read_text()`` on the\ncanonical path the server already knows about from the enumeration.",
+        "operationId": "get_trace_by_id_traces__trace_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Standard envelope with the trace markdown body in stdout."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fetch one training trace by opaque id",
+        "tags": [
+          "traces"
+        ]
+      }
+    }
+  }
+}

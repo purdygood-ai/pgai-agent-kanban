@@ -20,7 +20,7 @@
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: $HOME/pgai_agent_kanban)
 
 # --- Resolve kanban root and script directory ---
-TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 _RUT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Source optional config files ---
@@ -58,6 +58,8 @@ require_dev_tree "${PGAI_DEV_TREE_PATH:-}" "$TEAM_ROOT/kanban.cfg"
 
 # --- Now enable strict mode for our own code ---
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Clean exit handling ---
 cleanup_on_exit() {
@@ -149,12 +151,17 @@ _TMP_SNAPSHOT_FILE="$(pgai_mktemp tmp_cleanliness_snapshot)"
 pgai_tmp_snapshot > "$_TMP_SNAPSHOT_FILE"
 
 # --- Build pytest arguments ---
-# tests/unit/    — the main unit test tree
+# tests/unit/                      — the main unit test tree
+# pgai_agent_kanban/api/tests/     — package-local tests for the operator API
+#                                    (test_cors.py, test_fidelity.py, test_adapter.py);
+#                                    these live next to the api package code, not under
+#                                    tests/unit/, so they are listed explicitly.
 # tests/test_pgai_agent_kanban_cm_*.py — module-level tests for extracted cm packages
 #                  (these live at the tests/ top level, not under unit/, so they are
 #                  listed explicitly rather than relying on glob discovery inside unit/)
 PYTEST_ARGS=(
   "tests/unit/"
+  "pgai_agent_kanban/api/tests/"
 )
 if [[ "$VERBOSE" == "true" ]]; then
   PYTEST_ARGS+=("--verbose")
@@ -251,6 +258,186 @@ if [[ $SKIP_GATE_EXIT -ne 0 ]]; then
   exit 1
 fi
 
+# --- Run orphan-test lint ---
+# Scans team/ for test_*.py files that are unreachable from either gated
+# runner's pytest argv.  An orphan test means a regression it catches will
+# never surface in the authoritative UNIT_EXIT/INTEGRATION_EXIT signal.
+# Runs before pytest so failures surface early without consuming test-run CPU.
+echo "Running orphan-test lint..."
+set +e
+python3 scripts/lint_orphan_tests.py
+ORPHAN_LINT_EXIT=$?
+set -e
+
+if [[ $ORPHAN_LINT_EXIT -ne 0 ]]; then
+  echo "Orphan-test lint FAILED (exit code: $ORPHAN_LINT_EXIT)" >&2
+  echo "Fix: move the orphan test file into a collected root, or add the" >&2
+  echo "directory to a runner's PYTEST_ARGS and update _COLLECTED_ROOTS in" >&2
+  echo "team/scripts/lint_orphan_tests.py." >&2
+  exit 1
+fi
+
+# --- Run API-parity lint ---
+# Asserts that every operator script fronted by the API has full flag-parity
+# with the corresponding request body model.  A script gaining a new operator
+# flag without the body growing the field fails this check immediately, keeping
+# parity a property rather than a review habit.
+# Runs in the same pre-flight slot as lint_orphan_tests, before pytest.
+echo "Running API-parity lint..."
+set +e
+python3 scripts/lint_api_parity.py
+API_PARITY_LINT_EXIT=$?
+set -e
+
+if [[ $API_PARITY_LINT_EXIT -ne 0 ]]; then
+  echo "API-parity lint FAILED (exit code: $API_PARITY_LINT_EXIT)" >&2
+  echo "Fix: add the missing field to the corresponding body model in" >&2
+  echo "team/pgai_agent_kanban/api/routers/operations.py." >&2
+  exit 1
+fi
+
+# --- Run upgrade no-temp-copy-guard lint ---
+# Asserts that the retired temp-copy guard identifiers (_PGAI_UPGRADE_SELF_COPY,
+# _PGAI_UPGRADE_REEXEC, _PGAI_UPGRADE_ORIG_DIR) are absent from executable lines
+# in team/scripts/upgrade.sh.  A squash-merge conflict can silently resurrect the
+# retired block; this check makes such resurrection fail the suite immediately.
+echo "Running upgrade no-temp-copy-guard lint..."
+set +e
+python3 scripts/lint_upgrade_no_temp_copy_guard.py
+UPGRADE_GUARD_LINT_EXIT=$?
+set -e
+
+if [[ $UPGRADE_GUARD_LINT_EXIT -ne 0 ]]; then
+  echo "Upgrade no-temp-copy-guard lint FAILED (exit code: $UPGRADE_GUARD_LINT_EXIT)" >&2
+  echo "Fix: remove the retired temp-copy guard block from team/scripts/upgrade.sh." >&2
+  exit 1
+fi
+
+# --- Run ICD freshness gate ---
+# Asserts that docs/api/icd.json is byte-identical to a fresh regeneration from
+# the current codebase.  A stale artifact means the checked-in contract no longer
+# matches the served /openapi.json — consumers would pin the wrong schema.
+# Run 'bash team/scripts/generate-icd.sh' and commit the result to fix.
+echo "Running ICD freshness gate..."
+set +e
+python3 scripts/lint_icd_freshness.py
+ICD_FRESHNESS_EXIT=$?
+set -e
+
+if [[ $ICD_FRESHNESS_EXIT -ne 0 ]]; then
+  echo "ICD freshness gate FAILED (exit code: $ICD_FRESHNESS_EXIT)" >&2
+  echo "Fix: run 'bash team/scripts/generate-icd.sh' from the repository root" >&2
+  echo "and commit docs/api/icd.json." >&2
+  exit 1
+fi
+
+# --- Run ICD compatibility gate ---
+# Asserts that docs/api/icd.json is a compatible superset of every ICD version
+# listed in docs/api/baselines/SUPPORTED.  A breaking change (removed path,
+# removed response field, new required request field, enum shrink) against any
+# supported baseline fails immediately, enforcing the "breaking changes require
+# a major ICD version and an operator-approved RC" policy.
+# Wired here alongside the freshness gate, before pytest.
+echo "Running ICD compatibility gate..."
+set +e
+python3 scripts/lint_icd_compat.py
+ICD_COMPAT_EXIT=$?
+set -e
+
+if [[ $ICD_COMPAT_EXIT -ne 0 ]]; then
+  echo "ICD compatibility gate FAILED (exit code: $ICD_COMPAT_EXIT)" >&2
+  echo "Fix: resolve the compatibility break or retire the affected baseline" >&2
+  echo "version from docs/api/baselines/SUPPORTED (operator-approved RC required)." >&2
+  exit 1
+fi
+
+# --- Run CHANGELOG freshness gate ---
+# Asserts that CHANGELOG.md is byte-identical to a fresh regeneration from the
+# current codebase via changelog_writer.  A stale artifact means the committed
+# CHANGELOG no longer reflects the actual release notes and bug ledger state.
+# Regenerate using cm-release or: python3 -m pgai_agent_kanban.cm.changelog_writer
+# <repo_root> <bugs_dir> and commit the result to fix.
+#
+# RC-mode tolerance: when the worktree HEAD is on an rc/* or ai_rc/* branch,
+# PGAI_LINT_CHANGELOG_MODE=rc is set so the lint tolerates CHANGELOG staleness
+# caused only by BUG-NNNN files filed after the CHANGELOG.md commit.  This
+# prevents post-RC bug filings from blocking TESTER verification on in-flight
+# RCs.  The variable is left unset on all other branches (including ai_main),
+# keeping the gate strictly byte-exact on the main branch and at release time.
+#
+# PYTHONHASHSEED=0: changelog_writer uses frozenset over string section headings
+# whose iteration order is hash-seed-dependent.  Pinning the seed ensures the
+# gate's regeneration produces byte-identical output across independent process
+# invocations, matching the CHANGELOG.md committed under the same seed.
+_CHANGELOG_MODE_VAR=""
+_RU_CURRENT_BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
+if [[ -z "$_RU_CURRENT_BRANCH" ]]; then
+  # Detached HEAD — check if it is at a commit reachable from an rc/* branch.
+  _RU_CURRENT_BRANCH="$(git -C "$REPO_ROOT" branch --format='%(refname:short)' \
+    --points-at HEAD 2>/dev/null | grep -E '^(rc/|ai_rc/)' | head -1 || true)"
+fi
+if [[ "$_RU_CURRENT_BRANCH" =~ ^(rc/|ai_rc/) ]]; then
+  _CHANGELOG_MODE_VAR="rc"
+fi
+unset _RU_CURRENT_BRANCH
+echo "Running CHANGELOG freshness gate..."
+set +e
+PYTHONHASHSEED=0 PGAI_LINT_CHANGELOG_MODE="${_CHANGELOG_MODE_VAR}" \
+  python3 scripts/lint_changelog_freshness.py
+CHANGELOG_FRESHNESS_EXIT=$?
+set -e
+unset _CHANGELOG_MODE_VAR
+
+if [[ $CHANGELOG_FRESHNESS_EXIT -ne 0 ]]; then
+  echo "CHANGELOG freshness gate FAILED (exit code: $CHANGELOG_FRESHNESS_EXIT)" >&2
+  echo "Fix: regenerate CHANGELOG.md via the changelog_writer and commit it." >&2
+  echo "  python3 -m pgai_agent_kanban.cm.changelog_writer <repo_root> <bugs_dir>" >&2
+  exit 1
+fi
+
+# --- Run lib-function-dedupe lint ---
+# Asserts that no function name is defined in more than one team/scripts/lib/*.sh
+# file.  A duplicated function name causes bash's last-sourced-wins semantics to
+# silently shadow one implementation whenever both files are sourced — exactly the
+# latent defect class documented in BUG-0031.  This check makes the constraint
+# permanent and gated so future edits that reintroduce a duplicate are caught
+# before they reach production.
+echo "Running lib-function-dedupe lint..."
+set +e
+python3 scripts/lint_lib_function_dedupe.py
+LIB_DEDUPE_LINT_EXIT=$?
+set -e
+
+if [[ $LIB_DEDUPE_LINT_EXIT -ne 0 ]]; then
+  echo "Lib-function-dedupe lint FAILED (exit code: $LIB_DEDUPE_LINT_EXIT)" >&2
+  echo "Fix: ensure each function name is defined in exactly one team/scripts/lib/*.sh" >&2
+  echo "file.  If the duplication is intentional (provider-interface), add both" >&2
+  echo "defining files to the allow-list via --allow-file." >&2
+  exit 1
+fi
+
+# --- Run env-bootstrap lint ---
+# Asserts the env-bootstrap unification contract on both runtimes:
+#   - bash side: every executable entry point that references PGAI_AGENT_KANBAN_ROOT_PATH
+#     sources env_bootstrap.sh or wake_common.sh before using it.
+#   - python side: every Python entry point imports resolve_kanban_root from
+#     pgai_agent_kanban.env rather than reading the env var directly via os.environ.
+# A failure here means a newly-added script bypassed the canonical bootstrap,
+# reintroducing the class of silent-failure bug the RC closes.
+echo "Running env-bootstrap lint..."
+set +e
+python3 scripts/lint_env_bootstrap.py
+ENV_BOOTSTRAP_LINT_EXIT=$?
+set -e
+
+if [[ $ENV_BOOTSTRAP_LINT_EXIT -ne 0 ]]; then
+  echo "Env-bootstrap lint FAILED (exit code: $ENV_BOOTSTRAP_LINT_EXIT)" >&2
+  echo "Fix: add 'source \"\$(dirname \"\${BASH_SOURCE[0]}\")/lib/env_bootstrap.sh\"'" >&2
+  echo "as the first line (after the shebang/set lines) in any flagged bash entry point," >&2
+  echo "or route Python entry points through resolve_kanban_root from pgai_agent_kanban.env." >&2
+  exit 1
+fi
+
 # --- Run tests ---
 echo "Running unit tests in $(pwd)/tests/ (unit/ + cm module tests)"
 set +e
@@ -279,6 +466,37 @@ if [[ $_CLEAN_EXIT -ne 0 ]]; then
   exit 1
 fi
 echo "Bare-/tmp cleanliness check PASSED"
+
+# --- Post-suite listener cleanliness assertion ---
+# Assert the suite left no framework-rooted TCP listeners alive after pytest.
+# Runs only on success so the exit code reflects test failures cleanly.
+# Only listeners rooted in this project's own temp subtree are flagged; sibling
+# projects' leaked listeners are not attributed to this runner.  When the runner
+# is invoked from a path inside the framework temp tree the project subtree is
+# derived automatically; otherwise the check falls back to the wider basename
+# match (backward-compatible behavior for out-of-tree runs).
+_PGAI_TEMP_ROOT="$(pgai_temp_dir)"
+export PGAI_PROJECT_TEMP_SUBTREE=""
+if [[ "${REPO_ROOT}" == "${_PGAI_TEMP_ROOT}/projects/"* ]]; then
+    # REPO_ROOT is under <temp_root>/projects/<name>/worktrees/<branch>.
+    # Extract the project subtree as <temp_root>/projects/<name>.
+    _rel="${REPO_ROOT#"${_PGAI_TEMP_ROOT}/projects/"}"
+    _proj_name="${_rel%%/*}"
+    if [[ -n "${_proj_name}" ]]; then
+        export PGAI_PROJECT_TEMP_SUBTREE="${_PGAI_TEMP_ROOT}/projects/${_proj_name}"
+    fi
+fi
+unset _PGAI_TEMP_ROOT _rel _proj_name
+echo "Checking for framework-rooted TCP listener leaks..."
+set +e
+pgai_listener_cleanliness_check
+_LISTENER_EXIT=$?
+set -e
+if [[ $_LISTENER_EXIT -ne 0 ]]; then
+  echo "Listener cleanliness check FAILED: framework-rooted listener(s) survived the suite." >&2
+  exit 1
+fi
+echo "Listener cleanliness check PASSED"
 
 # --- Sweep tests/ scratch after a successful run ---
 # Calls pgai_temp_cleanup_tests, which removes ONLY the tests/ subtree

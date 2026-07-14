@@ -26,7 +26,7 @@
 # Actions:
 #   a. Backup key state stores to <temp_root>/unwind-rc-<version>-backup-<ts>/
 #   b. Inventory + confirmation prompt (or skip if --force/--dry-run)
-#   c. Git unwind: checkout prefixed develop, delete local and remote rc/<version>
+#   c. Git unwind: checkout prefixed main, delete local and remote rc/<version>
 #   d. Task folder state: mark matching task folders WONT-DO
 #   e. Queue caches: flip matching entries to [x]
 #   f. Requirements file: rename to *.SUPERSEDED-on-cancel-<ts>.md
@@ -114,7 +114,7 @@ fi
 # ---------------------------------------------------------------------------
 
 # Resolve KANBAN_ROOT
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 # Source env/config before strict mode — these files may use unset vars or
 # return non-zero from innocent operations.
@@ -149,6 +149,8 @@ _TMP_ROOT="$(pgai_temp_dir)"
 # Enable strict mode for our own code
 # ---------------------------------------------------------------------------
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve project name and repo root
@@ -176,7 +178,7 @@ fi
 
 VERSION="$VERSION_ARG"
 RC_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "rc/$VERSION")"
-DEVELOP_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "develop")"
+MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
 RELEASE_TAG="$(pp_prefix_tag "$PROJECT_NAME" "$VERSION")"
 
 # ---------------------------------------------------------------------------
@@ -715,7 +717,7 @@ echo ""
 
 # ---------------------------------------------------------------------------
 # Step c: Git unwind
-# 1. Checkout develop so we are not on the branch we are about to delete.
+# 1. Checkout main so we are not on the branch we are about to delete.
 # 2. Delete local rc/<version> if it exists.
 # 3. Delete remote origin/rc/<version> if it exists.
 # 4. Find orphan feature/CLAUDE-* branches whose feature-branch field in
@@ -723,10 +725,10 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "--- Step c: Git unwind ---"
 
-# Switch to develop so we are not standing on the RC branch.
-echo "  Checking out $DEVELOP_BRANCH ..."
-if ! git -C "$REPO_ROOT" checkout "$DEVELOP_BRANCH" 2>&1; then
-    echo "ERROR: could not checkout $DEVELOP_BRANCH in $REPO_ROOT" >&2
+# Switch to main so we are not standing on the RC branch.
+echo "  Checking out $MAIN_BRANCH ..."
+if ! git -C "$REPO_ROOT" checkout "$MAIN_BRANCH" 2>&1; then
+    echo "ERROR: could not checkout $MAIN_BRANCH in $REPO_ROOT" >&2
     exit 2
 fi
 

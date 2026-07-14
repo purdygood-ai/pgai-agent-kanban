@@ -43,9 +43,10 @@ $EDITOR projects/pgai-chomp-man/project.cfg
 #   set:  git_repo_url =                                (leave empty — local only)
 ```
 
-`branch_prefix = ai_` keeps all the chain's branches (`ai_develop`,
+`branch_prefix = ai_` keeps all the chain's branches (`ai_main`,
 `ai_rc/...`, `ai_`-prefixed tags) in their own lane, so they're easy to see and
-never collide with a human `main`.
+never collide with a human `main`. Each RC branches from `ai_main` and
+squashes back into it — one hop, no `develop` in the middle.
 
 ---
 

@@ -31,7 +31,7 @@
 # No default — required for any cron-driven operation.
 #
 # export PGAI_AGENT_KANBAN_ROOT_PATH="$HOME/pgai_agent_kanban"
-# export KANBAN_ROOT_PATH="$PGA_AGENT_KANBAN_ROOT_PATH"
+# export KANBAN_ROOT_PATH="$PGAI_AGENT_KANBAN_ROOT_PATH"
 
 
 # --- PATH ---

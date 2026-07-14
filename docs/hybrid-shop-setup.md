@@ -27,7 +27,7 @@ If you already have a git repository with human work on `main`, the kanban attac
 
 1. Install pgai-agent-kanban as a sub-dependency of your workflow (or alongside it), and point its `dev_tree_path` in `project.cfg` at your existing repository's checkout. The kanban will operate inside that working tree.
 2. Before the kanban runs for the first time, `cd` into the dev tree, check out `main`, and pull the latest. The first AI cycle uses `main` as its starting point.
-3. On first use, the kanban creates `ai_main` and `ai_develop` (the prefixed versions of its long-running branches) by branching from `main`. Your human `main` is left untouched — the AI never commits directly to it.
+3. On first use, the kanban creates `ai_main` (the prefixed version of its long-running integration branch) by branching from `main`. RC branches (`ai_rc/vX.Y.Z`) branch from `ai_main`, ship into it via a single squash, and are deleted — the single-lane flow uses `ai_main` as the sole long-running AI branch. Your human `main` is left untouched; the AI never commits directly to it.
 4. On the remote, set branch protection rules that match the split: protect `main` against direct pushes from the kanban's service account, and permit the same account to push branches matching `ai_*`. Human developers continue to interact with `main` through their normal workflow.
 5. No existing branches need to be renamed. Human feature branches, release branches, and tags stay exactly as they were.
 
@@ -181,9 +181,9 @@ Once the kanban tags its first release on `ai_main`, the operator decides when a
 
 After the first PR/MR lands, the two branches need to stay roughly in step or the next AI RC will conflict against stale state.
 
-- The kanban handles the common case automatically. On its next cycle after a merged PR, it back-merges `main` into `ai_develop` so the AI's integration branch picks up whatever shipped to human `main`. You do not need to do this manually for the normal PR-merge path.
-- The exception is direct human pushes to `main` — hotfixes, emergency reverts, or any commit that bypasses the AI's release flow. The kanban will not see these until they appear on `main` and it next syncs. To force-sync ahead of the next AI cycle, run `git fetch origin && git checkout ai_develop && git merge origin/main` in the dev tree.
-- Watch the dashboard. If `ai_develop` has fallen more than a handful of commits behind `main`, sync it manually before triggering the next RC. Letting it drift makes the next RC's merge-up step harder than it needs to be.
+- The kanban handles the common case automatically. On its next cycle after a merged PR, it back-merges `main` into `ai_main` so the AI's integration branch picks up whatever shipped to human `main`. You do not need to do this manually for the normal PR-merge path.
+- The exception is direct human pushes to `main` — hotfixes, emergency reverts, or any commit that bypasses the AI's release flow. The kanban will not see these until they appear on `main` and it next syncs. To force-sync ahead of the next AI cycle, run `git fetch origin && git checkout ai_main && git merge origin/main` in the dev tree.
+- Watch the dashboard. If `ai_main` has fallen more than a handful of commits behind `main`, sync it manually before triggering the next RC. Letting it drift makes the next RC's merge-up step harder than it needs to be.
 
 ## Switching prefix mid-release
 

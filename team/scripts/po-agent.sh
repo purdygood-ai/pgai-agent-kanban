@@ -8,8 +8,19 @@
 # it does NOT queue work for later processing (unlike pm-agent.sh).
 #
 # Usage:
-#   po-agent.sh <brief.md>             # validate and invoke PO subagent
-#   po-agent.sh <brief.md> --dry-run   # preview what would happen, no writes
+#   po-agent.sh <brief.md>                     # validate and invoke PO subagent (full mode)
+#   po-agent.sh <brief.md> --dry-run           # preview what would happen, no writes
+#   po-agent.sh <brief.md> --output <dir>      # draft mode: write doc to <dir>/, no PM ticket
+#
+# Draft mode (--output <dir>):
+#   Runs the full PO expansion and writes the resulting requirements document
+#   as <dir>/<target-version>-<slug>.md.  No PM ticket, no backlog entry,
+#   nothing written under projects/.  If the target file already exists, a
+#   numeric suffix is appended (-2, -3, ...) and the decision is announced on
+#   stdout.  The final line of every draft-mode run is:
+#     DRAFT: <path>
+#   --output combined with --dry-run is refused loudly (contradiction: dry-run
+#   means no writes; --output means write a draft file).
 #
 # Configuration:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: $HOME/pgai_agent_kanban)
@@ -20,7 +31,7 @@
 
 # --- Resolve kanban root ---
 # Done before strict mode so the error message is clean if it fails.
-TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 if [[ ! -d "$TEAM_ROOT" ]]; then
   echo "ERROR: kanban root not found: $TEAM_ROOT" >&2
@@ -54,6 +65,8 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # --- Now enable strict mode for our own code ---
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Source project paths helper ---
 KANBAN_ROOT="$TEAM_ROOT"
@@ -81,6 +94,7 @@ trap cleanup_on_exit EXIT
 DRY_RUN=false
 BRIEF_FILE=""
 _PO_PROJECT_ARG=""
+OUTPUT_DIR=""
 
 # --- Parse args ---
 while [[ $# -gt 0 ]]; do
@@ -95,6 +109,14 @@ while [[ $# -gt 0 ]]; do
       _PO_PROJECT_ARG="$2"
       shift 2
       ;;
+    --output)
+      if [[ -z "${2:-}" ]]; then
+        echo "ERROR: --output requires a directory path" >&2
+        exit 1
+      fi
+      OUTPUT_DIR="$2"
+      shift 2
+      ;;
     --help|-h)
       cat <<EOF
 Usage: po-agent.sh <brief.md> [options]
@@ -104,8 +126,13 @@ The PO subagent expands the brief into a full requirements document and
 creates a PM ticket for decomposition.
 
 Options:
-  --project <name>  Project name (required when PGAI_PROJECT_NAME is not set)
+  --project <name>  Project name (required in full mode; not needed with --output)
   --dry-run         Preview what would happen without invoking the subagent
+  --output <dir>    Draft mode: write the expanded document to <dir>/ instead of
+                    creating a PM ticket.  The dir is created if missing.  An
+                    existing same-named file gets a numeric suffix (-2, -3, ...).
+                    Final stdout line: DRAFT: <path>.  Mutually exclusive with
+                    --dry-run.
   --help, -h        Show this help
 
 Unlike pm-agent.sh, PO is invoked immediately rather than queued.
@@ -157,6 +184,14 @@ if [[ -z "$TARGET_VERSION" ]] || [[ ! "$TARGET_VERSION" =~ $VERSION_REGEX ]]; th
   exit 1
 fi
 
+# --- Refuse --output combined with --dry-run (contradiction) ---
+if [[ -n "$OUTPUT_DIR" && "$DRY_RUN" == "true" ]]; then
+  echo "ERROR: --output and --dry-run are mutually exclusive." >&2
+  echo "--dry-run means no writes; --output means write a draft file." >&2
+  echo "Choose one: --output <dir> to produce a draft, or --dry-run to preview metadata." >&2
+  exit 1
+fi
+
 # --- Validate claude CLI is available ---
 if ! command -v claude >/dev/null 2>&1; then
   echo "ERROR: claude CLI not found in PATH" >&2
@@ -164,7 +199,48 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 1
 fi
 
-# --- Resolve target project ---
+# --- Draft mode: compute output path, handle collisions, invoke subagent ---
+if [[ -n "$OUTPUT_DIR" ]]; then
+  # Derive slug from the brief's basename (no extension), normalised to
+  # lowercase with runs of non-alphanumeric characters collapsed to hyphens.
+  _BRIEF_SLUG="$(basename "$BRIEF_FILE" .md \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//')"
+  _DRAFT_BASENAME="${TARGET_VERSION}-${_BRIEF_SLUG}"
+
+  # Create the output directory if it does not exist.
+  mkdir -p "$OUTPUT_DIR"
+
+  # Resolve collision: never overwrite an existing file.
+  _DRAFT_PATH="${OUTPUT_DIR}/${_DRAFT_BASENAME}.md"
+  _DRAFT_SUFFIX=1
+  while [[ -e "$_DRAFT_PATH" ]]; do
+    _DRAFT_SUFFIX=$(( _DRAFT_SUFFIX + 1 ))
+    _DRAFT_PATH="${OUTPUT_DIR}/${_DRAFT_BASENAME}-${_DRAFT_SUFFIX}.md"
+  done
+  if [[ "$_DRAFT_SUFFIX" -gt 1 ]]; then
+    echo "NOTICE: output collision — writing to ${_DRAFT_BASENAME}-${_DRAFT_SUFFIX}.md instead of ${_DRAFT_BASENAME}.md"
+  fi
+
+  echo "=== PO Agent: Draft Mode ==="
+  echo ""
+  echo "Brief File     : $BRIEF_FILE"
+  echo "Target Version : $TARGET_VERSION"
+  echo "Output Dir     : $OUTPUT_DIR"
+  echo "Draft File     : $_DRAFT_PATH"
+  echo ""
+  echo "Handing off to PO subagent (draft mode — no PM ticket will be created)..."
+  echo ""
+
+  claude -p --dangerously-skip-permissions \
+    "Use the po subagent to process the brief at ${BRIEF_FILE} in DRAFT MODE. The Target Version is ${TARGET_VERSION}. The kanban root is ${TEAM_ROOT}. Validate the Target Version field, expand the brief into a full requirements document using your full expansion process (governance read, tree verification, 9-rule method, Assumptions ledger). Write the resulting requirements document to exactly this path: ${_DRAFT_PATH}. Do NOT create a PM ticket. Do NOT write a backlog entry. Do NOT write anything under projects/. Write ONLY the requirements document file to the exact path specified."
+
+  echo ""
+  echo "DRAFT: ${_DRAFT_PATH}"
+  exit 0
+fi
+
+# --- Resolve target project (full mode only) ---
 # Requires explicit --project <name> or $PGAI_PROJECT_NAME; fails loudly when
 # neither is provided.  Callers that previously relied on the first-registered
 # default must now supply the project explicitly.

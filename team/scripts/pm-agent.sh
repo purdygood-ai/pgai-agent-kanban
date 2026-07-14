@@ -28,7 +28,7 @@
 
 # --- Resolve kanban root ---
 # Done before strict mode so the error message is clean if it fails.
-TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 if [[ ! -d "$TEAM_ROOT" ]]; then
   echo "ERROR: kanban root not found: $TEAM_ROOT" >&2
@@ -62,6 +62,8 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # --- Now enable strict mode for our own code ---
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Source project paths helper ---
 KANBAN_ROOT="$TEAM_ROOT"
@@ -85,6 +87,14 @@ fi
 # --- Source shared argument parser ---
 # shellcheck source=lib/argparse.sh
 source "${_SCRIPT_DIR}/lib/argparse.sh"
+
+# --- Source workflow dispatcher ---
+# Required for wf_load_plugin / wf_version_semantics in the ceiling check.
+# Include-guarded so re-sourcing (e.g. in test shells) is safe.
+if ! declare -F wf_load_plugin >/dev/null 2>&1; then
+    # shellcheck source=lib/workflow.sh
+    source "${_SCRIPT_DIR}/lib/workflow.sh"
+fi
 
 # --- Defaults ---
 MAX_TASKS="${PM_MAX_TASKS:-15}"
@@ -377,28 +387,63 @@ _TARGET_PROJECT="$(pp_require_project_context "$_PM_EFFECTIVE_PROJECT")" || {
 # autonomous discovery pipeline uses — so both paths enforce an identical rule.
 # A Target Version of "none" (no ## Target Version field) is skipped; the PM
 # agent will treat it as an auto-sentinel when it runs.
+#
+# Version semantics gate (mirrors BUG-0042 fix in discovery eligibility):
+# Ceiling checks are semver consumption checkpoints — they are meaningless for
+# label or none projects where versions are names, not numbers.  Load the
+# workflow plugin to query the project's declared version_semantics; skip the
+# entire ceiling block when the semantics are not "semver".
 if [[ "$TARGET_VERSION" != "none" ]]; then
-    if ! pp_version_within_ceiling "$_TARGET_PROJECT" "$TARGET_VERSION" 2>/dev/null; then
-        # Determine which ceiling was exceeded for a precise error message.
+    # Resolve version_semantics for this project's workflow type.
+    _pm_wf_type="$(pp_workflow_type "$_TARGET_PROJECT" 2>/dev/null)" || _pm_wf_type="release"
+    _pm_wf_load_exit=0
+    set +e
+    wf_load_plugin "$_pm_wf_type"
+    _pm_wf_load_exit=$?
+    set -e
+    if [[ $_pm_wf_load_exit -ne 0 ]]; then
+        # Plugin load failed — default to semver (safe: enforces ceiling rather
+        # than skipping it; matches the analogous fallback in discovery.sh).
+        _pm_version_semantics="semver"
+    else
+        _pm_version_semantics="$(wf_version_semantics)"
+    fi
+
+    if [[ "$_pm_version_semantics" != "semver" ]]; then
+        # Label or none project: versions are names, not numbers.
+        # Ceiling arithmetic does not apply — skip the ceiling block entirely.
+        true
+    elif ! pp_version_within_ceiling "$_TARGET_PROJECT" "$TARGET_VERSION" 2>/dev/null; then
+        # Semver project whose Target Version exceeds the configured ceiling.
+        # Determine which component was violated for a precise error message.
         _ceil_max_major="$(pp_max_major "$_TARGET_PROJECT" 2>/dev/null)" || _ceil_max_major=""
         _ceil_max_minor="$(pp_max_minor "$_TARGET_PROJECT" 2>/dev/null)" || _ceil_max_minor=""
         _ceil_max_patch="$(pp_max_patch "$_TARGET_PROJECT" 2>/dev/null)" || _ceil_max_patch=""
 
-        # Extract the version components for comparison.
+        # Extract and validate version components before arithmetic.
+        # A malformed semver on a semver project (e.g. garbage string) must
+        # produce a named parse error, never an unbound-variable crash.
         _v_clean="${TARGET_VERSION#v}"; _v_clean="${_v_clean#V}"
         _v_major="${_v_clean%%.*}"
         _v_rest="${_v_clean#*.}"; _v_minor="${_v_rest%%.*}"; _v_patch="${_v_rest#*.}"
 
-        # Find first violated component to include in the message.
+        # Guard: only use arithmetic when each component is a non-negative integer.
+        # A component that contains non-digit characters (e.g. a hyphen from a
+        # label suffix) is not a valid semver field; skip the per-component detail
+        # and fall through to the generic ceiling message instead of crashing.
         _ceil_detail=""
-        if [[ -n "$_ceil_max_major" ]] && (( _v_major > _ceil_max_major )); then
-            _ceil_detail="major version ${_v_major} exceeds max_major=${_ceil_max_major}"
-        elif [[ -n "$_ceil_max_minor" ]] && (( _v_minor > _ceil_max_minor )); then
-            _ceil_detail="minor version ${_v_minor} exceeds max_minor=${_ceil_max_minor}"
-        elif [[ -n "$_ceil_max_patch" ]] && (( _v_patch > _ceil_max_patch )); then
-            _ceil_detail="patch version ${_v_patch} exceeds max_patch=${_ceil_max_patch}"
+        if [[ "$_v_major" =~ ^[0-9]+$ && "$_v_minor" =~ ^[0-9]+$ && "$_v_patch" =~ ^[0-9]+$ ]]; then
+            if [[ -n "$_ceil_max_major" ]] && (( _v_major > _ceil_max_major )); then
+                _ceil_detail="major version ${_v_major} exceeds max_major=${_ceil_max_major}"
+            elif [[ -n "$_ceil_max_minor" ]] && (( _v_minor > _ceil_max_minor )); then
+                _ceil_detail="minor version ${_v_minor} exceeds max_minor=${_ceil_max_minor}"
+            elif [[ -n "$_ceil_max_patch" ]] && (( _v_patch > _ceil_max_patch )); then
+                _ceil_detail="patch version ${_v_patch} exceeds max_patch=${_ceil_max_patch}"
+            else
+                _ceil_detail="version exceeds configured project ceiling"
+            fi
         else
-            _ceil_detail="version exceeds configured project ceiling"
+            _ceil_detail="version '${TARGET_VERSION}' could not be parsed as semver (expected vX.Y.Z)"
         fi
 
         if [[ "$OVERRIDE_CEILING" == "true" ]]; then

@@ -6,8 +6,8 @@ Provides:
                      and integration tests. Creates queue files for all
                      known agents, plus logs, locks, plans directories,
                      a release-state.md file, and team/workflows/ with
-                     release.yaml so the materializer can validate workflow
-                     types.
+                     workflow plugin directories (release/, document/) so the
+                     materializer can validate workflow types.
 
   pgai_tests_temp_dir  — returns the resolved base directory for test temp
                          files.  When PGAI_AGENT_KANBAN_TEMP_DIR is
@@ -46,7 +46,7 @@ runs occur.
 The post-suite pgai_temp_cleanup_all call in run-*.sh handles any remaining
 artifacts after a successful session.
 
-Crontab sandbox (BUG-0108)
+Crontab sandbox (an earlier defect)
 ---------------------------
 All tests are wrapped by an autouse _sandbox_crontab fixture that places a
 stub crontab binary at the front of PATH.  The stub redirects every crontab
@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -144,7 +145,7 @@ def pytest_configure(config):  # noqa: ARG001
         all tmp_path fixtures automatically land under the configured root.
       - The subdirectory is created if it does not exist.
 
-    Structural guard (BUG-0060 Phase 1)
+    Structural guard (the crontab-sandbox hardening (phase 1))
     ------------------------------------
     When PGAI_AGENT_KANBAN_TEMP_DIR is set, this function also
     verifies that PYTEST_DEBUG_TEMPROOT is set and that its value resolves
@@ -156,7 +157,7 @@ def pytest_configure(config):  # noqa: ARG001
     This converts the "no /tmp pollution" invariant from a soft property
     (correct only because the redirect happens to be present) into a hard
     structural assertion (session aborts when the redirect is missing or
-    misdirected).  Tests that hardcode /tmp paths (BUG-0060 Phase 2 scope)
+    misdirected).  Tests that hardcode /tmp paths (the same hardening's phase-2 scope)
     are therefore caught at session startup rather than silently polluting /tmp.
 
     The guard is intentionally skipped when PGAI_AGENT_KANBAN_TEMP_DIR is not
@@ -253,12 +254,19 @@ AGENTS = ["pm", "coder", "writer", "tester", "cm", "bug"]
 # Path to the real team/workflows directory (relative to this conftest.py)
 _REAL_WORKFLOWS_DIR = pathlib.Path(__file__).parent.parent / "workflows"
 
-# Explicit allowlist of workflow definition files. Intent: these are the workflow
+# Explicit allowlist of workflow plugin directories. Intent: these are the workflow
 # types that pm_materialize.py needs to validate workflow_type values. Listed
-# explicitly (rather than globbing *.yaml) so that a new workflow file added to
+# explicitly (rather than globbing) so that a new workflow type added to
 # team/workflows/ does not silently enter fixture scope and break tests that
 # cannot accommodate an unknown workflow type.
-_WORKFLOW_FILES_FOR_TESTS = ["release.yaml", "document.yaml"]
+#
+# Each entry is a subdirectory of _REAL_WORKFLOWS_DIR containing at minimum
+# workflow.cfg and workflow.sh.  Types that carry a pipeline.yaml (release,
+# document) also have their pipeline seeded into the test root so load_workflow()
+# can resolve them without per-test setup.
+# testing-only is included so that capability-gated materializer tests can
+# call load_workflow_capabilities('testing-only') without manual fixture setup.
+_WORKFLOW_PLUGIN_DIRS_FOR_TESTS = ["release", "document", "testing-only"]
 
 
 @pytest.fixture
@@ -326,21 +334,42 @@ def tmp_kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
         encoding="utf-8",
     )
 
-    # --- team/workflows/ — copy workflow YAML files so the materializer can
-    # validate workflow_type when called from integration and unit tests.
-    # The materializer uses load_workflow() which searches:
-    #   1. <kanban_root>/workflows/<name>.yaml
-    #   2. <kanban_root>/team/workflows/<name>.yaml
-    # We populate team/workflows/ with the real workflow definitions.
+    # --- team/workflows/ — copy workflow plugin directories so the materializer
+    # can validate workflow_type when called from integration and unit tests.
+    # load_workflow() searches team/workflows/<type>/pipeline.yaml (canonical)
+    # constructed from the type string.  We copy the real plugin directories.
     team_workflows_dir = kanban_root / "team" / "workflows"
     team_workflows_dir.mkdir(parents=True, exist_ok=True)
-    for wf_name in _WORKFLOW_FILES_FOR_TESTS:
-        src = _REAL_WORKFLOWS_DIR / wf_name
-        if src.exists():
-            dest = team_workflows_dir / wf_name
-            dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    for plugin_name in _WORKFLOW_PLUGIN_DIRS_FOR_TESTS:
+        src_plugin = _REAL_WORKFLOWS_DIR / plugin_name
+        if src_plugin.is_dir():
+            dest_plugin = team_workflows_dir / plugin_name
+            if dest_plugin.exists():
+                shutil.rmtree(dest_plugin)
+            shutil.copytree(src_plugin, dest_plugin)
 
     return kanban_root
+
+
+def _copy_workflow_plugins(dest_root: pathlib.Path) -> None:
+    """Copy workflow plugin directories into *dest_root/workflows/<type>/*.
+
+    Called by fixtures that need wf_load_plugin to succeed when
+    PGAI_AGENT_KANBAN_ROOT_PATH is redirected to a temp root.  Each plugin
+    directory contains workflow.cfg, workflow.sh, and (for release/document)
+    pipeline.yaml.  The dispatcher (wf_load_plugin) finds them at
+    $PGAI_AGENT_KANBAN_ROOT_PATH/workflows/<type>/ (project-local flat override
+    path); load_workflow() also searches this location.
+    """
+    wf_dir = dest_root / "workflows"
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    for plugin_name in _WORKFLOW_PLUGIN_DIRS_FOR_TESTS:
+        src_plugin = _REAL_WORKFLOWS_DIR / plugin_name
+        if src_plugin.is_dir():
+            dest_plugin = wf_dir / plugin_name
+            if dest_plugin.exists():
+                shutil.rmtree(dest_plugin)
+            shutil.copytree(src_plugin, dest_plugin)
 
 
 # ---------------------------------------------------------------------------
@@ -371,16 +400,14 @@ def _block_live_kanban_writes(monkeypatch, tmp_path):
     safe_root = tmp_path / "_default_kanban_safe_root"
     safe_root.mkdir(parents=True, exist_ok=True)
 
-    # Seed workflow YAML files in safe_root/workflows/ so that load_workflow()
-    # can resolve workflow_type values like "release" without per-test setup.
+    # Seed workflow plugin directories in safe_root/workflows/ so that:
+    #   - load_workflow() can resolve workflow_type values like "release" and
+    #     "document" without per-test setup (pipeline.yaml is inside the plugin dir)
+    #   - wf_load_plugin succeeds when PGAI_AGENT_KANBAN_ROOT_PATH is redirected
+    #     to safe_root in shell tests (workflow.cfg / workflow.sh are in the dir)
     # This mirrors the live install layout where install.sh copies team/workflows/
-    # to $KANBAN_ROOT/workflows/.
-    wf_dir = safe_root / "workflows"
-    wf_dir.mkdir(parents=True, exist_ok=True)
-    for wf_name in _WORKFLOW_FILES_FOR_TESTS:
-        src = _REAL_WORKFLOWS_DIR / wf_name
-        if src.exists():
-            (wf_dir / wf_name).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    # (including plugin subdirs) to $KANBAN_ROOT/workflows/.
+    _copy_workflow_plugins(safe_root)
 
     monkeypatch.setenv("PGAI_TASKS_DIR", str(safe_root / "tasks"))
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(safe_root))
@@ -389,7 +416,7 @@ def _block_live_kanban_writes(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Crontab sandbox (BUG-0108 defense)
+# Crontab sandbox (crontab-clobber defense)
 # ---------------------------------------------------------------------------
 
 # Stub script text.  Written once per test session into a temp dir.
@@ -440,17 +467,17 @@ esac
 def _sandbox_crontab(monkeypatch, tmp_path):
     """
     Autouse fixture: place a stub crontab binary at the front of PATH for every
-    test, and set PGAI_CRONTAB_CMD to point at the same stub (BUG-0108 /
-    BUG-0229 — stop tests from clobbering the real operator crontab).
+    test, and set PGAI_CRONTAB_CMD to point at the same stub (crontab sandboxing —
+     stop tests from clobbering the real operator crontab).
 
     Two complementary protection layers are applied:
 
-    1. PATH shadowing (BUG-0108): the stub binary is prepended to PATH so that
+    1. PATH shadowing (an earlier defect): the stub binary is prepended to PATH so that
        any subprocess which discovers 'crontab' via PATH resolution picks up the
        stub.  Tests that use subprocess.run(..., env=...) with a dict built from
        os.environ inherit the redirected PATH automatically.
 
-    2. PGAI_CRONTAB_CMD seam (BUG-0229): safe_overwrite.sh's _run_crontab()
+    2. PGAI_CRONTAB_CMD seam (an earlier defect): safe_overwrite.sh's _run_crontab()
        honours PGAI_CRONTAB_CMD over PATH-based lookup.  Setting this env var
        makes every install.sh/install-crontab.sh invocation that sources
        safe_overwrite.sh redirect through the stub regardless of how PATH is
@@ -485,7 +512,7 @@ def _sandbox_crontab(monkeypatch, tmp_path):
     current_path = os.environ.get("PATH", "")
     monkeypatch.setenv("PATH", f"{stub_bin}:{current_path}")
 
-    # Layer 2 (BUG-0229): set PGAI_CRONTAB_CMD so that safe_overwrite.sh's
+    # Layer 2 (an earlier defect): set PGAI_CRONTAB_CMD so that safe_overwrite.sh's
     # _run_crontab() calls the stub directly, bypassing PATH resolution.
-    # This is the default seam engagement that was missing before BUG-0229.
+    # This is the default seam engagement that was missing before an earlier defect.
     monkeypatch.setenv("PGAI_CRONTAB_CMD", str(stub_path))

@@ -6,14 +6,14 @@
 #
 # This closes the first-release block where cm/open-rc.sh fails with
 # "origin/<branch> does not exist" because the operator created the base
-# branches locally but never pushed them (or never created them at all).
+# branch locally but never pushed it (or never created it at all).
 #
 # The script reads the project's project.cfg (dev_tree_path, git_repo_url,
-# branch_prefix) and creates+pushes exactly the two base branches the chain
-# will operate on, resolved via pp_prefix_branch:
+# branch_prefix) and creates+pushes the single base branch the chain will
+# operate on, resolved via pp_prefix_branch:
 #
-#   branch_prefix = ai_   ->  ai_develop, ai_main
-#   branch_prefix empty   ->  develop, main
+#   branch_prefix = ai_   ->  ai_main
+#   branch_prefix empty   ->  main
 #
 # OPERATOR TOOLING ONLY.
 #
@@ -29,19 +29,18 @@
 #                    Reads dev_tree_path and branch_prefix from its project.cfg.
 #
 # Behavior:
-#   For each of the two chain base branches (develop, main — both prefixed
-#   when branch_prefix is set):
+#   For the chain base branch (main — prefixed when branch_prefix is set):
 #     1. Check if the branch already exists on origin (git ls-remote).
 #        If already present: skip with "already present" message.
 #     2. Check if the branch exists locally.
 #        If missing locally: create it from HEAD (git checkout -b <branch>).
 #     3. Push the branch to origin with upstream tracking (-u).
-#   After processing both branches, print a summary and exit 0.
+#   After processing the branch, print a summary and exit 0.
 #
 # Idempotent: safe to re-run. Existing remote branches are left untouched.
 #
 # Exit codes:
-#   0  — all required branches are present on origin (created/pushed or
+#   0  — the required branch is present on origin (created/pushed or
 #         already existed); repo is ready for the chain's first release.
 #   1  — usage error or missing required arguments
 #   2  — project.cfg not found or required fields missing
@@ -92,7 +91,7 @@ fi
 
 # --- Resolve script and kanban root ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 # --- Source optional config files (before strict mode) ---
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
@@ -122,6 +121,8 @@ fi
 
 # --- Enable strict mode for our own code ---
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Resolve project context ---
 export KANBAN_ROOT
@@ -163,13 +164,11 @@ fi
 
 echo "Dev tree:  $DEV_TREE"
 
-# --- Resolve the two chain base branch names via pp_prefix_branch ---
+# --- Resolve the chain base branch name via pp_prefix_branch ---
 # Single source of truth for branch naming — same helper CM scripts use.
-DEVELOP_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "develop")"
 MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
 
-echo "Required base branches:"
-echo "  $DEVELOP_BRANCH"
+echo "Required base branch:"
 echo "  $MAIN_BRANCH"
 echo ""
 
@@ -218,17 +217,6 @@ _ensure_branch_on_origin() {
     return 0
 }
 
-# --- Process develop branch ---
-develop_status="error"
-if _ensure_branch_on_origin "$DEVELOP_BRANCH" "$DEV_TREE"; then
-    develop_status="ok"
-else
-    echo "" >&2
-    echo "FAILED to ensure $DEVELOP_BRANCH on origin. See errors above." >&2
-    exit 3
-fi
-echo ""
-
 # --- Process main branch ---
 main_status="error"
 if _ensure_branch_on_origin "$MAIN_BRANCH" "$DEV_TREE"; then
@@ -243,7 +231,7 @@ echo ""
 # --- Verify final state (informational only — we just pushed, so this should succeed) ---
 echo "=== Verification ==="
 echo "Checking origin branch state..."
-remote_branches="$(git -C "$DEV_TREE" ls-remote --heads origin "$DEVELOP_BRANCH" "$MAIN_BRANCH" 2>/dev/null || true)"
+remote_branches="$(git -C "$DEV_TREE" ls-remote --heads origin "$MAIN_BRANCH" 2>/dev/null || true)"
 echo "$remote_branches" | while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     sha="${line%%$'\t'*}"
@@ -254,7 +242,6 @@ done
 
 echo ""
 echo "=== Summary ==="
-printf "  %-30s  %s\n" "$DEVELOP_BRANCH" "$develop_status"
 printf "  %-30s  %s\n" "$MAIN_BRANCH" "$main_status"
 echo ""
 echo "Repository is ready for the chain's first release."

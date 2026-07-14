@@ -50,7 +50,8 @@ Functions:
     delete_item(ctx, project, key, force=False)
         Delete a task (directory) or intake item (file) identified by key.
         Terminal-state guard: refuses non-terminal items unless force=True.
-        Terminal states: DONE or WONT-DO for tasks; "done" for intake items.
+        Terminal states: "done" and "wont-do" (case-insensitive; defined in
+        lib.terminal_states).
 
     reset_item(ctx, project, key, keep_artifacts=False)
         Reset a task or intake item to a re-pickable state.
@@ -103,6 +104,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from pgai_agent_kanban.lib.filename_contract import INTAKE_REQUIREMENTS_RE
+from pgai_agent_kanban.lib.terminal_states import is_terminal as _is_terminal_state
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.ops.errors import Ambiguous, IoError, NotFound, OpsError, Refused
 from pgai_agent_kanban.ops.resolve import ResolveResult, resolve_item
@@ -269,10 +272,12 @@ def unhalt_global(ctx: OpsContext) -> None:
 
 # Patterns are checked in order; first match wins.
 # Each entry: (compiled_regex, destination_subdir_name)
+# The requirements pattern is sourced from filename_contract to keep
+# intake and discovery in sync (BUG-0045 single-source contract).
 _INTAKE_ROUTES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r'^BUG-'), "bugs"),
     (re.compile(r'^PRIORITY-'), "priority"),
-    (re.compile(r'^v[0-9].*\.md$'), "requirements"),
+    (INTAKE_REQUIREMENTS_RE, "requirements"),
 ]
 
 
@@ -582,11 +587,6 @@ def wontdo_item(ctx: OpsContext, project: str, key: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-# Terminal states that permit deletion without --force.
-_TASK_TERMINAL_STATES: frozenset[str] = frozenset({"DONE", "WONT-DO"})
-_INTAKE_TERMINAL_STATES: frozenset[str] = frozenset({"done", "DONE", "WONT-DO"})
-
-
 def delete_item(
     ctx: OpsContext,
     project: str,
@@ -597,8 +597,7 @@ def delete_item(
 
     TERMINAL-STATE GUARD (the safety-critical property):
         Deletion is refused unless the item is in a terminal state.
-        Tasks: terminal states are DONE and WONT-DO.
-        Intake items: terminal state is "done" (also accepts "DONE" and "WONT-DO").
+        Terminal states are "done" and "wont-do" (case-insensitive).
         Pass ``force=True`` to override the guard unconditionally.
 
     The guard exists because delete is irreversible: deleting an in-flight
@@ -622,19 +621,16 @@ def delete_item(
     result = resolve_item(ctx, project, key)
 
     # --- Terminal-state guard ---
+    # Routes through the shared predicate from lib.terminal_states so the
+    # vocabulary is defined exactly once.  Accepts both uppercase task forms
+    # ("DONE", "WONT-DO") and lowercase intake forms ("done", "wont-do").
     if not force:
-        is_terminal: bool
-        if result.item_type == "task":
-            is_terminal = result.state in _TASK_TERMINAL_STATES
-        else:
-            is_terminal = result.state in _INTAKE_TERMINAL_STATES
-
-        if not is_terminal:
+        if not _is_terminal_state(result.state):
             raise Refused(
                 f"delete_item: refused to delete {key!r} — state is {result.state!r} "
                 f"(not a terminal state).\n"
                 f"delete_item: use --force to delete regardless, or move the item to "
-                f"DONE or WONT-DO first."
+                f"done or wont-do first."
             )
 
     # --- Resolve marker file and key BEFORE deletion ---
@@ -748,16 +744,15 @@ def reset_item(
         )
     elif result.item_type == "requirement":
         pm_task_id = _read_md_field(result.path, "PM Task")
-        # For requirements, the pm_backlog.md key is the PM task ID (not the
-        # requirements filename stem).  We reset ## Status to 'open' atomically,
-        # then flip the pm_backlog marker using the PM task ID.
-        _reset_intake_item_status_only(
+        # Fresh-decompose recipe: set ## Status to 'open' and clear ## PM Task
+        # to 'none' atomically in a single write.  pm_backlog.md is intentionally
+        # left untouched — discovery mints a fresh decompose ticket on the next
+        # tick, which is the selection model GUARD 4 assumes.
+        _write_requirement_reset(
             item_path=result.path,
             current_status=result.state,
         )
         if pm_task_id and pm_task_id.lower() != "none":
-            pm_backlog_file = _get_marker_file(project_root, result.item_type, result.path)
-            _flip_backlog_marker(pm_backlog_file, pm_task_id, " ")
             _reset_requirement_extras(
                 kanban_root=kanban_root,
                 project=project,
@@ -886,10 +881,6 @@ def _reset_intake_item(
 def _reset_intake_item_status_only(item_path: Path, current_status: str) -> None:
     """Reset an intake item's ## Status to 'open' without touching any marker file.
 
-    Used for requirements, where the backlog marker is keyed by PM task ID
-    (not the requirements filename stem) and must be flipped by the caller
-    with the correct key.
-
     Args:
         item_path:      Path to the intake .md file.
         current_status: Current ## Status value (for the running-state warning).
@@ -908,6 +899,66 @@ def _reset_intake_item_status_only(item_path: Path, current_status: str) -> None
         )
 
     _write_intake_status_open(item_path)
+
+
+def _write_requirement_reset(item_path: Path, current_status: str) -> None:
+    """Set ## Status to 'open' and ## PM Task to 'none' in a requirement file atomically.
+
+    Implements the fresh-decompose reset recipe for requirements: the status
+    is reopened and the recorded PM task reference is cleared so discovery
+    mints a new decompose ticket on the next tick.  pm_backlog.md is never
+    touched by this function.
+
+    Args:
+        item_path:      Path to the requirement .md file.
+        current_status: Current ## Status value (for the running-state warning).
+
+    Raises:
+        OpsError: If the ## Status heading is absent.
+        IoError:  If the atomic write fails.
+    """
+    if current_status == "running":
+        import sys as _sys
+        print(
+            f"WARNING: intake item has ## Status: running (bundle RC may be in flight).\n"
+            f"  Resetting now may cause double-handling on the next discovery idle tick.\n"
+            f"  Proceeding with reset anyway.",
+            file=_sys.stderr,
+        )
+
+    try:
+        text = item_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise OpsError(
+            f"reset_item: failed to read {item_path}: {exc}"
+        ) from exc
+
+    new_text, n_status = re.subn(
+        r"(## Status\n(?:[ \t]*\n)*)([^\n]+)",
+        lambda m: m.group(1) + "open",
+        text,
+        count=1,
+    )
+
+    if n_status == 0:
+        raise OpsError(
+            f"reset_item: no ## Status heading found in {item_path}; left untouched"
+        )
+
+    # Clear ## PM Task to 'none' when the field exists.  If the field is
+    # absent, leave the file as-is (discovery handles missing PM Task as
+    # an unrecorded requirement — still selectable).
+    new_text, _ = re.subn(
+        r"(## PM Task\n(?:[ \t]*\n)*)([^\n]+)",
+        lambda m: m.group(1) + "none",
+        new_text,
+        count=1,
+    )
+
+    if not new_text.endswith("\n"):
+        new_text += "\n"
+
+    _atomic_write(item_path, new_text)
 
 
 def _reset_requirement_extras(

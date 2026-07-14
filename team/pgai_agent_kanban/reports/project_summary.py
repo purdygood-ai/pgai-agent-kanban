@@ -90,14 +90,13 @@ _KNOWN_SEVERITIES = {"critical", "high", "medium", "low"}
 
 
 def _kanban_root() -> pathlib.Path:
-    """Return the kanban root path from env var or default location.
+    """Return the kanban root path via the canonical resolver.
 
-    Precedence: PGAI_AGENT_KANBAN_ROOT_PATH (canonical) > ~/pgai_agent_kanban.
+    Delegates to pgai_agent_kanban.env.resolve_kanban_root() which reads
+    PGAI_AGENT_KANBAN_ROOT_PATH and fails loud if the variable is unset or empty.
     """
-    env = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "").strip()
-    if env:
-        return pathlib.Path(env).expanduser()
-    return pathlib.Path.home() / "pgai_agent_kanban"
+    from pgai_agent_kanban.env import resolve_kanban_root
+    return resolve_kanban_root()
 
 
 def _projects_dir(root: pathlib.Path) -> pathlib.Path:

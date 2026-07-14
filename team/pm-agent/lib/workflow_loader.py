@@ -3,9 +3,17 @@
 Workflow YAML files define a complete pipeline: what inputs a workflow expects,
 which agents participate, what steps run in order, and what output is produced.
 
-File search order (first match wins):
-  1. $KANBAN_ROOT/team/workflows/<name>.yaml   (team-level definition)
-  2. $KANBAN_ROOT/workflows/<name>.yaml         (project-local override)
+Each workflow type is a plugin directory under ``team/workflows/<type>/``
+containing at minimum ``workflow.cfg`` and ``workflow.sh``.  A type that needs
+PM decomposition richness beyond the simple wf_agents roster carries an
+optional ``pipeline.yaml`` inside that directory.  Types without a
+``pipeline.yaml`` use the simple path (roster from ``wf_agents``) — the same
+behavior ``testing-only`` runs, now the documented default for custom types.
+
+File search order for load_workflow (first match wins):
+  1. $KANBAN_ROOT/workflows/<name>.yaml              (project-local flat override)
+  2. $KANBAN_ROOT/team/workflows/<name>/pipeline.yaml  (plugin directory — canonical)
+  3. $KANBAN_ROOT/team/workflows/<name>.yaml          (legacy flat path — backward compat)
 
 Public API
 ----------
@@ -113,27 +121,32 @@ def _kanban_root(kanban_root=None) -> Path:
     )
 
 
-def _find_workflow_file(name: str, root: Path) -> Path:
-    """Return path to the workflow YAML file, checking project-local override first.
+def _find_workflow_file(name: str, root: Path) -> tuple:
+    """Return (path, expected_name) for the workflow YAML file.
 
-    Search order:
-      1. $KANBAN_ROOT/workflows/<name>.yaml   (project-local override)
-      2. $KANBAN_ROOT/team/workflows/<name>.yaml  (team-level definition)
+    Search order (first match wins):
+      1. $KANBAN_ROOT/workflows/<name>.yaml          (project-local flat override)
+      2. $KANBAN_ROOT/team/workflows/<name>/pipeline.yaml  (plugin directory — canonical)
+      3. $KANBAN_ROOT/team/workflows/<name>.yaml     (legacy flat path — backward compat)
 
-    Raises WorkflowError if neither path exists.
+    The second return value is the workflow name the caller should validate the
+    YAML ``name`` field against.  For the plugin-directory form the directory
+    name is the workflow type, not the filename stem (``pipeline``), so the
+    expected name is explicitly set to ``name`` (the type string).
+
+    Raises WorkflowError if no candidate exists.
     """
-    # NOTE: SCHEMA.md says team path first, then project-local. However the
-    # requirements doc says "project-local override" which logically means the
-    # project-local path should win. We follow the requirements doc: project-local
-    # checked first so it can override the team definition.
+    # Candidate list: each entry is (path, expected_name_in_yaml).
+    # expected_name is None when it equals the argument `name` (covers flat forms).
     candidates = [
-        root / "workflows" / f"{name}.yaml",
-        root / "team" / "workflows" / f"{name}.yaml",
+        (root / "workflows" / f"{name}.yaml", name),
+        (root / "team" / "workflows" / name / "pipeline.yaml", name),
+        (root / "team" / "workflows" / f"{name}.yaml", name),
     ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    searched = ", ".join(str(c) for c in candidates)
+    for path, expected_name in candidates:
+        if path.is_file():
+            return path, expected_name
+    searched = ", ".join(str(p) for p, _ in candidates)
     raise WorkflowError(
         f"Workflow '{name}' not found. Searched: {searched}"
     )
@@ -438,9 +451,13 @@ def _parse_outputs(data: dict, context: str) -> OutputsSpec:
 def load_workflow(workflow_name: str, kanban_root=None) -> WorkflowDefinition:
     """Load a workflow definition by name.
 
-    Searches:
-      1. $KANBAN_ROOT/workflows/<name>.yaml  (project-local override)
-      2. $KANBAN_ROOT/team/workflows/<name>.yaml  (team-level definition)
+    Resolves the pipeline file as ``workflows/<type>/pipeline.yaml`` constructed
+    from ``workflow_name``, then falls back to legacy flat and project-local paths.
+    Full search order (first match wins):
+
+      1. $KANBAN_ROOT/workflows/<name>.yaml          (project-local flat override)
+      2. $KANBAN_ROOT/team/workflows/<name>/pipeline.yaml  (plugin directory — canonical)
+      3. $KANBAN_ROOT/team/workflows/<name>.yaml     (legacy flat path — backward compat)
 
     Validates structure and returns a parsed WorkflowDefinition.
     Raises WorkflowError with a descriptive message on any validation failure.
@@ -448,7 +465,7 @@ def load_workflow(workflow_name: str, kanban_root=None) -> WorkflowDefinition:
     Parameters
     ----------
     workflow_name:
-        Name of the workflow (without .yaml extension). E.g. 'release', 'document'.
+        Name of the workflow (the type string). E.g. 'release', 'document'.
     kanban_root:
         Override for the kanban root directory. Defaults to
         PGAI_AGENT_KANBAN_ROOT_PATH (canonical) /
@@ -465,15 +482,16 @@ def load_workflow(workflow_name: str, kanban_root=None) -> WorkflowDefinition:
         If the workflow file is not found, cannot be parsed, or fails validation.
     """
     root = _kanban_root(kanban_root)
-    path = _find_workflow_file(workflow_name, root)
+    path, expected_name = _find_workflow_file(workflow_name, root)
     data = _load_yaml(path)
 
     context = f"workflow '{workflow_name}' ({path})"
 
     # --- name ---
     name = _require_str(data, "name", context)
-    # name must match filename (case-sensitive)
-    expected_name = path.stem  # filename without extension
+    # For the plugin-directory form (pipeline.yaml), the expected name is the
+    # workflow type (directory name), not the file stem.  For flat forms the
+    # expected name equals the file stem, which also equals workflow_name.
     if name != expected_name:
         raise WorkflowError(
             f"Workflow name '{name}' does not match filename '{expected_name}' "
@@ -518,10 +536,10 @@ def list_workflows(kanban_root=None) -> list:
     """Return names of all available workflow types.
 
     Collects workflow names from:
-      - $KANBAN_ROOT/team/workflows/*.yaml
-      - $KANBAN_ROOT/workflows/*.yaml (project-local overrides)
+      - $KANBAN_ROOT/team/workflows/<type>/pipeline.yaml  (plugin directory — canonical)
+      - $KANBAN_ROOT/team/workflows/*.yaml                (legacy flat paths)
+      - $KANBAN_ROOT/workflows/*.yaml                     (project-local flat overrides)
 
-    The SCHEMA.md file (if present in team/workflows/) is excluded.
     Returns a sorted list of unique workflow names (without .yaml extension).
 
     Parameters
@@ -539,18 +557,26 @@ def list_workflows(kanban_root=None) -> list:
     root = _kanban_root(kanban_root)
     names = set()
 
-    search_dirs = [
+    # Flat YAML files: project-local overrides and legacy team definitions.
+    flat_dirs = [
         root / "team" / "workflows",
         root / "workflows",
     ]
-    for search_dir in search_dirs:
+    for search_dir in flat_dirs:
         if not search_dir.is_dir():
             continue
         for yaml_file in search_dir.glob("*.yaml"):
             stem = yaml_file.stem
-            # Exclude non-workflow YAML files (e.g. SCHEMA is a .md, not .yaml, but
-            # be safe by skipping anything that doesn't look like a workflow name)
+            # Skip anything that doesn't look like a workflow name.
             if stem and not stem.startswith("."):
                 names.add(stem)
+
+    # Plugin directories: each subdirectory of team/workflows/ that contains a
+    # pipeline.yaml is a workflow type whose name is the directory name.
+    team_wf_dir = root / "team" / "workflows"
+    if team_wf_dir.is_dir():
+        for subdir in team_wf_dir.iterdir():
+            if subdir.is_dir() and (subdir / "pipeline.yaml").is_file():
+                names.add(subdir.name)
 
     return sorted(names)

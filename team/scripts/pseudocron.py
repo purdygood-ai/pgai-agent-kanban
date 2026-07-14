@@ -31,6 +31,13 @@ import subprocess
 import sys
 import time
 
+# Canonical root resolver — must be importable before using resolve_kanban_root().
+# The sys.path insert mirrors the pattern used by lint_changelog_freshness.py:
+# scripts/ lives at team/scripts/, so team/ is one directory up.
+_TEAM_DIR = str(pathlib.Path(__file__).resolve().parent.parent)
+if _TEAM_DIR not in sys.path:
+    sys.path.insert(0, _TEAM_DIR)
+
 
 # ---------------------------------------------------------------------------
 # Parsers (importable by unit tests)
@@ -152,17 +159,13 @@ def _shutdown(signum, frame):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 def main():
-    # Resolve root directory — canonical var first, new-path default.
-    root = (
-        os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "").strip()
-        or str(pathlib.Path.home() / "pgai_agent_kanban")
-    )
-    if not root:
-        print(
-            "ERROR pseudocron: PGAI_AGENT_KANBAN_ROOT_PATH is not set."
-            " Set PGAI_AGENT_KANBAN_ROOT_PATH to the kanban root directory and retry.",
-            file=sys.stderr,
-        )
+    # Resolve root directory through the canonical resolver — fails loud when
+    # PGAI_AGENT_KANBAN_ROOT_PATH is unset or empty (source-then-fail-loud contract).
+    try:
+        from pgai_agent_kanban.env import resolve_kanban_root
+        root = str(resolve_kanban_root())
+    except RuntimeError as exc:
+        print(f"ERROR pseudocron: {exc}", file=sys.stderr)
         sys.exit(1)
 
     cfg_path = os.path.join(root, "pseudocron.cfg")

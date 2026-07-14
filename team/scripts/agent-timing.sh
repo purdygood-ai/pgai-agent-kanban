@@ -24,6 +24,8 @@
 #   1 -- usage error or unrecoverable configuration failure
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script location
@@ -75,6 +77,10 @@ done
 if [[ -n "$KANBAN_ROOT_OVERRIDE" ]]; then
     export PGAI_AGENT_KANBAN_ROOT_PATH="$KANBAN_ROOT_OVERRIDE"
 fi
+
+# ---------------------------------------------------------------------------
+# Kanban root is established by env_bootstrap.sh (sourced above) — no check needed.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Build python argument list

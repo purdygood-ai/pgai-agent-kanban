@@ -43,6 +43,8 @@
 #   - Idempotent: safe to re-run; every run starts with a fresh fixture.
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Locate this script and source shared helpers
@@ -70,7 +72,7 @@ unset _WORKTREE_SH
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 VERBOSE=false
 PASS_COUNT=0
 FAIL_COUNT=0

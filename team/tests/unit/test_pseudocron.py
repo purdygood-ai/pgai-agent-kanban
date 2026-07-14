@@ -249,8 +249,8 @@ def test_env_multiple_variables_returned() -> None:
 
 def test_env_plain_path_value() -> None:
     """parse_env stores a path-style value without alteration."""
-    result = parse_env("export PGAI_AGENT_KANBAN_ROOT_PATH=/home/rocky/pgai_agent_kanban\n")
-    assert result["PGAI_AGENT_KANBAN_ROOT_PATH"] == "/home/rocky/pgai_agent_kanban"
+    result = parse_env("export PGAI_AGENT_KANBAN_ROOT_PATH=/home/<operator>/pgai_agent_kanban\n")
+    assert result["PGAI_AGENT_KANBAN_ROOT_PATH"] == "/home/<operator>/pgai_agent_kanban"
 
 
 def test_env_malformed_line_skipped() -> None:

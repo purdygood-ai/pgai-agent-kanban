@@ -62,6 +62,8 @@
 #   TERM=dumb                           — also disables ANSI colors
 
 set -euo pipefail
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # TEAM_DIR: the 'team/' directory two levels above this script's location
@@ -90,7 +92,7 @@ source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 # Parse arguments
 # ---------------------------------------------------------------------------
 SUBCOMMAND=""          # "input" or "queue"
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 PANE_LABEL=""          # optional label for header line
 ALL_PROJECTS=false     # --all-projects flag: render mixed view from all projects
 COLUMN_TYPE=""         # --column-type: e.g. "bugs", "priorities", "coder", etc.
@@ -460,6 +462,20 @@ if [[ "$ALL_PROJECTS" == "true" ]]; then
         --max-rows-per-project "${DASHBOARD_MAX_ROWS_PER_PROJECT}" \
     <<PYEOF
 import argparse, os, re, sys, pathlib, textwrap
+
+# ---------------------------------------------------------------------------
+# Resolve the pgai_agent_kanban package from the live-install anchor only.
+# The live kanban root ($PGAI_AGENT_KANBAN_ROOT_PATH) is the single sys.path
+# candidate — the dev tree is DATA to the live runtime, never CODE.  A missing
+# or broken live package raises ImportError immediately with the live path in
+# the traceback, making deployment gaps visible rather than silently masking
+# them via a dev-tree fallback.
+# ---------------------------------------------------------------------------
+_kanban_root = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "")
+if _kanban_root and _kanban_root not in sys.path:
+    sys.path.insert(0, _kanban_root)
+
+from pgai_agent_kanban.dashboard.status_priority_cap import status_priority_cap as _status_priority_cap  # noqa: E402
 
 # Parse dashboard layout configuration injected as CLI args by the bash wrapper.
 # These values come from kanban.cfg [dashboard] section via read_ini.
@@ -915,12 +931,14 @@ for idx in range(n_projects):
 
         # For requirements columns, preserve the full uncapped list so the
         # active-window algorithm can access entries beyond proj_max_rows.
-        # For all other input columns, apply per-project max_rows cap.
+        # For all other input columns, apply per-project max_rows cap with
+        # status-priority-aware selection: WORKING rows are never evicted,
+        # BLOCKED rows are evicted only after all non-attention rows are gone.
         if IS_REQ:
             per_proj_entries[idx] = proj_item_list  # uncapped; windowing applies later
         else:
             p_max = proj_max_rows[idx]
-            per_proj_entries[idx] = proj_item_list[:p_max]
+            per_proj_entries[idx] = _status_priority_cap(proj_item_list, p_max)
 
     elif IS_QUEUE:
         bfile = proj_backlog_files[idx]
@@ -962,9 +980,10 @@ for idx in range(n_projects):
         # Sort this project's queue items DESC by (date_str, seq) — newest first
         proj_item_list.sort(key=lambda e: e["id_sort_key"], reverse=True)
 
-        # Apply per-project max_rows cap (no truncation row in multi-project mix)
+        # Apply per-project max_rows cap with status-priority-aware selection:
+        # WORKING rows are never evicted; BLOCKED next; remainder fills remaining slots.
         p_max = proj_max_rows[idx]
-        per_proj_entries[idx] = proj_item_list[:p_max]
+        per_proj_entries[idx] = _status_priority_cap(proj_item_list, p_max)
 
 # ---------------------------------------------------------------------------
 # Apply per-project minimum allocation + DESC global sort.

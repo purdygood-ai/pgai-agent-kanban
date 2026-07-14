@@ -6,7 +6,7 @@ with explicit coverage assertions for upgrade.sh and install.sh.
 
 WHY THIS EXISTS
 ---------------
-BUG-0013: upgrade.sh shipped syntactically broken because the bash -n gate
+an earlier defect: upgrade.sh shipped syntactically broken because the bash -n gate
 did not enumerate it.  These front-door scripts (install.sh and upgrade.sh)
 are the first thing a new user runs; a broken installer is the worst possible
 first impression.
@@ -91,7 +91,7 @@ def test_upgrade_sh_is_in_tracked_shell_file_set() -> None:
     This assertion exists so a future refactor that accidentally drops upgrade.sh
     from git tracking is caught immediately rather than silently losing coverage.
     The negative consequence of missing this: a broken upgrade.sh ships without
-    detection, as happened before BUG-0013.
+    detection, as happened before an earlier defect.
     """
     root = _repo_root()
     tracked = _tracked_shell_files()

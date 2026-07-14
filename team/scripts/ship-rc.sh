@@ -3,43 +3,50 @@
 # Human-invoked: manual escape hatch for shipping a release candidate.
 #
 # Usage:
-#   ship-rc.sh --project <name> --key vX.Y.Z [--help]
+#   ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]
 #   ship-rc.sh --help
 #
 # Both --project and --key are REQUIRED. Positional invocation is not supported.
 #
 # --project <name>   project name (required; drives project resolution via pp layer)
 # --key vX.Y.Z       release version (required; format: vX.Y.Z, e.g. v0.5.0)
+# --dry-run          print the plan (project, version, branch names) and exit 0;
+#                    no git operations are performed
 # --help             print this message and exit 0
 #
 # Behavior:
 #   1.  Validate version format
 #   2.  Resolve project name and branch_prefix from project.cfg
 #   3.  Verify PREFIXED_rc/<version> exists locally and on origin
+#   3b. Pre-squash hook: resolve and run (if present); HALT on failure
 #   4.  git fetch origin --tags
-#   5.  git checkout PREFIXED_develop && git pull --ff-only
-#   6.  git merge --squash -X theirs PREFIXED_rc/<version>  (RC wins on conflict)
-#   7.  git commit -m "<version>: release candidate squashed to PREFIXED_develop"
-#   8.  git push origin PREFIXED_develop
-#   9.  git checkout PREFIXED_main && git pull --ff-only
-#   10. git merge --squash -X theirs PREFIXED_develop  (develop wins on conflict)
-#   11. git commit -m "Release <version>"
-#   12. git tag PREFIXED_<version>
-#   13. git push origin PREFIXED_main --tags
-#   14. git push origin --delete PREFIXED_rc/<version>
-#   15. git branch -D PREFIXED_rc/<version>
+#   5.  git checkout PREFIXED_main && git pull --ff-only
+#   6.  git merge --squash PREFIXED_rc/<version>
+#   7.  git commit -m "Release <version>"
+#   7a. Fidelity gate: git diff --quiet PREFIXED_rc/<version> PREFIXED_main
+#       Exit 1 before tag if trees diverge.
+#   5b. Pre-tag hook: resolve and run (if present); HALT on failure
+#   8.  git tag PREFIXED_v<version>
+#   6b. Post-tag hook: resolve and run (if present); failure is logged, not blocking
+#   9.  git push origin PREFIXED_main --tags
+#   10. git push origin --delete PREFIXED_rc/<version>
+#   11. git branch -D PREFIXED_rc/<version>
+#
+# Hook resolution (all three phases use the same precedence order):
+#   (a) project.cfg [hooks] cm_release_<phase>_hook        (cfg)
+#   (b) projects/<name>/hooks/cm-release-<phase>.sh        (kanban-side)
+#   (c) <dev_tree_path>/.pgai/hooks/cm-release-<phase>.sh  (in-repo)
+# Each phase prints exactly one resolution line before running (or "none configured").
+# Set cm_release_<phase>_hook_required=true in project.cfg to HALT when absent.
 #
 # Branch and tag prefixing
 # ------------------------
 # When the project's project.cfg sets [project] branch_prefix (e.g. "ai_"),
-# ALL git refs are prefixed: rc branches become ai_rc/<version>, develop becomes
-# ai_develop, main becomes ai_main, and the tag becomes ai_v<version>.
+# ALL git refs are prefixed: rc branches become ai_rc/<version>, main becomes
+# ai_main, and the tag becomes ai_v<version>.
 # When branch_prefix is empty (the common case), behavior is identical to earlier
-# versions of this script: bare rc/<version>, develop, main, and v<version> tag.
+# versions of this script: bare rc/<version>, main, and v<version> tag.
 #
-# The -X theirs flag means "take the incoming side on conflict automatically."
-# For a single-developer workflow where there are no competing commits on
-# develop or main, this is correct and safe.
 #
 # Safety: all git steps are wrapped so the script halts cleanly on failure.
 #
@@ -48,24 +55,27 @@
 #               project.cfg, then global PGAI_DEV_TREE_PATH, then script's parent-parent dir)
 
 _ship_rc_usage() {
-  echo "Usage: $(basename "$0") --project <name> --key vX.Y.Z [--help]" >&2
+  echo "Usage: $(basename "$0") --project <name> --key vX.Y.Z [--dry-run] [--help]" >&2
   echo "" >&2
   echo "  --project <name>  project name (required)" >&2
   echo "  --key vX.Y.Z      release version (required; format: vX.Y.Z)" >&2
+  echo "  --dry-run         print plan and exit 0; no git operations performed" >&2
   echo "  --help            print full documentation" >&2
 }
 
 _ship_rc_help() {
   cat <<'EOF'
-Usage: ship-rc.sh --project <name> --key vX.Y.Z [--help]
+Usage: ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]
 
-Ship a release candidate by squash-merging it into develop and then main.
+Ship a release candidate by squash-merging it directly into main (single-lane).
 
 Both --project and --key are REQUIRED. Positional invocation is not supported.
 
 Arguments:
   --project <name>  Required. Project name; drives project resolution via the pp layer.
   --key vX.Y.Z      Required. Release version in format vX.Y.Z (e.g. v0.5.0).
+  --dry-run         Print the plan (project, version, branch names) and exit 0.
+                    No git operations are performed. Safe to use from the API.
   --help            Print this help and exit 0.
 
 Branch and tag prefixing
@@ -74,7 +84,6 @@ When the project's project.cfg sets [project] branch_prefix (e.g. "ai_"),
 ALL git refs operated on by this script are prefixed:
 
   rc branch:     ai_rc/<version>    (instead of rc/<version>)
-  develop:       ai_develop         (instead of develop)
   main:          ai_main            (instead of main)
   tag:           ai_v<version>      (instead of v<version>)
 
@@ -96,6 +105,7 @@ EOF
 # --- Argument parsing ---
 PROJECT_ARG=""
 VERSION=""
+DRY_RUN=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -122,6 +132,10 @@ while [[ $# -gt 0 ]]; do
       fi
       VERSION="$2"
       shift 2
+      ;;
+    --dry-run)
+      DRY_RUN="1"
+      shift
       ;;
     --*)
       echo "ERROR: unknown flag: $1" >&2
@@ -158,8 +172,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # --- Source optional config files (BEFORE strict mode) ---
 # The kanban bashrc/env may have unset vars, non-zero returns, or interactive
 # aliases that would trip strict mode. Source them first.
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
-TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
 # $HOME/.config/pgai-kanban.cfg is operator-local bash config; sourced as-is.
@@ -181,8 +195,20 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 # shellcheck source=lib/project_paths.sh
 source "$SCRIPT_DIR/lib/project_paths.sh"
 
+# --- Source project registry helpers (provides projects_resolve_release_hook_path) ---
+# shellcheck source=lib/projects.sh
+source "$SCRIPT_DIR/lib/projects.sh"
+
+# --- Source CM release hook resolution/printing/enforcement library ---
+# cm_release_hooks.sh provides cm_resolve_and_enforce_hook, the single implementation
+# used by both release.sh and ship-rc.sh (one-implementation rule).
+# shellcheck source=lib/cm_release_hooks.sh
+source "$SCRIPT_DIR/lib/cm_release_hooks.sh"
+
 # --- Enable strict mode for our own code ---
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Clean exit handling ---
 cleanup_on_exit() {
@@ -240,12 +266,85 @@ if [[ -z "${REPO_ROOT:-}" ]]; then
   unset _proj_root _proj_cfg _per_project_dev_tree
 fi
 
+# --- Resolve kanban-side project root and hooks directory ---
+# _CM_PROJECT_ROOT is the kanban-side directory for this project (not the dev tree).
+# PROJECT_HOOKS_DIR is where per-project kanban-side hook scripts live (tier b).
+# Both are passed to cm_resolve_and_enforce_hook at each hook phase.
+_CM_PROJECT_ROOT="$(KANBAN_ROOT="$KANBAN_ROOT" pp_project_root "$PROJECT_NAME" 2>/dev/null)" || _CM_PROJECT_ROOT=""
+PROJECT_HOOKS_DIR="${_CM_PROJECT_ROOT}/hooks"
+
+# Helper: halt the release with a named reason.
+# Called by cm_resolve_and_enforce_hook when required=true and no hook is found,
+# and by the hook-execution block when a hook fails.
+# Usage: cm_halt <trigger_description> <reason_one_line>
+cm_halt() {
+  local reason="${2:-$1}"
+  echo "" >&2
+  echo "[ship-rc] HALT: ${reason}" >&2
+  echo "" >&2
+  echo "HALT: ship-rc.sh stopped. The release has NOT been shipped." >&2
+  exit 1
+}
+
+# Helper: run a lifecycle hook for this release.
+# Usage: _run_release_hook <hook-name> <hook-path> [--no-block]
+#
+# hook-name  : identifier used in log prefixes (e.g. "cm-release-pre-squash")
+# hook-path  : absolute path to the hook script
+# --no-block : if set, hook failure is a logged warning; release continues
+#
+# Hook runs with:
+#   cwd  = $REPO_ROOT (the dev tree path)
+#   env  = PGAI_* variables plus the ambient environment
+#
+# stdout and stderr are captured and prefixed with "[hook <name>]" in the log.
+# Return codes: 0 = success; non-zero = blocking failure (when --no-block absent).
+_run_release_hook() {
+  local hook_name="$1"
+  local hook_path="$2"
+  local no_block="${3:-}"
+
+  if [[ ! -f "$hook_path" ]]; then
+    echo "[ship-rc] hook ${hook_name}: not present, skipping"
+    return 0
+  fi
+  if [[ ! -x "$hook_path" ]]; then
+    echo "[ship-rc] WARNING: hook ${hook_name} exists but is not executable, skipping" >&2
+    return 0
+  fi
+
+  echo "[ship-rc] running hook ${hook_name}..."
+  local _hook_rc=0
+  (
+    cd "$REPO_ROOT"
+    PGAI_TARGET_VERSION="$VERSION" \
+    PGAI_PROJECT_NAME="$PROJECT_NAME" \
+    PGAI_PROJECT_ROOT="$_CM_PROJECT_ROOT" \
+    PGAI_DEV_TREE_PATH="$REPO_ROOT" \
+    PGAI_RC_BRANCH="$RC_BRANCH" \
+    PGAI_KANBAN_ROOT="$KANBAN_ROOT" \
+    "$hook_path" 2>&1 | sed "s/^/[hook ${hook_name}] /"
+    exit "${PIPESTATUS[0]}"
+  ) || _hook_rc=$?
+
+  if [[ $_hook_rc -ne 0 ]]; then
+    if [[ "$no_block" == "--no-block" ]]; then
+      echo "[ship-rc] WARNING: hook ${hook_name} failed (rc=${_hook_rc}), continuing per --no-block" >&2
+      return 0
+    fi
+    echo "[ship-rc] ERROR: hook ${hook_name} failed (rc=${_hook_rc}), blocking release" >&2
+    echo "[ship-rc] ERROR: see [hook ${hook_name}] lines above for the hook's output" >&2
+    exit 1
+  fi
+  echo "[ship-rc] hook ${hook_name}: completed successfully"
+  return 0
+}
+
 # --- Resolve prefixed branch and tag names ---
 # pp_prefix_branch and pp_prefix_tag read branch_prefix from project.cfg.
 # When branch_prefix is empty (pure-AI shop or unconfigured), the names are
-# returned unchanged (rc/v0.5.0, develop, main, v0.5.0).
+# returned unchanged (rc/v0.5.0, main, v0.5.0).
 RC_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "rc/$VERSION")"
-DEVELOP_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "develop")"
 MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
 RELEASE_TAG="$(pp_prefix_tag "$PROJECT_NAME" "$VERSION")"
 
@@ -274,8 +373,8 @@ git_step() {
 # Side effects on exit 0:
 #   - All UD/DU paths have been staged (git rm or git add as appropriate).
 #   - Each resolution is logged to stdout with the exact line:
-#       cm-release: auto-resolved modify/delete: <path> (took develop's deletion)
-#       cm-release: auto-resolved modify/delete: <path> (took develop's version)
+#       cm-release: auto-resolved modify/delete: <path> (took main's deletion)
+#       cm-release: auto-resolved modify/delete: <path> (took main's version)
 #
 _ship_rc_autoresolve_ud_conflicts() {
   local repo_root="$1"
@@ -342,11 +441,11 @@ _ship_rc_autoresolve_ud_conflicts() {
     local _action="${ud_actions[$i]}"
     if [[ "$_action" == "delete" ]]; then
       git -C "$repo_root" rm --force -- "$_p" >/dev/null 2>&1
-      echo "cm-release: auto-resolved modify/delete: ${_p} (took develop's deletion)"
+      echo "cm-release: auto-resolved modify/delete: ${_p} (took main's deletion)"
     else
       git -C "$repo_root" checkout --theirs -- "$_p"
       git -C "$repo_root" add -- "$_p"
-      echo "cm-release: auto-resolved modify/delete: ${_p} (took develop's version)"
+      echo "cm-release: auto-resolved modify/delete: ${_p} (took main's version)"
     fi
   done
 
@@ -364,10 +463,21 @@ _ship_rc_autoresolve_ud_conflicts() {
   return 0
 }
 
+# --- Dry-run: print plan and exit without performing any git operations ---
+if [[ -n "$DRY_RUN" ]]; then
+  echo "ship-rc dry-run: no git operations will be performed."
+  echo "  Project:   $PROJECT_NAME"
+  echo "  Version:   $VERSION"
+  echo "  RC branch: $RC_BRANCH"
+  echo "  Main:      $MAIN_BRANCH"
+  echo "  Tag:       $RELEASE_TAG"
+  echo "  (dry-run: exiting before any git step)"
+  exit 0
+fi
+
 # --- Sanity checks ---
 echo "Shipping release: $VERSION (project: $PROJECT_NAME)"
 echo "  RC branch:    $RC_BRANCH"
-echo "  Develop:      $DEVELOP_BRANCH"
 echo "  Main:         $MAIN_BRANCH"
 echo "  Tag:          $RELEASE_TAG"
 echo ""
@@ -407,18 +517,43 @@ echo "  Confirmed: $RC_BRANCH exists locally and on origin."
 echo "[Step 2] Fetching origin and tags..."
 git_step "git fetch origin --tags" git -C "$REPO_ROOT" fetch origin --tags
 
-# --- Step 3: git checkout DEVELOP_BRANCH && git pull --ff-only ---
-echo "[Step 3] Checking out $DEVELOP_BRANCH and pulling..."
-git_step "git checkout $DEVELOP_BRANCH" git -C "$REPO_ROOT" checkout "$DEVELOP_BRANCH"
-git_step "git pull --ff-only $DEVELOP_BRANCH" git -C "$REPO_ROOT" merge --ff-only "origin/$DEVELOP_BRANCH"
+# --- Step 3: git checkout MAIN_BRANCH && git pull --ff-only ---
+echo "[Step 3] Checking out $MAIN_BRANCH and pulling..."
+git_step "git checkout $MAIN_BRANCH" git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
+git_step "git pull --ff-only $MAIN_BRANCH" git -C "$REPO_ROOT" merge --ff-only "origin/$MAIN_BRANCH"
 
-# --- Step 4: git merge --squash -X theirs RC_BRANCH ---
-echo "[Step 4] Squash-merging $RC_BRANCH into $DEVELOP_BRANCH (-X theirs: RC wins on conflict)..."
-_ship_squash_develop_rc=0
-git -C "$REPO_ROOT" merge --squash -X theirs "$RC_BRANCH" || _ship_squash_develop_rc=$?
-if [[ $_ship_squash_develop_rc -ne 0 ]]; then
+# --- Hook: cm-release-pre-squash ---
+# Runs on the RC branch before squash to main.
+# Any commits made by this hook become part of what gets squashed.
+# Failure here halts the release before any git operations are performed.
+# Resolution, visibility printing, and required-flag enforcement are handled by
+# cm_resolve_and_enforce_hook (see team/scripts/lib/cm_release_hooks.sh).
+# NOTE: _run_release_hook calls exit 1 on hook failure (not return 1), so we run
+# it in a subshell to capture the exit code without exiting the parent script.
+echo "[Step 3b] Running pre-squash hook (if present)..."
+CM_RESOLVED_HOOK_PATH=""
+cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-squash" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" || {
+  cm_halt \
+    "Pre-squash in-repo hook is not executable" \
+    "cm-release-pre-squash in-repo hook exists but is not executable. Fix with: chmod +x (path shown above)"
+}
+_pre_squash_rc=0
+if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
+  ( _run_release_hook "cm-release-pre-squash" "$CM_RESOLVED_HOOK_PATH" ) || _pre_squash_rc=$?
+fi
+if [[ $_pre_squash_rc -ne 0 ]]; then
+  cm_halt \
+    "Pre-squash hook failed (rc=${_pre_squash_rc})" \
+    "cm-release-pre-squash hook exited non-zero (rc=${_pre_squash_rc}) for ${VERSION}. Squash cannot proceed safely."
+fi
+
+# --- Step 4: git merge --squash RC_BRANCH ---
+echo "[Step 4] Squash-merging $RC_BRANCH into $MAIN_BRANCH..."
+_ship_squash_rc=0
+git -C "$REPO_ROOT" merge --squash "$RC_BRANCH" || _ship_squash_rc=$?
+if [[ $_ship_squash_rc -ne 0 ]]; then
   _ship_autoresolve_rc=0
-  _ship_rc_autoresolve_ud_conflicts "$REPO_ROOT" "${RC_BRANCH} into ${DEVELOP_BRANCH}" "develop" || _ship_autoresolve_rc=$?
+  _ship_rc_autoresolve_ud_conflicts "$REPO_ROOT" "${RC_BRANCH} into ${MAIN_BRANCH}" "main" || _ship_autoresolve_rc=$?
   if [[ $_ship_autoresolve_rc -ne 0 ]]; then
     echo "" >&2
     echo "ERROR: git operation failed at step: git merge --squash $RC_BRANCH" >&2
@@ -429,52 +564,83 @@ if [[ $_ship_squash_develop_rc -ne 0 ]]; then
 fi
 
 # --- Step 5: git commit ---
-echo "[Step 5] Committing squash on $DEVELOP_BRANCH..."
-git_step "git commit ($DEVELOP_BRANCH squash)" git -C "$REPO_ROOT" commit -m "$VERSION: release candidate squashed to $DEVELOP_BRANCH"
-
-# --- Step 6: git push origin DEVELOP_BRANCH ---
-echo "[Step 6] Pushing $DEVELOP_BRANCH to origin..."
-git_step "git push origin $DEVELOP_BRANCH" git -C "$REPO_ROOT" push origin "$DEVELOP_BRANCH"
-
-# --- Step 7: git checkout MAIN_BRANCH && git pull --ff-only ---
-echo "[Step 7] Checking out $MAIN_BRANCH and pulling..."
-git_step "git checkout $MAIN_BRANCH" git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
-git_step "git pull --ff-only $MAIN_BRANCH" git -C "$REPO_ROOT" merge --ff-only "origin/$MAIN_BRANCH"
-
-# --- Step 8: git merge --squash -X theirs DEVELOP_BRANCH ---
-echo "[Step 8] Squash-merging $DEVELOP_BRANCH into $MAIN_BRANCH (-X theirs: develop wins on conflict)..."
-_ship_squash_main_rc=0
-git -C "$REPO_ROOT" merge --squash -X theirs "$DEVELOP_BRANCH" || _ship_squash_main_rc=$?
-if [[ $_ship_squash_main_rc -ne 0 ]]; then
-  _ship_autoresolve_main_rc=0
-  _ship_rc_autoresolve_ud_conflicts "$REPO_ROOT" "${DEVELOP_BRANCH} into ${MAIN_BRANCH}" "develop" || _ship_autoresolve_main_rc=$?
-  if [[ $_ship_autoresolve_main_rc -ne 0 ]]; then
-    echo "" >&2
-    echo "ERROR: git operation failed at step: git merge --squash $DEVELOP_BRANCH" >&2
-    echo "Halting before any further git operations." >&2
-    echo "Recover manually by inspecting git state and re-running, or revert as needed." >&2
-    exit 1
-  fi
-fi
-
-# --- Step 9: git commit ---
-echo "[Step 9] Committing squash on $MAIN_BRANCH..."
+# Structural parity note: ship-rc.sh is a single-lane squash-merge path.
+# It does NOT perform WRITER release-notes polish detection, CHANGELOG.md
+# regeneration, or release-notes stub generation.  Those steps belong to
+# cm-release.sh (Step 8 / 8b / 11b) and are called by the orchestrated release
+# pipeline, not by this manual escape hatch.  Any edit that introduces polish
+# detection or changelog regeneration here must be accompanied by the same
+# ordering constraints that apply in cm-release.sh: polish BEFORE regeneration,
+# regeneration BEFORE tag — otherwise the freshness gate will fail on the tip.
+# Verify with: grep -n "changelog_writer\|Polish release notes" team/scripts/ship-rc.sh
+# (should return no matches in the absence of an intentional addition).
+echo "[Step 5] Committing squash on $MAIN_BRANCH..."
 git_step "git commit ($MAIN_BRANCH squash)" git -C "$REPO_ROOT" commit -m "Release $VERSION"
 
-# --- Step 10: git tag RELEASE_TAG ---
-echo "[Step 10] Tagging $RELEASE_TAG on $MAIN_BRANCH..."
+# --- Step 5a: Fidelity gate ---
+# After the squash commit, RC_BRANCH and MAIN_BRANCH should be identical trees.
+# Any divergence means a commit landed on main mid-RC. Gate fires before tag.
+echo "[Step 5a] Fidelity gate: verifying $RC_BRANCH tree matches $MAIN_BRANCH after squash..."
+if git -C "$REPO_ROOT" diff --quiet "$RC_BRANCH" "$MAIN_BRANCH" 2>/dev/null; then
+  echo "[Step 5a] Fidelity gate: OK — $RC_BRANCH and $MAIN_BRANCH are identical."
+else
+  echo "" >&2
+  echo "[Step 5a] Fidelity gate: DIVERGENCE DETECTED — $RC_BRANCH and $MAIN_BRANCH differ:" >&2
+  git -C "$REPO_ROOT" diff --stat "$RC_BRANCH" "$MAIN_BRANCH" >&2 || true
+  echo "" >&2
+  echo "ERROR: Post-squash fidelity gate failed for $VERSION: $MAIN_BRANCH contains commits" >&2
+  echo "not present in $RC_BRANCH. A commit landed on main mid-RC." >&2
+  echo "Operator must inspect the divergent paths shown above and resolve before re-running." >&2
+  exit 1
+fi
+
+# --- Hook: cm-release-pre-tag ---
+# Runs after squash commit and fidelity gate, before the git tag is created.
+# Use for final consistency checks or generating release artifacts.
+# Failure here halts the release (tag has NOT yet been created).
+# Resolution, visibility printing, and required-flag enforcement are handled by
+# cm_resolve_and_enforce_hook (see team/scripts/lib/cm_release_hooks.sh).
+echo "[Step 5b] Running pre-tag hook (if present)..."
+CM_RESOLVED_HOOK_PATH=""
+cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-tag" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" || {
+  cm_halt \
+    "Pre-tag in-repo hook is not executable" \
+    "cm-release-pre-tag in-repo hook exists but is not executable. Fix with: chmod +x (path shown above)"
+}
+if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
+  _run_release_hook "cm-release-pre-tag" "$CM_RESOLVED_HOOK_PATH"
+fi
+
+# --- Step 6: git tag RELEASE_TAG ---
+echo "[Step 6] Tagging $RELEASE_TAG on $MAIN_BRANCH..."
 git_step "git tag $RELEASE_TAG" git -C "$REPO_ROOT" tag "$RELEASE_TAG"
 
-# --- Step 11: git push origin MAIN_BRANCH --tags ---
-echo "[Step 11] Pushing $MAIN_BRANCH and tags to origin..."
+# --- Hook: cm-release-post-tag ---
+# Runs after the tag is created (tag has NOT yet been pushed to origin).
+# Use for external notifications, asset uploads, or downstream triggers.
+# Failure here is a LOGGED WARNING ONLY and does NOT block the release;
+# the tag already exists locally and will be pushed at Step 7.
+# Resolution, visibility printing, and required-flag enforcement are handled by
+# cm_resolve_and_enforce_hook (see team/scripts/lib/cm_release_hooks.sh).
+echo "[Step 6b] Running post-tag hook (if present)..."
+CM_RESOLVED_HOOK_PATH=""
+cm_resolve_and_enforce_hook "$PROJECT_NAME" "post-tag" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" || {
+  echo "[ship-rc] WARNING: post-tag in-repo hook exists but is not executable — skipping (post-tag does not block release)" >&2
+}
+if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
+  _run_release_hook "cm-release-post-tag" "$CM_RESOLVED_HOOK_PATH" --no-block
+fi
+
+# --- Step 7: git push origin MAIN_BRANCH --tags ---
+echo "[Step 7] Pushing $MAIN_BRANCH and tags to origin..."
 git_step "git push origin $MAIN_BRANCH --tags" git -C "$REPO_ROOT" push origin "$MAIN_BRANCH" --tags
 
-# --- Step 12: git push origin --delete RC_BRANCH ---
-echo "[Step 12] Deleting $RC_BRANCH on origin..."
+# --- Step 8: git push origin --delete RC_BRANCH ---
+echo "[Step 8] Deleting $RC_BRANCH on origin..."
 git_step "git push origin --delete $RC_BRANCH" git -C "$REPO_ROOT" push origin --delete "$RC_BRANCH"
 
-# --- Step 13: git branch -D RC_BRANCH ---
-echo "[Step 13] Deleting local branch $RC_BRANCH..."
+# --- Step 9: git branch -D RC_BRANCH ---
+echo "[Step 9] Deleting local branch $RC_BRANCH..."
 git_step "git branch -D $RC_BRANCH" git -C "$REPO_ROOT" branch -D "$RC_BRANCH"
 
 # --- Post-ship: reconcile kanban release-state.md ---
@@ -560,8 +726,8 @@ echo "  Tagged as:  $RELEASE_TAG  (on $MAIN_BRANCH)"
 echo "  RC deleted: $RC_BRANCH (local + origin)"
 echo ""
 echo "Summary of what shipped:"
-echo "  - $RC_BRANCH squashed to $DEVELOP_BRANCH and pushed"
-echo "  - $DEVELOP_BRANCH squashed to $MAIN_BRANCH and pushed"
+echo "  - $RC_BRANCH squashed directly to $MAIN_BRANCH (single-lane squash commit)"
+echo "  - Post-squash fidelity gate passed: $RC_BRANCH and $MAIN_BRANCH trees are identical"
 echo "  - Tag $RELEASE_TAG created and pushed"
 echo "  - $RC_BRANCH deleted from origin and locally"
 exit 0

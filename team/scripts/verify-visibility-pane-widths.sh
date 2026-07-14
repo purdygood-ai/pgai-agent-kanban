@@ -48,6 +48,8 @@
 #   -h, --help     Show this help and exit
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Centralized temp dir helpers
@@ -77,7 +79,7 @@ _tmux() { tmux -L "$_PGAI_VERIFY_SOCKET" "$@"; }
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 REPORT_DIR="$(pgai_mktemp_d verify-pane-widths)"
 TEST_WIDTHS=(80 107 220)
 SESSION_PREFIX="pgai-kanban-dashboard-verify"
@@ -246,13 +248,13 @@ verify_width() {
   #   Step 6: split pane 4 -h  → pane 4=bot-2, pane 5=bot-rest
   #   Step 7: split pane 5 -h  → pane 5=bot-3, pane 6=bot-rest
   #   Step 8: split pane 6 -h  → pane 6=bot-4, pane 7=bot-right
-  _tmux split-window -t "${SESSION_NAME}:visibility.0" -v -p 50
-  _tmux split-window -t "${SESSION_NAME}:visibility.0" -h -p 50
-  _tmux split-window -t "${SESSION_NAME}:visibility.1" -h -p 50
-  _tmux split-window -t "${SESSION_NAME}:visibility.3" -h -p 50
-  _tmux split-window -t "${SESSION_NAME}:visibility.4" -h -p 50
-  _tmux split-window -t "${SESSION_NAME}:visibility.5" -h -p 50
-  _tmux split-window -t "${SESSION_NAME}:visibility.6" -h -p 50
+  _tmux split-window -t "${SESSION_NAME}:visibility.0" -v -l 50%
+  _tmux split-window -t "${SESSION_NAME}:visibility.0" -h -l 50%
+  _tmux split-window -t "${SESSION_NAME}:visibility.1" -h -l 50%
+  _tmux split-window -t "${SESSION_NAME}:visibility.3" -h -l 50%
+  _tmux split-window -t "${SESSION_NAME}:visibility.4" -h -l 50%
+  _tmux split-window -t "${SESSION_NAME}:visibility.5" -h -l 50%
+  _tmux split-window -t "${SESSION_NAME}:visibility.6" -h -l 50%
 
   # Read actual window dimensions after splits (tmux may adjust during splits)
   local VIS_WIDTH VIS_HEIGHT

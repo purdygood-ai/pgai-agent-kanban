@@ -1,26 +1,22 @@
-# Workflow YAML Schema
+# Pipeline YAML Schema
 
-This document defines the workflow YAML format used by the pgai-agent-kanban system. A workflow YAML file describes a complete pipeline: what inputs it needs, which agents participate, what steps run in order, and what output is produced.
+This document defines the `pipeline.yaml` format used by pgai-agent-kanban workflow-type plugins. A `pipeline.yaml` file describes a complete PM decomposition pipeline: what inputs it needs, which agents participate, what steps run in order, and what output is produced.
 
-A developer should be able to write a new workflow YAML using only this document.
+`pipeline.yaml` is the optional Layer 2 of a workflow-type plugin. Layer 1 — the `workflow.cfg` manifest and the `workflow.sh` hooks — is required for every plugin and is described in [README.md](README.md), the workflows-directory front door. Read the README first if you have not yet seen the two-layer plugin model; this document is the field-by-field reference for authoring the pipeline file itself.
+
+A developer should be able to write a new `pipeline.yaml` using only this document.
 
 ## File Location
 
-Workflow YAML files live at:
+A plugin's `pipeline.yaml` lives inside the plugin directory:
 
 ```
-$KANBAN_ROOT/team/workflows/<name>.yaml
+$KANBAN_ROOT/workflows/<type>/pipeline.yaml
 ```
 
-The filename (without extension) must match the `name` field inside the YAML. Case-sensitive.
+PM constructs the path from the plugin's type string (there is no per-type constant). The plugin's `name` field in its `workflow.cfg` manifest must match the directory name `<type>` exactly. Case-sensitive.
 
-Project-local overrides may exist at:
-
-```
-$KANBAN_ROOT/workflows/<name>.yaml
-```
-
-The loader checks the project-local path first, then falls back to the team path.
+A plugin without a `pipeline.yaml` decomposes via the simple `wf_agents` path — one task per roster entry in order. This is the documented default for types that do not need a multi-step pipeline; see [README.md](README.md) for the minimal-vs-rich distinction.
 
 ---
 
@@ -466,13 +462,13 @@ versioning: from_requirements
 
 ### How This Pipeline Executes
 
-1. **open-rc** (CM): Creates the RC branch `rc/v0.16.0` from develop. The `create_branch` operation handles the git checkout and push.
+1. **open-rc** (CM): Creates the RC branch `rc/v0.16.0` from the prefixed main branch. The `create_branch` operation handles the git checkout and push.
 
 2. **implement** (CODER): The `foreach: requirements.tickets` directive generates one ticket per requirement item. Each ticket gets its own feature branch (`feature/CLAUDE-CODER-20260428-050`, etc.), branched from the RC. The coder implements, commits, and merges back into the RC branch.
 
 3. **verify** (TESTER): Runs the test suite against the RC branch. Produces `report.md` as its deliverable. The `autonomous_criterion: required` field means the tester must explicitly verify that the build ran without manual intervention.
 
-4. **release** (CM): The `tag_and_push` operation merges the RC branch into `main`, tags it with the version, and pushes.
+4. **release** (CM): The `tag_and_push` operation squashes the RC branch into the prefixed main branch (one squash), runs the post-squash fidelity gate, stamps and commits release notes, tags the release, and pushes.
 
 ### What This Workflow Does Not Use
 
@@ -666,7 +662,7 @@ Specify the output format and location pattern.
 
 ### Step 7: Validate
 
-Place the file at `team/workflows/<name>.yaml`. The workflow loader validates:
+Place the file at `team/workflows/<type>/pipeline.yaml` — inside the plugin directory, alongside `workflow.cfg` and `workflow.sh`. The workflow loader validates:
 
 - `name` matches filename
 - `pipeline` is non-empty

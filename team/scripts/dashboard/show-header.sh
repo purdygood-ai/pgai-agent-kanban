@@ -27,6 +27,9 @@
 #   TERM=dumb  — disables all ANSI codes
 #   NO_COLOR=1 — disables all ANSI codes
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Resolve script dir and source dashboard-data ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -46,7 +49,7 @@ source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 DATA_ARGS=("$@")
 
 # --- Source config (non-strict) ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 for cfg_arg in "$@"; do
   shift
   if [[ "$cfg_arg" == "--kanban-root" ]]; then
@@ -122,7 +125,7 @@ get_val() {
   echo "$DATA" | awk -F= -v k="$key" '$1 == k { sub(/^[^=]+=/, ""); print; found=1 } END { if (!found) print "'"$default"'" }'
 }
 
-KANBAN_ROOT_VAL="$(get_val KANBAN_ROOT "${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}")"
+KANBAN_ROOT_VAL="$(get_val KANBAN_ROOT "${PGAI_AGENT_KANBAN_ROOT_PATH}")"
 LAST_RELEASED="$(get_val LAST_RELEASED "none")"
 HALT_FLAG="$(get_val HALT_FLAG "no")"
 HALT_OVERWATCH_FLAG="$(get_val HALT_OVERWATCH_FLAG "no")"
@@ -213,7 +216,10 @@ CRON_FIRINGS_AVAILABLE=false
 CRON_ERROR=false
 CRONTAB_TEXT="$(crontab -l 2>/dev/null || true)"
 if [[ -n "$CRONTAB_TEXT" ]]; then
-  CRON_PARSER="${PGAI_DEV_TREE_PATH}/team/pm-agent/lib/cron_parser.py"
+  # cron_parser.py is resolved from the live-install anchor only.
+  # The dev tree is DATA to the live runtime; executing python code under
+  # PGAI_DEV_TREE_PATH is prohibited for live-runtime scripts.
+  CRON_PARSER="${KANBAN_ROOT}/pm-agent/lib/cron_parser.py"
   if [[ -f "$CRON_PARSER" ]]; then
     # Resolve cron_firings.py via shared helper resolver (live-install anchor first — D3 fix).
     CRON_FIRINGS_PY="$(resolve_dashboard_helper "$KANBAN_ROOT" "${PGAI_DEV_TREE_PATH:-}" "dashboard/cron_firings.py")"

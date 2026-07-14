@@ -28,7 +28,7 @@ Usage (CLI):
     --indent N     — number of spaces to prefix each output line (default: 4)
 
 Usage (import):
-    from team.pgai_agent_kanban.dashboard.render_costs import render_costs
+    from pgai_agent_kanban.dashboard.render_costs import render_costs
     render_costs(rollup_path="...", pricing_path="...", indent="    ")
 
 Both forms produce identical output.

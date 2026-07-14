@@ -72,11 +72,16 @@
 #   projects_cfg_max_rows <name>            — echo dashboard_max_rows for <name> (default 20)
 #   projects_cfg_field <name> <field>       — echo any parsed field value for <name>
 #   projects_resolve_release_hook_path <name> <phase>
-#                                           — echo the resolved hook path declared in project.cfg
-#                                             for the given phase (pre-squash | pre-tag | post-tag),
-#                                             or empty when the field is absent/unset.
-#                                             Path resolution: leading '/' → absolute; otherwise
-#                                             resolved relative to dev_tree_path in project.cfg.
+#                                           — echo the resolved hook path for the given phase
+#                                             (pre-squash | pre-tag | post-tag) using three-tier
+#                                             precedence: (a) project.cfg [hooks] key (cfg),
+#                                             (b) kanban-side projects/<name>/hooks/ (kanban-side),
+#                                             (c) <dev_tree_path>/.pgai/hooks/ (in-repo).
+#                                             Echoes empty string when no hook found at any tier.
+#                                             Sets global _PGAI_HOOK_LAST_SOURCE to the winning
+#                                             source label (cfg|kanban-side|in-repo) or "" when
+#                                             no hook is found. Callers that need the source label
+#                                             may read _PGAI_HOOK_LAST_SOURCE immediately after.
 #
 # Color helpers (from lib/projects_cfg.sh, sourced below)
 # --------------------------------------------------------
@@ -673,7 +678,7 @@ projects_cfg_migrate_comment_block() {
 # on the unified visibility dashboard (the small square at the left edge of
 # each row). After editing this file, restart the tmux dashboard session to
 # pick up new colors — dashboard.sh re-reads projects.cfg only on startup.
-# See team/SOP.md "Dashboard color conventions" for the palette source, the
+# See docs/OPERATIONS.md "Dashboard Color Conventions" for the palette source, the
 # status-color mapping, and the full override flow.'
 
     # Strip leading comment block (all lines that are comments or blank, before
@@ -1245,35 +1250,51 @@ projects_cfg_remove() {
 # ---------------------------------------------------------------------------
 # projects_resolve_release_hook_path <project_name> <phase>
 #
-# Reads the cm_release_<phase>_hook field from the named project's project.cfg
-# and echoes the resolved absolute path, or an empty string when the field is
-# absent, empty, or unresolvable.
+# Resolves the hook path for <phase> using a three-tier precedence lookup and
+# echoes the resolved absolute path, or an empty string when no hook is found.
 #
 # Arguments:
 #   <project_name>  — project name (must match a directory under projects/)
 #   <phase>         — one of: pre-squash | pre-tag | post-tag
 #
-# Path resolution rules (applied to the raw field value from project.cfg):
+# Precedence (highest to lowest):
+#   (a) project.cfg [hooks] cm_release_<phase>_hook  (cfg)
+#   (b) $KANBAN_ROOT/projects/<name>/hooks/cm-release-<phase>.sh  (kanban-side)
+#   (c) <dev_tree_path>/.pgai/hooks/cm-release-<phase>.sh  (in-repo)
+#
+# Side effect:
+#   Sets the global variable _PGAI_HOOK_LAST_SOURCE to the winning source label
+#   (cfg | kanban-side | in-repo) or empty string when no hook is found.
+#   Callers that need the source label may read this variable immediately after
+#   calling projects_resolve_release_hook_path.
+#
+# Path resolution rules for tier (a):
 #   - Leading '/' → treated as an absolute path; returned as-is.
-#   - No leading '/' → resolved relative to dev_tree_path from the same
-#     project.cfg. The result is an absolute path.
-#   - Empty / absent field → echoes empty string and returns 0.
+#   - No leading '/' → resolved relative to dev_tree_path from project.cfg.
 #
-# The function does NOT check whether the returned path exists. The caller
-# (cm-release.sh) decides what to do when the file is absent.
+# Tier (b) is a plain file existence check on the kanban-side hooks directory.
+# Tier (c) is a plain file existence check on <dev_tree_path>/.pgai/hooks/.
+# For tier (c), an existing-but-non-executable file is NOT silently skipped;
+# the path is still returned and the source is set to in-repo — the caller
+# is responsible for the executability check (cm_resolve_and_enforce_hook in
+# cm_release_hooks.sh enforces the fail-loud rule for in-repo hooks).
 #
-# This function requires lib/project_paths.sh to be sourced first (for
-# pp_project_root, pp_require_project_context, and pp_load_config).
+# Requires lib/project_paths.sh to be sourced first (for pp_project_root and
+# _pp_project_cfg_file).
 #
 # Example:
 #   hook_path="$(projects_resolve_release_hook_path pgai-agent-kanban pre-squash)"
-#   if [[ -n "$hook_path" ]]; then
-#       echo "project.cfg-declared hook: $hook_path"
-#   fi
+#   src="$_PGAI_HOOK_LAST_SOURCE"   # cfg | kanban-side | in-repo | ""
 # ---------------------------------------------------------------------------
+# Module-level: last source label written by projects_resolve_release_hook_path.
+_PGAI_HOOK_LAST_SOURCE=""
+
 projects_resolve_release_hook_path() {
     local name="${1:-}"
     local phase="${2:-}"
+
+    # Clear source label before any return path.
+    _PGAI_HOOK_LAST_SOURCE=""
 
     if [[ -z "$name" ]]; then
         echo "projects_resolve_release_hook_path: project name is required" >&2
@@ -1297,44 +1318,84 @@ projects_resolve_release_hook_path() {
             ;;
     esac
 
-    # Locate project.cfg for this project (prefer lowercase; fall back to uppercase for legacy installs).
+    # Locate project.cfg for this project.
+    local _krp_kanban_root
+    _krp_kanban_root="${KANBAN_ROOT:-${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}}"
     local project_root cfg_file
-    project_root="$(KANBAN_ROOT="${KANBAN_ROOT:-${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}}" \
+    project_root="$(KANBAN_ROOT="$_krp_kanban_root" \
         pp_project_root "$name" 2>/dev/null)" || {
         echo "" ; return 0
     }
     cfg_file="$(_pp_project_cfg_file "$project_root")"
-    [[ -n "$cfg_file" && -f "$cfg_file" ]] || { echo ""; return 0; }
 
-    # Extract the raw field value via grep — avoids sourcing project.cfg into
-    # the caller's environment (which pp_load_config would do).
-    local raw_value
-    raw_value="$(grep -E "^[[:space:]]*${field_name}[[:space:]]*=" "$cfg_file" \
-        | head -n1 \
-        | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+    # ---------------------------------------------------------------------------
+    # Tier (a): project.cfg [hooks] cm_release_<phase>_hook
+    # ---------------------------------------------------------------------------
+    if [[ -n "$cfg_file" && -f "$cfg_file" ]]; then
+        local raw_value
+        raw_value="$(grep -E "^[[:space:]]*${field_name}[[:space:]]*=" "$cfg_file" \
+            | head -n1 \
+            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
 
-    # Empty or absent field — no hook declared.
-    [[ -z "$raw_value" ]] && { echo ""; return 0; }
+        if [[ -n "$raw_value" ]]; then
+            # Absolute path: return as-is.
+            if [[ "$raw_value" == /* ]]; then
+                _PGAI_HOOK_LAST_SOURCE="cfg"
+                echo "$raw_value"
+                return 0
+            fi
 
-    # Absolute path: return as-is.
-    if [[ "$raw_value" == /* ]]; then
-        echo "$raw_value"
+            # Relative path: resolve against dev_tree_path from project.cfg.
+            local dev_tree
+            dev_tree="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "$cfg_file" \
+                | head -n1 \
+                | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+
+            if [[ -z "$dev_tree" ]]; then
+                echo "projects_resolve_release_hook_path: cannot resolve relative hook path '${raw_value}': dev_tree_path not set in ${cfg_file}" >&2
+                echo ""
+                return 0
+            fi
+
+            _PGAI_HOOK_LAST_SOURCE="cfg"
+            echo "${dev_tree}/${raw_value}"
+            return 0
+        fi
+    fi
+
+    # ---------------------------------------------------------------------------
+    # Tier (b): kanban-side projects/<name>/hooks/cm-release-<phase>.sh
+    # ---------------------------------------------------------------------------
+    local kanban_side_hook
+    kanban_side_hook="${_krp_kanban_root}/projects/${name}/hooks/cm-release-${phase}.sh"
+    if [[ -f "$kanban_side_hook" ]]; then
+        _PGAI_HOOK_LAST_SOURCE="kanban-side"
+        echo "$kanban_side_hook"
         return 0
     fi
 
-    # Relative path: resolve against dev_tree_path from the same project.cfg.
-    local dev_tree
-    dev_tree="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "$cfg_file" \
-        | head -n1 \
-        | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-
-    if [[ -z "$dev_tree" ]]; then
-        echo "projects_resolve_release_hook_path: cannot resolve relative hook path '${raw_value}': dev_tree_path not set in ${cfg_file}" >&2
-        echo ""
-        return 0
+    # ---------------------------------------------------------------------------
+    # Tier (c): in-repo <dev_tree_path>/.pgai/hooks/cm-release-<phase>.sh
+    # ---------------------------------------------------------------------------
+    local dev_tree_for_inrepo=""
+    if [[ -n "$cfg_file" && -f "$cfg_file" ]]; then
+        dev_tree_for_inrepo="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "$cfg_file" \
+            | head -n1 \
+            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
     fi
 
-    echo "${dev_tree}/${raw_value}"
+    if [[ -n "$dev_tree_for_inrepo" ]]; then
+        local in_repo_hook
+        in_repo_hook="${dev_tree_for_inrepo}/.pgai/hooks/cm-release-${phase}.sh"
+        if [[ -f "$in_repo_hook" ]]; then
+            _PGAI_HOOK_LAST_SOURCE="in-repo"
+            echo "$in_repo_hook"
+            return 0
+        fi
+    fi
+
+    # No hook found at any tier.
+    echo ""
     return 0
 }
 

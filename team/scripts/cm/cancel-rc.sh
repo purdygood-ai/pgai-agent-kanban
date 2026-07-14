@@ -25,7 +25,7 @@
 #       exists on origin. Skipped (idempotent) if already absent.
 #   rc/<version> branch locally
 #     - Deleted via `git branch -D rc/<version>` if the branch exists locally.
-#       Switches to develop first if currently on the rc branch.
+#       Switches to main first if currently on the rc branch.
 #       Skipped (idempotent) if already absent.
 #   $KANBAN_ROOT/projects/<name>/release-state.md
 #     - Three fields are reset to `none`:
@@ -33,10 +33,10 @@
 #         RC Opened At
 #         RC Opened By Task
 #     - Skipped (idempotent) if Active RC is already `none`.
-#   develop branch (local + origin)
-#     - After resetting release-state.md the script checks out develop, runs
-#       `merge --ff-only origin/develop`, then `git push origin develop`.
-#       This syncs develop with origin but does not change its commit history.
+#   main branch (local)
+#     - After resetting release-state.md the script checks out main and runs
+#       `merge --ff-only origin/main` (when push_to_remote=true).
+#       This ensures the repo is on main after cancellation.
 #
 # DOES NOT TOUCH (explicitly preserved):
 #   main branch             — never checked out, never merged, never pushed
@@ -68,7 +68,7 @@
 #
 # Behavior:
 #   1.  Validates version format
-#   2.  Validates repository state (must be on develop or rc/<version>)
+#   2.  Validates repository state (must be on main or rc/<version>)
 #   3.  git fetch origin   (skipped when push_to_remote=false)
 #   4.  Reads Active RC from project-scoped release-state.md (live install) and
 #       verifies Active RC = <version>
@@ -133,10 +133,10 @@ FOOTPRINT — what this script touches vs. leaves alone:
     local rc/<version>           deleted (git branch -D)
     release-state.md             Active RC / RC Opened At / RC Opened By Task
                                  reset to 'none'
-    develop branch (local+origin) fast-forward synced and pushed (no history change)
+    main branch (local)          checked out; fast-forward pulled from origin when push_to_remote=true
 
   DOES NOT TOUCH:
-    main branch                  never checked out, merged, or pushed
+    main branch on origin        never pushed (operator pushes via finalize-release.sh if needed)
     git tags                     never created, moved, or deleted
     release-state.md Last Released fields
                                  preserved verbatim (canonical from git tag)
@@ -221,14 +221,17 @@ if [[ -z "$PROJECT_ARG" && -z "${PGAI_PROJECT_NAME:-}" ]]; then
   exit 1
 fi
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # --- Resolve script directory ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Source optional config files (BEFORE strict mode) ---
 # The kanban bashrc/env may have unset vars, non-zero returns, or interactive
 # aliases that would trip strict mode. Source them first.
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
-TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
 [[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
@@ -275,17 +278,17 @@ if [[ -z "${REPO_ROOT:-}" ]]; then
 fi
 
 # --- Resolve base branch names via pp_prefix_branch ---
-# For projects with branch_prefix=ai_, DEVELOP_BRANCH=ai_develop.
-# For projects with no branch_prefix, DEVELOP_BRANCH=develop unchanged.
-DEVELOP_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "develop")"
+# For projects with branch_prefix=ai_, MAIN_BRANCH=ai_main.
+# For projects with no branch_prefix, MAIN_BRANCH=main unchanged.
+MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
 
 # --- Read push_to_remote flag via pp_push_to_remote helper ---
-# Default: 'true' — deletes rc branch from origin and pushes develop (existing behavior).
+# Default: 'true' — deletes rc branch from origin (existing behavior).
 # Set [project] push_to_remote = false in project.cfg to perform only local cleanup
-# (no origin branch delete, no develop push).
+# (no origin branch delete).
 _CM_PUSH_TO_REMOTE="$(KANBAN_ROOT="$KANBAN_ROOT" pp_push_to_remote "$PROJECT_NAME")"
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  echo "[cm-cancel-rc] Push policy: push_to_remote=true — origin branch delete and develop push will proceed."
+  echo "[cm-cancel-rc] Push policy: push_to_remote=true — origin branch delete will proceed."
 else
   echo "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only."
 fi
@@ -322,12 +325,12 @@ else
   echo "push_to_remote=false — skipping git fetch origin (local-only install)."
 fi
 
-# --- Step 2: Check current branch is develop (or prefixed equivalent) or rc/<version> ---
+# --- Step 2: Check current branch is main (or prefixed equivalent) or rc/<version> ---
 CURRENT_BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || echo "DETACHED")"
-if [[ "$CURRENT_BRANCH" != "$DEVELOP_BRANCH" && "$CURRENT_BRANCH" != "$RC_BRANCH" ]]; then
-  echo "ERROR: must be on '$DEVELOP_BRANCH' or '$RC_BRANCH' to cancel this RC" >&2
+if [[ "$CURRENT_BRANCH" != "$MAIN_BRANCH" && "$CURRENT_BRANCH" != "$RC_BRANCH" ]]; then
+  echo "ERROR: must be on '$MAIN_BRANCH' or '$RC_BRANCH' to cancel this RC" >&2
   echo "Current branch: $CURRENT_BRANCH" >&2
-  echo "Please checkout $DEVELOP_BRANCH or $RC_BRANCH first." >&2
+  echo "Please checkout $MAIN_BRANCH or $RC_BRANCH first." >&2
   exit 1
 fi
 
@@ -354,7 +357,7 @@ fi
 
 if [[ "$ACTIVE_RC" == "none" && $RC_LOCAL_EXISTS -eq 0 && $RC_REMOTE_EXISTS -eq 0 ]]; then
   echo "INFO: RC cancellation already complete (idempotent run)." >&2
-  echo "  Active RC on develop: none"
+  echo "  Active RC on main: none"
   echo "  $RC_BRANCH: not found locally or on origin"
   echo ""
   echo "Nothing to do. Exiting cleanly."
@@ -365,7 +368,7 @@ fi
 # Allow the case where Active RC is already none (partial cancellation recovery)
 if [[ "$ACTIVE_RC" != "none" && "$ACTIVE_RC" != "$VERSION" ]]; then
   echo "ERROR: Active RC mismatch." >&2
-  echo "  develop's release-state.md shows Active RC = '$ACTIVE_RC'" >&2
+  echo "  release-state.md shows Active RC = '$ACTIVE_RC'" >&2
   echo "  You requested cancel of: '$VERSION'" >&2
   echo "  Only the active RC can be cancelled." >&2
   exit 1
@@ -374,7 +377,7 @@ fi
 # --- Step 6: List pending tasks for the cancelled RC ---
 echo ""
 echo "RC to cancel: $RC_BRANCH"
-echo "Current Active RC on develop: $ACTIVE_RC"
+echo "Current Active RC on main: $ACTIVE_RC"
 echo ""
 
 # Search for tasks referencing this RC version in the kanban root
@@ -426,8 +429,7 @@ if [[ $YES_FLAG -eq 0 ]]; then
     echo "  - Delete local branch $RC_BRANCH"
   fi
   if [[ "$ACTIVE_RC" != "none" ]]; then
-    echo "  - Reset develop's release-state.md: Active RC -> none"
-    echo "  - Commit and push the reset on develop"
+    echo "  - Reset release-state.md: Active RC -> none"
   fi
   echo ""
   echo "This does NOT touch main, does NOT delete any tags."
@@ -461,10 +463,10 @@ fi
 if [[ $RC_LOCAL_EXISTS -eq 1 ]]; then
   # Must not be on the branch we are deleting
   if [[ "$CURRENT_BRANCH" == "$RC_BRANCH" ]]; then
-    echo "Switching to $DEVELOP_BRANCH before deleting local branch..."
-    git -C "$REPO_ROOT" checkout "$DEVELOP_BRANCH"
+    echo "Switching to $MAIN_BRANCH before deleting local branch..."
+    git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
     if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-      git -C "$REPO_ROOT" merge --ff-only "origin/$DEVELOP_BRANCH"
+      git -C "$REPO_ROOT" merge --ff-only "origin/$MAIN_BRANCH"
     fi
   fi
   echo "Deleting local branch $RC_BRANCH..."
@@ -474,7 +476,7 @@ else
   echo "  Local branch $RC_BRANCH not found — skipping local delete (idempotent)."
 fi
 
-# --- Step 10: Reset release-state.md on develop ---
+# --- Step 10: Reset release-state.md ---
 if [[ "$ACTIVE_RC" != "none" ]]; then
   # Write only the RC fields. Last Released* fields are intentionally NOT written —
   # the git tag created by cm-release.sh is the canonical Last Released record.
@@ -497,18 +499,15 @@ EOF
   echo "  release-state.md reset."
   echo "  Path: $RELEASE_STATE"
 
-  # Sync develop branch (or prefixed equivalent) with origin (no release-state.md git commit
-  # needed — the file lives in the live install, outside the git repo).
-  # The checkout and local fast-forward always happen; only the push is gated.
-  echo "Syncing $DEVELOP_BRANCH branch..."
-  git -C "$REPO_ROOT" checkout "$DEVELOP_BRANCH"
+  # Switch to main so the repo is in a clean state after cancellation.
+  echo "Switching to $MAIN_BRANCH..."
+  git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
   if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-    git -C "$REPO_ROOT" merge --ff-only "origin/$DEVELOP_BRANCH"
-    git -C "$REPO_ROOT" push origin "$DEVELOP_BRANCH"
-    echo "  $DEVELOP_BRANCH synced and pushed to origin."
+    git -C "$REPO_ROOT" merge --ff-only "origin/$MAIN_BRANCH"
+    echo "  $MAIN_BRANCH fast-forward updated from origin."
   else
-    echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: git push origin $DEVELOP_BRANCH (Step 10)"
-    echo "  $DEVELOP_BRANCH checked out locally; no push (push_to_remote=false)."
+    echo "[push_to_remote=false] skipping origin pull for ${PROJECT_NAME}: merge --ff-only origin/$MAIN_BRANCH (Step 10)"
+    echo "  $MAIN_BRANCH checked out locally; no pull (push_to_remote=false)."
   fi
 else
   echo "  Active RC already none — skipping release-state.md reset (idempotent)."
@@ -539,5 +538,10 @@ if [[ ${#PENDING_TASKS[@]} -gt 0 ]]; then
   done
   echo ""
 fi
+echo "Reminder: close the requirements bundle intake item to prevent re-selection:"
+echo "  close.sh --project $PROJECT_NAME --key ${VERSION}-bugfix-bundle-<YYYYMMDD> --state wont-do"
+echo "  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)"
+echo "  Leaving the bundle live re-arms the discovery re-selection path."
+echo ""
 echo "You may now open a new RC with cm-open-rc.sh <version>."
 exit 0

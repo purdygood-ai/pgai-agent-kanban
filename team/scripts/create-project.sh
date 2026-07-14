@@ -70,9 +70,11 @@
 #   3 — script invoked outside a kanban install (KANBAN_ROOT not set/found)
 
 set -euo pipefail
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Resolve kanban root ---
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 if [[ ! -d "$KANBAN_ROOT" ]]; then
     echo "ERROR: kanban root not found: $KANBAN_ROOT" >&2
@@ -86,6 +88,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/projects.sh"
 # shellcheck source=lib/operator_args.sh
 source "${SCRIPT_DIR}/lib/operator_args.sh"
+# shellcheck source=lib/workflow.sh
+source "${SCRIPT_DIR}/lib/workflow.sh"
 
 # ---------------------------------------------------------------------------
 # _reject_path_flag <flag-name>
@@ -156,7 +160,7 @@ if argparse_has "help" || argparse_has "h"; then
         "Bootstrap a new project under \$KANBAN_ROOT/projects/<name>/." \
         OPERATOR_VALID_FLAGS \
         "" \
-        "  --workflow-type TYPE workflow_type: release|document (default: release)" \
+        "  --workflow-type TYPE workflow_type: any registered ready plugin type (default: release)" \
         "  --max-patch N        max_patch ceiling (default: 21)" \
         "  --max-minor N        max_minor ceiling (default: 13)" \
         "  --max-major N        max_major ceiling (default: 0)" \
@@ -227,27 +231,90 @@ if [[ -d "$PROJECT_DIR" ]]; then
     exit 2
 fi
 
-# --- Validate workflow type against the canonical set ---
-# Valid types are 'release' and 'document'. All other values exit non-zero
-# with a clear error.
-case "$WORKFLOW" in
-    release|document)
-        ;;
-    *)
-        echo "ERROR: unknown workflow type '${WORKFLOW}'; valid types are: release, document" >&2
-        exit 1
-        ;;
-esac
+# --- Validate workflow type against the plugin registry ---
+# Acceptable types are any plugin in workflows/ with status = ready.
+# Scaffold-status plugins are refused with the status named; unknown types
+# are refused with an error that lists the discovered ready types.
+#
+# Workflows root: installed at $KANBAN_ROOT/workflows/; in the dev tree at
+# team/workflows/ two levels above SCRIPT_DIR (team/scripts/ → team/).
+_WORKFLOWS_DIR="${KANBAN_ROOT}/workflows"
+if [[ ! -d "$_WORKFLOWS_DIR" ]]; then
+    # Fall back to dev-tree location when installed workflows/ is absent.
+    _WORKFLOWS_DIR="${SCRIPT_DIR}/../workflows"
+fi
+
+# ---------------------------------------------------------------------------
+# _list_ready_workflow_types <workflows_root>
+#
+# Scans <workflows_root>/*/workflow.cfg for plugins whose status = ready.
+# Prints each ready type name on its own line.  Requires read_ini (loaded
+# above via lib/workflow.sh → lib/ini_parser.sh).
+# ---------------------------------------------------------------------------
+_list_ready_workflow_types() {
+    local _wf_root="$1"
+    local _cfg _type _status
+    for _cfg in "${_wf_root}"/*/workflow.cfg; do
+        [[ -f "$_cfg" ]] || continue
+        _type="$(basename "$(dirname "$_cfg")")"
+        _status="$(read_ini "$_cfg" workflow status "" 2>/dev/null || true)"
+        [[ "$_status" == "ready" ]] && printf '%s\n' "$_type"
+    done
+}
+
+# Attempt to load the plugin via the registry.  wf_load_plugin validates the
+# manifest and exposes WF_MANIFEST_STATUS and WF_MANIFEST_AGENTS on success.
+_WF_LOAD_EXIT=0
+wf_load_plugin --workflows-dir "$_WORKFLOWS_DIR" "$WORKFLOW" 2>/dev/null || _WF_LOAD_EXIT=$?
+
+if [[ "$_WF_LOAD_EXIT" -ne 0 ]]; then
+    # Distinguish scaffold status from fully unknown type so the error names
+    # the concrete reason (required by the acceptance criteria).
+    _PROBE_CFG="${_WORKFLOWS_DIR}/${WORKFLOW}/workflow.cfg"
+    if [[ -f "$_PROBE_CFG" ]]; then
+        # Plugin directory exists — the manifest failed validation.  Surface
+        # the status value if it is scaffold; use the library's error text
+        # for other manifest failures.
+        _PROBE_STATUS="$(read_ini "$_PROBE_CFG" workflow status "" 2>/dev/null || true)"
+        if [[ "$_PROBE_STATUS" == "scaffold" ]]; then
+            echo "ERROR: workflow type '${WORKFLOW}' cannot be used: plugin status is 'scaffold' — flip status to 'ready' after implementing all hooks" >&2
+        else
+            echo "ERROR: workflow type '${WORKFLOW}' is not valid: ${WF_LOAD_ERROR}" >&2
+        fi
+    else
+        # Unknown type — enumerate discovered ready types to help the operator.
+        _READY_TYPES="$(  _list_ready_workflow_types "$_WORKFLOWS_DIR" | sort | tr '\n' ' ' | sed 's/ $//'  )"
+        if [[ -n "$_READY_TYPES" ]]; then
+            echo "ERROR: unknown workflow type '${WORKFLOW}'; discovered ready types are: ${_READY_TYPES}" >&2
+        else
+            echo "ERROR: unknown workflow type '${WORKFLOW}'; no ready workflow plugins found under ${_WORKFLOWS_DIR}" >&2
+        fi
+    fi
+    exit 1
+fi
+unset _WF_LOAD_EXIT _PROBE_CFG _PROBE_STATUS _READY_TYPES
 
 # --- Resolve template directory for the selected workflow type ---
 # Templates live at team/templates/project/<workflow>/ in the dev tree and at
 # templates/project/<workflow>/ in the installed tree.  SCRIPT_DIR is one level
 # below the templates root in both cases (dev: team/scripts/; installed:
 # scripts/), so ../templates/project/<workflow>/ resolves correctly either way.
+#
+# Fallback: when no type-specific template directory exists (e.g. a minimal
+# plugin that ships no templates/), use the release/ directory as a
+# type-agnostic base.  The BUG-TEMPLATE, PRIORITY-TEMPLATE, REQUIREMENTS-
+# TEMPLATE, and README files in release/ are workflow-type neutral.
+# Queue files are generated from the plugin manifest agents field in this case
+# (see "Seed queue files" section below).
 TEMPLATE_DIR="${SCRIPT_DIR}/../templates/project/${WORKFLOW}"
+TEMPLATE_FALLBACK="false"
 if [[ ! -d "$TEMPLATE_DIR" ]]; then
-    echo "ERROR: template directory not found for workflow type '${WORKFLOW}': ${TEMPLATE_DIR}" >&2
-    exit 1
+    TEMPLATE_DIR="${SCRIPT_DIR}/../templates/project/release"
+    TEMPLATE_FALLBACK="true"
+    if [[ ! -d "$TEMPLATE_DIR" ]]; then
+        echo "ERROR: template directory not found for workflow type '${WORKFLOW}' and fallback release/ template is also missing" >&2
+        exit 1
+    fi
 fi
 
 # --- Print plan ---
@@ -350,18 +417,17 @@ git_remote_name = ${GIT_REMOTE_NAME}
 dev_tree_path =
 git_repo_url =
 # --- Git branch topology (release workflow only; ignored for document) -----
-# Before this project's FIRST release, the chain's two base branches must
-# exist: <prefix>main and <prefix>develop. With the default prefix that is
-# ai_main and ai_develop; with an empty prefix, main and develop. Your
-# repo's own default branch (e.g. main) is untouched and coexists.
-#   push_to_remote = true  -> both must also exist ON ORIGIN: CM pulls
-#                             <prefix>develop at RC-open and pushes releases.
-#   push_to_remote = false -> local branches in dev_tree_path suffice.
-# For push_to_remote = true, one idempotent command creates and pushes both:
+# Before this project's FIRST release, the chain's single base branch must
+# exist: <prefix>main. With the default prefix that is ai_main; with an
+# empty prefix, main. Your repo's own default branch is untouched and coexists.
+#   push_to_remote = true  -> the branch must also exist ON ORIGIN: CM
+#                             branches RC from <prefix>main and squashes back.
+#   push_to_remote = false -> local branch in dev_tree_path suffices.
+# For push_to_remote = true, one idempotent command creates and pushes it:
 #   init-project-git-repo.sh --project ${NAME}
-# For push_to_remote = false, create them locally instead (the init script
-# ALWAYS pushes — wrong for local-only mode):
-#   git branch <prefix>main main && git branch <prefix>develop main
+# For push_to_remote = false, create the branch locally instead (the init
+# script ALWAYS pushes — wrong for local-only mode):
+#   git branch <prefix>main main
 # Default for hybrid shops where AI and human branches share the same repo.
 # Set empty (branch_prefix =) for pure-AI installs; never use quoted-empty ("").
 ${_BRANCH_PREFIX_LINE}
@@ -369,8 +435,8 @@ ${_BRANCH_PREFIX_LINE}
 # Set to false for local-only / demo / customer-site mode where the AI chain
 # must never touch origin — releases are built locally and the operator pushes
 # manually if and when they choose.  Default: true (preserves existing behavior).
-# NOTE: see the branch-topology block above — true requires <prefix>main and
-# <prefix>develop on origin BEFORE the first release (init-project-git-repo.sh).
+# NOTE: see the branch-topology block above — true requires <prefix>main on
+# origin BEFORE the first release (init-project-git-repo.sh).
 push_to_remote = true
 
 [versioning]
@@ -421,22 +487,26 @@ unset _BRANCH_PREFIX_LINE
 echo "  + wrote project.cfg"
 
 # --- Seed queue files ---
-# Read queue file list from the workflow's template directory.
-# Format: <filename>:<title>:<description>  (comment lines start with #, empty lines skipped)
-_queue_count=0
-while IFS=':' read -r queue_file title desc; do
-    # Skip comment lines and empty lines
-    [[ -z "$queue_file" || "$queue_file" =~ ^[[:space:]]*# ]] && continue
-    # Trim any trailing whitespace from fields
-    queue_file="${queue_file%"${queue_file##*[![:space:]]}"}"
-    title="${title%"${title##*[![:space:]]}"}"
-    desc="${desc%"${desc##*[![:space:]]}"}"
-    [[ -z "$queue_file" ]] && continue
-    target="${PROJECT_DIR}/tasks/queues/${queue_file}"
-    cat > "$target" <<EOF
-# ${title}
+# When the workflow type ships a type-specific template directory, read the
+# queue file list from that directory (format: <filename>:<title>:<description>).
+# When using the minimal fallback template, derive queue files from the plugin
+# manifest's agents field (WF_MANIFEST_AGENTS, set by wf_load_plugin above)
+# plus the always-present bug_backlog and priority_backlog queues.
+#
+# Standard agent → queue-file mapping for fallback generation:
+#   pm     → pm_backlog.md:PM Backlog:pm agent
+#   coder  → coder_backlog.md:Coder Backlog:coder agent
+#   writer → writer_backlog.md:Writer Backlog:writer agent
+#   tester → tester_backlog.md:Tester Backlog:tester agent
+#   cm     → cm_backlog.md:CM Backlog:cm agent
+# Plus always: bug_backlog.md and priority_backlog.md
+_write_queue_file() {
+    local _qf="$1" _title="$2" _desc="$3"
+    local _target="${PROJECT_DIR}/tasks/queues/${_qf}"
+    cat > "$_target" <<EOF
+# ${_title}
 
-Tasks ready for the ${desc} to pull. Markers:
+Tasks ready for the ${_desc} to pull. Markers:
 
 - \`[ ]\` pending (BACKLOG, ready to pull)
 - \`[W]\` waiting on prerequisites
@@ -444,8 +514,45 @@ Tasks ready for the ${desc} to pull. Markers:
 - \`[x]\` done or won't-do
 
 EOF
-    (( _queue_count++ )) || true
-done < "${TEMPLATE_DIR}/queue-files.list"
+}
+
+_queue_count=0
+if [[ "$TEMPLATE_FALLBACK" == "false" && -f "${TEMPLATE_DIR}/queue-files.list" ]]; then
+    # Type-specific template directory exists — use its queue-files.list.
+    while IFS=':' read -r queue_file title desc; do
+        # Skip comment lines and empty lines
+        [[ -z "$queue_file" || "$queue_file" =~ ^[[:space:]]*# ]] && continue
+        # Trim any trailing whitespace from fields
+        queue_file="${queue_file%"${queue_file##*[![:space:]]}"}"
+        title="${title%"${title##*[![:space:]]}"}"
+        desc="${desc%"${desc##*[![:space:]]}"}"
+        [[ -z "$queue_file" ]] && continue
+        _write_queue_file "$queue_file" "$title" "$desc"
+        (( _queue_count++ )) || true
+    done < "${TEMPLATE_DIR}/queue-files.list"
+else
+    # Minimal fallback: derive queue files from the plugin manifest agents.
+    # WF_MANIFEST_AGENTS is a comma-separated list set by wf_load_plugin.
+    _agents_csv="${WF_MANIFEST_AGENTS:-}"
+    IFS=',' read -ra _agents_arr <<< "$_agents_csv"
+    for _agent in "${_agents_arr[@]}"; do
+        _agent="${_agent// /}"  # strip any spaces
+        [[ -z "$_agent" ]] && continue
+        case "$_agent" in
+            pm)     _write_queue_file "pm_backlog.md"     "PM Backlog"     "pm agent"     ;;
+            coder)  _write_queue_file "coder_backlog.md"  "Coder Backlog"  "coder agent"  ;;
+            writer) _write_queue_file "writer_backlog.md" "Writer Backlog" "writer agent" ;;
+            tester) _write_queue_file "tester_backlog.md" "Tester Backlog" "tester agent" ;;
+            cm)     _write_queue_file "cm_backlog.md"     "CM Backlog"     "cm agent"     ;;
+            *)      : ;;  # unknown agent role — skip gracefully
+        esac
+        (( _queue_count++ )) || true
+    done
+    unset _agents_csv _agents_arr _agent
+    # Always seed the shared intake queues regardless of agent roster.
+    _write_queue_file "bug_backlog.md"      "Bug Backlog"      "bug triage"       && (( _queue_count++ )) || true
+    _write_queue_file "priority_backlog.md" "Priority Backlog" "priority intake"   && (( _queue_count++ )) || true
+fi
 echo "  + seeded ${_queue_count} queue files"
 
 # --- Seed templates ---

@@ -31,6 +31,9 @@
 #   NO_COLOR                            Set non-empty to disable colors
 #   TERM=dumb                           Also disables colors
 
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+
 # ---------------------------------------------------------------------------
 # Resolve script directory (before set -euo pipefail so sourcing works safely)
 # ---------------------------------------------------------------------------
@@ -47,7 +50,7 @@ source "${SCRIPT_DIR}/../lib/projects.sh"
 # ---------------------------------------------------------------------------
 # Parse arguments (before set -euo pipefail — arg parsing tolerates unset vars)
 # ---------------------------------------------------------------------------
-KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
+KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 PROJECT_NAME=""
 LAST_N=10
 HISTORY_CSV_OVERRIDE=""

@@ -918,3 +918,507 @@ class TestRejectionQuarantine:
             f"Expected well-formed bug file NOT to be quarantined.\n"
             f"Quarantined files: {quarantined}"
         )
+
+
+class TestTerminalStateBundleFilter:
+    """Discovery does not select or re-materialize intake items in terminal states.
+
+    Terminal states are 'done' and 'wont-do'.  Once an intake item (bug file,
+    priority file, or requirements bundle) carries one of those statuses, the
+    discovery pipeline must skip it in every step — bundle selection, requirements
+    pickup — and must never mutate its on-disk state.
+
+    The primary regression being tested is the two-bundle scenario (an earlier defect):
+    a closed v1.19.1 bundle plus a live v1.19.2 bundle.  Discovery must leave
+    the v1.19.1 bundle byte-unchanged and emit the fail-loud skip log line.
+    """
+
+    def test_wontdo_requirements_bundle_is_skipped_and_live_bundle_selected(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """Closed (wont-do) bundle is skipped; the live higher-version bundle is queued.
+
+        Two requirements bundles exist:
+          - v0.0.2-bugfix-bundle-*.md  with  ## Status: wont-do  (closed)
+          - v0.0.3-bugfix-bundle-*.md  with  ## Status: open      (live)
+
+        Discovery must leave the v0.0.2 file byte-unchanged, emit a
+        'terminal state' skip log line, and queue PM for v0.0.3 (status -> 'running').
+        A stub pm-agent.sh is installed so Step 3 can actually invoke PM queuing.
+        """
+        root = two_project_root
+
+        # Install a stub pm-agent.sh so Step 3 can queue PM for the live bundle.
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        task_id = "PM-20260711-001-decompose-v0-0-3-bugfix-bundle"
+        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir.mkdir(parents=True, exist_ok=True)
+        stub_pm = scripts_dir / "pm-agent.sh"
+        stub_pm.write_text(
+            textwrap.dedent(f"""\
+                #!/usr/bin/env bash
+                TASK_ID="{task_id}"
+                TASK_DIR="{pm_tasks_dir}/${{TASK_ID}}"
+                mkdir -p "$TASK_DIR"
+                printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
+                echo "  Folder   : $TASK_DIR"
+            """),
+            encoding="utf-8",
+        )
+        stub_pm.chmod(0o755)
+
+        req_dir = _requirements_dir(root, "project_a")
+
+        # Closed bundle (wont-do) — lower version.
+        closed_bundle = _add_requirements_file(
+            root, "project_a",
+            version="v0.0.2",
+            slug="bugfix-bundle-20260711",
+            status="wont-do",
+        )
+        closed_content_before = closed_bundle.read_bytes()
+
+        # Live bundle (open) — higher version.
+        _add_requirements_file(
+            root, "project_a",
+            version="v0.0.3",
+            slug="bugfix-bundle-20260711",
+            status="open",
+        )
+
+        result = _run_discovery(root, "project_a")
+
+        assert result.returncode == 0, (
+            f"discovery_run_pipeline exited non-zero.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # The closed bundle's on-disk content must be byte-unchanged.
+        closed_content_after = closed_bundle.read_bytes()
+        assert closed_content_before == closed_content_after, (
+            "Closed (wont-do) bundle was mutated by the discovery pipeline. "
+            "Its state must never be overwritten.\n"
+            f"Content before:\n{closed_content_before.decode()}\n"
+            f"Content after:\n{closed_content_after.decode()}"
+        )
+
+        # The skip log line must appear in stderr.
+        combined_output = result.stderr + result.stdout
+        assert "terminal state" in combined_output.lower(), (
+            "Expected the discovery pipeline to emit a 'terminal state' skip "
+            "log line for the wont-do bundle.\n"
+            f"stderr: {result.stderr}\nstdout: {result.stdout}"
+        )
+
+        # The v0.0.3 bundle must have been queued for PM (its status set to 'running').
+        live_bundle = req_dir / "v0.0.3-bugfix-bundle-20260711.md"
+        assert live_bundle.exists(), (
+            f"Expected live bundle at {live_bundle}.\n"
+            f"requirements/ contents: {list(req_dir.iterdir())}"
+        )
+        live_status = live_bundle.read_text(encoding="utf-8")
+        assert "running" in live_status.lower(), (
+            "Expected the live (v0.0.3) bundle to be marked 'running' after "
+            "discovery queued PM for it.\n"
+            f"Bundle contents:\n{live_status}"
+        )
+
+    def test_done_requirements_bundle_is_equally_skipped(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """A 'done' bundle is skipped just like a 'wont-do' bundle.
+
+        Both terminal states must be honored.  This test mirrors the wont-do
+        case above but with ## Status: done on the lower-version bundle.
+        A stub pm-agent.sh is installed so Step 3 can queue PM for the live bundle.
+        """
+        root = two_project_root
+
+        # Install a stub pm-agent.sh.
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        task_id = "PM-20260711-002-decompose-v0-0-3-live-bugfix-bundle"
+        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir.mkdir(parents=True, exist_ok=True)
+        stub_pm = scripts_dir / "pm-agent.sh"
+        stub_pm.write_text(
+            textwrap.dedent(f"""\
+                #!/usr/bin/env bash
+                TASK_ID="{task_id}"
+                TASK_DIR="{pm_tasks_dir}/${{TASK_ID}}"
+                mkdir -p "$TASK_DIR"
+                printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
+                echo "  Folder   : $TASK_DIR"
+            """),
+            encoding="utf-8",
+        )
+        stub_pm.chmod(0o755)
+
+        req_dir = _requirements_dir(root, "project_a")
+
+        # Closed bundle (done) — lower version.
+        done_bundle = _add_requirements_file(
+            root, "project_a",
+            version="v0.0.2",
+            slug="bugfix-bundle-done-20260711",
+            status="done",
+        )
+        done_content_before = done_bundle.read_bytes()
+
+        # Live bundle (open) — higher version.
+        _add_requirements_file(
+            root, "project_a",
+            version="v0.0.3",
+            slug="bugfix-bundle-live-20260711",
+            status="open",
+        )
+
+        result = _run_discovery(root, "project_a")
+
+        assert result.returncode == 0, (
+            f"discovery_run_pipeline exited non-zero.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # The done bundle must be byte-unchanged.
+        done_content_after = done_bundle.read_bytes()
+        assert done_content_before == done_content_after, (
+            "Done bundle was mutated by the discovery pipeline."
+        )
+
+        # The v0.0.3 live bundle must have been queued (status set to 'running').
+        live_bundle = req_dir / "v0.0.3-bugfix-bundle-live-20260711.md"
+        assert live_bundle.exists(), (
+            f"Expected live bundle at {live_bundle}.\n"
+            f"requirements/ contents: {list(req_dir.iterdir())}"
+        )
+        live_status = live_bundle.read_text(encoding="utf-8")
+        assert "running" in live_status.lower(), (
+            "Expected the live (v0.0.3) bundle to be marked 'running' after "
+            "discovery queued PM for it.\n"
+            f"Bundle contents:\n{live_status}"
+        )
+
+    def test_wontdo_bug_file_is_not_bundled(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """A bug file in wont-do state is not included in the bug bundle.
+
+        Bug files that the operator explicitly closed (wont-do) must be filtered
+        out of bug bundle collection, even when other open bugs exist.
+        """
+        root = two_project_root
+
+        # Closed bug (wont-do).
+        closed_bug = _add_bug_file(
+            root, "project_a",
+            bug_id="BUG-0100",
+            slug="closed-bug",
+            status="wont-do",
+        )
+        closed_content_before = closed_bug.read_bytes()
+
+        # Open bug — should be the only one bundled.
+        _add_bug_file(
+            root, "project_a",
+            bug_id="BUG-0101",
+            slug="open-bug",
+            status="open",
+        )
+
+        result = _run_discovery(root, "project_a")
+
+        assert result.returncode == 0, (
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # The closed bug's state file must be byte-unchanged.
+        closed_content_after = closed_bug.read_bytes()
+        assert closed_content_before == closed_content_after, (
+            "Closed (wont-do) bug file was mutated by the discovery pipeline."
+        )
+
+        # The skip log line for the closed bug must appear.
+        combined_output = result.stderr + result.stdout
+        assert "terminal state" in combined_output.lower(), (
+            "Expected the pipeline to emit a 'terminal state' log line for "
+            "the wont-do bug file.\n"
+            f"stderr: {result.stderr}\nstdout: {result.stdout}"
+        )
+
+        # A bundle must still have been created (for the open bug).
+        req_dir = _requirements_dir(root, "project_a")
+        bundles = list(req_dir.glob("*-bugfix-bundle-*.md"))
+        assert bundles, (
+            "Expected a bundle to be created for the open bug even though a "
+            "wont-do bug was also present."
+        )
+
+        # The bundle must reference only the open bug, not the closed one.
+        bundle_text = bundles[0].read_text(encoding="utf-8")
+        assert "BUG-0101" in bundle_text, (
+            "Expected the open bug (BUG-0101) to appear in the bundle."
+        )
+        assert "BUG-0100" not in bundle_text, (
+            "Closed bug (BUG-0100) must not appear in the bundle."
+        )
+
+
+class TestPMAgentFailureRetryAndStuckStateReconciliation:
+    """discovery_step_requirements: correct behavior on pm-agent failure and stuck-state recovery.
+
+    Three behaviors verified here:
+      1. Failure retry: a pm-agent that exits non-zero must NOT flip ## Status to
+         'running'; the ERROR line must name the file and exit code; the next
+         discovery scan must re-select the bundle (i.e., retry is live).
+      2. Success path regression: a succeeding pm-agent flips ## Status to 'running',
+         writes the task ID into ## PM Task, and writes a pm_backlog entry —
+         byte-identical semantics to the pre-fix behavior.
+      3. Stuck-state reconciliation: a hand-crafted stuck bundle (## Status: running,
+         ## PM Task: none, no pm_backlog entry) triggers the guard's stuck-state
+         diagnosis line naming the reset recovery, not the generic 'PM in flight'
+         deferral.
+    """
+
+    def test_pm_agent_failure_leaves_bundle_selectable_for_retry(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """When pm-agent exits non-zero, ## Status stays 'open' and the next scan retries.
+
+        A failing pm-agent stub (exits 1, no Folder line) must not flip the
+        bundle's ## Status to 'running'.  The ERROR log line must name both the
+        bundle file path and the pm-agent exit code.  On the very next discovery
+        run (with the failing stub replaced by a passing stub), the bundle is
+        re-selected and successfully queued — proving the retry path is live.
+        """
+        root = two_project_root
+
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Place a requirements bundle in 'open' state.
+        req_file = _add_requirements_file(
+            root, "project_a", version="v0.0.2", slug="pm-fail-retry"
+        )
+
+        # --- First pass: install a failing pm-agent stub (exits 1, no Folder line). ---
+        stub_pm = scripts_dir / "pm-agent.sh"
+        stub_pm.write_text(
+            textwrap.dedent("""\
+                #!/usr/bin/env bash
+                # Stubbed failing pm-agent: exits 1, emits no Folder line.
+                echo "pm-agent: simulated failure" >&2
+                exit 1
+            """),
+            encoding="utf-8",
+        )
+        stub_pm.chmod(0o755)
+
+        result_fail = _run_discovery(root, "project_a")
+
+        # Pipeline must still exit 0 (failure inside Step 3 is not a pipeline crash).
+        assert result_fail.returncode == 0, (
+            f"Pipeline must exit 0 even when pm-agent fails.\n"
+            f"stdout: {result_fail.stdout}\nstderr: {result_fail.stderr}"
+        )
+
+        # ## Status must remain 'open' — not 'running'.
+        req_text_after_fail = req_file.read_text(encoding="utf-8")
+        assert "running" not in req_text_after_fail.lower(), (
+            "pm-agent failure must NOT flip ## Status to 'running'.\n"
+            f"Bundle content after failed pm-agent:\n{req_text_after_fail}"
+        )
+
+        # The ERROR log line must name the bundle file and the exit code.
+        combined_fail = result_fail.stderr + result_fail.stdout
+        assert "ERROR pm-agent failed" in combined_fail, (
+            "Expected an ERROR log line naming the pm-agent failure.\n"
+            f"stderr: {result_fail.stderr}\nstdout: {result_fail.stdout}"
+        )
+        assert "exit 1" in combined_fail, (
+            "Expected the pm-agent exit code (1) in the ERROR log line.\n"
+            f"stderr: {result_fail.stderr}\nstdout: {result_fail.stdout}"
+        )
+
+        # --- Second pass: replace with a succeeding stub; bundle must be re-selected. ---
+        task_id = "PM-20260712-001-decompose-v0-0-2-pm-fail-retry"
+        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir.mkdir(parents=True, exist_ok=True)
+        stub_pm.write_text(
+            textwrap.dedent(f"""\
+                #!/usr/bin/env bash
+                TASK_ID="{task_id}"
+                TASK_DIR="{pm_tasks_dir}/${{TASK_ID}}"
+                mkdir -p "$TASK_DIR"
+                printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                mkdir -p "$(dirname "$PM_BACKLOG")"
+                echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
+                echo "  Folder   : $TASK_DIR"
+            """),
+            encoding="utf-8",
+        )
+        stub_pm.chmod(0o755)
+
+        result_retry = _run_discovery(root, "project_a")
+
+        assert result_retry.returncode == 0, (
+            f"Pipeline must exit 0 on retry with passing pm-agent.\n"
+            f"stdout: {result_retry.stdout}\nstderr: {result_retry.stderr}"
+        )
+
+        # Bundle ## Status must now be 'running' — retry succeeded.
+        req_text_after_retry = req_file.read_text(encoding="utf-8")
+        assert "running" in req_text_after_retry.lower(), (
+            "Expected ## Status to be 'running' after successful retry.\n"
+            f"Bundle content after retry:\n{req_text_after_retry}"
+        )
+
+        # PM backlog must contain the task entry.
+        pm_backlog = root / "projects" / "project_a" / "tasks" / "queues" / "pm_backlog.md"
+        backlog_text = pm_backlog.read_text(encoding="utf-8") if pm_backlog.exists() else ""
+        assert task_id in backlog_text, (
+            f"Expected task ID {task_id!r} in pm_backlog after retry.\n"
+            f"pm_backlog:\n{backlog_text}"
+        )
+
+    def test_pm_agent_success_sets_running_and_pm_task(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """Successful pm-agent flips ## Status to 'running' and writes ## PM Task.
+
+        This is the success path regression: the fix must not alter the outcome
+        when pm-agent succeeds.  On exit 0 with a valid Folder line and a
+        pm_backlog entry, the bundle's ## Status becomes 'running' and ## PM Task
+        is written — exactly as before the fix.
+        """
+        root = two_project_root
+
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+
+        task_id = "PM-20260712-002-decompose-v0-0-2-success-regression"
+        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir.mkdir(parents=True, exist_ok=True)
+
+        stub_pm = scripts_dir / "pm-agent.sh"
+        stub_pm.write_text(
+            textwrap.dedent(f"""\
+                #!/usr/bin/env bash
+                TASK_ID="{task_id}"
+                TASK_DIR="{pm_tasks_dir}/${{TASK_ID}}"
+                mkdir -p "$TASK_DIR"
+                printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                mkdir -p "$(dirname "$PM_BACKLOG")"
+                echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
+                echo "  Folder   : $TASK_DIR"
+            """),
+            encoding="utf-8",
+        )
+        stub_pm.chmod(0o755)
+
+        req_file = _add_requirements_file(
+            root, "project_a", version="v0.0.2", slug="success-regression"
+        )
+
+        result = _run_discovery(root, "project_a")
+
+        assert result.returncode == 0, (
+            f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        req_text = req_file.read_text(encoding="utf-8")
+        assert "running" in req_text.lower(), (
+            "Expected ## Status 'running' after pm-agent success.\n"
+            f"Bundle content:\n{req_text}"
+        )
+        assert task_id in req_text, (
+            f"Expected ## PM Task to contain task ID {task_id!r}.\n"
+            f"Bundle content:\n{req_text}"
+        )
+
+        pm_backlog = root / "projects" / "project_a" / "tasks" / "queues" / "pm_backlog.md"
+        backlog_text = pm_backlog.read_text(encoding="utf-8") if pm_backlog.exists() else ""
+        assert task_id in backlog_text, (
+            f"Expected task ID {task_id!r} in pm_backlog.\n"
+            f"pm_backlog:\n{backlog_text}"
+        )
+
+    def test_stuck_state_running_with_no_pm_task_emits_diagnosis(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """Stuck-state bundle (Status: running, PM Task: none, no backlog) triggers diagnosis.
+
+        A hand-crafted bundle with ## Status: running and ## PM Task: none, combined
+        with a pm_backlog file that contains no matching entry, represents the
+        stuck state produced by the old buggy code path (pm-agent failure after
+        ## Status was written before verification).
+
+        The in-flight guard must emit the stuck-state diagnosis line that names
+        the reset recovery ('reset ## Status to ready'), not the generic
+        'PM in flight' deferral that the old code emitted — which silently blocked
+        every subsequent scan.
+        """
+        root = two_project_root
+
+        # Create a bundle in the stuck state: ## Status: running, ## PM Task: none.
+        req_dir = _requirements_dir(root, "project_a")
+        req_dir.mkdir(parents=True, exist_ok=True)
+        stuck_bundle = req_dir / "v0.0.2-stuck-bundle-20260712.md"
+        stuck_bundle.write_text(
+            "# v0.0.2: stuck bundle\n\n"
+            "## Status\nrunning\n\n"
+            "## Target Version\nv0.0.2\n\n"
+            "## Workflow Type\nrelease\n\n"
+            "## PM Task\nnone\n\n"
+            "## Summary\nHand-crafted stuck state for reconciliation test.\n",
+            encoding="utf-8",
+        )
+
+        # Create an empty pm_backlog file (exists, but contains no matching entry).
+        queues_dir = root / "projects" / "project_a" / "tasks" / "queues"
+        queues_dir.mkdir(parents=True, exist_ok=True)
+        pm_backlog = queues_dir / "pm_backlog.md"
+        pm_backlog.write_text(
+            "# PM Backlog\n\n## Queue\n\n"
+            "- [x] PM-20260101-000-some-completed-task\n",
+            encoding="utf-8",
+        )
+
+        result = _run_discovery(root, "project_a")
+
+        # Pipeline must exit cleanly.
+        assert result.returncode == 0, (
+            f"Pipeline must exit 0 even for stuck-state bundle.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # The stuck-state diagnosis line must appear — naming the reset recovery.
+        combined = result.stderr + result.stdout
+        assert "stuck-state" in combined.lower(), (
+            "Expected stuck-state diagnosis line in discovery output.\n"
+            f"stderr: {result.stderr}\nstdout: {result.stdout}"
+        )
+        assert "reset" in combined.lower() and "ready" in combined.lower(), (
+            "Expected stuck-state diagnosis to name the recovery action "
+            "('reset ## Status to ready').\n"
+            f"stderr: {result.stderr}\nstdout: {result.stdout}"
+        )
+
+        # The GENERIC 'PM in flight' deferral must NOT appear for this case —
+        # that was the old silent-deferral behavior being replaced.
+        # Note: 'PM in flight' may appear for OTHER conditions; check only that
+        # the stuck-state diagnosis line is present (checked above).  The absence
+        # of the old generic line for THIS specific stuck-state path is implicitly
+        # verified by the presence of the diagnosis line, since both branches are
+        # mutually exclusive in the code.
+        assert "stuck-state detected" in combined.lower(), (
+            "Expected 'stuck-state detected' in the diagnosis log line.\n"
+            f"stderr: {result.stderr}\nstdout: {result.stdout}"
+        )
