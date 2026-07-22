@@ -18,44 +18,57 @@
 # LOGS (middle ~40%), and PROGRESS left ~65% + CRON right ~35% (bottom).
 #
 # Auxiliary windows (in creation order):
-#   W2: Visibility        — unified 3+5 visibility window (Dashboard 2.1)
+#   W2: Operator          — three-pane container operator workspace (BUG-0097):
+#                           Rationale: inside a container attach there is no "just open another
+#                           terminal" — this window is the container operator's whole workspace:
+#                           watch the board, run commands (show.sh, reset.sh, wontdo.sh,
+#                           intake.sh), one screen.
+#                           Top-left pane (~40% width, ~80% height): visibility inputs region —
+#                             same aggregated bugs / priority / requirements render as the
+#                             Visibility window's left region (same column-render.sh calls).
+#                           Top-right pane (~60% width, ~80% height): visibility queues region —
+#                             same aggregated pm / coder / writer / tester / cm render as the
+#                             Visibility window's right region (same column-render.sh calls).
+#                           Bottom pane (~20% height): interactive bash login shell with
+#                             shell-env sourced, cwd = $KANBAN_ROOT; pane title "operator".
+#   W3: Visibility        — unified 3+5 visibility window (Dashboard 2.1)
 #                           LEFT region (~40%): bugs / priority / requirements
 #                           RIGHT region (~60%): pm / coder / writer / tester / cm
 #                           Side-by-side horizontal split
 #                           Each pane runs: watch -c -n <interval> dashboard-column-render.sh <args>
 #                           Designed for 120-char-wide terminals
-#   W3: Attention         — watch dashboard-attention.sh (BLOCKED tasks)
-#   W4: Git               — two vertical panes:
+#   W4: Attention         — watch dashboard-attention.sh (BLOCKED tasks)
+#   W5: Git               — two vertical panes:
 #                           Left:  watch -n 10 dashboard-git-status.sh
 #                                  (branch, sync status, uncommitted changes, rc/* branches,
 #                                   recent commits on main)
 #                           Right: watch -n 10 dashboard-git-recent-tags.sh
 #                                  (Recent Tags listing, >=10 newest tags, refreshed every 10s)
-#   W5: Metadata          — single pane running watch -n 10 dashboard-metadata.sh
+#   W6: Metadata          — single pane running watch -n 10 dashboard-metadata.sh
 #                           shows kanban version, PM mode, HALT, and per-project rows
 #                           (workflow type, active RC, last released, max_minor, max_major)
-#   W6: Metrics           — two vertical panes:
+#   W7: Metrics           — two vertical panes:
 #                           Left:  watch -t -c -n $REFRESH_INTERVAL dashboard-metrics.sh
 #                                  shows today's per-project metrics (RCs shipped, wall time, tokens, tasks)
 #                                  and current-RC progress (tasks done, elapsed, tokens so far)
 #                           Right: watch -t -c -n $REFRESH_INTERVAL show-metrics.sh
 #                                  shows historical RC metrics from history.csv (last 10 RCs)
-#   W7: Logs full-screen  — dashboard-logs.sh
-#   W8: debug-logs        — single-pane unified merged stream of all agents' debug logs
+#   W8: Logs full-screen  — dashboard-logs.sh
+#   W9: debug-logs        — single-pane unified merged stream of all agents' debug logs
 #                           ($KANBAN_ROOT/logs/debug/<agent>.log)
 #                           color-coded per agent; gated by PGAI_VERBOSE_MODE=1
 #                           missing log files tolerated (tail -F waits for them)
-#   W9: training-logs     — single-pane unified view of all agents' newest training traces
+#   W10: training-logs    — single-pane unified view of all agents' newest training traces
 #                           ($KANBAN_ROOT/projects/<project>/logs/training/<agent>/<ts>-<task-id>.md)
 #                           color-coded per agent, sorted by mtime (newest at top)
 #                           gated by PGAI_REASONING_TRACE=1; refreshed via watch -n 30
-#   W10: Terminal         — three interactive shell panes
-#   W14: human-review     — single-pane listing of all pending HUMAN-APPROVE gate
+#   W11: Terminal         — three interactive shell panes
+#   W12: human-review     — single-pane listing of all pending HUMAN-APPROVE gate
 #                           tasks across ALL projects; one row per pending gate
 #                           (project, RC, age, show content, approve cmd, reject cmd).
 #                           Empty state: "no approvals pending."
 #                           Refreshed via watch on the standard interval.
-#   W11+: drill-N         — one window per registered project (all workflow types),
+#   W13+: drill-N         — one window per registered project (all workflow types),
 #                           numbered in projects.cfg registration order (drill-1, drill-2, ...).
 #                           Release/feature projects: 5-pane release layout scoped to
 #                           project N (header / queues / progress / cron / logs).
@@ -65,7 +78,7 @@
 #                           Each drill-N window tab is colored with its project's
 #                           dashboard_color.
 #
-# Window order: main, visibility, attention, git, metadata, metrics (metrics.sh + show-metrics.sh),
+# Window order: main, operator, visibility, attention, git, metadata, metrics (metrics.sh + show-metrics.sh),
 #               logs, debug-logs, training-logs, terminal, human-review, drill-1, drill-2, ...
 #
 # Per-project drill/overview toggle (Feature 4):
@@ -442,6 +455,16 @@ VIS_WRITER_CMD="clear; while true; do tput cup 0 0; while IFS= read -r _line; do
 VIS_TESTER_CMD="clear; while true; do tput cup 0 0; while IFS= read -r _line; do printf '%s' \"\$_line\"; tput el; printf '\\n'; done < <(${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} 26 --label TESTER ${_all_proj_flags}); tput ed; sleep ${REFRESH_INTERVAL}; done"
 VIS_CM_CMD="clear; while true; do tput cup 0 0; while IFS= read -r _line; do printf '%s' \"\$_line\"; tput el; printf '\\n'; done < <(${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} 26 --label CM ${_all_proj_flags}); tput ed; sleep ${REFRESH_INTERVAL}; done"
 
+# Operator window aggregated commands (BUG-0097):
+# Each command combines all columns for its region into a single pane — stacked vertically
+# within one refresh loop — using the same _vis_render_script and _all_proj_flags as the
+# VIS_*_CMD variables above (same code path; fixture string-compare targets these variables).
+#
+# Left aggregate: bugs + priority + requirements (mirrors Visibility window left region).
+OP_VIS_LEFT_AGG_CMD="clear; while true; do tput cup 0 0; while IFS= read -r _line; do printf '%s' \"\$_line\"; tput el; printf '\\n'; done < <({ ${_vis_render_script} input none none ${DASHBOARD_ROWS_PER_COLUMN} 29 --label BUGS ${_all_proj_flags}; echo; ${_vis_render_script} input none none ${DASHBOARD_ROWS_PER_COLUMN} 29 --label PRIORITIES ${_all_proj_flags}; echo; ${_vis_render_script} input none none ${DASHBOARD_ROWS_PER_COLUMN} 29 --label REQUIREMENTS ${_all_proj_flags}; }); tput ed; sleep ${REFRESH_INTERVAL}; done"
+# Right aggregate: pm + coder + writer + tester + cm (mirrors Visibility window right region).
+OP_VIS_RIGHT_AGG_CMD="clear; while true; do tput cup 0 0; while IFS= read -r _line; do printf '%s' \"\$_line\"; tput el; printf '\\n'; done < <({ ${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} 26 --label PM ${_all_proj_flags}; echo; ${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} 26 --label CODER ${_all_proj_flags}; echo; ${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} 26 --label WRITER ${_all_proj_flags}; echo; ${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} 26 --label TESTER ${_all_proj_flags}; echo; ${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} 26 --label CM ${_all_proj_flags}; }); tput ed; sleep ${REFRESH_INTERVAL}; done"
+
 # Git window — two vertical panes.
 # Left pane: watch -n 10 against dashboard-git-status.sh (branch/working-tree/remotes).
 # Right pane: watch -n 10 against dashboard-git-recent-tags.sh (recent tags >=10, newest first).
@@ -506,7 +529,7 @@ _REASONING_TRACE="${PGAI_REASONING_TRACE:-}"
 #   3 = PROGRESS (middle-left, ~65% width of left column)
 #   4 = CRON FIRINGS (middle-right within left column, ~35% width of left column)
 #
-# Drill-N windows (W11+): left as-is with the original 5-pane layout (HEADER /
+# Drill-N windows (W13+): left as-is with the original 5-pane layout (HEADER /
 # QUEUES-middle-left / PROGRESS-middle-center / CRON-middle-right / LOGS-bottom).
 # Drill windows scope to ONE project, so the multi-project overflow problem that
 # motivated this change does not apply there. Drill-N geometry consistency with
@@ -736,7 +759,122 @@ tmux send-keys -t "${SESSION_NAME}:main.3" "${CRON_FIRINGS_CMD}" Enter
 tmux send-keys -t "${SESSION_NAME}:main.4" "${QUEUES_CMD}" Enter
 
 # ---------------------------------------------------------------------------
-# Window 2: Visibility — unified 3+5 pane layout + legend (Dashboard 2.1)
+# Window 2: Operator — three-pane container operator workspace (BUG-0097)
+#
+# Rationale: inside a container attach there is no "just open another terminal"
+# — this window is the container operator's whole workspace: watch the board,
+# run commands (show.sh, reset.sh, wontdo.sh, intake.sh), one screen.
+#
+# Layout:
+#   ┌─────────────────────────────────┬──────────────────────────────────────┐
+#   │ TOP-LEFT (~40% w, ~80% h)       │ TOP-RIGHT (~60% w, ~80% h)           │
+#   │ Visibility inputs region:       │ Visibility queues region:             │
+#   │ bugs / priority / requirements  │ pm / coder / writer / tester / cm    │
+#   │ (OP_VIS_LEFT_AGG_CMD)           │ (OP_VIS_RIGHT_AGG_CMD)               │
+#   ├─────────────────────────────────┴──────────────────────────────────────┤
+#   │ BOTTOM (~20% h) — interactive bash login shell (unchanged)             │
+#   └──────────────────────────────────────────────────────────────────────┘
+#
+# Split sequence:
+#   Step 1: window created → pane 0 (full)
+#   Step 2: split pane 0 -v -l 20% → pane 0=top (~80%), pane 1=bottom (~20%)
+#   Step 3: split pane 0 -h -l 60% → pane 0=top-left (~40%), pane 1=top-right (~60%),
+#                                    pane 2=bottom (shell)
+#
+# Post-creation resize corrects proportions using absolute character widths/heights.
+# Same resize-correction pattern as Window 0 and the Visibility window.
+# Minimums enforced: LEFT_W >= 15, RIGHT_W >= 15, TOP_H >= 5, SHELL_H >= 3.
+# ---------------------------------------------------------------------------
+tmux new-window -t "${SESSION_NAME}" -n "operator"
+
+# Step 2: split the full window vertically — bottom 20% = shell, top 80% = visibility region.
+# After split: pane 0=top (~80%), pane 1=bottom (~20%)
+tmux split-window -t "${SESSION_NAME}:operator.0" -v -l 20%
+
+# Step 3: split the top region horizontally — left ~40% = inputs, right ~60% = queues.
+# After split: pane 0=top-left (~40%), pane 1=top-right (~60%), pane 2=bottom (shell)
+tmux split-window -t "${SESSION_NAME}:operator.0" -h -l 60%
+
+# Step 4-8: split each region into individual columns — SAME ladder as the
+# Visibility window, so the top 80% is a faithful replica of it.
+# Left region → 3 input columns:
+tmux split-window -t "${SESSION_NAME}:operator.0" -h -l 67%
+tmux split-window -t "${SESSION_NAME}:operator.1" -h -l 50%
+# After: 0=bugs 1=priority 2=requirements 3=right-region 4=shell
+# Right region → 5 agent columns:
+tmux split-window -t "${SESSION_NAME}:operator.3" -h -l 80%
+tmux split-window -t "${SESSION_NAME}:operator.4" -h -l 75%
+tmux split-window -t "${SESSION_NAME}:operator.5" -h -l 67%
+tmux split-window -t "${SESSION_NAME}:operator.6" -h -l 50%
+# Final: 0=bugs 1=prio 2=reqs 3=pm 4=coder 5=writer 6=tester 7=cm 8=shell
+
+# ---------------------------------------------------------------------------
+# Post-creation explicit resize for operator window — absolute widths/heights.
+# Same pattern as Window 0 and the Visibility window: query true dimensions
+# after splits, then force-resize every pane to absolute character dimensions.
+#
+# WIDTH (40/60 SPLIT):
+#   OP_LEFT_W  = floor(OP_WIDTH * 40 / 100) - 1  (left budget minus 1 divider)
+#   OP_RIGHT_W = OP_WIDTH - OP_LEFT_W - 1         (right column; explicit)
+#
+# HEIGHT (80/20 SPLIT):
+#   OP_TOP_H   = floor(OP_HEIGHT * 80 / 100)      (top region ~80%)
+#   OP_SHELL_H = OP_HEIGHT - OP_TOP_H - 1         (bottom shell; -1 for border)
+#
+# Minimums: OP_LEFT_W >= 15, OP_RIGHT_W >= 15, OP_TOP_H >= 5, OP_SHELL_H >= 3.
+# ---------------------------------------------------------------------------
+OP_WIDTH=$(tmux display-message -t "${SESSION_NAME}:operator" -p '#{window_width}')
+OP_HEIGHT=$(tmux display-message -t "${SESSION_NAME}:operator" -p '#{window_height}')
+
+# Guard: fall back to safe minima if tmux query returns empty or zero
+OP_WIDTH=${OP_WIDTH:-120}
+OP_HEIGHT=${OP_HEIGHT:-24}
+[[ "$OP_WIDTH"  -lt 32  ]] && OP_WIDTH=32    # 32 = 15 + 1 + 15 + 1 (two panes + borders)
+[[ "$OP_HEIGHT" -lt 10  ]] && OP_HEIGHT=10   # 10 = 5 top + 1 border + 3 shell + 1 border
+
+# Left column (~40% of total width; -1 for the vertical divider between left and right).
+OP_LEFT_W=$(( OP_WIDTH * 40 / 100 - 1 ))
+[[ "$OP_LEFT_W" -lt 15 ]] && OP_LEFT_W=15
+# Right column: explicit remainder so total stays within window width.
+OP_RIGHT_W=$(( OP_WIDTH - OP_LEFT_W - 1 ))
+[[ "$OP_RIGHT_W" -lt 15 ]] && OP_RIGHT_W=15
+
+# Top region (~80% of total height).
+OP_TOP_H=$(( OP_HEIGHT * 80 / 100 ))
+[[ "$OP_TOP_H" -lt 5 ]] && OP_TOP_H=5
+# Shell region: explicit remainder so total stays within window height.
+OP_SHELL_H=$(( OP_HEIGHT - OP_TOP_H - 1 ))
+[[ "$OP_SHELL_H" -lt 3 ]] && OP_SHELL_H=3
+
+# Resize: correct only the shell height (pane 8); the eight column panes keep
+# the chained-percentage widths, matching the Visibility window's proportions.
+tmux resize-pane -t "${SESSION_NAME}:operator.8" -y "${OP_SHELL_H}"
+
+# Send the SAME commands the Visibility window's eight column panes run.
+tmux send-keys -t "${SESSION_NAME}:operator.0" "${VIS_BUGS_CMD}" Enter
+tmux send-keys -t "${SESSION_NAME}:operator.1" "${VIS_PRIORITY_CMD}" Enter
+tmux send-keys -t "${SESSION_NAME}:operator.2" "${VIS_REQUIREMENTS_CMD}" Enter
+tmux send-keys -t "${SESSION_NAME}:operator.3" "${VIS_PM_CMD}" Enter
+tmux send-keys -t "${SESSION_NAME}:operator.4" "${VIS_CODER_CMD}" Enter
+tmux send-keys -t "${SESSION_NAME}:operator.5" "${VIS_WRITER_CMD}" Enter
+tmux send-keys -t "${SESSION_NAME}:operator.6" "${VIS_TESTER_CMD}" Enter
+tmux send-keys -t "${SESSION_NAME}:operator.7" "${VIS_CM_CMD}" Enter
+
+# Bottom pane: interactive bash login shell with kanban env sourced, cwd = KANBAN_ROOT.
+# Source shell-env the same way create.sh does at startup (lines ~170-176):
+# wrap in bash -l so /etc/profile.d/ and ~/.bash_profile run, giving the operator
+# a complete login environment with PATH, pyenv, etc.
+_OPERATOR_SHELL_INIT="cd ${KANBAN_ROOT}"
+if [[ -f "${KANBAN_ROOT}/shell-env" ]]; then
+    _OPERATOR_SHELL_INIT="source ${KANBAN_ROOT}/shell-env && ${_OPERATOR_SHELL_INIT}"
+fi
+tmux send-keys -t "${SESSION_NAME}:operator.8" "bash -l -c '${_OPERATOR_SHELL_INIT}; exec bash -l'" Enter
+
+# Label the bottom pane so its border identifies it as the operator shell
+tmux select-pane -t "${SESSION_NAME}:operator.8" -T "operator"
+
+# ---------------------------------------------------------------------------
+# Window 3: Visibility — unified 3+5 pane layout + legend (Dashboard 2.1)
 #
 # Three discovery-pipeline columns on the LEFT (~40% width) and five
 # agent-queue columns on the RIGHT (~60% width), arranged side-by-side
@@ -950,13 +1088,13 @@ VIS_LEGEND_CMD="clear; while true; do tput cup 0 0; while IFS= read -r _line; do
 tmux send-keys -t "${SESSION_NAME}:visibility.8" "${VIS_LEGEND_CMD}" Enter
 
 # ---------------------------------------------------------------------------
-# Window 3: Attention — blocked tasks panel (dashboard-attention.sh)
+# Window 4: Attention — blocked tasks panel (dashboard-attention.sh)
 # ---------------------------------------------------------------------------
 tmux new-window -t "${SESSION_NAME}" -n "attention"
 tmux send-keys -t "${SESSION_NAME}:attention" "${ATTENTION_CMD}" Enter
 
 # ---------------------------------------------------------------------------
-# Window 4: Git — two vertical panes
+# Window 5: Git — two vertical panes
 #
 # Left pane:  watch -n 10 dashboard-git-status.sh
 #   Shows live git state of the dev tree:
@@ -984,7 +1122,7 @@ tmux send-keys -t "${SESSION_NAME}:git.0" "${GIT_STATUS_CMD}" Enter
 tmux send-keys -t "${SESSION_NAME}:git.1" "${GIT_RECENT_TAGS_CMD}" Enter
 
 # ---------------------------------------------------------------------------
-# Window 5: Metadata — kanban-wide state + per-project pacing (single pane)
+# Window 6: Metadata — kanban-wide state + per-project pacing (single pane)
 #
 # Shows kanban version, PM_MODE, HALT, and per-project rows including
 # workflow type, active RC, last released, max_minor, max_major.
@@ -994,7 +1132,7 @@ tmux new-window -t "${SESSION_NAME}" -n "metadata"
 tmux send-keys -t "${SESSION_NAME}:metadata" "${METADATA_CMD}" Enter
 
 # ---------------------------------------------------------------------------
-# Window 6: Metrics — two vertical panes
+# Window 7: Metrics — two vertical panes
 #
 # Left pane:  watch -t -c -n $REFRESH_INTERVAL dashboard-metrics.sh
 #   Shows today's per-project metrics (RCs shipped, wall time, tokens with
@@ -1020,13 +1158,13 @@ tmux send-keys -t "${SESSION_NAME}:metrics.0" "${METRICS_CMD}" Enter
 tmux send-keys -t "${SESSION_NAME}:metrics.1" "${SHOW_METRICS_CMD}" Enter
 
 # ---------------------------------------------------------------------------
-# Window 7: Logs full-screen (named "logs")
+# Window 8: Logs full-screen (named "logs")
 # ---------------------------------------------------------------------------
 tmux new-window -t "${SESSION_NAME}" -n "logs"
 tmux send-keys -t "${SESSION_NAME}:logs" "${LOGS_WIN_CMD}" Enter
 
 # ---------------------------------------------------------------------------
-# Window 8: debug-logs — unified, merged, color-coded debug log stream
+# Window 9: debug-logs — unified, merged, color-coded debug log stream
 #
 # Single pane showing all agents' central debug logs in one interleaved,
 # color-coded stream (same color scheme as dashboard-logs.sh).
@@ -1046,7 +1184,7 @@ tmux send-keys -t "${SESSION_NAME}:debug-logs.0" \
   "env PGAI_VERBOSE_MODE=${_VERBOSE_MODE} ${SCRIPT_DIR}/debug-logs.sh --kanban-root ${KANBAN_ROOT}" Enter
 
 # ---------------------------------------------------------------------------
-# Window 9: training-logs — unified, merged, color-coded training trace viewer
+# Window 10: training-logs — unified, merged, color-coded training trace viewer
 #
 # Single pane showing all agents' newest training traces in one color-coded
 # view (same color scheme as dashboard-logs.sh), refreshed every 30 seconds.
@@ -1067,7 +1205,7 @@ tmux send-keys -t "${SESSION_NAME}:training-logs.0" \
   "watch -t -c -n 30 -- env PGAI_REASONING_TRACE=${_REASONING_TRACE} ${SCRIPT_DIR}/training-logs.sh --kanban-root ${KANBAN_ROOT}" Enter
 
 # ---------------------------------------------------------------------------
-# Window 10: Terminal — two-pane split: live logs (left) + KANBAN_ROOT shell (right)
+# Window 11: Terminal — two-pane split: live logs (left) + KANBAN_ROOT shell (right)
 #
 # Left pane (0):  live log stream via logs.sh (same feed as the "logs" window).
 # Right pane (1): a single interactive bash shell started at $KANBAN_ROOT.
@@ -1082,22 +1220,19 @@ tmux send-keys -t "${SESSION_NAME}:terminal.0" "${LOGS_WIN_CMD}" Enter
 tmux send-keys -t "${SESSION_NAME}:terminal.1" "cd ${KANBAN_ROOT} && exec bash" Enter
 
 # ---------------------------------------------------------------------------
-# Window 14: human-review — pending HUMAN-APPROVE gate tasks (single pane)
+# Window 12: human-review — pending HUMAN-APPROVE gate tasks (single pane)
 #
 # Lists every pending HUMAN-APPROVE task across ALL registered projects.
 # Renders: project, target RC, age, show content, approve command,
 #          reject command.  Empty state: "no approvals pending."
 #
 # Single pane; refreshes on the standard dashboard interval via watch.
-# Index 14 is used to keep this distinct from the per-project drill windows
-# (W11+) that follow, while staying below the arbitrary high numbered indices
-# that might crowd the tmux status bar.
 # ---------------------------------------------------------------------------
 tmux new-window -t "${SESSION_NAME}" -n "human-review"
 tmux send-keys -t "${SESSION_NAME}:human-review" "${HUMAN_REVIEW_CMD}" Enter
 
 # ---------------------------------------------------------------------------
-# Windows W11+: Per-project drill windows (Feature 4 — per-project view selector)
+# Windows W13+: Per-project drill windows (Feature 4 — per-project view selector)
 #
 # One window named "drill-<N>" is created for each project registered in
 # projects.cfg.  Each drill window uses the same 4-pane layout as the

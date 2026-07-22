@@ -4,10 +4,12 @@
 #
 # Usage:
 #   cm-finalize.sh <project-name> <version>
+#   cm-finalize.sh --help
 #
 # Arguments:
 #   project-name  — project identifier (e.g. kids-story-creek)
 #   version       — semver string (e.g. v0.0.1): document workflow mode
+#   --help, -h    — print full usage and exit 0
 #
 # Behavior:
 #   1. Resolve KANBAN_ROOT and temp root from env
@@ -45,16 +47,64 @@
 #   PGAI_DOC_WORKING_DIR                — explicit task-local scratch dir (overrides temp-root logic)
 
 # --- Argument parsing ---
+_cm_finalize_usage() {
+  echo "Usage: $(basename "$0") <project-name> <version>" >&2
+  echo "" >&2
+  echo "  project-name  project identifier, lowercase letters/digits/hyphens" >&2
+  echo "  version       semver string (e.g. v0.0.1)" >&2
+  echo "  --help, -h    print full usage and exit 0" >&2
+}
+
+_cm_finalize_help() {
+  cat <<HELPTEXT
+Usage: $(basename "$0") <project-name> <version>
+
+Finalize a document-workflow deliverable: package working/ into output/,
+publish the artifact to projects/<project>/artifacts/, and flip the
+originating requirement ## Status from running to done.
+
+Arguments:
+  project-name  project identifier (lowercase letters, digits, hyphens;
+                e.g. kids-story-creek)
+  version       semver version string (e.g. v0.0.1)
+  --help, -h    print this message and exit 0
+
+Exit codes:
+  0  Finalize complete (or --help requested)
+  1  Missing required arguments, validation failure, or missing deliverable
+
+Example:
+  cm-finalize.sh kids-story-creek v0.0.1
+
+Configuration:
+  PGAI_AGENT_KANBAN_ROOT_PATH       kanban root (default: ~/pgai_agent_kanban)
+  PGAI_AGENT_KANBAN_TEMP_DIR        temp dir root override
+  PGAI_PROJECT_NAME                 kanban project name (metadata source + publish target)
+  PGAI_ARTIFACT_NAME                artifact slug (default: OUTPUT_NAME from requirement doc)
+  PGAI_WRITER_POLISH_TASK_ARTIFACTS path to WRITER polish task artifacts (required)
+  PGAI_DOC_WORKING_DIR              explicit task-local scratch dir override
+HELPTEXT
+}
+
+# Handle --help/-h before positional assignment so it fires even when other
+# args are absent.
+for _arg in "$@"; do
+  case "$_arg" in
+    --help|-h)
+      _cm_finalize_help
+      exit 0
+      ;;
+  esac
+done
+unset _arg
+
 PROJECT_NAME="${1:-}"
 VERSION_ARG="${2:-}"
 
 if [[ -z "$PROJECT_NAME" || -z "$VERSION_ARG" ]]; then
   echo "ERROR: missing required arguments" >&2
   echo "" >&2
-  echo "Usage: $(basename "$0") <project-name> <version>" >&2
-  echo "" >&2
-  echo "  project-name: lowercase letters, digits, hyphens (e.g. kids-story-creek)" >&2
-  echo "  version: semver (e.g. v0.0.1)" >&2
+  _cm_finalize_usage
   exit 1
 fi
 

@@ -7,6 +7,7 @@
 #   │ ⚠ BLOCKED TASKS                                                          │
 #   ├─────────────────────────────────────────────────────────────────────────┤
 #   │                                                                          │
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #   │ ▶ CLAUDE-CM-20260428-009-release-0-15-5                                  │
 #   │   Blocked since: 14:23:18 (2m ago)                                       │
 #   │   Reason: cm-release.sh exited 1 at Step 4 ...                           │

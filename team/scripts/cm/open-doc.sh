@@ -4,11 +4,13 @@
 #
 # Usage:
 #   cm-open-doc.sh <project-name> [target-version]
+#   cm-open-doc.sh --help
 #
 # Arguments:
 #   project-name    — project identifier (lowercase letters, digits, hyphens)
 #   target-version  — optional semver version (e.g. v0.0.1); overrides
 #                     PGAI_TARGET_VERSION env var when supplied.
+#   --help, -h      — print full usage and exit 0
 #
 # Version resolution (first match wins):
 #   1. $2 arg (target-version) — explicit override
@@ -54,16 +56,68 @@
 #   PGAI_AGENT_KANBAN_TEMP_DIR    — temp dir root override (resolved via temp.sh resolver)
 
 # --- Argument parsing ---
+_cm_open_doc_usage() {
+  echo "Usage: $(basename "$0") <project-name> [target-version]" >&2
+  echo "" >&2
+  echo "  project-name    project identifier, lowercase letters/digits/hyphens" >&2
+  echo "  target-version  semver string (e.g. v0.0.1); overrides PGAI_TARGET_VERSION" >&2
+  echo "  --help, -h      print full usage and exit 0" >&2
+}
+
+_cm_open_doc_help() {
+  cat <<HELPTEXT
+Usage: $(basename "$0") <project-name> [target-version]
+
+Open a new document/creative project version: create the task-local scratch
+directories (input/, working/, output/) and set Active RC in release-state.md.
+No git operations — filesystem only.
+
+Arguments:
+  project-name    project identifier (lowercase letters, digits, hyphens;
+                  e.g. kids-story-creek)
+  target-version  semver version for this document run (e.g. v0.0.1);
+                  overrides PGAI_TARGET_VERSION env var when supplied
+  --help, -h      print this message and exit 0
+
+Version resolution (first match wins):
+  1. target-version positional argument
+  2. PGAI_TARGET_VERSION environment variable
+
+Exit codes:
+  0  Working directories created (or already exist) and Active RC written
+     (or --help requested)
+  1  Missing project-name, invalid project name or version, or missing version
+
+Example:
+  cm-open-doc.sh kids-story-creek v0.0.1
+  PGAI_TARGET_VERSION=v0.0.1 cm-open-doc.sh kids-story-creek
+
+Configuration:
+  PGAI_AGENT_KANBAN_ROOT_PATH  kanban root (default: ~/pgai_agent_kanban)
+  PGAI_TARGET_VERSION          semver version (when not passed as \$2)
+  PGAI_AGENT_KANBAN_TEMP_DIR   temp dir root override
+HELPTEXT
+}
+
+# Handle --help/-h before positional assignment so it fires even when other
+# args are absent.
+for _arg in "$@"; do
+  case "$_arg" in
+    --help|-h)
+      _cm_open_doc_help
+      exit 0
+      ;;
+  esac
+done
+unset _arg
+
 PROJECT_NAME="${1:-}"
 VERSION_ARG="${2:-}"
 
 if [[ -z "$PROJECT_NAME" ]]; then
   echo "ERROR: missing required argument <project-name>" >&2
   echo "" >&2
-  echo "Usage: $(basename "$0") <project-name> [target-version]" >&2
-  echo "" >&2
-  echo "  project-name:   lowercase letters, digits, hyphens (e.g. kids-story-creek)" >&2
-  echo "  target-version: semver string (e.g. v0.0.1); overrides PGAI_TARGET_VERSION" >&2
+  _cm_open_doc_usage
   exit 1
 fi
 

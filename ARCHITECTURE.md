@@ -266,7 +266,7 @@ CM is the sole origin-toucher and only via managed scripts (open-rc, release); i
 
 The active LLM provider is a runtime selection, read from `kanban.cfg [providers] active`. Wake scripts for each provider can be wired so only the active one does work; the others exit immediately on a stagger tick.
 
-**Current reality:** Claude is the production provider. The Codex lane is exercised — a managed project has shipped end-to-end on Codex with OAuth — and ships experimental for v1.0.0 (see docs/codex-known-issues.md for the known rough edges). The Gemini lane is designed-for (provider-neutral task IDs, queues, and role files; per-provider wake-script structure; provider-aware token capture and pricing) but not yet exercised in production. Adding a provider is a wake-script + pricing-table change, not a refactor.
+**Current reality:** Claude is the production provider. The Codex lane is exercised — a managed project has shipped end-to-end on Codex with OAuth — and ships experimental (see docs/codex-known-issues.md for the known rough edges). The Gemini lane is designed-for (provider-neutral task IDs, queues, and role files; per-provider wake-script structure; provider-aware token capture and pricing) but not yet exercised in production. Adding a provider is a wake-script + pricing-table change, not a refactor.
 
 Token capture is provider-aware: each task's `tokens.json` records `provider`, `model`, agent, RC, token counts, and timing, so cost rollups break down per provider when more than one is in use.
 

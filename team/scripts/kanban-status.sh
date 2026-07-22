@@ -30,6 +30,13 @@
 #   TERM=dumb            Disables all ANSI codes
 #   NO_COLOR=1           Disables all ANSI codes
 
+# --- Bootstrap: self-locate → source shell-env → fail loud ---
+# Must happen before the first use of PGAI_AGENT_KANBAN_ROOT_PATH so the
+# script runs from a fresh shell without manual pre-sourcing.  Explicit
+# operator exports win via env_bootstrap.sh's idempotency guard.
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+
 # --- Resolve script dir ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -60,6 +67,8 @@ while [[ $_i -lt ${#_args[@]} ]]; do
 done
 
 # --- Source config (non-strict) ---
+# PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh or the operator.
+# --kanban-root overrides the default for this run.
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 _i=0
 while [[ $_i -lt ${#_args[@]} ]]; do
@@ -82,8 +91,6 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 # no dev tree access required. Global require_dev_tree removed (D5).
 
 set -euo pipefail
-# shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- ANSI color support ---
 # Disable color if: --no-color flag, NO_COLOR env var (any non-empty value),

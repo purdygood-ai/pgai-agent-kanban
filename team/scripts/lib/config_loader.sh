@@ -52,6 +52,8 @@
 #   min_rows_per_project    OPTIONAL  3
 #   max_rows_per_project    OPTIONAL  8
 #   max_rows                OPTIONAL  20
+#   dashboard_status_glyph  OPTIONAL  ■  (single visible character; multi-char values
+#                                         are rejected non-zero naming the key)
 #
 # [wake]
 #   max_tasks_per_wake      OPTIONAL  5
@@ -163,6 +165,22 @@ load_config() {
     # [dashboard] rows_per_column → DASHBOARD_ROWS_PER_COLUMN
     DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "$cfg" dashboard rows_per_column 21)}"
     export DASHBOARD_ROWS_PER_COLUMN
+
+    # [dashboard] dashboard_status_glyph → DASHBOARD_STATUS_GLYPH
+    # OPTIONAL; default is U+25A0 "■". Validated: must be exactly one visible
+    # character. Multi-character values exit non-zero with an error naming the
+    # key and the config file path — do not silently truncate.
+    if [[ -z "${DASHBOARD_STATUS_GLYPH:-}" ]]; then
+        local _glyph _char_count
+        _glyph="$(read_ini "$cfg" dashboard dashboard_status_glyph "■")"
+        _glyph="${_glyph:-■}"
+        _char_count=$(printf '%s' "$_glyph" | wc -m)
+        if [[ "$_char_count" -ne 1 ]]; then
+            echo "ERROR: load_config: dashboard_status_glyph must be exactly one character (got ${_char_count}): ${cfg}" >&2
+            return 1
+        fi
+        export DASHBOARD_STATUS_GLYPH="$_glyph"
+    fi
 
     # [wake] max_tasks_per_wake → MAX_TASKS_PER_WAKE
     export MAX_TASKS_PER_WAKE="${MAX_TASKS_PER_WAKE:-$(read_ini "$cfg" wake max_tasks_per_wake 5)}"

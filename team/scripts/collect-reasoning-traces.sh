@@ -57,6 +57,34 @@ AGENT_TYPE=""
 LAST_N=10
 PROJECT_FILTER=""
 
+_show_help() {
+    echo "Usage: $(basename "$0") <agent-type> [--last N] [--project <name>]"
+    echo ""
+    echo "Collect and bundle reasoning-trace files from per-project training corpora."
+    echo ""
+    echo "Arguments:"
+    echo "  <agent-type>       Role/agent name to filter on (e.g. coder, cm, tester, writer, pm)."
+    echo "                     Case-insensitive; corpus directories use lowercase names."
+    echo ""
+    echo "Flags:"
+    echo "  --last N           Emit the N most-recent traces (default: 10)."
+    echo "  --project <name>   Restrict output to this project only (default: all projects)."
+    echo "  --help, -h         Show this help and exit."
+    echo ""
+    echo "Output:"
+    echo "  A markdown bundle on stdout; each trace is preceded by a header line"
+    echo "  containing project, agent-type, filename, and modification timestamp."
+    echo "  Pipe to a file as needed:"
+    echo "    $(basename "$0") coder --last 5 > coder-traces.md"
+    echo "    $(basename "$0") coder --project pgai-agent-kanban > coder-traces.md"
+    echo ""
+    echo "Exit codes:"
+    echo "  0   Success (zero matching traces is not an error; an empty bundle is emitted)."
+    echo "  1   Configuration error (missing agent-type, invalid --last value, unknown"
+    echo "      --project name, or missing required environment)."
+    exit 0
+}
+
 usage() {
     echo "Usage: $(basename "$0") <agent-type> [--last N] [--project <name>]" >&2
     echo "  agent-type       Role/agent name to filter on (e.g. coder, cm, tester, writer, pm)" >&2
@@ -70,6 +98,9 @@ _i=0
 while [[ $_i -lt ${#_args[@]} ]]; do
     arg="${_args[$_i]}"
     case "$arg" in
+        --help|-h)
+            _show_help
+            ;;
         --last)
             _next=$(( _i + 1 ))
             if [[ $_next -ge ${#_args[@]} ]]; then

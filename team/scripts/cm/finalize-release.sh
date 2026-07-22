@@ -4,12 +4,13 @@
 # pushes main and the release tag to origin (or the configured REMOTE).
 #
 # Usage:
-#   cm-finalize-release.sh [--project <name>] [-y] [VERSION]
+#   cm-finalize-release.sh [--project <name>] [-y] [VERSION] [--help]
 #
 #   --project <name>   explicit project name (overrides PGAI_PROJECT_NAME env var)
-#   -y                 Skip the confirmation prompt (non-interactive / CI mode).
+#   -y, --yes          Skip the confirmation prompt (non-interactive / CI mode).
 #   VERSION            The version tag to push (e.g. v0.17.1). If omitted, the
 #                      script reads the most recent tag reachable from HEAD on main.
+#   --help, -h         print full usage and exit 0
 #
 # Project context resolution (highest to lowest precedence):
 #   1. --project <name> flag
@@ -58,6 +59,14 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 # shellcheck source=lib/project_paths.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/project_paths.sh"
 
+# --- Source version stamp helper for git_describe_tag_pattern ---
+# shellcheck source=lib/version_stamp.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/version_stamp.sh"
+
+# --- Source the shared Python invocation helper ---
+# shellcheck source=lib/pp_run_ops.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/pp_run_ops.sh"
+
 set -euo pipefail
 
 # --- Remote name ---
@@ -70,12 +79,61 @@ PROJECT_ARG=""
 SKIP_CONFIRM=false
 VERSION=""
 
+_cm_finalize_release_usage() {
+  echo "Usage: $(basename "$0") [--project <name>] [-y] [VERSION] [--help]" >&2
+  echo "" >&2
+  echo "  --project <name>  project name (required when PGAI_PROJECT_NAME not set)" >&2
+  echo "  -y, --yes         skip the confirmation prompt" >&2
+  echo "  VERSION           version tag to push (e.g. v0.17.1); auto-detected if omitted" >&2
+  echo "  --help, -h        print full usage and exit 0" >&2
+}
+
+_cm_finalize_release_help() {
+  cat <<HELPTEXT
+Usage: $(basename "$0") [--project <name>] [-y] [VERSION] [--help]
+
+Push main and the release tag to origin; optionally commit WRITER polish
+to release notes beforehand. Run from a regular operator terminal (not
+inside the Claude agent) so the PreToolUse hook does not intercept pushes.
+
+Arguments:
+  --project <name>  project name; overrides PGAI_PROJECT_NAME env var
+  -y, --yes         skip the interactive confirmation prompt (CI / scripted use)
+  VERSION           version tag to push (e.g. v0.17.1); when omitted the script
+                    reads the most recent tag reachable from HEAD on main
+  --help, -h        print this message and exit 0
+
+Project context resolution (highest to lowest precedence):
+  1. --project <name> flag
+  2. PGAI_PROJECT_NAME environment variable
+  3. FAIL — prints error naming both knobs, exits non-zero
+
+Exit codes:
+  0  Push complete (or --help requested, or operator aborted at the prompt)
+  1  Missing VERSION, tag not found locally, or git push failure
+
+Example:
+  cm-finalize-release.sh --project my-project v1.5.0
+  cm-finalize-release.sh --project my-project -y
+
+Configuration:
+  PGAI_PROJECT_NAME  fallback project name (when --project flag not used)
+  REPO_ROOT          override path to the repository root
+  GIT_REMOTE_NAME    remote name (default: origin)
+HELPTEXT
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --help|-h)
+      _cm_finalize_release_help
+      exit 0
+      ;;
     --project)
       if [[ -z "${2:-}" ]]; then
         echo "ERROR: --project requires a value" >&2
-        echo "Usage: $(basename "$0") [--project <name>] [-y] [VERSION]" >&2
+        echo "" >&2
+        _cm_finalize_release_usage
         exit 1
       fi
       PROJECT_ARG="$2"
@@ -87,7 +145,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     -*)
       echo "ERROR: Unknown flag: $1" >&2
-      echo "Usage: $(basename "$0") [--project <name>] [-y] [VERSION]" >&2
+      echo "" >&2
+      _cm_finalize_release_usage
       exit 1
       ;;
     *)
@@ -95,7 +154,8 @@ while [[ $# -gt 0 ]]; do
         VERSION="$1"
       else
         echo "ERROR: Unexpected argument: $1" >&2
-        echo "Usage: $(basename "$0") [--project <name>] [-y] [VERSION]" >&2
+        echo "" >&2
+        _cm_finalize_release_usage
         exit 1
       fi
       shift
@@ -133,6 +193,14 @@ fi
 # For projects with no branch_prefix, MAIN_BRANCH=main unchanged.
 MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
 
+# --- Resolve branch_prefix for prefix-aware git describe --match pattern ---
+# The describe match pattern must reflect the project's tag naming convention
+# (e.g. "ai_v[0-9]*" for prefixed lanes) so describe never walks past a
+# prefixed tag to a bare v-ancestor.  git_describe_tag_pattern constructs
+# the pattern; defaults to "v[0-9]*" when prefix is empty.
+_FINALIZE_BRANCH_PREFIX="$(pp_branch_prefix "$PROJECT_NAME" 2>/dev/null || true)"
+_FINALIZE_TAG_PATTERN="$(git_describe_tag_pattern "$_FINALIZE_BRANCH_PREFIX")"
+
 # --- Read push_to_remote flag via pp_push_to_remote helper ---
 # Default: 'true' — pushes main branch and tag to origin (existing behavior preserved).
 # Set [project] push_to_remote = false in project.cfg to complete the full local
@@ -151,22 +219,21 @@ if [[ -z "$VERSION" ]]; then
   CURRENT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if [[ "$CURRENT_BRANCH" != "$MAIN_BRANCH" ]]; then
     echo "  Current branch is '$CURRENT_BRANCH'; reading tag from origin/${MAIN_BRANCH}..."
-    VERSION="$(git -C "$REPO_ROOT" describe --tags --abbrev=0 "${REMOTE}/${MAIN_BRANCH}" 2>/dev/null)" || true
+    VERSION="$(git -C "$REPO_ROOT" describe --tags --match "$_FINALIZE_TAG_PATTERN" --abbrev=0 "${REMOTE}/${MAIN_BRANCH}" 2>/dev/null)" || true
     if [[ -z "$VERSION" ]]; then
       # Try local $MAIN_BRANCH ref directly
-      VERSION="$(git -C "$REPO_ROOT" describe --tags --abbrev=0 "$MAIN_BRANCH" 2>/dev/null)" || true
+      VERSION="$(git -C "$REPO_ROOT" describe --tags --match "$_FINALIZE_TAG_PATTERN" --abbrev=0 "$MAIN_BRANCH" 2>/dev/null)" || true
     fi
   else
-    # HEAD is on $MAIN_BRANCH: describe --tags --abbrev=0 HEAD is safe here.
-    # This code path only runs when CURRENT_BRANCH == MAIN_BRANCH (the if-branch
-    # above handles the non-main case by targeting origin/$MAIN_BRANCH or
-    # $MAIN_BRANCH directly).  On main, HEAD is the latest merged commit, so
-    # describe walks back to the most recent tag on main — which is exactly the
-    # released tag.  This is NOT the branch-sensitive resolver pattern:
-    # upgrade.sh's bug was that it used HEAD while on develop, where describe
-    # finds an older tag.  Here, HEAD is already constrained to $MAIN_BRANCH.
-    # (Assessed in CODER-20260630-003-repoint-upgrade-version-stamp; no follow-up needed.)
-    VERSION="$(git -C "$REPO_ROOT" describe --tags --abbrev=0 HEAD 2>/dev/null)" || true
+    # HEAD is on $MAIN_BRANCH: describe with the prefix-aware tag pattern is
+    # safe here.  This code path only runs when CURRENT_BRANCH == MAIN_BRANCH
+    # (the if-branch above handles the non-main case by targeting
+    # origin/$MAIN_BRANCH or $MAIN_BRANCH directly).  On main, HEAD is the
+    # latest merged commit, so describe walks back to the most recent release
+    # tag matching the project's own tag shape — exactly the released tag.
+    # The pattern prevents alias tags (e.g. 'latest') and bare-v ancestors
+    # from being picked on prefixed lanes.
+    VERSION="$(git -C "$REPO_ROOT" describe --tags --match "$_FINALIZE_TAG_PATTERN" --abbrev=0 HEAD 2>/dev/null)" || true
   fi
   if [[ -z "$VERSION" ]]; then
     echo "ERROR: Could not determine version from tags on ${MAIN_BRANCH}." >&2
@@ -256,8 +323,8 @@ else
     # matches a fresh regeneration.  PYTHONHASHSEED=0 ensures stable frozenset
     # iteration (same requirement as cm-release.sh Step 11b).
     _cl_bugs_dir="${KANBAN_ROOT}/projects/${PROJECT_NAME}/bugs"
-    PYTHONPATH="$KANBAN_ROOT" PYTHONHASHSEED=0 \
-      python3 -m pgai_agent_kanban.cm.changelog_writer \
+    PYTHONHASHSEED=0 \
+      pp_run_ops pgai_agent_kanban.cm.changelog_writer \
       "$REPO_ROOT" "$_cl_bugs_dir" \
       > "$REPO_ROOT/CHANGELOG.md"
     git -C "$REPO_ROOT" add "CHANGELOG.md"

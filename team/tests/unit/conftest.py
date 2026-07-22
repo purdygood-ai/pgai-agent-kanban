@@ -74,6 +74,7 @@ from tests.fixtures.two_project import two_project_root  # noqa: F401
 from tests.fixtures.log_stub import log_stub_fragment  # noqa: F401
 from tests.fixtures.log_stub import log_stub_capture  # noqa: F401
 from tests.fixtures.api_server import api_server  # noqa: F401
+from tests.fixtures.install_shaped_kanban_root import install_shaped_kanban_root  # noqa: F401
 
 
 # ---------------------------------------------------------------------------

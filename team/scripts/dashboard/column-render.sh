@@ -52,7 +52,8 @@
 #   against width).  Emits '(empty)' when there are no items.
 #
 #   In multi-project mode each row is prefixed with a project color tag:
-#     "■ " in the project's display_color (truecolor ANSI), or
+#     "<glyph> " in the project's display_color (truecolor ANSI), where glyph
+#     defaults to "■" and is configured via dashboard_status_glyph in kanban.cfg, or
 #     "[<short>] " in plain text when NO_COLOR/TERM=dumb.
 #
 # Environment:
@@ -210,6 +211,17 @@ DASHBOARD_MAX_ROWS_PER_PROJECT="$(read_ini "$_KANBAN_CFG" dashboard max_rows_per
 [[ "${DASHBOARD_MAX_ROWS_PER_COLUMN}" =~ ^[0-9]+$ ]] && (( DASHBOARD_MAX_ROWS_PER_COLUMN > 0 )) || DASHBOARD_MAX_ROWS_PER_COLUMN=34
 [[ "${DASHBOARD_MIN_ROWS_PER_PROJECT}" =~ ^[0-9]+$ ]] && (( DASHBOARD_MIN_ROWS_PER_PROJECT > 0 )) || DASHBOARD_MIN_ROWS_PER_PROJECT=3
 [[ "${DASHBOARD_MAX_ROWS_PER_PROJECT}" =~ ^[0-9]+$ ]] && (( DASHBOARD_MAX_ROWS_PER_PROJECT > 0 )) || DASHBOARD_MAX_ROWS_PER_PROJECT=8
+
+# [dashboard] dashboard_status_glyph → DASHBOARD_STATUS_GLYPH
+# OPTIONAL; default is U+25A0 "■" — byte-identical to pre-change output when
+# the key is absent.  A value already set in the environment (e.g. exported by
+# load_config upstream) wins; read_ini is only called when the env var is unset.
+# Exported so the Python subprocess can read it via os.environ.
+if [[ -z "${DASHBOARD_STATUS_GLYPH:-}" ]]; then
+    DASHBOARD_STATUS_GLYPH="$(read_ini "$_KANBAN_CFG" dashboard dashboard_status_glyph "■")"
+    DASHBOARD_STATUS_GLYPH="${DASHBOARD_STATUS_GLYPH:-■}"
+fi
+export DASHBOARD_STATUS_GLYPH
 
 # ---------------------------------------------------------------------------
 # ANSI color support
@@ -1088,9 +1100,12 @@ per_proj_render_blocks = []   # populated by IS_INPUT and IS_QUEUE branches belo
 # the per-project block population loop.
 # ---------------------------------------------------------------------------
 
-# Tag width: "■ " = 2 visible chars, or "[xxxx] " = 7 visible chars (no color).
+# Tag width: "<glyph> " + trailing space = (glyph display width + 1) visible chars,
+# or "[xxxx] " = 7 visible chars (no color).  Default glyph is "■" (2 visible chars
+# including the trailing space); a single-char ASCII glyph also yields 2 visible chars.
 # Reserve that many chars from width for the tag, leaving the rest for the ID.
-TAG_VIS_LEN = 2   # "■ " in color mode
+_status_glyph = os.environ.get("DASHBOARD_STATUS_GLYPH", "■") or "■"
+TAG_VIS_LEN = len(_status_glyph) + 1   # configured glyph (1 char) + trailing space
 TAG_NC_LEN  = 7   # "[xxxx] " in no-color mode (4-char short name + brackets + space)
 
 def _render_entry_tagged(e):
@@ -1101,7 +1116,7 @@ def _render_entry_tagged(e):
 
     if use_color:
         tag_color = project_tag_color(pcolor)
-        tag       = f"{tag_color}■{RESET} "
+        tag       = f"{tag_color}{_status_glyph}{RESET} "
         tag_vis   = TAG_VIS_LEN
     else:
         tag     = f"[{e['proj_name'][:4]}] "

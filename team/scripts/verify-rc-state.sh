@@ -61,8 +61,51 @@ _usage() {
     echo "  --verbose    print every check, not just WARN/ERROR" >&2
 }
 
+_show_help() {
+    echo "Usage: $(basename "$0") <project> [--verbose]"
+    echo ""
+    echo "Read-only consistency checker for kanban project RC state."
+    echo ""
+    echo "Arguments:"
+    echo "  <project>    Project name; must match a directory under projects/<name>/."
+    echo ""
+    echo "Flags:"
+    echo "  --verbose    Print every check result (OK, WARN, ERROR)."
+    echo "               By default only WARN/ERROR and the final summary are printed."
+    echo "  --help, -h   Show this help and exit."
+    echo ""
+    echo "Checks performed:"
+    echo "  a. release-state.md consistency (Active RC format, timestamps, Last Released)."
+    echo "  b. Queue <-> folder consistency (open queue entries have matching task folders)."
+    echo "  c. status.md state <-> queue marker consistency."
+    echo "  d. Cross-task Prerequisites references resolve to existing task folders."
+    echo "  e. release-state.md <-> git branch consistency."
+    echo "  f. Bundle invariants (PRIORITY/BUG files referenced in requirements bundles exist)."
+    echo ""
+    echo "Output format:"
+    echo "  [OK]    <message>"
+    echo "  [WARN]  <message>"
+    echo "  [ERROR] <message>"
+    echo "  verify-rc-state: N errors, N warnings, N ok"
+    echo ""
+    echo "Exit codes:"
+    echo "  0   No ERRORs found (WARN findings do not affect exit code)."
+    echo "  1   One or more ERROR findings."
+    echo "  2   Pre-flight failure (bad arguments, project not found, etc.)."
+    echo ""
+    echo "Configuration:"
+    echo "  KANBAN_ROOT           Path to the kanban live install root"
+    echo "                        (default: \$HOME/pgai_agent_kanban)."
+    echo "  PGAI_DEV_TREE_PATH    Path to the dev tree git clone"
+    echo "                        (derived from project config when not set)."
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --help|-h)
+            _show_help
+            exit 0
+            ;;
         --verbose)
             VERBOSE=1
             shift
@@ -95,11 +138,21 @@ if [[ -z "$PROJECT_ARG" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Bootstrap: self-locate → source shell-env → fail loud
+# ---------------------------------------------------------------------------
+# Must happen before the first use of PGAI_AGENT_KANBAN_ROOT_PATH so the
+# script runs from a fresh shell without manual pre-sourcing.  Explicit
+# operator exports win via env_bootstrap.sh's idempotency guard.
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+
+# ---------------------------------------------------------------------------
 # Resolve script / library paths (BEFORE strict mode)
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Resolve KANBAN_ROOT
+# PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh or the operator.
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 # Source optional env / config files (they may use unset vars — pre-strict)
@@ -129,8 +182,6 @@ source "${SCRIPT_DIR}/lib/semver.sh"
 # Enable strict mode for our own code
 # ---------------------------------------------------------------------------
 set -euo pipefail
-# shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve project paths

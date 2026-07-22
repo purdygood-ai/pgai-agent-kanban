@@ -173,8 +173,14 @@ def test_config_mixed_valid_and_invalid_lines(
     assert "parse error" in captured.err
 
 
-def test_config_kanban_root_placeholder_is_treated_as_literal() -> None:
-    """parse_config does not expand __KANBAN_ROOT__; that is install-pseudocron's job."""
+def test_config_placeholder_string_treated_as_literal() -> None:
+    """parse_config treats any token including __KANBAN_ROOT__ as a literal string.
+
+    parse_config never performs variable substitution; it tokenises only.
+    A cfg that still contains __KANBAN_ROOT__ (e.g. a legacy or hand-authored
+    file) will parse without error — the scheduler will attempt to run the
+    literal string as-is, which is the correct parse-time behaviour.
+    """
     result = parse_config("5 __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm\n")
     assert len(result) == 1
     assert "__KANBAN_ROOT__" in result[0][1]
@@ -329,9 +335,7 @@ def test_small_tier_template_parses_to_jobs() -> None:
     """pseudocron-small.cfg.example parses to at least one valid job.
 
     Uses parse_config() to confirm the template content is valid pseudocron
-    format and that the __KANBAN_ROOT__ placeholder does not break parsing
-    (it is embedded in the command field, not the minute field, so parse_config
-    accepts it as a literal string).
+    format and that ROOT-RELATIVE command strings parse without error.
     """
     text = _tier_template_path("small").read_text(encoding="utf-8")
     jobs = parse_config(text, source="pseudocron-small.cfg.example")
@@ -365,16 +369,194 @@ def test_large_tier_template_parses_to_jobs() -> None:
         assert 0 <= minute <= 59, f"Minute {minute} out of range in large template"
 
 
-def test_small_tier_template_jobs_reference_kanban_root_placeholder() -> None:
-    """Jobs in pseudocron-small.cfg.example reference __KANBAN_ROOT__ for portability.
+def test_no_tier_template_contains_kanban_root_placeholder() -> None:
+    """grep-zero: none of the three tier templates contain __KANBAN_ROOT__.
 
-    The install script substitutes __KANBAN_ROOT__ at install time.  A template
-    that hardcodes a specific path is non-portable.
+    Templates use ROOT-RELATIVE commands.  pseudocron.py sets cwd to the
+    resolved kanban root so relative paths work from any mount point.
+    A placeholder remaining in a template would be passed literally to the
+    shell and fail at runtime.
     """
-    text = _tier_template_path("small").read_text(encoding="utf-8")
-    jobs = parse_config(text, source="pseudocron-small.cfg.example")
-    kanban_root_refs = [cmd for _min, cmd in jobs if "__KANBAN_ROOT__" in cmd]
-    assert len(kanban_root_refs) >= 1, (
-        "No jobs in small tier template reference __KANBAN_ROOT__; "
-        "template may have been incorrectly substituted or uses hardcoded paths."
+    for tier in ("small", "medium", "large"):
+        text = _tier_template_path(tier).read_text(encoding="utf-8")
+        assert "__KANBAN_ROOT__" not in text, (
+            f"pseudocron-{tier}.cfg.example still contains __KANBAN_ROOT__; "
+            "templates must use ROOT-RELATIVE commands only."
+        )
+
+
+def test_tier_template_commands_are_root_relative() -> None:
+    """All active job commands in tier templates are ROOT-RELATIVE (no leading /).
+
+    ROOT-RELATIVE means the command does not begin with '/' — it starts with
+    a directory name that resolves under the kanban root when pseudocron.py
+    sets cwd=root before spawning the subprocess.
+    """
+    for tier in ("small", "medium", "large"):
+        text = _tier_template_path(tier).read_text(encoding="utf-8")
+        jobs = parse_config(text, source=f"pseudocron-{tier}.cfg.example")
+        assert len(jobs) >= 1, f"No jobs parsed from {tier} template"
+        for _minute, cmd in jobs:
+            # Extract the first token (the executable / path before the first space).
+            first_token = cmd.split()[0]
+            assert not first_token.startswith("/"), (
+                f"Command in {tier} template begins with absolute path: {first_token!r}. "
+                "Templates must use ROOT-RELATIVE commands so they work from any mount."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Relocation fixture — identical relative cfg fires from two different mounts
+# ---------------------------------------------------------------------------
+#
+# Behaviorally asserts that a ROOT-RELATIVE pseudocron cfg that refers to
+# "scripts/marker.sh" fires correctly when pseudocron's cwd is set to the
+# mount root.  The test simulates two independent kanban installations at
+# different paths and confirms each produces its own marker file.
+
+def test_relocation_relative_cfg_fires_from_two_mounts(tmp_path: pathlib.Path) -> None:
+    """Relocation fixture: identical relative cfg fires correctly from two mount paths.
+
+    Two temp directories simulate two kanban installations at different paths.
+    Each has a tiny scripts/marker.sh that writes a marker file.
+    The same ROOT-RELATIVE cfg ("0 scripts/marker.sh") is placed in each.
+    Running the job with cwd=mount_root confirms the relative command resolves
+    to the correct installation — proving relocation safety.
+    """
+    import subprocess
+    import stat
+
+    cfg_text = "0 scripts/marker.sh\n"
+
+    for mount_label in ("mount_a", "mount_b"):
+        mount_root = tmp_path / mount_label
+        scripts_dir = mount_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+
+        marker_file = mount_root / f"marker-{mount_label}.txt"
+        marker_sh = scripts_dir / "marker.sh"
+        marker_sh.write_text(f"#!/bin/bash\ntouch {marker_file}\n")
+        marker_sh.chmod(marker_sh.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+        jobs = parse_config(cfg_text, source="test-relocation.cfg")
+        assert len(jobs) == 1
+        _minute, command = jobs[0]
+
+        # Fire the job with cwd=mount_root (mirrors pseudocron.py behaviour).
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=str(mount_root),
+            timeout=10,
+        )
+        assert result.returncode == 0, (
+            f"Job failed for {mount_label} with cwd={mount_root}: returncode={result.returncode}"
+        )
+        assert marker_file.exists(), (
+            f"Marker file not created for {mount_label}; "
+            f"relative command did not resolve under cwd={mount_root}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Container-mount-path relocation variant — /pgai_agent_kanban path form
+# ---------------------------------------------------------------------------
+#
+# Extends the two-mount relocation fixture above to cover the specific
+# container deployment path: when the kanban is bind-mounted at
+# /pgai_agent_kanban (the canonical container mount path), the ROOT-RELATIVE
+# cfg must still fire commands relative to that mount root.
+#
+# This is the in-suite proof that the container's pseudocron.cfg will work
+# correctly when the kanban is mounted at /pgai_agent_kanban rather than at
+# an arbitrary host path.  The test simulates the container mount under
+# tmp_path so it runs without Docker.
+
+def test_relocation_container_mount_path_fires_correctly(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Container-mount-path relocation: relative cfg fires correctly from /pgai_agent_kanban-shaped path.
+
+    Simulates the canonical container deployment: the kanban is bind-mounted
+    at a /pgai_agent_kanban-shaped directory.  A ROOT-RELATIVE pseudocron cfg
+    fires commands relative to that mount root, confirming pseudocron.py's
+    cwd-setting behaviour is correct in the container environment.
+    """
+    import subprocess
+    import stat
+
+    # Simulate /pgai_agent_kanban under tmp_path (no real mount needed).
+    container_mount = tmp_path / "pgai_agent_kanban"
+    scripts_dir = container_mount / "scripts"
+    scripts_dir.mkdir(parents=True)
+
+    marker_file = container_mount / "marker-container-mount.txt"
+    marker_sh = scripts_dir / "marker.sh"
+    marker_sh.write_text(f"#!/bin/bash\ntouch {marker_file}\n")
+    marker_sh.chmod(
+        marker_sh.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
+    )
+
+    cfg_text = "0 scripts/marker.sh\n"
+    jobs = parse_config(cfg_text, source="test-container-mount.cfg")
+    assert len(jobs) == 1
+    _minute, command = jobs[0]
+
+    # Fire the job with cwd=container_mount (mirrors pseudocron.py behaviour
+    # when PGAI_AGENT_KANBAN_ROOT_PATH=/pgai_agent_kanban in the container).
+    result = subprocess.run(
+        ["bash", "-c", command],
+        cwd=str(container_mount),
+        timeout=10,
+    )
+    assert result.returncode == 0, (
+        f"Job failed for container-mount path with cwd={container_mount}: "
+        f"returncode={result.returncode}"
+    )
+    assert marker_file.exists(), (
+        "Marker file not created for container-mount path variant; "
+        f"relative command did not resolve under cwd={container_mount}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Legacy fixture — absolute-path cfg still fires (backward compatibility)
+# ---------------------------------------------------------------------------
+#
+# Confirms that an existing pseudocron.cfg with absolute-path commands
+# continues to work after the ROOT-RELATIVE migration.  Absolute paths
+# are independent of cwd, so they fire correctly regardless of the setting.
+
+def test_legacy_absolute_path_cfg_still_fires(tmp_path: pathlib.Path) -> None:
+    """Legacy fixture: an absolute-path cfg still fires after the ROOT-RELATIVE migration.
+
+    Operators who installed pseudocron.cfg before this change may have absolute
+    paths in their config.  pseudocron.py passes cwd=root to Popen, but
+    absolute commands are unaffected by cwd — they resolve to the exact path
+    given.  This test confirms backward compatibility.
+    """
+    import subprocess
+
+    marker_file = tmp_path / "legacy-marker.txt"
+    # Absolute path to /bin/touch (or equivalent); write a cfg with an absolute command.
+    # We use '/bin/sh -c' with an absolute marker path to keep this host-agnostic.
+    cfg_text = f"0 /bin/sh -c 'touch {marker_file}'\n"
+
+    jobs = parse_config(cfg_text, source="test-legacy.cfg")
+    assert len(jobs) == 1
+    _minute, command = jobs[0]
+
+    # Use an unrelated cwd to confirm the absolute command fires independently of cwd.
+    unrelated_cwd = str(tmp_path / "some" / "other" / "path")
+    pathlib.Path(unrelated_cwd).mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        ["bash", "-c", command],
+        cwd=unrelated_cwd,
+        timeout=10,
+    )
+    assert result.returncode == 0, (
+        f"Legacy absolute-path job failed: returncode={result.returncode}"
+    )
+    assert marker_file.exists(), (
+        "Marker file not created; absolute-path command did not fire as expected."
     )

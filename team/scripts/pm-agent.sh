@@ -26,8 +26,15 @@
 #   bashrc  — personal shell config
 #   env     — wake script tunables (PM_MAX_TASKS lives here too)
 
+# --- Bootstrap: self-locate → source shell-env → fail loud ---
+# Must happen before the first use of PGAI_AGENT_KANBAN_ROOT_PATH so the
+# script runs from a fresh shell without manual pre-sourcing.  Explicit
+# operator exports win via env_bootstrap.sh's idempotency guard.
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+
 # --- Resolve kanban root ---
-# Done before strict mode so the error message is clean if it fails.
+# PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh or the operator.
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 if [[ ! -d "$TEAM_ROOT" ]]; then
@@ -62,8 +69,6 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # --- Now enable strict mode for our own code ---
 set -euo pipefail
-# shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Source project paths helper ---
 KANBAN_ROOT="$TEAM_ROOT"
@@ -388,7 +393,7 @@ _TARGET_PROJECT="$(pp_require_project_context "$_PM_EFFECTIVE_PROJECT")" || {
 # A Target Version of "none" (no ## Target Version field) is skipped; the PM
 # agent will treat it as an auto-sentinel when it runs.
 #
-# Version semantics gate (mirrors BUG-0042 fix in discovery eligibility):
+# Version semantics gate (mirrors the equivalent gate in discovery eligibility):
 # Ceiling checks are semver consumption checkpoints — they are meaningless for
 # label or none projects where versions are names, not numbers.  Load the
 # workflow plugin to query the project's declared version_semantics; skip the

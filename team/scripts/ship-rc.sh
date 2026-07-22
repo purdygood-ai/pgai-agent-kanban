@@ -54,6 +54,13 @@
 #   REPO_ROOT — path to the repository root (default: per-project dev_tree_path from
 #               project.cfg, then global PGAI_DEV_TREE_PATH, then script's parent-parent dir)
 
+# --- Bootstrap: self-locate → source shell-env → fail loud ---
+# Must happen before the first use of PGAI_AGENT_KANBAN_ROOT_PATH so the
+# script runs from a fresh shell without manual pre-sourcing.  Explicit
+# operator exports win via env_bootstrap.sh's idempotency guard.
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+
 _ship_rc_usage() {
   echo "Usage: $(basename "$0") --project <name> --key vX.Y.Z [--dry-run] [--help]" >&2
   echo "" >&2
@@ -172,6 +179,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # --- Source optional config files (BEFORE strict mode) ---
 # The kanban bashrc/env may have unset vars, non-zero returns, or interactive
 # aliases that would trip strict mode. Source them first.
+# PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh (sourced above) or the operator.
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
@@ -207,8 +215,6 @@ source "$SCRIPT_DIR/lib/cm_release_hooks.sh"
 
 # --- Enable strict mode for our own code ---
 set -euo pipefail
-# shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Clean exit handling ---
 cleanup_on_exit() {

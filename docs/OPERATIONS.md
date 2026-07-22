@@ -1939,6 +1939,10 @@ differences as follow-up work: file calibration bugs as they appear, ship patch 
 (v0.27.1+) to adjust role-file prompts. Calibration regressions do not gate v0.27.0; the
 substrate that enables provider switching is the achievement here.
 
+### Proxy compatibility: llm_thinking_enabled
+
+Some deployment environments route provider traffic through older HTTP proxies that reject responses carrying extended-thinking (reasoning) blocks; the visible symptom is that every agent invocation fails outright. Set `[providers] llm_thinking_enabled = false` in `kanban.cfg` on such deployments — the framework then passes the provider's thinking-disable flag on each invocation (currently `--thinking disabled` on the Claude lane; the same key maps to the equivalent switch on other provider lanes as they mature). The default is `true` and modern deployments should not change it; leave the key absent for the default behavior.
+
 ## PM Mode Control
 
 The autonomous scan described above can be toggled between two modes via the `PGAI_KANBAN_PM_MODE` environment variable.

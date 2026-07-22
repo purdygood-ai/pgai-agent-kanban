@@ -47,6 +47,7 @@ from pgai_agent_kanban.cm.changelog_writer import (
     load_published_manifest,
     parse_bug_file,
     regenerate,
+    _earliest_published_gte,
     _parse_version,
 )
 
@@ -201,11 +202,11 @@ class TestRealDataChangelog:
     ) -> None:
         """Criterion 5a: v1.0.0 entry shows correct affects/fixed-in per PUBLISHED state.
 
-        At implementation time, PUBLISHED contains only v1.0.0. an earlier defect is
-        fixed internally in v1.16.2, which is NOT in PUBLISHED, so the
-        rendering must be 'fix pending next release' (not 'fixed in v1.16.2').
-        When v1.16.2 is added to PUBLISHED in a future promotion, it will flip
-        to 'fixed in v1.16.2' — this test captures the current state.
+        The underlying defect (BUG-0023 / KI-1.0.0.1) was fixed internally in v1.16.2.
+        The writer's rendering rule: if the earliest PUBLISHED version >= v1.16.2 exists,
+        the KI line reads 'fixed in <that-version>'; otherwise it reads
+        'fix pending next release'.  This test reflects that behavioral contract
+        for whatever PUBLISHED manifest is checked into the repo at test time.
         """
         self._ensure_data_available()
 
@@ -230,18 +231,20 @@ class TestRealDataChangelog:
             f"Expected 'affects v1.0.0' in KI line but got: {ki_line!r}"
         )
 
-        # Rendering depends on PUBLISHED state:
-        # v1.16.2 in PUBLISHED → 'fixed in v1.16.2'
-        # v1.16.2 NOT in PUBLISHED → 'fix pending next release'
-        if "v1.16.2" in published:
-            assert "fixed in" in ki_line, (
-                f"v1.16.2 is in PUBLISHED; expected 'fixed in' in KI line: {ki_line!r}"
+        # Rendering depends on PUBLISHED state — mirrors the writer's
+        # _earliest_published_gte rule anchored to the internal fix version v1.16.2:
+        #   earliest PUBLISHED >= v1.16.2 exists  → 'fixed in <that-version>'
+        #   no PUBLISHED version >= v1.16.2        → 'fix pending next release' / 'open'
+        earliest_fixed = _earliest_published_gte("v1.16.2", published)
+        if earliest_fixed:
+            assert f"fixed in {earliest_fixed}" in ki_line, (
+                f"Earliest PUBLISHED version >= v1.16.2 is {earliest_fixed!r}; "
+                f"expected 'fixed in {earliest_fixed}' in KI line: {ki_line!r}"
             )
         else:
-            # Implementation-time state: fix pending
             assert "fix pending next release" in ki_line or "open" in ki_line, (
-                f"v1.16.2 not in PUBLISHED; expected 'fix pending' or 'open' in "
-                f"KI line: {ki_line!r}"
+                f"No PUBLISHED version >= v1.16.2; expected 'fix pending next release' "
+                f"or 'open' in KI line: {ki_line!r}"
             )
 
     def test_bug_0023_file_carries_public_id_ki_1_0_0_1(self) -> None:

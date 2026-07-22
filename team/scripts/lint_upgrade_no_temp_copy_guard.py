@@ -9,7 +9,7 @@ WHY THIS EXISTS
 ---------------
 The v1.7.0 two-phase upgrade architecture retired the self-overwrite guard
 mechanism (_PGAI_UPGRADE_SELF_COPY, _PGAI_UPGRADE_REEXEC, _PGAI_UPGRADE_ORIG_DIR).
-BUG-0018 showed that a squash-merge conflict at the CM layer can silently resurrect
+an earlier defect showed that a squash-merge conflict at the CM layer can silently resurrect
 the retired block — TESTER saw the correct RC tree; CM's squash to ai_main
 produced the wrong result for upgrade.sh.
 

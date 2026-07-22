@@ -1,0 +1,78 @@
+# docker/rhel9/docker-compose.example.yaml
+# Compose example for the RHEL9/UBI9 flavor of the pgai-agent-kanban container.
+#
+# Flavor choice: RHEL9/UBI9 (registry.access.redhat.com/ubi9/ubi) — for sites
+# where security/compliance tooling requires RHEL-lineage images.
+# For non-compliance-constrained environments, use docker/debian/docker-compose.example.yaml
+# instead; the Debian image is smaller and the default.
+# The two files differ only in the dockerfile: line and context depth.
+#
+# USAGE:
+#   Copy this file to docker-compose.yaml, adjust the four bind-mount sources
+#   to match your host layout, then run:
+#
+#     docker compose up -d
+#
+# MOUNT CONTRACT:
+#   All four mounts must be present before the container starts.
+#   docker/entrypoint.sh exits 1 naming each missing mount.
+#
+# PORT PUBLISHING:
+#   The pgai-agent-kanban API server is disabled by default.  If you enable
+#   it via kanban.cfg, you may un-comment the ports section below.
+#   NEVER publish a host-reachable port without reviewing your site's
+#   firewall policy first.  The example is loopback-only (127.0.0.1).
+
+services:
+  pgai-kanban:
+    build:
+      context: ../..     # repo root (this file lives at docker/rhel9/; context goes up two levels)
+      dockerfile: docker/rhel9/Dockerfile
+    # Uncomment image: instead of build: to run a pre-built image:
+    # image: pgai-agent-kanban-rhel9:latest
+
+    # Override the default CMD to choose a startup mode:
+    #   (no command)  — pseudocron in the foreground as PID 1 (default)
+    #   shell         — interactive bash (for diagnostics)
+    #   dashboard     — tmux dashboard session
+    # command: shell
+
+    environment:
+      # TERM is already set to xterm-256color in the Dockerfile ENV layer;
+      # repeat it here so it survives any compose environment_file overrides.
+      - TERM=xterm-256color
+      # PGAI_WORKSPACE_MOUNT must match the container-side path of Mount 2 below.
+      # Without this, the entrypoint cannot distinguish a bind-mounted workspace
+      # from the image-baked /home/kanban directory created by useradd --create-home.
+      - PGAI_WORKSPACE_MOUNT=/home/operator
+
+    volumes:
+      # Mount 1: /pgai_agent_kanban — the kanban install volume.
+      # Populate this directory on the host first with install.sh, then mount
+      # it here so the container reads the same kanban tree the host prepared.
+      - /path/to/kanban/install:/pgai_agent_kanban
+
+      # Mount 2: /home/<user> — user workspace (dev trees, project repos).
+      # Replace 'operator' with the actual username whose home directory
+      # contains the dev trees and project repositories you want accessible.
+      - /home/operator:/home/operator
+
+      # Mount 3: /claude — site-specific payload directory.
+      # Customer/site content that the kanban chain reads and writes.
+      - /path/to/claude/payload:/claude
+
+      # Mount 4: ./claude → ~/.claude inside the container — agent CLI config.
+      # This directory holds the agent CLI credentials and configuration.
+      # It is NEVER baked into the image; always mount it at runtime.
+      # The host path is relative to this compose file (./claude resolves to
+      # the claude/ directory adjacent to this file) or use ${HOME}/.claude.
+      - ./claude:/home/kanban/.claude
+
+    # Port publishing — DISABLED by default.
+    # Un-comment to expose the API server on loopback ONLY:
+    #   - "127.0.0.1:8080:8080"
+    # Never publish 0.0.0.0:<port> without explicit firewall review.
+    # ports:
+    #   - "127.0.0.1:8080:8080"
+
+    restart: unless-stopped

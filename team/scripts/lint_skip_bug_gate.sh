@@ -223,6 +223,7 @@ if [[ "${_LSG_TOTAL_FINDINGS}" -gt 0 ]]; then
     echo "  (a) replacing the placeholder/missing citation with a real filed BUG-NNNN" >&2
     echo "      whose file exists in the bugs/ directory, or" >&2
     echo "  (b) un-skipping the test if the underlying issue is resolved." >&2
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     echo "  See PRIORITY-0100-20260624-skipped-tests-cite-real-bug-grep-gated.md for policy." >&2
     exit 1
 fi

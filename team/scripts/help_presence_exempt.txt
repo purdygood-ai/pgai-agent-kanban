@@ -1,0 +1,23 @@
+# help_presence_exempt.txt
+# Exempt list for lint_help_presence.py.
+#
+# Each line names the basename of a script under team/scripts/ that is
+# exempt from the help-presence lint requirement.  Blank lines and lines
+# beginning with # are ignored.
+#
+# Exemption categories:
+#
+#   dashboard-internal  Scripts invoked by the dashboard rendering engine
+#                       rather than by operators directly.  They receive
+#                       arguments from the dashboard and are not exposed
+#                       on the operator command line.
+#
+#   process-internal    Scripts invoked by other scripts (cron, batch
+#                       dispatcher, overwatch runner) and not exposed on
+#                       the operator command line.  They do not accept
+#                       operator flags and have no help surface.
+#
+# ---------------------------------------------------------------------------
+# No entries currently exempt.  All previously listed scripts now implement
+# --help/-h and are operator-facing.
+# ---------------------------------------------------------------------------

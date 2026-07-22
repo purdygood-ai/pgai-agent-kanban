@@ -152,9 +152,77 @@ def _line_is_comment(line: str) -> bool:
     return line.lstrip().startswith("#")
 
 
+def _heredoc_body_line_numbers(lines: list[str]) -> set[int]:
+    """Return the set of 1-based line numbers that fall inside a heredoc body.
+
+    A heredoc body is the content between a ``<<TOKEN`` (or ``<<'TOKEN'``,
+    ``<<"TOKEN"``, ``<<-TOKEN``, etc.) opener and its matching close-tag line.
+    Body lines are documentation, not executable code, so references to env
+    vars inside them must not be treated as runtime usage.
+
+    The opener is detected on any non-comment line that contains the pattern
+    ``<<[-]?(['"]?)WORD\\1`` (with optional ``-`` for tab-stripping and optional
+    quoting around the delimiter).  The close-tag is a line whose stripped
+    content equals the unquoted WORD (bash ignores leading tabs when ``<<-``
+    was used; this implementation strips leading whitespace from close-tag
+    candidates conservatively).
+
+    Lines that ARE the opener or close-tag themselves are not included in the
+    returned set — only the body lines between them.
+    """
+    # Regex to detect a heredoc opener embedded anywhere in a non-comment line.
+    # Captures: optional '-' (tab-strip flag), optional quote char, the TOKEN.
+    _HEREDOC_OPEN_RE = re.compile(
+        r'<<(-?)([\'"]?)([A-Za-z_][A-Za-z0-9_]*)\2'
+    )
+
+    body_lines: set[int] = set()
+    # Stack of active heredoc delimiters (unquoted TOKEN strings).
+    # Multiple heredocs can be opened on the same command line (rare but valid).
+    active_delimiters: list[tuple[str, bool]] = []  # (token, tab_strip)
+
+    for lineno, line in enumerate(lines, start=1):
+        stripped = line.lstrip()
+
+        if active_delimiters:
+            # We are inside one or more heredoc bodies.
+            # Check if this line closes the innermost heredoc.
+            token, tab_strip = active_delimiters[-1]
+            # Close-tag: line stripped of leading whitespace (tabs when <<-) equals TOKEN.
+            close_candidate = line.strip() if tab_strip else line.rstrip("\n").rstrip("\r")
+            if close_candidate == token:
+                # This line is the close-tag; pop the delimiter but do NOT add it to body.
+                active_delimiters.pop()
+            else:
+                # This line is a body line — mark it.
+                body_lines.add(lineno)
+            # Even inside a heredoc body, bash does NOT allow nested heredoc openers
+            # to be parsed (they are literal text).  Skip opener detection for body lines.
+            continue
+
+        # Not currently inside a heredoc body.  Skip comment lines for opener detection.
+        if stripped.startswith("#"):
+            continue
+
+        # Detect all heredoc openers on this (non-comment) line.
+        for m in _HEREDOC_OPEN_RE.finditer(line):
+            tab_flag = m.group(1) == "-"
+            token = m.group(3)
+            active_delimiters.append((token, tab_flag))
+        # Opener line itself is NOT added to body_lines.
+
+    return body_lines
+
+
 def _file_references_root_var(text: str) -> bool:
-    """Return True when the file contains a non-comment line referencing the root env var."""
-    for line in text.splitlines():
+    """Return True when the file contains a non-comment, non-heredoc-body line
+    referencing the root env var.
+    """
+    lines = text.splitlines()
+    heredoc_body = _heredoc_body_line_numbers(lines)
+    for lineno, line in enumerate(lines, start=1):
+        if lineno in heredoc_body:
+            continue
         if not _line_is_comment(line) and _ROOT_VAR in line:
             return True
     return False
@@ -181,6 +249,77 @@ def _file_sources_approved_prelude(text: str) -> bool:
             ):
                 return True
     return False
+
+
+def _source_precedes_first_usage(text: str) -> tuple[bool, int, int]:
+    """Return whether the approved prelude source appears BEFORE the first usage.
+
+    The predicate gap this lint targets: a script can source an approved
+    prelude anywhere in the file and pass the old presence-only check — even
+    when the source appears AFTER the first non-comment runtime use of
+    PGAI_AGENT_KANBAN_ROOT_PATH.  Such a script fails from a fresh shell because
+    the env var is read before the bootstrap has a chance to set it.
+
+    This function closes that hole by checking LINE ORDER, not just presence.
+
+    Heredoc body lines are excluded from the usage scan.  A reference to
+    PGAI_AGENT_KANBAN_ROOT_PATH inside a ``<<HELPTEXT ... HELPTEXT`` block is
+    documentation (for example, a ``--help`` output block), not executable code.
+    Including heredoc body text in the first-use scan produces false ordering
+    violations when ``--help`` heredocs that describe the env var appear above
+    the ``source env_bootstrap.sh`` line.
+
+    Parameters
+    ----------
+    text:
+        Full file content as a string.
+
+    Returns
+    -------
+    tuple[bool, int, int]
+        (ordering_ok, first_source_line, first_usage_line)
+        ``ordering_ok`` is True when the source appears before the first usage
+        (or when the file has a source but no runtime usage — exempt).
+        Line numbers are 1-based; 0 means "not found".
+        When ``ordering_ok`` is False, the caller should report both line numbers
+        in the violation message so the operator knows exactly what to move.
+    """
+    lines = text.splitlines()
+    heredoc_body = _heredoc_body_line_numbers(lines)
+    first_source_line: int = 0
+    first_usage_line: int = 0
+
+    for lineno, line in enumerate(lines, start=1):
+        # Skip heredoc body lines — they are documentation, not executable code.
+        if lineno in heredoc_body:
+            continue
+
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+
+        # Detect the first approved-prelude source call.
+        if first_source_line == 0:
+            for prelude in _BASH_APPROVED_PRELUDES:
+                if re.search(r'\b(source|\.)\b.*' + re.escape(prelude), stripped):
+                    first_source_line = lineno
+                    break
+
+        # Detect the first non-comment, non-heredoc-body runtime use of the root env var.
+        if first_usage_line == 0 and _ROOT_VAR in line:
+            first_usage_line = lineno
+
+    # Ordering is correct when:
+    #  - There is a source AND it precedes the first usage.
+    #  - There is a source but no usage (the bootstrap call itself may not
+    #    count, and pure-bootstrap helpers don't use the var directly).
+    if first_source_line == 0:
+        # No source found — not an ordering issue, handled by _file_sources_approved_prelude.
+        return True, 0, first_usage_line
+    if first_usage_line == 0:
+        # Source present, no runtime usage detected — ordering is fine.
+        return True, first_source_line, 0
+    return first_source_line < first_usage_line, first_source_line, first_usage_line
 
 
 def check_bash_side(
@@ -253,6 +392,26 @@ def check_bash_side(
                         message=(
                             f"references {_ROOT_VAR} but does not source an approved prelude "
                             f"(env_bootstrap.sh or wake_common.sh)"
+                        ),
+                    )
+                )
+                continue
+
+            # Ordering check: the approved prelude source must appear BEFORE
+            # the first non-comment runtime use of the root env var.
+            # A source present but placed AFTER the first usage is the predicate
+            # hole this lint closes: the script still fails from a fresh shell
+            # even though the old presence-only predicate reported it as clean.
+            ordering_ok, src_line, use_line = _source_precedes_first_usage(text)
+            if not ordering_ok:
+                violations.append(
+                    Violation(
+                        path=sh_path,
+                        message=(
+                            f"sources approved prelude at line {src_line} but "
+                            f"{_ROOT_VAR} is first used at line {use_line} — "
+                            f"the source must appear before the first usage so "
+                            f"the script bootstraps correctly from a fresh shell"
                         ),
                     )
                 )

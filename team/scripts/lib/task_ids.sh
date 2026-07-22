@@ -14,6 +14,7 @@
 # Format:
 #   <AGENT>-YYYYMMDD-NNN-slug
 #   e.g. PM-20260518-001-decompose-v0-26-1
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #        CODER-20260518-002-implement-feature
 #
 # ===========================================================================
@@ -26,17 +27,24 @@
 # Emission:
 #   SEQ=$(kanban_next_task_seq "$TASKS_DIR" "CODER" "20260518")
 #   ID=$(kanban_task_id "$TASKS_DIR" "CODER" "20260518" "fix-something")
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #   # → "CODER-20260518-001-fix-something"
 #
 # Parsing:
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #   kanban_parse_task_id "CODER-20260518-002-implement-feature"
 #   # Populates: _TASK_AGENT  _TASK_DATE  _TASK_SEQ  _TASK_SLUG  _TASK_PARTICIPANT
 #
 # Individual field accessors:
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #   kanban_task_agent       "CODER-20260518-002-implement-feature"  # → CODER
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #   kanban_task_date        "CODER-20260518-002-implement-feature"  # → 20260518
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #   kanban_task_seq         "CODER-20260518-002-implement-feature"  # → 002
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #   kanban_task_slug        "CODER-20260518-002-implement-feature"  # → implement-feature
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #   kanban_task_participant "CODER-20260518-002-implement-feature"  # → claude (default)
 
 # ---------------------------------------------------------------------------

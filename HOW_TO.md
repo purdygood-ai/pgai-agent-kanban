@@ -22,6 +22,7 @@ degrades only the project that owns it.
 
 ### 1.1 Install
 
+<!-- doc-lint: skip — install narrative requires a fresh checkout and no prior install; cannot run verbatim in harness -->
 ```bash
 git clone <repo-url> ~/develop/pgai-agent-kanban
 cd ~/develop/pgai-agent-kanban
@@ -85,6 +86,7 @@ required keys.
 
 ### 1.3 shell-env — wake environment
 
+<!-- doc-lint: skip — requires a live $KANBAN_ROOT install and an interactive editor; cannot run verbatim in harness -->
 ```bash
 cp $KANBAN_ROOT/shell-env_example $KANBAN_ROOT/shell-env
 $EDITOR $KANBAN_ROOT/shell-env
@@ -96,6 +98,7 @@ agent can't find it, the fix belongs here.
 
 ### 1.4 secrets — credentials
 
+<!-- doc-lint: skip — requires a live $KANBAN_ROOT install and an interactive editor; cannot run verbatim in harness -->
 ```bash
 cp $KANBAN_ROOT/secrets_example $KANBAN_ROOT/secrets
 chmod 600 $KANBAN_ROOT/secrets
@@ -200,6 +203,7 @@ it in one squash — there is no develop hop.
 
 ### 2.2 create-project — new project from scratch
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir -->
 ```bash
 scripts/create-project.sh --project my-app \
   --workflow-type release \
@@ -221,6 +225,7 @@ into it, so only one base branch is required.
 To have the kanban manage its own source, register it like anything else —
 nothing in the framework treats it specially:
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir -->
 ```bash
 scripts/create-project.sh --project pgai-agent-kanban \
   --dev-tree ~/develop/pgai-agent-kanban --git-repo <repo-url>
@@ -228,6 +233,7 @@ scripts/create-project.sh --project pgai-agent-kanban \
 
 ### 2.3 add-project — register an existing project directory
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir -->
 ```bash
 scripts/add-project.sh --project my-app
 ```
@@ -237,6 +243,7 @@ from backup) into projects.cfg without recreating its contents.
 
 ### 2.4 remove-project
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir -->
 ```bash
 scripts/remove-project.sh --project my-app             # unregister only (safe default)
 scripts/remove-project.sh --project my-app --force     # also rm -rf the directory
@@ -249,6 +256,7 @@ either way. Export first if you may want it back.
 
 ### 2.5 export-project / import-project
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir -->
 ```bash
 scripts/export-project.sh --project my-app                       # → tarball in cwd
 scripts/import-project.sh --archive my-app-export-<ts>.tar.gz \
@@ -470,6 +478,7 @@ these files — a listed item is considered handled and will never bundle.
 
 A tmux session rendering every project's state. Lifecycle:
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd and a live tmux-capable environment; cannot run verbatim in harness -->
 ```bash
 scripts/dashboard/create.sh     # build + attach the session
 scripts/dashboard/detach.sh     # leave it running, return to your shell
@@ -505,6 +514,7 @@ anything. Kill it freely; recreate it freely.
 Two scopes, both backed by simple sentinel files honored by every pipeline
 check. Each scope has a command so you no longer touch the files by hand:
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir -->
 ```bash
 scripts/halt-global.sh                       # GLOBAL: all projects stop (no args)
 scripts/unhalt-global.sh                     # GLOBAL: all projects resume (no args)
@@ -542,6 +552,7 @@ on `halt.sh`; the global pair above is its own command for that reason.
 
 "Stop, but only after X finishes" — without watching for the moment:
 
+<!-- doc-lint: skip — illustrative examples using .../HALT-AFTER shorthand for a live project path; requires an existing $KANBAN_ROOT and project directory -->
 ```bash
 echo rc        > $KANBAN_ROOT/projects/<name>/HALT-AFTER   # after current RC ships
 echo rc:v0.62.0 > .../HALT-AFTER                            # after that version ships
@@ -599,16 +610,20 @@ mode, because keys are unique only within a project (two projects can both
 have a task `CODER-20260607-001`), so there is no environment-variable
 fallback:
 
+<!-- doc-lint: skip — bare reset.sh requires $KANBAN_ROOT/scripts/ on PATH; shown without full path for readability; use $KANBAN_ROOT/scripts/reset.sh in practice -->
 ```bash
-reset.sh --project <project-name> --key <ROLE-YYYYMMDD-NNN> [--keep-artifacts] [--help]
+reset.sh --project <project-name> --key <ROLE-YYYYMMDD-NNN> [--keep-artifacts] [--force] [--help]
 reset.sh --project <project-name> --key <BUG-NNNN|PRIORITY-NNNN|version> [--help]
 ```
 
 `--keep-artifacts` applies to agent resets only (it opts out of clearing
-`artifacts/`); intake resets do not take it. `--help` / `-h` prints usage
-and exits 0. A missing required flag, an unknown flag (including the
-removed `--bug`/`--priority`/`--requirement` selectors), or a missing key
-prints usage and exits 1.
+`artifacts/`); intake resets do not take it. `--force` applies to agent
+resets only: it clears a stale worktree (left by a prior run) before
+resetting — use it as the standard corpse-clearing step when bare reset
+refuses with a stale-worktree warning. `--help` / `-h` prints usage and
+exits 0. A missing required flag, an unknown flag (including the removed
+`--bug`/`--priority`/`--requirement` selectors), or a missing key prints
+usage and exits 1.
 
 The full reset surface is also documented in `docs/operator-commands.md`,
 the authoritative operator reference.
@@ -623,8 +638,10 @@ reads the role from the task key prefix. All calls share the same flags:
 | `--project <name>` | yes | Project the task lives in. |
 | `--key <key>` | yes | Full task key, e.g. `CODER-20260611-001` for `CODER-20260611-001-some-slug`; the role is in the prefix. |
 | `--keep-artifacts` | no | Preserve `artifacts/` contents (default: clear). |
+| `--force` | no | Clear a stale worktree (registration and/or on-disk path left by a prior run) before resetting. Without `--force`, a stale worktree causes a warning with the manual removal recipe and a non-zero exit. Use `--force` as the standard corpse-clearing step — it runs git worktree remove, prune, and rm -rf automatically before completing the reset. |
 | `--help`, `-h` | no | Print usage and exit 0. |
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; task keys used here are illustrative examples, not real tasks -->
 ```bash
 scripts/reset.sh --project my-app --key PM-20260611-001
 scripts/reset.sh --project my-app --key CM-20260611-008
@@ -647,10 +664,16 @@ A TESTER task key additionally tears down a BLOCKED-retained TESTER
 worktree via the standard teardown path.
 
 Refusal mode: a WORKING task refuses with exit code 2 (an agent holds it —
-wait or investigate). An ambiguous key (zero or multiple matches) refuses
-with exit code 1, listing the directory searched or the candidate matches.
-Warning-and-proceed: a feature branch already merged into the active RC
-warns loudly (re-running produces a second merge commit) and proceeds.
+wait or investigate). A stale worktree (registration or on-disk path left
+by a prior run) also refuses with exit code 2, printing the three-command
+manual removal recipe to stderr. Re-run with `--force` to clear the
+corpse automatically in one call. An ambiguous key (zero or multiple
+matches) refuses with exit code 1, listing the directory searched or the
+candidate matches. Warning-and-proceed: a feature branch already merged
+into the active RC warns loudly (re-running produces a second merge
+commit) and proceeds. If `--force` cannot remove the stale path because
+it is an active mount target, it aborts with exit code 4 (the mount is
+named in stderr; no partial cleanup occurs).
 
 Resetting a BLOCKED task is also how you un-gate a project: while any task
 is BLOCKED with Needs Human, the project dispatches no new tasks.
@@ -663,6 +686,7 @@ From an intake `--key`, it infers the item type from the prefix
 requirement). All take `--project` and `--key` only (no
 `--keep-artifacts`); `--help` / `-h` exits 0:
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; keys are illustrative examples -->
 ```bash
 scripts/reset.sh --project my-app --key BUG-0123
 scripts/reset.sh --project my-app --key PRIORITY-0123
@@ -700,6 +724,7 @@ commands. Resetting an item whose bundle's RC is currently in flight warns
 The RC trio brings release-candidate control under the same uniform
 `--project <name> --key vX.Y.Z` signature:
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; also operates on live release state that does not exist in harness -->
 ```bash
 scripts/cm/cancel-rc.sh                  --project my-app --key v0.7.17         # abandon an active RC
 scripts/ship-rc.sh                       --project my-app --key v0.7.17         # manual ship escape hatch
@@ -723,6 +748,7 @@ BACKLOG so the next CM wake re-runs the release step.
 
 **Upgrade the live install** (drains nothing by itself — HALT first):
 
+<!-- doc-lint: skip — upgrade narrative requires a live $KANBAN_ROOT install, a tracked git clone, and scripts/ on the relative path from cwd; cannot run verbatim in harness -->
 ```bash
 scripts/halt-global.sh           # or HALT-AFTER and wait
 scripts/dashboard/kill.sh
@@ -826,6 +852,7 @@ clone — the same one you `git pull`ed at the top of the upgrade
 procedure — and the message prints the absolute path in place of
 `<dev_tree>` so you can copy-paste it verbatim.
 
+<!-- doc-lint: skip — recovery procedure requires a live $KANBAN_ROOT install and a dev-tree checkout; <dev_tree> is a placeholder for the absolute path printed in the error line -->
 ```bash
 cd $KANBAN_ROOT
 cp <dev_tree>/team/scripts/upgrade.sh scripts/   # exact path from the error line
@@ -839,6 +866,7 @@ and cannot be resolved without the manual bootstrap above. The
 symptom is the same "Manual bootstrap" message described in the
 previous entry; the fix is the same one-liner:
 
+<!-- doc-lint: skip — one-time recovery procedure requiring a live $KANBAN_ROOT install at v1.2.3–v1.2.5 and a local dev checkout -->
 ```bash
 cd $KANBAN_ROOT
 cp ~/develop/pgai-agent-kanban/team/scripts/upgrade.sh scripts/
@@ -871,6 +899,7 @@ old installed `upgrade.sh` cannot drive the new `install.sh`. You must
 first replace the installed `upgrade.sh` with the target dev tree's
 version, then run it (the new one does its own deposit and succeeds):
 
+<!-- doc-lint: skip — one-time recovery procedure for pre-v0.80.0 installs; requires a live $KANBAN_ROOT at that version and a local dev checkout -->
 ```bash
 cd $KANBAN_ROOT
 mv scripts/upgrade.sh scripts/upgrade.sh_old

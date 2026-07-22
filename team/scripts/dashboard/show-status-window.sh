@@ -19,6 +19,7 @@
 #   │ cm:     1/2 done, waiting                                                │
 #   ├─────────────────────────────────────────────────────────────────────────┤
 #   │ ⚠ ATTENTION  (shown only when BLOCKED tasks exist)                       │
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #   │   CLAUDE-CM-20260428-009-release  Blocked 2m ago                         │
 #   ├─────────────────────────────────────────────────────────────────────────┤
 #   │ — currently working —                                                    │

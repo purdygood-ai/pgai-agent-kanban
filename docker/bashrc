@@ -1,0 +1,94 @@
+# docker/bashrc — interactive shell environment for the pgai-agent-kanban container.
+#
+# Sourced automatically by bash for interactive login shells when:
+#   BASH_ENV=<path>/docker/bashrc  (for non-login interactive shells),
+#   or via /etc/bash.bashrc / ~/.bashrc system integration.
+#
+# Responsibilities:
+#   1. Source the kanban's shell-env from the mount so every interactive
+#      shell satisfies the environment contract without manual sourcing.
+#   2. Set the standard working aliases (dashboard, kanban-status, etc.).
+#   3. Put the venv/system python on PATH.
+#
+# The shell-env file on the mount (/pgai_agent_kanban/shell-env) is the
+# operator's editable runtime configuration (PATH tweaks, venv activation,
+# PGAI_AGENT_KANBAN_ROOT_PATH, etc.).  We source it from the mount — we do
+# NOT copy it into the image, so operator edits are picked up on the next
+# shell open without rebuilding.
+#
+# This file is intentionally non-strict (no set -e / set -u) because:
+#   - It is sourced by interactive shells, which commonly have unset vars.
+#   - bash.bashrc and ~/.bashrc files are sourced before strict mode in the
+#     run-unit-tests.sh harness; strict mode here would break that harness.
+
+# ---------------------------------------------------------------------------
+# Kanban root — set canonical env var if not already set by the environment
+# ---------------------------------------------------------------------------
+# The bind mount at /pgai_agent_kanban is the authoritative install path in
+# the container.  Export both the canonical var and the legacy alias.
+if [[ -z "${PGAI_AGENT_KANBAN_ROOT_PATH:-}" ]]; then
+    export PGAI_AGENT_KANBAN_ROOT_PATH="/pgai_agent_kanban"
+fi
+export KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+
+# ---------------------------------------------------------------------------
+# Source the operator's shell-env from the mount (non-fatal if absent)
+# ---------------------------------------------------------------------------
+# The shell-env file exports PATH adjustments, venv activation, and any
+# other runtime configuration the operator placed there.  Sourcing from the
+# mount means changes take effect immediately without an image rebuild.
+#
+# We guard with [[ -f ]] so a fresh container without the file yet does not
+# error.  Once the kanban is installed on the volume, shell-env will exist
+# (install.sh writes it from shell-env_example).
+_KANBAN_SHELL_ENV="${PGAI_AGENT_KANBAN_ROOT_PATH}/shell-env"
+if [[ -f "${_KANBAN_SHELL_ENV}" ]]; then
+    # shellcheck source=/pgai_agent_kanban/shell-env
+    source "${_KANBAN_SHELL_ENV}"
+fi
+unset _KANBAN_SHELL_ENV
+
+# ---------------------------------------------------------------------------
+# Python PATH — prefer venv if activated, otherwise system python3
+# ---------------------------------------------------------------------------
+# If a virtualenv is active (activated by shell-env), its bin/ is already
+# prepended to PATH.  If not, ensure the system python3 from the base image
+# is on PATH.  The python:3.12-bookworm base already ships it at /usr/local/bin.
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+    # Ensure /usr/local/bin (where the base image python3 lives) is on PATH.
+    case ":${PATH}:" in
+        *:/usr/local/bin:*) ;;
+        *) export PATH="/usr/local/bin:${PATH}" ;;
+    esac
+fi
+
+# ---------------------------------------------------------------------------
+# TERM — ensure tput has a known terminal type
+# ---------------------------------------------------------------------------
+export TERM="${TERM:-xterm-256color}"
+
+# ---------------------------------------------------------------------------
+# Standard aliases
+# ---------------------------------------------------------------------------
+
+# Show the kanban dashboard (runs the show.sh script from the mounted install).
+# Satisfies acceptance criterion 5: `bash team/dashboard/show.sh` works from a
+# fresh shell without manual sourcing.
+alias dashboard="bash ${PGAI_AGENT_KANBAN_ROOT_PATH}/team/scripts/dashboard/show.sh"
+alias show="bash ${PGAI_AGENT_KANBAN_ROOT_PATH}/team/scripts/dashboard/show.sh"
+
+# Quick kanban status check.
+alias kanban-status="bash ${PGAI_AGENT_KANBAN_ROOT_PATH}/team/scripts/kanban-status.sh"
+
+# Jump to the kanban root directory.
+alias cdk="cd ${PGAI_AGENT_KANBAN_ROOT_PATH}"
+
+# ---------------------------------------------------------------------------
+# Prompt hint — remind the operator they are inside the kanban container
+# ---------------------------------------------------------------------------
+# Only set PS1 when we are in an interactive shell and PS1 is not already set
+# by the system bashrc or the operator's preferences.
+if [[ $- == *i* && -z "${_KANBAN_PS1_SET:-}" ]]; then
+    PS1="[kanban-container] \u@\h:\w\$ "
+    export _KANBAN_PS1_SET=1
+fi

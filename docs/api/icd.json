@@ -401,7 +401,7 @@
       },
       "ResetBody": {
         "additionalProperties": true,
-        "description": "Body for POST /operations/reset.\n\nExactly one of the kind selectors (``key``, ``agent``, ``bug``, ``priority``,\n``requirement``) must be supplied.  Supplying two or more returns a 422 that\nnames all conflicting fields.  Supplying none also returns a 422.\n\nThe resolved selector value is forwarded as ``--key`` to reset.sh.  reset.sh\ndetermines the item type from the key prefix (agent tasks are ``ROLE-YYYYMMDD-NNN``\nprefixed; bug intake is ``BUG-*``; priority intake is ``PRIORITY-*``; requirement\nintake is a version string such as ``v0.1.2``).\n\nFields:\n    project:        Project name.\n    key:            Task key or intake identifier (kind-agnostic selector).\n    agent:          Agent task ID (e.g. ``CODER-20260101-001-slug``).\n    bug:            Bug intake key (e.g. ``BUG-0042``).\n    priority:       Priority intake key (e.g. ``PRIORITY-0007``).\n    requirement:    Requirement intake version (e.g. ``v0.1.2``).\n    keep_artifacts: When True, passes ``--keep-artifacts`` to reset.sh.\n    dry_run:        When True, short-circuits dispatch \u2014 no subprocess spawned.",
+        "description": "Body for POST /operations/reset.\n\nExactly one of the kind selectors (``key``, ``agent``, ``bug``, ``priority``,\n``requirement``) must be supplied.  Supplying two or more returns a 422 that\nnames all conflicting fields.  Supplying none also returns a 422.\n\nThe resolved selector value is forwarded as ``--key`` to reset.sh.  reset.sh\ndetermines the item type from the key prefix (agent tasks are ``ROLE-YYYYMMDD-NNN``\nprefixed; bug intake is ``BUG-*``; priority intake is ``PRIORITY-*``; requirement\nintake is a version string such as ``v0.1.2``).\n\nFields:\n    project:        Project name.\n    key:            Task key or intake identifier (kind-agnostic selector).\n    agent:          Agent task ID (e.g. ``CODER-20260101-001-slug``).\n    bug:            Bug intake key (e.g. ``an earlier defect``).\n    priority:       Priority intake key (e.g. ``PRIORITY-0007``).\n    requirement:    Requirement intake version (e.g. ``v0.1.2``).\n    keep_artifacts: When True, passes ``--keep-artifacts`` to reset.sh.\n    force:          When True, passes ``--force`` to reset.sh, which performs\n                    stale-worktree cleanup (git worktree remove, prune, rm -rf)\n                    before the normal amnesia reset.  Without force, a detected\n                    stale worktree causes a non-zero exit with the removal recipe\n                    printed to stderr.  Agent-task resets only.\n    dry_run:        When True, short-circuits dispatch \u2014 no subprocess spawned.",
         "properties": {
           "agent": {
             "anyOf": [
@@ -429,6 +429,17 @@
             "default": false,
             "title": "Dry Run",
             "type": "boolean"
+          },
+          "force": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Force"
           },
           "keep_artifacts": {
             "anyOf": [
@@ -1545,7 +1556,7 @@
     },
     "/operations/reset": {
       "post": {
-        "description": "Reset a task or intake item, returning it to a re-processable state.\n\nThe script refuses on filesystem races (WORKING state, ambiguous key)\nand those refusals propagate unchanged in the envelope.\n\nBody fields (exactly one kind selector is required):\n\n- ``project``        (required) \u2014 project name.\n- ``key``            (optional) \u2014 kind-agnostic task or intake key.\n- ``agent``          (optional) \u2014 agent task ID (e.g. ``CODER-20260101-001-slug``).\n- ``bug``            (optional) \u2014 bug intake key (e.g. ``BUG-0042``).\n- ``priority``       (optional) \u2014 priority intake key (e.g. ``PRIORITY-0007``).\n- ``requirement``    (optional) \u2014 requirement intake version (e.g. ``v0.1.2``).\n- ``keep_artifacts`` (optional, bool) \u2014 when True, passes ``--keep-artifacts``.\n- ``dry_run``        (optional, bool) \u2014 when True, returns the planned action description\n                                        without resetting anything.\n\nExactly one of ``key``, ``agent``, ``bug``, ``priority``, or ``requirement`` must\nbe supplied.  Supplying two or more returns 422 naming the conflicting fields.\nSupplying none returns 422 naming the missing choice.  No silent precedence.\n\nThe resolved value is forwarded as ``--key`` to reset.sh; reset.sh determines the\nitem type from the key prefix.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str, \"warnings\": list}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero, 422 on validation failure.",
+        "description": "Reset a task or intake item, returning it to a re-processable state.\n\nThe script refuses on filesystem races (WORKING state, ambiguous key)\nand those refusals propagate unchanged in the envelope.\n\nBody fields (exactly one kind selector is required):\n\n- ``project``        (required) \u2014 project name.\n- ``key``            (optional) \u2014 kind-agnostic task or intake key.\n- ``agent``          (optional) \u2014 agent task ID (e.g. ``CODER-20260101-001-slug``).\n- ``bug``            (optional) \u2014 bug intake key (e.g. ``an earlier defect``).\n- ``priority``       (optional) \u2014 priority intake key (e.g. ``PRIORITY-0007``).\n- ``requirement``    (optional) \u2014 requirement intake version (e.g. ``v0.1.2``).\n- ``keep_artifacts`` (optional, bool) \u2014 when True, passes ``--keep-artifacts``.\n- ``force``          (optional, bool) \u2014 when True, passes ``--force`` to perform\n                                        stale-worktree cleanup before the reset.\n- ``dry_run``        (optional, bool) \u2014 when True, returns the planned action description\n                                        without resetting anything.\n\nExactly one of ``key``, ``agent``, ``bug``, ``priority``, or ``requirement`` must\nbe supplied.  Supplying two or more returns 422 naming the conflicting fields.\nSupplying none returns 422 naming the missing choice.  No silent precedence.\n\nThe resolved value is forwarded as ``--key`` to reset.sh; reset.sh determines the\nitem type from the key prefix.\n\nResponse envelope:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str, \"warnings\": list}``\n\nHTTP status: 200 on exit_code 0, 500 on non-zero, 422 on validation failure.",
         "operationId": "post_reset_operations_reset_post",
         "requestBody": {
           "content": {

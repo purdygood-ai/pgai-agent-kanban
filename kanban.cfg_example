@@ -42,6 +42,17 @@ max_rows_per_project = 13
 # "... and N more".
 max_rows = 20
 
+# Marker character for dashboard status tags. Unicode "■" (U+25A0) by
+# default; set to an ASCII character (e.g. "#" or "*") for terminals or
+# fonts that render block glyphs poorly. Must be exactly one visible
+# character — multi-character values are rejected with a non-zero exit
+# naming this key and the config file path. Change takes effect on the
+# next dashboard refresh cycle (no restart required).
+# Common values (copy-paste one):  ■ ● ◆ ▲ ▪ •  — or any ASCII char: # * + o
+# To create unicode glyph; in VI, type => Ctrl-V u<the unicode character>
+# The default glyph below is => Ctrl-V u25a0
+dashboard_status_glyph = ■
+
 
 # ---------------------------------------------------------------------------
 # [chain] — pipeline and chain-execution settings
@@ -141,6 +152,15 @@ available = claude codex
 #       ai_auth_mode because codex will not just look for the API key
 #       env variable when switching to "apikey mode"
 ai_auth_mode = oauth
+
+# llm_thinking_enabled — controls the provider's extended-thinking
+# (reasoning) feature on agent invocations. Some older HTTP proxies
+# reject responses carrying thinking blocks, failing every agent
+# call; set false on such deployments to pass the provider's
+# thinking-disable flag. Generic across providers: applies to the
+# claude lane today and maps to equivalent switches on other
+# provider lanes as they mature. Default: true.
+llm_thinking_enabled = true
 
 
 # ---------------------------------------------------------------------------

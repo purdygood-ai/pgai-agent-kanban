@@ -3,9 +3,10 @@
 # Human-invoked: closes an active release candidate branch.
 #
 # Usage:
-#   cm-release.sh [--project <name>]
+#   cm-release.sh [--project <name>] [--help]
 #
 # --project <name>   explicit project name (overrides PGAI_PROJECT_NAME env var)
+# --help, -h         print full usage and exit 0
 #
 # Project context resolution (highest to lowest precedence):
 #   1. --project <name> flag
@@ -42,6 +43,10 @@
 #   8b. Commit any uncommitted WRITER polish of release-notes/<ACTIVE_RC>.md on main
 #       (no-op when file is unchanged; must run BEFORE Step 11b so changelog_writer
 #       reads the polished notes — keeps the freshness gate green on the tip).
+#   11b. Regenerate CHANGELOG.md and commit on main.
+#   11d. Write bare release version to $repo_root/VERSION and commit on main.
+#        Byte-compare idempotency: no-op when VERSION already matches.
+#        Pre-tag gate (Step 13) asserts VERSION == release tag before tagging.
 #   NOTE: main is staged locally; auto-push is attempted at Step 18 (best-effort)
 #   9.  git push origin --delete rc/<ACTIVE_RC>
 #   10. git branch -D rc/<ACTIVE_RC>
@@ -91,12 +96,58 @@
 # Done before strict mode so error messages are clean.
 PROJECT_ARG=""
 
+_cm_release_usage() {
+  echo "Usage: $(basename "$0") [--project <name>] [--help]" >&2
+  echo "" >&2
+  echo "  --project <name>  project name (required when PGAI_PROJECT_NAME not set)" >&2
+  echo "  --help, -h        print full usage and exit 0" >&2
+}
+
+_cm_release_help() {
+  cat <<HELPTEXT
+Usage: $(basename "$0") [--project <name>] [--help]
+
+Close an active release candidate: squash-merge to main, tag, and ship.
+
+Reads the Active RC from \$KANBAN_ROOT/projects/<name>/release-state.md.
+No positional arguments — the version is derived from the live release-state.
+
+Arguments:
+  --project <name>  project name; overrides PGAI_PROJECT_NAME env var
+  --help, -h        print this message and exit 0
+
+Project context resolution (highest to lowest precedence):
+  1. --project <name> flag
+  2. PGAI_PROJECT_NAME environment variable
+  3. FAIL — prints error naming both knobs, exits non-zero
+
+Exit codes:
+  0  Release shipped (or --help requested)
+  1  HALT condition, pre-condition error, or git failure
+     (a \$KANBAN_ROOT/HALT file is created on HALT conditions)
+
+Example:
+  cm-release.sh --project my-project
+
+Configuration:
+  PGAI_PROJECT_NAME              fallback project name (when --project flag not used)
+  REPO_ROOT                      override path to the repository root
+  CM_SQUASH_STRICT_POLLUTION_GUARD
+                                 set to 'true' to HALT on squash pollution detection
+HELPTEXT
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --help|-h)
+      _cm_release_help
+      exit 0
+      ;;
     --project)
       if [[ -z "${2:-}" ]]; then
         echo "ERROR: --project requires a value" >&2
-        echo "Usage: $(basename "$0") [--project <name>]" >&2
+        echo "" >&2
+        _cm_release_usage
         exit 1
       fi
       PROJECT_ARG="$2"
@@ -104,12 +155,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --*)
       echo "ERROR: unknown flag: $1" >&2
-      echo "Usage: $(basename "$0") [--project <name>]" >&2
+      echo "" >&2
+      _cm_release_usage
       exit 1
       ;;
     *)
       echo "ERROR: unexpected argument: $1" >&2
-      echo "Usage: $(basename "$0") [--project <name>]" >&2
+      echo "" >&2
+      _cm_release_usage
       exit 1
       ;;
   esac
@@ -155,6 +208,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/projects.sh"
 # for hook resolution used by both release.sh and ship-rc.sh (one-implementation rule).
 # shellcheck source=lib/cm_release_hooks.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm_release_hooks.sh"
+
+# --- Source the shared Python invocation helper ---
+# shellcheck source=lib/pp_run_ops.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/pp_run_ops.sh"
 
 # --- Enable strict mode for our own code ---
 set -euo pipefail
@@ -1638,35 +1695,60 @@ fi
 # byte-identical to what the freshness gate verifies.
 echo "[Step 11b] Updating CHANGELOG.md for ${ACTIVE_RC}..."
 
-# Idempotency: if CHANGELOG.md is already committed to HEAD on main and already
-# contains an entry for this RC, the step is already complete.  Skip the Python
-# generator + add + commit to avoid creating a new commit that would advance main
-# HEAD past the existing tag.
-# NOTE: git ls-tree exits 0 even when the path is absent — check output is non-empty.
-_cl_in_head=0
-_cl_ls_out="$(git -C "$REPO_ROOT" ls-tree --name-only HEAD "CHANGELOG.md" 2>/dev/null)" || true
-if [[ -n "$_cl_ls_out" ]]; then
-  # CHANGELOG.md is tracked in HEAD; check if it already has this RC's entry.
-  if git -C "$REPO_ROOT" show "HEAD:CHANGELOG.md" 2>/dev/null | grep -qF "## ${ACTIVE_RC}"; then
-    _cl_in_head=1
-  fi
+# Idempotency: always render a fresh changelog_writer buffer (PYTHONHASHSEED=0
+# for deterministic heading order) and compare it byte-for-byte against the
+# checked-in CHANGELOG.md.  Only skip regeneration when the two are byte-identical.
+#
+# A heading-presence-only check (the prior approach) was insufficient: a
+# WRITER-authored section satisfies the heading check but diverges from the
+# canonical writer output, and a stale section would silently merge to main.
+# The byte-compare catches any divergence — including hand-authored content,
+# reordered bullets, or retained internal BUG-NNNN identifiers that the writer
+# strips.
+_cl_bugs_dir="${_CM_PROJECT_ROOT}/bugs"
+_cl_temp_dir="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}"
+mkdir -p "$_cl_temp_dir"
+_cl_buf="$(mktemp "${_cl_temp_dir}/cl_buf_XXXXXXXX")"
+# Ensure the temp buffer is cleaned up on any exit path.
+trap 'rm -f "$_cl_buf"' EXIT
+
+# Render the canonical CHANGELOG.md to the temp buffer.
+# PYTHONHASHSEED=0 ensures frozenset iteration over heading sets is stable
+# across invocations so two runs on identical inputs are byte-identical.
+# pp_run_ops sets PYTHONPATH to include the own-tree root and KANBAN_ROOT fallback.
+PYTHONHASHSEED=0 \
+  pp_run_ops pgai_agent_kanban.cm.changelog_writer \
+  "$REPO_ROOT" "$_cl_bugs_dir" \
+  > "$_cl_buf"
+
+# Byte-compare: skip regeneration only when the checked-in file is byte-identical
+# to the fresh render.  A missing CHANGELOG.md on disk always diverges.
+_cl_needs_regen=1
+if [[ -f "$REPO_ROOT/CHANGELOG.md" ]] && cmp -s "$REPO_ROOT/CHANGELOG.md" "$_cl_buf"; then
+  _cl_needs_regen=0
 fi
-if [[ $_cl_in_head -eq 1 ]]; then
-  echo "[Step 11b] step 11b: already complete, continuing — CHANGELOG.md already contains entry for ${ACTIVE_RC} in $MAIN_BRANCH HEAD."
+
+if [[ $_cl_needs_regen -eq 0 ]]; then
+  echo "[Step 11b] step 11b: already complete, continuing — CHANGELOG.md is byte-identical to a fresh changelog_writer render."
 else
 
-# Regenerate CHANGELOG.md in full by invoking the canonical writer module.
-# PYTHONHASHSEED=0 ensures frozenset iteration over section heading names is
-# stable across invocations, so two runs on identical inputs produce byte-identical
-# output — required by the freshness gate in run-unit-tests.sh and
-# run-integration-tests.sh.  PYTHONPATH=$KANBAN_ROOT exposes the installed
-# pgai_agent_kanban package to the subprocess.
-_cl_bugs_dir="${_CM_PROJECT_ROOT}/bugs"
-PYTHONPATH="$KANBAN_ROOT" PYTHONHASHSEED=0 \
-  python3 -m pgai_agent_kanban.cm.changelog_writer \
-  "$REPO_ROOT" "$_cl_bugs_dir" \
-  > "$REPO_ROOT/CHANGELOG.md"
+# Install the fresh render as CHANGELOG.md.
+cp "$_cl_buf" "$REPO_ROOT/CHANGELOG.md"
 echo "  CHANGELOG.md regenerated in full for ${ACTIVE_RC}."
+
+# Safety pass: no internal BUG-[0-9] token may survive in the regenerated
+# CHANGELOG.md.  The changelog_writer strips these via its documented safety
+# pass; if any survive (e.g. from a writer defect), fail loudly here so the
+# release is blocked rather than shipping an internal identifier.
+if grep -qE "BUG-[0-9]" "$REPO_ROOT/CHANGELOG.md"; then
+  echo "" >&2
+  echo "ERROR: [Step 11b] Post-regeneration safety check failed: internal BUG-[0-9] token(s) found in CHANGELOG.md." >&2
+  echo "  Matching lines:" >&2
+  grep -nE "BUG-[0-9]" "$REPO_ROOT/CHANGELOG.md" >&2
+  echo "  The changelog_writer safety pass should strip these. Investigate changelog_writer.py." >&2
+  exit 1
+fi
+echo "  [Step 11b] Safety pass: no internal BUG-[0-9] tokens in regenerated CHANGELOG.md."
 
 git_step "git add CHANGELOG.md" git -C "$REPO_ROOT" add "CHANGELOG.md"
 # Idempotency: CHANGELOG.md already committed from a prior run — detect via exit code,
@@ -1687,7 +1769,7 @@ else
   fi
 fi
 
-fi  # end: skip if CHANGELOG.md already in HEAD with RC entry
+fi  # end: skip if CHANGELOG.md is byte-identical to fresh render
 
 # --- Step 11c: Add CHANGELOG.md reference to README.md (one-time) ---
 # If the project README does not already mention CHANGELOG.md, append a
@@ -1701,6 +1783,74 @@ if [[ -f "$REPO_ROOT/README.md" ]]; then
     echo "  README.md updated with CHANGELOG.md reference."
   else
     echo "  README.md already references CHANGELOG.md — skipping."
+  fi
+fi
+
+# --- Step 11d: Write VERSION file into the release commit ---
+# Writes the clean bare release version (e.g. v1.23.9) to $REPO_ROOT/VERSION and
+# stages it into a dedicated release commit alongside CHANGELOG.md.  This makes
+# every checkout, clone, zip download, and tag carry the committed version without
+# requiring a git-describe or any stamping step.
+#
+# Content: the bare version string (prefix stripped), single line, one trailing newline.
+# Idempotency: byte-compare the on-disk file against the expected content; skip
+# write and commit when already byte-identical (re-runs are clean no-ops).
+#
+# VERSION_DETAIL remains tool-written at deploy time by stamp_version_files — do not
+# touch it here.
+echo "[Step 11d] Writing VERSION for ${ACTIVE_RC}..."
+_CLEAN_RELEASE_VERSION="$(pp_strip_prefix_from_tag "$PROJECT_NAME" "$ACTIVE_RC" 2>/dev/null)" || _CLEAN_RELEASE_VERSION="$ACTIVE_RC"
+_version_expected_content="$(printf '%s\n' "$_CLEAN_RELEASE_VERSION")"
+
+# Byte-compare: skip write when the on-disk file already matches.
+_version_needs_write=1
+if [[ -f "$REPO_ROOT/VERSION" ]]; then
+  _version_on_disk="$(cat "$REPO_ROOT/VERSION" 2>/dev/null || true)"
+  if [[ "$_version_on_disk" == "$_version_expected_content" ]]; then
+    _version_needs_write=0
+  fi
+fi
+
+if [[ $_version_needs_write -eq 0 ]]; then
+  # File already matches; check whether it is already staged/committed.
+  git_step "git add VERSION (idempotency)" git -C "$REPO_ROOT" add "VERSION"
+  if git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+    echo "[Step 11d] step 11d: already complete, continuing — VERSION is byte-identical and already committed (no staged changes)."
+  else
+    _commit_ver_out=""
+    _commit_ver_rc=0
+    _commit_ver_out="$(git -C "$REPO_ROOT" commit -m "Add committed VERSION for ${ACTIVE_RC}" 2>&1)" || _commit_ver_rc=$?
+    if [[ $_commit_ver_rc -ne 0 ]]; then
+      echo "" >&2
+      echo "ERROR: git commit VERSION failed (rc=${_commit_ver_rc})" >&2
+      echo "$_commit_ver_out" >&2
+      exit 1
+    else
+      echo "$_commit_ver_out"
+      echo "  [Step 11d] VERSION committed (was already correct on disk; staged and committed)."
+    fi
+  fi
+else
+  # Write the version string to disk.
+  printf '%s\n' "$_CLEAN_RELEASE_VERSION" > "$REPO_ROOT/VERSION"
+  echo "  VERSION written: $_CLEAN_RELEASE_VERSION"
+
+  git_step "git add VERSION" git -C "$REPO_ROOT" add "VERSION"
+  if git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+    echo "[Step 11d] step 11d: already complete, continuing — VERSION already committed from prior run (no staged changes)."
+  else
+    _commit_ver_out=""
+    _commit_ver_rc=0
+    _commit_ver_out="$(git -C "$REPO_ROOT" commit -m "Add committed VERSION for ${ACTIVE_RC}" 2>&1)" || _commit_ver_rc=$?
+    if [[ $_commit_ver_rc -ne 0 ]]; then
+      echo "" >&2
+      echo "ERROR: git commit VERSION failed (rc=${_commit_ver_rc})" >&2
+      echo "$_commit_ver_out" >&2
+      exit 1
+    else
+      echo "$_commit_ver_out"
+      echo "  [Step 11d] VERSION committed for ${ACTIVE_RC}."
+    fi
   fi
 fi
 
@@ -1853,6 +2003,32 @@ else
       "Trigger 7: Tag ${RELEASE_TAG} already exists on remote origin" \
       "git tag ${RELEASE_TAG} would be a duplicate — tag already exists on origin. This indicates a race condition or repeated invocation against an already-shipped version. Operator must inspect and resolve."
   fi
+
+  # --- Pre-tag VERSION gate ---
+  # Assert that VERSION on disk equals the tag about to be cut.  This is the
+  # single gate that prevents a committed VERSION from lying about the release.
+  # Fires AFTER VERSION is written (Step 11d) and BEFORE git tag — on mismatch
+  # the release exits non-zero without creating the tag and without pushing anything.
+  _pretag_version_on_disk=""
+  if [[ -f "$REPO_ROOT/VERSION" ]]; then
+    _pretag_version_on_disk="$(cat "$REPO_ROOT/VERSION" 2>/dev/null || true)"
+  fi
+  # Strip trailing newline from on-disk read for comparison (printf '%s\n' wrote one).
+  _pretag_version_trimmed="${_pretag_version_on_disk%$'\n'}"
+  # _CLEAN_RELEASE_VERSION was set in Step 11d; fall back to computing it here for
+  # re-entry paths where Step 11d was skipped (VERSION already correct).
+  _pretag_expected="${_CLEAN_RELEASE_VERSION:-$(pp_strip_prefix_from_tag "$PROJECT_NAME" "$ACTIVE_RC" 2>/dev/null || echo "$ACTIVE_RC")}"
+  if [[ "$_pretag_version_trimmed" != "$_pretag_expected" ]]; then
+    echo "" >&2
+    echo "ERROR: [Pre-tag VERSION gate] VERSION content does not match the tag about to be created." >&2
+    echo "  On-disk VERSION : '${_pretag_version_trimmed}'" >&2
+    echo "  Expected (tag)  : '${_pretag_expected}'" >&2
+    echo "  Release tag     : ${RELEASE_TAG}" >&2
+    echo "  No tag has been created. Investigate why VERSION diverged before re-running." >&2
+    exit 1
+  fi
+  echo "[Step 13] Pre-tag VERSION gate: OK — VERSION='${_pretag_version_trimmed}' matches tag '${_pretag_expected}'."
+
   _tag_rc=0
   git -C "$REPO_ROOT" tag "$RELEASE_TAG" || _tag_rc=$?
   if [[ $_tag_rc -ne 0 ]]; then

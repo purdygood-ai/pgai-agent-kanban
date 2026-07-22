@@ -24,6 +24,10 @@ _HALT_GLOBAL_LIB_DIR="${_HALT_GLOBAL_SCRIPT_DIR}/lib"
 # shellcheck source=lib/operator_args.sh
 source "${_HALT_GLOBAL_LIB_DIR}/operator_args.sh"
 
+# --- Source the shared Python invocation helper ---
+# shellcheck source=lib/pp_run_ops.sh
+source "${_HALT_GLOBAL_LIB_DIR}/pp_run_ops.sh"
+
 # --- Declare accepted flags for this script ---
 # halt-global takes no project/key arguments; only --help is accepted.
 OPERATOR_VALID_FLAGS=(help)
@@ -65,7 +69,7 @@ if [[ -f "${_halt_path}" ]]; then
 fi
 
 # --- Create the HALT sentinel via Python library ---
-if python3 -m pgai_agent_kanban.ops halt_global "${KANBAN_ROOT}"; then
+if pp_run_ops pgai_agent_kanban.ops halt_global "${KANBAN_ROOT}"; then
     printf 'global HALT set: %s — all projects will stop at next wake\n' "${_halt_path}"
     exit 0
 else

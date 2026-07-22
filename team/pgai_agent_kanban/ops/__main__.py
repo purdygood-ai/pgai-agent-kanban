@@ -23,7 +23,7 @@ Supported verbs (see ops/write.py _cli_main for the full list):
     close_item      PROJECT_ROOT KEY [STATE] [NOTE] [DRY_RUN]
     wontdo_item     PROJECT_ROOT KEY
     delete_item     PROJECT_ROOT KEY [FORCE]
-    reset_item      PROJECT_ROOT KEY [KEEP_ARTIFACTS]
+    reset_item      PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE]
 """
 
 import sys

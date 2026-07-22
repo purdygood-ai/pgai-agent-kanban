@@ -112,6 +112,20 @@ provider_invoke_agent() {
   else
     echo "[$(date -Iseconds)] wake(${AGENT}): model: ${model_source}" | tee -a "$log_file"
   fi
+  # Read llm_thinking_enabled from kanban.cfg via the standard config loader.
+  # Absent key or value "true" → do nothing (default-true, back-compat).
+  # Value "false" → append --thinking disabled to tell the Claude CLI to
+  #   suppress extended-thinking blocks (required on proxies that reject them).
+  # Any other value → fail loud, naming the key, so the operator can correct it.
+  local _llm_thinking_enabled
+  _llm_thinking_enabled="$(config_get providers llm_thinking_enabled "true")"
+  if [[ "${_llm_thinking_enabled}" == "false" ]]; then
+    claude_cmd+=(--thinking disabled)
+  elif [[ "${_llm_thinking_enabled}" != "true" ]]; then
+    echo "ERROR: wake_claude_provider: kanban.cfg [providers] llm_thinking_enabled has invalid value '${_llm_thinking_enabled}'; expected 'true' or 'false'" >&2
+    return 1
+  fi
+
   claude_cmd+=(--dangerously-skip-permissions -p "$prompt")
 
   # Add --output-format json for structured token usage capture.

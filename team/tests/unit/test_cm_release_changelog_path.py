@@ -2,14 +2,14 @@
 test_cm_release_changelog_path.py
 ==================================
 Regression gate: cm-release.sh CHANGELOG-update path uses the canonical
-`python3 -m pgai_agent_kanban.cm.changelog_writer` module invocation, and
+pp_run_ops helper to invoke pgai_agent_kanban.cm.changelog_writer, and
 the output of that invocation is byte-identical to a direct changelog_writer
 call on the same fixture.
 
 Acceptance criteria addressed:
-  1. Structural: cm-release.sh Step 11b contains the `-m pgai_agent_kanban.cm.changelog_writer`
-     invocation form — fails immediately if the script is reverted to the legacy
-     heredoc approach.
+  1. Structural: cm-release.sh Step 11b invokes the writer via the pp_run_ops
+     shared helper — fails immediately if the script is reverted to the legacy
+     heredoc approach or a bare python3 -m form.
   2. Behavioral: two independent subprocess invocations of the module on the same
      hermetic fixture produce byte-identical output.
   3. Cross-path: the subprocess invocation (reproducing what cm-release.sh does)
@@ -191,27 +191,28 @@ def _subprocess_writer_output(
 
 
 class TestCmReleaseShellInvocationForm:
-    """cm-release.sh Step 11b must use the module invocation form, not the legacy heredoc."""
+    """cm-release.sh Step 11b must use the pp_run_ops helper form, not the legacy heredoc."""
 
-    def test_script_uses_module_invocation(self) -> None:
-        """cm-release.sh Step 11b contains the `-m pgai_agent_kanban.cm.changelog_writer` pattern.
+    def test_script_uses_pp_run_ops_invocation(self) -> None:
+        """cm-release.sh Step 11b invokes changelog_writer via the pp_run_ops shared helper.
 
         If cm-release.sh is reverted to the legacy Python heredoc (which loaded the writer
-        via `importlib.util.spec_from_file_location`), this assertion fails immediately.
-        The regression gate is the presence of the module-invocation string in the
-        CHANGELOG-update section of the script.
+        via `importlib.util.spec_from_file_location`) or to a bare python3 -m form, this
+        assertion fails immediately.  The regression gate is the presence of the
+        pp_run_ops helper call in the CHANGELOG-update section of the script.
         """
         assert _CM_RELEASE_SCRIPT.exists(), (
             f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
         )
         source = _CM_RELEASE_SCRIPT.read_text(encoding="utf-8")
 
-        assert "-m pgai_agent_kanban.cm.changelog_writer" in source, (
-            "cm-release.sh does not contain the canonical module invocation "
-            "`-m pgai_agent_kanban.cm.changelog_writer`.\n"
-            "The CHANGELOG-update path (Step 11b) must invoke the writer as a Python "
-            "module, not via a heredoc or spec_from_file_location. Check whether the "
-            "script was reverted to the legacy inline approach."
+        assert "pp_run_ops pgai_agent_kanban.cm.changelog_writer" in source, (
+            "cm-release.sh does not contain the pp_run_ops invocation form "
+            "`pp_run_ops pgai_agent_kanban.cm.changelog_writer`.\n"
+            "The CHANGELOG-update path (Step 11b) must invoke the writer via the "
+            "pp_run_ops shared helper for cwd-independent package resolution.  "
+            "Check whether the script was reverted to the legacy inline or bare "
+            "python3 -m approach."
         )
 
     def test_legacy_heredoc_pattern_absent(self) -> None:
@@ -238,7 +239,7 @@ class TestCmReleaseShellInvocationForm:
         assert "spec_from_file_location" not in step11b_block, (
             "cm-release.sh Step 11b contains `spec_from_file_location` — the legacy "
             "heredoc pattern. The CHANGELOG path was reverted. It must use "
-            "`python3 -m pgai_agent_kanban.cm.changelog_writer` instead."
+            "`pp_run_ops pgai_agent_kanban.cm.changelog_writer` via the shared helper."
         )
 
 

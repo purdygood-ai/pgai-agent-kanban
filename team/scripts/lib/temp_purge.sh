@@ -269,6 +269,7 @@ temp_purge_sweep_worktrees() {
 #   1. If the basename is NOT in the allowlist:
 #        log "temp purge: skipping foreign entry <path>" and skip.
 #        This includes provider session dirs (claude-*, codex-*, gemini-*)
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 #        which are explicitly absent from the allowlist (CODER-20260613-016).
 #   2. If the basename IS "worktrees" and the entry is a directory:
 #        Delegate to temp_purge_sweep_worktrees for per-task WORKING guard.

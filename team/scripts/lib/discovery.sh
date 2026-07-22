@@ -776,18 +776,26 @@ discovery_run_pipeline() {
     # Also skipped when Active RC is set — discovery_step_bugs contains an
     # active-RC guard that defers bundling until after the in-flight RC ships,
     # preventing bundles whose target version would be below the RC version.
-    local _step1_produced=0
+    #
+    # Category-first ordering: if Step 1 produces work, stop immediately.
+    # Steps 2 and 3 are skipped — bugs take priority over priorities and
+    # requirements regardless of version numbers.  "First category with work
+    # stops the iteration" is the contract stated in the pipeline header and SOP.
     if discovery_step_bugs "$project_name"; then
-        _step1_produced=1
+        DISCOVERY_LAST_STATUS="produced_work"
+        return 0
     fi
 
     # STEP 2: bundle priority items (same guard logic as Step 1 above).
-    local _step2_produced=0
+    # Only runs when Step 1 found nothing (category-first: bugs → priorities).
+    # If Step 2 produces work, stop immediately — requirements are skipped.
     if discovery_step_priority "$project_name"; then
-        _step2_produced=1
+        DISCOVERY_LAST_STATUS="produced_work"
+        return 0
     fi
 
     # STEP 3: queue PM for the lowest-version unprocessed requirements bundle.
+    # Only runs when Steps 1 and 2 both found nothing (category-first ordering).
     # Gated by _disc_chain_idle: only runs when Active RC = none AND every
     # named agent backlog's latest entry is [x]. This prevents queuing a new
     # PM task while any agent is still finishing the current RC.
@@ -796,13 +804,6 @@ discovery_run_pipeline() {
             DISCOVERY_LAST_STATUS="produced_work"
             return 0
         fi
-    fi
-
-    # STEP 4: idle (Steps 1 and 2 found nothing; Step 3 found nothing or was gated)
-    if [[ "$_step1_produced" -eq 1 || "$_step2_produced" -eq 1 ]]; then
-        # Steps 1 or 2 produced work but Step 3 found nothing — still produced_work
-        DISCOVERY_LAST_STATUS="produced_work"
-        return 0
     fi
 
     log "discovery_run_pipeline: no work pending, idle exit"
@@ -1610,7 +1611,13 @@ _disc_find_unhandled_items() {
     # stdout  → validated item paths (captured by caller via $())
     # stderr  → rejection log messages (operator-visible; never captured as content)
     # $rejected_tmp (when set) → one "<basename>\t<reason>" line per rejected file
-    python3 - "$dir" "$cache_file" "$id_prefix" "${rejected_tmp:-}" <<'PY'
+    #
+    # Settle guard: after the Python scan, each candidate is passed through
+    # _disc_settle_guard_active.  Items whose settle window has not yet expired
+    # are suppressed from stdout so the caller never sees them.  The settle
+    # guard fires only when state_dir is set and a fresh settle file exists.
+    local _py_validated_paths=""
+    _py_validated_paths="$(python3 - "$dir" "$cache_file" "$id_prefix" "${rejected_tmp:-}" <<'PY'
 import os, re, sys, pathlib
 
 dir_path = pathlib.Path(sys.argv[1])
@@ -1744,6 +1751,7 @@ if rejected_fh is not None:
 for r in results:
     print(r)
 PY
+)"
 
     # Quarantine tracking: process each rejected basename+reason through _disc_maybe_quarantine.
     # Each line in rejected_tmp is: <basename>\t<reason>.
@@ -1757,6 +1765,164 @@ PY
 
     # Clean up the temp file (ignore errors — failure to clean is not fatal)
     [[ -n "$rejected_tmp" ]] && rm -f "$rejected_tmp" 2>/dev/null || true
+
+    # Settle guard: emit only items whose settle window has expired (or no settle
+    # file exists).  Items with a fresh settle file are suppressed and logged.
+    # This closes the cancel→reset→re-tick double-handling race: after an operator
+    # resets an intake item's Status back to 'open', the guard defers pickup for
+    # one settle window (PGAI_DISCOVERY_SETTLE_SECONDS, default 60) so that the
+    # cancellation bookkeeping completes before the item is re-processed.
+    if [[ -n "$_py_validated_paths" ]]; then
+        while IFS= read -r _candidate_path; do
+            [[ -z "$_candidate_path" ]] && continue
+            if [[ -n "$state_dir" ]] && _disc_settle_guard_active "$state_dir" "$_candidate_path"; then
+                log "_disc_find_unhandled_items: settle guard active for $(basename "${_candidate_path}") — deferring pickup until settle window expires"
+            else
+                echo "$_candidate_path"
+            fi
+        done <<< "$_py_validated_paths"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Settle guard: protect against cancel→reset→re-tick double-handling.
+#
+# When an intake item (bug, priority, or requirements bundle) transitions from
+# 'running' back to 'open' — because an operator or cancel-rc resets it — the
+# discovery pipeline must not act on it again in the same tick window.  Acting
+# on it immediately risks double-handling: a bug could be re-bundled while the
+# previous bundle's PM task is still being cleaned up, or a requirements file
+# could be re-queued while the prior RC is still being cancelled.
+#
+# The guard uses a per-item settle file stored at:
+#   <state_dir>/settle/<item-basename>.settle
+# The file records the UTC timestamp of the reset event.  When discovery finds
+# an item eligible (Status=open), it checks whether a settle file exists and is
+# less than PGAI_DISCOVERY_SETTLE_SECONDS old (default: 60).  If so, it skips
+# the item for this iteration and emits a log line.  On the next tick (after the
+# settle window expires), the item is processed normally.
+#
+# Contract:
+#   - Settle files are WRITTEN by _disc_reset_item_status_to_open (the
+#     running→open transition wrapper).  Direct callers of _disc_set_status_field
+#     for non-reset transitions (bundling step marks running; cm-release marks done)
+#     do NOT write settle files — the guard only applies to the reset path.
+#   - Settle files are READ by _disc_settle_guard_active (called from
+#     _disc_find_unhandled_items).
+#   - Settle files are not deleted after use; they expire by age comparison.
+#     This avoids write-delete races under concurrent discovery runs.
+#   - PGAI_DISCOVERY_SETTLE_SECONDS defaults to 60.  Tests set it to 0 to
+#     exercise the "guard fires immediately" path.
+# ---------------------------------------------------------------------------
+
+# _disc_settle_guard_active <state_dir> <item_path>
+#
+# Returns 0 (guard active — SKIP this item) when a settle file for the item
+# exists in <state_dir>/settle/ AND was written less than
+# PGAI_DISCOVERY_SETTLE_SECONDS ago.
+#
+# Returns 1 (guard inactive — proceed) in all other cases:
+#   - state_dir is empty or does not exist
+#   - settle file does not exist
+#   - settle file exists but is older than the window
+#   - PGAI_DISCOVERY_SETTLE_SECONDS is 0 (guard disabled)
+#
+# This is intentionally a non-fatal, non-side-effecting check: it reads
+# the settle file and compares timestamps only.  No files are written here.
+_disc_settle_guard_active() {
+    local state_dir="$1"
+    local item_path="$2"
+
+    # Disabled when state_dir is absent (settle tracking not configured).
+    [[ -z "$state_dir" ]] && return 1
+
+    local settle_window="${PGAI_DISCOVERY_SETTLE_SECONDS:-60}"
+
+    # A window of 0 means "disabled" — skip the check entirely.
+    # This prevents divide-by-zero and provides a test escape hatch.
+    if [[ "$settle_window" -eq 0 ]]; then
+        return 1
+    fi
+
+    local item_basename
+    item_basename="$(basename "$item_path")"
+    local settle_file="${state_dir}/settle/${item_basename}.settle"
+
+    [[ -f "$settle_file" ]] || return 1
+
+    # Read the epoch timestamp written into the settle file (first non-blank line).
+    local settle_epoch
+    settle_epoch="$(grep -m1 '^[0-9]' "$settle_file" 2>/dev/null || true)"
+    [[ -n "$settle_epoch" ]] || return 1
+
+    # Compare against current time.
+    local now_epoch
+    now_epoch="$(date +%s 2>/dev/null || echo 0)"
+
+    local age=$(( now_epoch - settle_epoch ))
+    if [[ "$age" -lt "$settle_window" ]]; then
+        return 0  # guard active: settle window not yet expired
+    fi
+
+    return 1  # guard inactive: settle window has passed
+}
+
+# _disc_write_settle_marker <state_dir> <item_path>
+#
+# Write a settle file for the given item.  Called by _disc_reset_item_status_to_open
+# immediately after setting Status=open so that the next discovery tick knows a
+# recent reset occurred and defers pickup.
+#
+# The settle file contains the current UTC epoch timestamp on the first line
+# and the item path on the second line (for operator diagnostics).
+# The settle/ directory is created on demand.
+_disc_write_settle_marker() {
+    local state_dir="$1"
+    local item_path="$2"
+
+    [[ -z "$state_dir" ]] && return 0
+
+    local settle_dir="${state_dir}/settle"
+    mkdir -p "$settle_dir" 2>/dev/null || true
+
+    local item_basename
+    item_basename="$(basename "$item_path")"
+    local settle_file="${settle_dir}/${item_basename}.settle"
+    local now_epoch
+    now_epoch="$(date +%s 2>/dev/null || echo 0)"
+
+    printf '%s\n%s\n' "$now_epoch" "$item_path" > "$settle_file" 2>/dev/null || true
+
+    log "_disc_write_settle_marker: settle guard armed for ${item_basename} (expires in ${PGAI_DISCOVERY_SETTLE_SECONDS:-60}s)"
+}
+
+# _disc_reset_item_status_to_open <file> <state_dir>
+#
+# Reset an intake item's ## Status to 'open' and arm the settle guard.
+# This is the canonical entry point for the running→open transition.
+# Callers that need to reset an intake item (cancel-rc integration, operator
+# tooling, recovery scripts) should use this function rather than calling
+# _disc_set_status_field directly so that the settle guard fires on the next
+# discovery tick.
+#
+# If <state_dir> is empty, the settle file is not written (settle guard
+# inactive for this reset).  This matches the behaviour of _disc_set_status_field
+# in codepaths that do not have a project-scoped state directory.
+#
+# Note: the Status field is unconditionally written to 'open' regardless of
+# the current value.  Callers are responsible for ensuring this is appropriate
+# (e.g., only calling this for items whose prior status was 'running').
+_disc_reset_item_status_to_open() {
+    local file="$1"
+    local state_dir="${2:-}"
+
+    # Update the Status field first (this is the authoritative mutation).
+    _disc_set_status_field "$file" "open"
+
+    # Arm the settle guard so the next discovery tick defers pickup.
+    if [[ -n "$state_dir" ]]; then
+        _disc_write_settle_marker "$state_dir" "$file"
+    fi
 }
 
 # _disc_set_status_field <file> <new_status>
@@ -1775,7 +1941,7 @@ pattern = re.compile(r'(^##\s+Status\s*\n)(.*?)(\n+##|\Z)', flags=re.M | re.S | 
 if pattern.search(text):
     new_text = pattern.sub(lambda m: m.group(1) + new_status + "\n" + (m.group(3) if m.group(3) else ''), text, count=1)
 else:
-    # Insert after the first heading (e.g. "# BUG-0001-foo")
+    # Insert after the first heading (e.g. "# an earlier defect-foo")
     lines = text.splitlines(keepends=True)
     insert_idx = 0
     for i, line in enumerate(lines):
@@ -2083,7 +2249,7 @@ if version_semantics == "semver":
         # vX.Y.Z-slug.md name on a semver project.  A file that passed intake's
         # looser v[0-9]* rule but lacks dots (e.g. v20260712-slug.md) is a
         # label-semantics file deposited into a semver project — skip it with a
-        # named log line (no silent rejection per BUG-0045).
+        # named log line (no silent rejection per the recorded defect).
         if _INTAKE_RE.match(entry.name) and not _SEMVER_RE.match(entry.name):
             print(
                 _skip_log_line(entry.name, _SKIP_SEMVER_SHAPE),

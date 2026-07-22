@@ -8,9 +8,10 @@
 #      - medium: every-2-minutes with sub-minute stagger collapsed to minute granularity
 #      - large:  every-minute schedule, 8+ core hosts
 #   2. Loads the corresponding template from team/templates/install/pseudocron-{tier}.cfg.example.
-#   3. Substitutes the __KANBAN_ROOT__ placeholder with the resolved kanban root path.
-#   4. Writes pseudocron.cfg to the kanban root (idempotent: skip if identical).
-#   5. Writes pseudocron.env to the kanban root from the example, if absent.
+#   3. Copies the template directly to pseudocron.cfg in the kanban root (idempotent: skip if identical).
+#      Templates use ROOT-RELATIVE commands; no placeholder substitution is needed.
+#      pseudocron.py sets cwd=kanban_root at runtime so relative paths resolve correctly.
+#   4. Writes pseudocron.env to the kanban root from the example, if absent.
 #
 # NOTE on default tier:
 #   When --wake-tier is not supplied, the tier defaults to "small".  This is
@@ -29,7 +30,6 @@
 #
 # Requirements:
 #   - team/scripts/lib/safe_overwrite.sh must be present.
-#   - team/scripts/lib/temp.sh must be present.
 #   - team/templates/install/pseudocron-small.cfg.example, pseudocron-medium.cfg.example,
 #     and pseudocron-large.cfg.example must exist in the dev tree.
 #   - team/scripts/pseudocron.env.example must exist in the dev tree.
@@ -58,7 +58,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 # ---------------------------------------------------------------------------
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _SAFE_OVERWRITE_LIB="${_SCRIPT_DIR}/lib/safe_overwrite.sh"
-_TEMP_SH="${_SCRIPT_DIR}/lib/temp.sh"
 _ARGPARSE_LIB="${_SCRIPT_DIR}/lib/argparse.sh"
 _TEMPLATES_DIR="$(cd "${_SCRIPT_DIR}/../templates/install" 2>/dev/null && pwd)" || _TEMPLATES_DIR="${_SCRIPT_DIR}/../templates/install"
 _ENV_EXAMPLE="${_SCRIPT_DIR}/pseudocron.env.example"
@@ -131,8 +130,10 @@ Options:
   --help                 Print this usage and exit 0.
 
 Files written to the kanban root:
-  pseudocron.cfg   Pseudocron schedule derived from the chosen tier template.
-                   __KANBAN_ROOT__ is substituted with the resolved kanban root path.
+  pseudocron.cfg   Pseudocron schedule copied from the chosen tier template.
+                   Templates use ROOT-RELATIVE commands; no placeholder substitution is
+                   needed. pseudocron.py sets cwd to the kanban root at runtime so
+                   relative paths (e.g. "scripts/wake-batch.sh") resolve correctly.
                    Skipped silently if the file already exists with identical content.
                    Backed up and overwritten when content differs (with --wake-tier explicit).
   pseudocron.env   Pre-filled environment variable file consumed by pseudocron.py.
@@ -224,13 +225,6 @@ fi
 # shellcheck source=team/scripts/lib/safe_overwrite.sh
 source "$_SAFE_OVERWRITE_LIB"
 
-if [[ ! -f "$_TEMP_SH" ]]; then
-  die "temp.sh not found: $_TEMP_SH"
-fi
-# shellcheck source=team/scripts/lib/temp.sh
-source "$_TEMP_SH"
-unset _TEMP_SH
-
 # ---------------------------------------------------------------------------
 # Resolve kanban root
 # ---------------------------------------------------------------------------
@@ -309,24 +303,6 @@ PSEUDOCRON_CFG="${KANBAN_ROOT_ABS}/pseudocron.cfg"
 PSEUDOCRON_ENV="${KANBAN_ROOT_ABS}/pseudocron.env"
 
 # ---------------------------------------------------------------------------
-# Substitute __KANBAN_ROOT__ placeholder into a temp file.
-# The temp file is removed on EXIT (success or failure).
-# pgai_mktemp routes under the resolved framework temp root.
-# ---------------------------------------------------------------------------
-_RESOLVED_CFG="$(pgai_mktemp pseudocron_cfg_resolved)"
-trap 'rm -f "$_RESOLVED_CFG"' EXIT
-
-if ! sed -e "s|__KANBAN_ROOT__|${KANBAN_ROOT_ABS}|g" \
-     "$TIER_TEMPLATE" > "$_RESOLVED_CFG"; then
-  die "Failed to substitute placeholders in template: $TIER_TEMPLATE"
-fi
-
-# Sanity check: no unresolved placeholder tokens remain.
-if grep -qE '__KANBAN_ROOT__' "$_RESOLVED_CFG" 2>/dev/null; then
-  die "Resolved template still contains __KANBAN_ROOT__ tokens — substitution failed."
-fi
-
-# ---------------------------------------------------------------------------
 # Dry-run: print the planned actions and exit.
 # ---------------------------------------------------------------------------
 if [[ "$DRY_RUN" == "true" ]]; then
@@ -335,9 +311,9 @@ if [[ "$DRY_RUN" == "true" ]]; then
   echo ""
   info "  [1] Write pseudocron.cfg -> $PSEUDOCRON_CFG"
   info "      Source template: $TIER_TEMPLATE"
-  info "      Substitution: __KANBAN_ROOT__ -> $KANBAN_ROOT_ABS"
+  info "      (ROOT-RELATIVE commands; no placeholder substitution needed)"
   if [[ -f "$PSEUDOCRON_CFG" ]]; then
-    if cmp -s "$_RESOLVED_CFG" "$PSEUDOCRON_CFG"; then
+    if cmp -s "$TIER_TEMPLATE" "$PSEUDOCRON_CFG"; then
       info "      Status: content is already identical — would be a no-op."
     else
       info "      Status: content differs — would be backed up and overwritten."
@@ -354,9 +330,9 @@ if [[ "$DRY_RUN" == "true" ]]; then
     info "      Status: file does not exist — would be installed from example."
   fi
   echo ""
-  info "=== Resolved pseudocron.cfg content (tier: $SELECTED_TIER) ==="
+  info "=== pseudocron.cfg content (tier: $SELECTED_TIER) ==="
   echo ""
-  cat "$_RESOLVED_CFG"
+  cat "$TIER_TEMPLATE"
   echo ""
   info "=== end dry run ==="
   echo ""
@@ -378,12 +354,12 @@ info "Writing pseudocron.cfg (tier: $SELECTED_TIER)..."
 
 if [[ -n "$WAKE_TIER_ARG" && -f "$PSEUDOCRON_CFG" ]]; then
   # Explicit tier + file exists: force-overwrite with backup (skip prompt).
-  if cmp -s "$_RESOLVED_CFG" "$PSEUDOCRON_CFG"; then
+  if cmp -s "$TIER_TEMPLATE" "$PSEUDOCRON_CFG"; then
     info "pseudocron.cfg already up to date (identical content) — skipping write."
   else
     _bak="${HOME}/.pseudocron.cfg.before-install-$(date +%Y%m%d-%H%M%S).bak"
     cp "$PSEUDOCRON_CFG" "$_bak" || die "Failed to back up existing pseudocron.cfg to $_bak"
-    cp "$_RESOLVED_CFG" "$PSEUDOCRON_CFG" || die "Failed to write pseudocron.cfg"
+    cp "$TIER_TEMPLATE" "$PSEUDOCRON_CFG" || die "Failed to write pseudocron.cfg"
     ok "pseudocron.cfg updated (tier: $SELECTED_TIER, backup: $_bak)."
     unset _bak
   fi
@@ -391,7 +367,7 @@ else
   # No explicit tier (default small) or file does not exist yet:
   # let safe_overwrite_file prompt the operator if content differs.
   _cfg_result=0
-  safe_overwrite_file "$_RESOLVED_CFG" "$PSEUDOCRON_CFG" || _cfg_result=$?
+  safe_overwrite_file "$TIER_TEMPLATE" "$PSEUDOCRON_CFG" || _cfg_result=$?
   case "$_cfg_result" in
     0)
       ok "pseudocron.cfg installed/updated (tier: $SELECTED_TIER)."
@@ -399,8 +375,7 @@ else
     2)
       warn "pseudocron.cfg not installed (operator declined)."
       warn "To install manually (tier: $SELECTED_TIER):"
-      warn "  sed \"s|__KANBAN_ROOT__|${KANBAN_ROOT_ABS}|g\" \\"
-      warn "    ${TIER_TEMPLATE} > ${PSEUDOCRON_CFG}"
+      warn "  cp ${TIER_TEMPLATE} ${PSEUDOCRON_CFG}"
       ;;
     *)
       die "pseudocron.cfg installation failed (safe_overwrite_file exited $_cfg_result)."

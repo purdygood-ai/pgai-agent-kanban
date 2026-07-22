@@ -52,7 +52,7 @@ fronts are stable; the HTTP surface is the part still being field-tested.
   zoom semantics) that are not present in older tmux builds. The
   chain is exercised regularly against tmux 3.4; anything from 3.1
   forward should work.
-- **Python 3.9+**, `git`, `bash`, `curl` — standard shop tooling.
+- **Python 3.12+**, `git`, `bash`, `curl` — standard shop tooling.
 - **cron** — the pipeline is driven by cron ticks. Container hosts
   without cron can substitute `pseudocron.sh`; see
   [docs/pseudocron.md](docs/pseudocron.md).
@@ -62,6 +62,7 @@ fronts are stable; the HTTP surface is the part still being field-tested.
 The fastest path from empty directory to a running kanban. Every
 command is verbatim; adjust the URLs to your fork.
 
+<!-- doc-lint: skip — installation narrative requiring a fresh checkout with no prior kanban install, a registered project, and a live kanban root; harness cannot establish these prerequisites and several commands call scripts at full $KANBAN_ROOT paths that the ephemeral tempdir does not provide -->
 ```bash
 # 1. Clone and install (canonical default: $HOME/pgai_agent_kanban).
 git clone <this-repo> ~/develop/pgai-agent-kanban
@@ -96,12 +97,16 @@ couple of hours of wall-clock time for a few dollars in tokens; the
 dashboard's cost pane and `scripts/cost-report.sh --project <name>`
 show the real spend as it accrues.
 
-**Fastest first run: the demos.** The repo ships two complete guided
-walkthroughs that end in a real release —
+**Fastest first run: the demos.** The repo ships demos from 10 minutes
+to full workflow tours —
+[team/demos/helloworld-demo/README.md](team/demos/helloworld-demo/README.md)
+(a ~10–15 minute proof of life: one goal, one test, one tagged release),
 [team/demos/chomp-man-demo/README.md](team/demos/chomp-man-demo/README.md)
-(a small game shipped through the `release` workflow, git tags and all)
-and [team/demos/three-bears-demo/README.md](team/demos/three-bears-demo/README.md)
-(a story shipped through the `document` workflow). Evaluating the
+(a small game shipped through the `release` workflow, git tags and all),
+[team/demos/three-bears-demo/README.md](team/demos/three-bears-demo/README.md)
+(a story shipped through the `document` workflow), and
+[team/demos/testing-only-demo/README.md](team/demos/testing-only-demo/README.md)
+(a read-only audit of your Chomp-Man run's latest tag). Evaluating the
 framework? Run a demo first — every file you need is included.
 
 ---
@@ -173,10 +178,11 @@ To have the kanban manage its own source (the self-build pattern),
 register the framework's repository the same way you would any other
 project — there is no special flag, no special mode:
 
+<!-- doc-lint: skip — self-build registration example requiring a live kanban root and a real git repository URL; <repo-url> is a placeholder the operator replaces with their own fork or clone URL -->
 ```bash
 ~/pgai_agent_kanban/scripts/create-project.sh --project pgai-agent-kanban \
     --dev-tree ~/develop/pgai-agent-kanban \
-    --git-repo <your fork or clone URL>
+    --git-repo <repo-url>
 ```
 
 ---
@@ -264,6 +270,7 @@ project — there is no special flag, no special mode:
 | [docs/operator-commands.md](docs/operator-commands.md) | Every operator command, flags, and examples |
 | [docs/public-contract.md](docs/public-contract.md) | What you can depend on across the 1.x line |
 | [docs/pseudocron.md](docs/pseudocron.md) | Scheduling without cron (containers) |
+| [docs/docker.md](docs/docker.md) | Container deployment (Debian and RHEL9/UBI9 flavors): install → build → compose up → verify → upgrade → HALT |
 | [docs/dashboard.md](docs/dashboard.md), [docs/DASHBOARD-PANES.md](docs/DASHBOARD-PANES.md) | The tmux dashboard |
 | [docs/projects-cfg.md](docs/projects-cfg.md) | The project registry format |
 | [docs/operator-troubleshooting.md](docs/operator-troubleshooting.md) | When something looks wrong |
@@ -274,8 +281,10 @@ project — there is no special flag, no special mode:
 | [docs/creating-a-workflow.md](docs/creating-a-workflow.md) | Author a new workflow-type plugin end-to-end |
 | [team/workflows/README.md](team/workflows/README.md) | The plugin surface — manifest, hooks, `pipeline.yaml` |
 | [team/roles/OVERWATCH.md](team/roles/OVERWATCH.md) | The self-monitor's two tiers, on-BLOCK trigger, and whitelist |
+| [team/demos/helloworld-demo/README.md](team/demos/helloworld-demo/README.md) | 10-minute release-workflow proof of life |
 | [team/demos/chomp-man-demo/README.md](team/demos/chomp-man-demo/README.md) | Guided release-workflow walkthrough |
 | [team/demos/three-bears-demo/README.md](team/demos/three-bears-demo/README.md) | Guided document-workflow walkthrough |
+| [team/demos/testing-only-demo/README.md](team/demos/testing-only-demo/README.md) | Read-only audit of a shipped tag |
 
 Inside the install: `SOP.md` (operational procedures), `roles/`
 (per-agent specifications), `workflows/` (workflow type definitions),

@@ -1479,12 +1479,14 @@ PY_POL
     fi
   fi
 
-  # --- Post-TESTER finalize=report intake closure (BUG-0066) ---
-  # When the terminal roster ticket of a testing-only (finalize=report) run
-  # completes DONE, flip the originating intake item from running to done.
-  # Guards: SUBAGENT==tester, final_state==DONE, WF_MANIFEST_FINALIZE==report,
-  # plus README constraint "finalize_mode: report" (written by inject_simple_tester_task).
-  # Release/document workflow closure paths are byte-identical (no change here).
+  # --- Post-TESTER event-hook: finalize=report intake closure ---
+  # When the completing TESTER task reaches DONE, run the completion census to
+  # determine whether all sibling tasks sharing the same requirements path are
+  # terminal.  If so, flip the originating intake item from running to done.
+  # Guards: SUBAGENT==tester, final_state==DONE, WF_MANIFEST_FINALIZE==report.
+  # This is the low-latency path: closure lands in the same wake tick that
+  # completes the final task.  The per-wake sweep (sweep_running_intake_census)
+  # is the eventual-consistency guarantee for items whose closing tick is missed.
   if [[ "$SUBAGENT" == "tester" && "$final_state" == "DONE" ]]; then
     close_intake_on_finalize_report \
       "$task_id" \
@@ -1820,6 +1822,7 @@ PY
     reconcile_stale_active
     recheck_waiting_tasks
     recheck_blocked_tasks
+    sweep_running_intake_census
 
     set +e
     process_one_task
@@ -1858,6 +1861,7 @@ PY
 
   recheck_waiting_tasks
   recheck_blocked_tasks
+  sweep_running_intake_census
 
   fi  # end: if [[ "$_dispatch_gated" == "false" ]]
 
@@ -1886,6 +1890,7 @@ PY
                   reconcile_stale_active
                   recheck_waiting_tasks
                   recheck_blocked_tasks
+                  sweep_running_intake_census
                   set +e
                   process_one_task
                   _post_disc_exit=$?

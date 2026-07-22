@@ -6,7 +6,41 @@
 
 ---
 
-## v1.23.0 — unknown
+## v1.27.0-preview — 2026-07-22
+
+Preview build for field evaluation ahead of the formal v1.27.0
+release. Everything from v1.23.0 to this preview was built by the
+framework itself, on its own board.
+
+Highlights:
+
+- Containerized deployment as a first-class target: Debian and
+  RHEL9/UBI9 image flavors, a fail-loud entrypoint verifying the
+  four canonical mounts, pseudocron as PID 1, and an executable
+  runbook (docs/docker.md).
+- Relocatable scheduling: pseudocron configs carry root-relative
+  commands and run from the resolved kanban root — one config,
+  every environment.
+- Coding standards, self-enforced: docs/coding-standards.md binds
+  every code-producing agent, backed by a lint fleet the framework
+  runs against its own tree.
+- Executable documentation: a doc-lint harness runs every fenced
+  command in the public docs verbatim; links, fossils, and feature
+  coverage are gated the same way.
+- Committed VERSION: releases stamp their identity into the tree at
+  ship; installs and containers report exactly what they run.
+- Release-engineering hardening: cancelled version numbers free
+  cleanly, bug fixes precede feature work at selection, and the
+  recovery drill is race-guarded.
+- Operator experience: an operator dashboard window (full board
+  plus a working shell), configurable status glyphs, force-reset
+  with worktree cleanup, complete in-container test tooling.
+
+API contract: ICD 1.2.0 — unchanged since v1.23.0.
+
+---
+
+## v1.23.0 — 2026-07-14
 
 v1.23.0 is the second public release and the consolidation of everything since v1.0.0: the pluggable workflow architecture, the operator REST API with its browser dashboard, the OVERWATCH observer and PO intake agent, a unified fail-loud environment contract across every entry point, and a third shipped workflow type — testing-only — certified end-to-end with zero operator interventions.
 
@@ -73,20 +107,21 @@ selection model. Defects are tracked on the internal ledger and
 described by pattern in the CHANGELOG.
 All five public Known Issues disclosed at v1.0.0 are resolved as of
 this release:
-- KI-1.0.0.1 — resolved
-- KI-1.0.0.2 — resolved
-- KI-1.0.0.3 — resolved
-- KI-1.0.0.4 — resolved
-- KI-1.0.0.5 — resolved
+KI-1.0.0.1 — `scripts/dashboard/create.sh` fails on Ubuntu 24.04 with `size missing` emitted by tmux, leaving the dashboard partially constructed (window 0 never splits past one pane).; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.2 — `shell-env_example` line 34 references a misspelled variable in the commented-out convenience export: `$PGA_AGENT_KANBAN_ROOT_PATH` (missing the `I`) instead of `$PGAI_AGENT_KANBAN_ROOT_PATH` (the correct variable, defined one line above on line 33).; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.3 — Discovery/PM re-activates a requirements bundle that the operator has terminally closed, overwriting its terminal state.; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.4 — `delete.sh` refuses to delete an intake item that IS in a terminal state, and its refusal message contradicts itself: The item's state is `wont-do`; the guard says that is "not a terminal state"; the remedy text says to move it to "DONE or WONT-DO first" — i.e.; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.5 — The tmux dashboard's per-project agent columns sort task rows by ID descending (`column-render.sh` ~line 914/963: `reverse=True`) and truncate to `max_rows_per_project` (default 8).; affects v1.0.0 · fixed in v1.0.0
 
 ### Known Issues
-None
+(writer mints KI-1.23.0.1 at the next regen — v1.23.0 is in
+PUBLISHED; do not hand-assign) — A testing-only run completes fully — verification, report at the finalize location, no-mutation attestation — but the originating requirements intake item is not flipped to `done` by the machinery.; affects v1.23.0 · fix pending next release
 
 *Details: [release-notes/v1.23.0.md](release-notes/v1.23.0.md)*
 
 ---
 
-## v1.0.0 — unknown
+## v1.0.0 — 2026-07-03
 
 ### Implemented
 None (bugfix release)
@@ -96,9 +131,9 @@ None
 
 ### Known Issues
 KI-1.0.0.1 — `scripts/dashboard/create.sh` fails on Ubuntu 24.04 with `size missing` emitted by tmux, leaving the dashboard partially constructed (window 0 never splits past one pane).; affects v1.0.0 · fixed in v1.23.0
-KI-1.0.0.2 — `shell-env_example` line 34 references a misspelled variable in the commented-out convenience export: ``` # export KANBAN_ROOT_PATH="$PGA_AGENT_KANBAN_ROOT_PATH" ``` `$PGA_AGENT_KANBAN_ROOT_PATH` (missing the `I`) instead of `$PGAI_AGENT_KANBAN_ROOT_PATH` (the correct variable, defined one line above on line 33).; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.2 — `shell-env_example` line 34 references a misspelled variable in the commented-out convenience export: `$PGA_AGENT_KANBAN_ROOT_PATH` (missing the `I`) instead of `$PGAI_AGENT_KANBAN_ROOT_PATH` (the correct variable, defined one line above on line 33).; affects v1.0.0 · fixed in v1.23.0
 KI-1.0.0.3 — Discovery/PM re-activates a requirements bundle that the operator has terminally closed, overwriting its terminal state.; affects v1.0.0 · fixed in v1.23.0
-KI-1.0.0.4 — `delete.sh` refuses to delete an intake item that IS in a terminal state, and its refusal message contradicts itself: ``` $ scripts/close.sh --project pgai-agent-kanban --key <item> --state wont-do close: <item> closed (status: wont-do) $ scripts/delete.sh --project pgai-agent-kanban --key <item> delete_item: refused to delete '<item>' — state is 'wont-do' (not a terminal state).; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.4 — `delete.sh` refuses to delete an intake item that IS in a terminal state, and its refusal message contradicts itself: The item's state is `wont-do`; the guard says that is "not a terminal state"; the remedy text says to move it to "DONE or WONT-DO first" — i.e.; affects v1.0.0 · fixed in v1.23.0
 
 *Details: [release-notes/v1.0.0.md](release-notes/v1.0.0.md)*
 

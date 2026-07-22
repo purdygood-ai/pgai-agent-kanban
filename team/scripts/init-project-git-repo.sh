@@ -89,7 +89,15 @@ if [[ -z "$PROJECT_ARG" ]]; then
     exit 1
 fi
 
+# --- Bootstrap: self-locate → source shell-env → fail loud ---
+# Must happen before the first use of PGAI_AGENT_KANBAN_ROOT_PATH so the
+# script runs from a fresh shell without manual pre-sourcing.  Explicit
+# operator exports win via env_bootstrap.sh's idempotency guard.
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+
 # --- Resolve script and kanban root ---
+# PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh or the operator.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
@@ -121,8 +129,6 @@ fi
 
 # --- Enable strict mode for our own code ---
 set -euo pipefail
-# shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Resolve project context ---
 export KANBAN_ROOT

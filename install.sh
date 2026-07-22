@@ -1370,11 +1370,18 @@ echo "See $KANBAN_ROOT/README.md for the full documentation."
 echo ""
 
 # --- Write VERSION and VERSION_DETAIL files (last step before exit) ---
-# Uses the shared stamp helper to write VERSION (clean tag, suffix-stripped)
-# and VERSION_DETAIL (full describe + deposit SHA).  The helper is the single
-# implementation; upgrade.sh calls the same function.
-# When --stamp-version is supplied, VERSION is written verbatim (no suffix to
-# strip; no VERSION_DETAIL written) and the advisory is bypassed.
+# Uses the shared stamp helper to propagate VERSION and write VERSION_DETAIL.
+# The helper is the single implementation; upgrade.sh calls the same function.
+#
+# Normal deposit path (no --stamp-version):
+#   - VERSION comes from the source tree's committed VERSION file when present.
+#     The committed file IS the identity; no git-describe rewrite occurs.
+#   - VERSION_DETAIL (full describe + deposit SHA) is always tool-written as
+#     deployment provenance; it is not committed.
+#
+# Override path (--stamp-version STRING):
+#   - VERSION is written verbatim from the explicit value.
+#   - VERSION_DETAIL is NOT written.
 _INSTALL_STAMP_LIB="${SCRIPT_DIR}/team/scripts/lib/version_stamp.sh"
 if [[ -f "$_INSTALL_STAMP_LIB" ]]; then
   # shellcheck source=team/scripts/lib/version_stamp.sh
@@ -1384,33 +1391,16 @@ unset _INSTALL_STAMP_LIB
 
 if [[ "$DRY_RUN" != "true" ]]; then
   if [[ -n "$STAMP_VERSION" ]]; then
-    # Operator override: write verbatim via shared helper; skip advisory.
+    # Operator override: write verbatim via shared helper; no VERSION_DETAIL.
     ok "VERSION stamp: using --stamp-version override: $STAMP_VERSION"
     stamp_version_files "$SCRIPT_DIR" "$KANBAN_ROOT" "$STAMP_VERSION"
     ok "Wrote VERSION: $STAMP_VERSION -> $KANBAN_ROOT/VERSION"
   else
-    # Resolve from HEAD via git describe; emit divergence advisory when the
-    # deployed tree is ahead of the latest published tag.
-    _INSTALL_FULL_DESCRIBE="$(git -C "$SCRIPT_DIR" describe --tags 2>/dev/null || true)"
-    _INSTALL_FULL_DESCRIBE="${_INSTALL_FULL_DESCRIBE:-unknown-dev}"
-
-    # Advisory: when the latest unprefixed tag merged to origin/main differs
-    # from the describe result, inform the operator of the staged-vs-published
-    # gap.  The advisory is one line only; never a prompt or a blocking error.
-    _OLD_VER="$(git -C "$SCRIPT_DIR" tag --merged origin/main 2>/dev/null \
-      | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-      | sort -V \
-      | tail -n1 || true)"
-    if [[ -n "$_OLD_VER" ]] && [[ "$_INSTALL_FULL_DESCRIBE" != "$_OLD_VER" ]]; then
-      info "deploying $_INSTALL_FULL_DESCRIBE ; latest published tag is $_OLD_VER"
-    fi
-    unset _OLD_VER
-
-    # Write VERSION (clean tag) and VERSION_DETAIL (forensics) via shared helper.
+    # Normal deposit: copy committed VERSION (when present) and write VERSION_DETAIL.
     stamp_version_files "$SCRIPT_DIR" "$KANBAN_ROOT"
     _INSTALL_CLEAN_TAG="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
-    ok "Wrote VERSION: ${_INSTALL_CLEAN_TAG} -> $KANBAN_ROOT/VERSION"
-    unset _INSTALL_FULL_DESCRIBE _INSTALL_CLEAN_TAG
+    ok "VERSION: ${_INSTALL_CLEAN_TAG} (from source tree; detail in VERSION_DETAIL)"
+    unset _INSTALL_CLEAN_TAG
   fi
 fi
 

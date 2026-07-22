@@ -382,10 +382,15 @@ class ResetBody(BaseModel):
         project:        Project name.
         key:            Task key or intake identifier (kind-agnostic selector).
         agent:          Agent task ID (e.g. ``CODER-20260101-001-slug``).
-        bug:            Bug intake key (e.g. ``BUG-0042``).
+        bug:            Bug intake key (e.g. ``an earlier defect``).
         priority:       Priority intake key (e.g. ``PRIORITY-0007``).
         requirement:    Requirement intake version (e.g. ``v0.1.2``).
         keep_artifacts: When True, passes ``--keep-artifacts`` to reset.sh.
+        force:          When True, passes ``--force`` to reset.sh, which performs
+                        stale-worktree cleanup (git worktree remove, prune, rm -rf)
+                        before the normal amnesia reset.  Without force, a detected
+                        stale worktree causes a non-zero exit with the removal recipe
+                        printed to stderr.  Agent-task resets only.
         dry_run:        When True, short-circuits dispatch — no subprocess spawned.
     """
 
@@ -398,6 +403,7 @@ class ResetBody(BaseModel):
     priority: Optional[str] = None
     requirement: Optional[str] = None
     keep_artifacts: Optional[bool] = None
+    force: Optional[bool] = None
     dry_run: bool = False
 
 
@@ -933,10 +939,12 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
     - ``project``        (required) — project name.
     - ``key``            (optional) — kind-agnostic task or intake key.
     - ``agent``          (optional) — agent task ID (e.g. ``CODER-20260101-001-slug``).
-    - ``bug``            (optional) — bug intake key (e.g. ``BUG-0042``).
+    - ``bug``            (optional) — bug intake key (e.g. ``an earlier defect``).
     - ``priority``       (optional) — priority intake key (e.g. ``PRIORITY-0007``).
     - ``requirement``    (optional) — requirement intake version (e.g. ``v0.1.2``).
     - ``keep_artifacts`` (optional, bool) — when True, passes ``--keep-artifacts``.
+    - ``force``          (optional, bool) — when True, passes ``--force`` to perform
+                                            stale-worktree cleanup before the reset.
     - ``dry_run``        (optional, bool) — when True, returns the planned action description
                                             without resetting anything.
 
@@ -996,6 +1004,8 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
     flags: dict = {"project": body.project, "key": resolved_key}
     if body.keep_artifacts:
         flags["keep-artifacts"] = True
+    if body.force:
+        flags["force"] = True
     planned_argv = build_argv(script, flags)
 
     short_circuit = _dry_run_envelope(body.dry_run, planned_argv, warnings)

@@ -242,6 +242,7 @@ Beyond the generic standards in the agent prompt, this project requires:
 - **Phase 0 is scaffolding** (always). Final phase is integration testing or end-to-end verification (always).
 - **Order by genuine dependency.** Don't impose false serialization.
 - **Constraints propagate.** Constraints in the requirements doc apply to every ticket they touch.
+- **`docs/coding-standards.md` is implicit acceptance criteria for every CODER ticket.** Do not restate its directives in each ticket — CODER's role file binds every produced code artifact to the standards doc. Cite it only when a ticket must deviate from a specific directive.
 
 ### Suggested Decomposition Is a Strong Signal
 

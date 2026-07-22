@@ -29,12 +29,14 @@ cd -
 
 ### 2. Create the project
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/create-project.sh --project pgai-chomp-man --workflow-type release
 ```
 
 ### 3. Wire the project to your scratch repo (edit project.cfg)
 
+<!-- doc-lint: skip — interactive editor invocation ($EDITOR) in a non-TTY environment; harness cannot open an interactive editing session -->
 ```bash
 $EDITOR projects/pgai-chomp-man/project.cfg
 #   set:  push_to_remote = false                       (local-only — never push)
@@ -69,6 +71,7 @@ fix or an enhancement back to the chain. Deposit them where shown; if your build
 already does the right thing, the chain will handle it gracefully.
 
 ### 1. Bootstrap (v0.0.1)
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/v0.0.1-bootstrap.md
@@ -76,6 +79,7 @@ scripts/intake.sh --project pgai-chomp-man \
 Sets up the project skeleton. First release.
 
 ### 2. Screen and movement (v0.1.0)
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/v0.1.0-screen-and-movement.md
@@ -84,6 +88,7 @@ The maze and the player appear; you can move Chomp-Man around. Watch the full
 RC lifecycle for the first time here.
 
 ### 3. BUG — movement requires a held key
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/BUG-0001-movement-requires-held-key.md
@@ -95,6 +100,7 @@ report a defect — write it up, drop it with `intake.sh` (the `BUG-` prefix
 routes it to `bugs/`).
 
 ### 4. PRIORITY — scalable 16:9 HD display
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/PRIORITY-0001-scalable-16x9-hd-display.md
@@ -104,6 +110,7 @@ shows how you prioritize an improvement in — same `intake.sh`, the `PRIORITY-`
 prefix routes it to the priority lane.
 
 ### 5. Dots and scoring (v0.2.0)
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/v0.2.0-dots-and-scoring.md
@@ -111,6 +118,7 @@ scripts/intake.sh --project pgai-chomp-man \
 Now there are dots to eat and a score.
 
 ### 6. PRIORITY — sound effects
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/PRIORITY-0002-sound-effects.md
@@ -119,6 +127,7 @@ With eating and scoring in place, add sound. Another enhancement through the
 priority lane.
 
 ### 7. Dragons (v0.3.0)
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/v0.3.0-dragons.md
@@ -126,6 +135,7 @@ scripts/intake.sh --project pgai-chomp-man \
 The enemies (dragons) arrive and chase Chomp-Man.
 
 ### 8. Power pellets (v0.4.0)
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/v0.4.0-power-pellets.md
@@ -133,6 +143,7 @@ scripts/intake.sh --project pgai-chomp-man \
 Eat a power pellet and the dragons become edible for a while.
 
 ### 9. BUG — no color change during the power-pellet window
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/BUG-0002-no-color-change-power-pellet.md
@@ -142,6 +153,7 @@ sprite gives no visual cue that he's in the powered-up (dragon-eating) state.
 A fix through the patch lane, reported against a feature that now exists.
 
 ### 10. PRIORITY — extra life for every 2 dragons eaten
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
   --file demos/chomp-man-demo/intake/PRIORITY-0003-extra-life-per-two-dragons.md
@@ -150,6 +162,7 @@ An enhancement that only makes sense once you can eat dragons: reward it with an
 extra life per two eaten.
 
 ### 11–14. The rest of the features
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man --file demos/chomp-man-demo/intake/v0.5.0-fruit-bonus.md
 scripts/intake.sh --project pgai-chomp-man --file demos/chomp-man-demo/intake/v0.6.0-chompman-dragon-sprites.md

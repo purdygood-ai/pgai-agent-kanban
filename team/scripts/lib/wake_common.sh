@@ -78,6 +78,12 @@ source "${SCRIPT_DIR}/../lib/config_loader.sh"
 # shellcheck source=scripts/lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 
+# --- Source pp_run_ops helper (cwd-independent python3 -m invocations) ---
+# Provides pp_run_ops() so all pgai_agent_kanban.* module calls are
+# cwd-independent and do not require a pre-set PYTHONPATH from the caller.
+# shellcheck source=scripts/lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
+
 # PGAI_PROJECT_ROOT / PGAI_PROJECT_NAME initial values.
 # These are pre-loop placeholders overridden per-project in wake_common_run.
 # Resolution: honor PGAI_PROJECT_NAME if already set in the environment
@@ -1600,38 +1606,48 @@ PY
 # ---------------------------------------------------------------------------
 # close_intake_on_finalize_report
 #   <task_id> <task_readme> <project_root> <tasks_root> <wf_manifest_finalize>
+#   [<req_path_override>]
 #
 # Closure-parity helper for testing-only (finalize=report) workflows.
 # Mirrors the CM intake-item closure that cm/release.sh Step 16b performs for
-# release workflows via cm/promote_bundled_items.py, but keyed on:
-#   (a) the workflow plugin's finalize=report capability (WF_MANIFEST_FINALIZE)
-#   (b) the terminal roster ticket's README carrying "finalize_mode: report"
-#       in its ## Constraints section (written by inject_simple_tester_task)
+# release workflows via cm/promote_bundled_items.py.
 #
-# Both guards must be true before any closure is attempted — neither fires in
-# isolation.  This dual-gate prevents the closure from triggering on release
-# or document workflows (finalize != report).
+# Root-cause evidence (an earlier defect, 2026-07-14T14:04:10):
+#   "finalize_mode:report not found in README constraints — skipping intake
+#   closure (not a finalize=report terminal ticket)"
+# The prior Guard 2 checked for a README marker that inject_simple_tester_task
+# writes — but PM-authored one-ticket plans never carry it.  The fix replaces
+# that marker check with a completion census: every sibling task that shares
+# the same requirements path must be terminal before closure fires.  This is
+# shape-blind (one-ticket, two-ticket, injected or PM-authored) and mirrors
+# the same rule CM workflows implement implicitly (CM is positionally last).
 #
-# Reference: BUG-0066 (this fix), BUG-0063 (report half), BUG-0051 (design).
+# Reference: an earlier defect (this fix), an earlier defect (original helper), an earlier defect
+#   (report half), an earlier defect (design).
 # Parity with: cm/release.sh Step 16b + cm/promote_bundled_items.py.
 #
 # Behaviour:
 #   1. Guard 1: <wf_manifest_finalize> must equal "report".  Any other value
 #      (tag, publish, …) exits immediately — no-op for release/document paths.
-#   2. Guard 2: <task_readme> ## Constraints section must contain the line
-#      "finalize_mode: report" (written by inject_simple_tester_task).
-#   3. Requirements path: the first absolute-path entry in <task_readme>'s
-#      ## Inputs section (requirements file prepended by create_task_folder).
-#   4. Mid-run failure check: scan <tasks_root> for any task whose README
-#      lists the same requirements path in ## Inputs.  If any such sibling
-#      task has ## State: BLOCKED, abort — item stays running.
-#   5. Closure: invoke the canonical close_item helper via the ops package:
-#        python3 -m pgai_agent_kanban.ops close_item <project_root> <key>
+#   2. Requirements path: when <req_path_override> (6th arg) is non-empty it is
+#      used directly, bypassing README extraction.  Otherwise the first
+#      absolute-path entry in <task_readme>'s ## Inputs section is used
+#      (requirements file prepended by create_task_folder).
+#   3. Completion census: scan ALL task folders under <tasks_root> whose
+#      README ## Inputs cite the same requirements path.  Terminal states are
+#      exactly {DONE, WONT-DO}; all others (WORKING, BACKLOG, WAITING,
+#      BLOCKED) are non-terminal.  If every sibling is terminal, proceed to
+#      closure.  Otherwise log the census result (counts, non-terminal siblings
+#      by ID and state) and skip.  Note: the BLOCKED mid-run check from the
+#      prior implementation is subsumed here — BLOCKED is non-terminal and will
+#      prevent closure via the census, so no separate BLOCKED-only pass is
+#      needed.
+#   4. Closure: invoke the canonical close_item helper via the ops package:
+#        pp_run_ops pgai_agent_kanban.ops close_item <project_root> <key>
 #      where <key> is the requirements file's basename (without .md extension).
 #
 # Returns 0 on success (closure fired or legitimately skipped).
-# Returns non-zero only on unexpected internal errors (best-effort: never
-# fails the task that called it).
+# Never fails the caller — all internal error paths return 0.
 # ---------------------------------------------------------------------------
 close_intake_on_finalize_report() {
   local _task_id="${1:-}"
@@ -1639,6 +1655,17 @@ close_intake_on_finalize_report() {
   local _project_root="${3:-}"
   local _tasks_root="${4:-}"
   local _wf_finalize="${5:-}"
+  local _req_path_override="${6:-}"
+
+  # Narration prefix: when called from sweep_running_intake_census (_task_id=="sweep"),
+  # use "sweep-census:" so all sweep-mode helper lines share one grep-able prefix.
+  # Non-sweep callers keep the "task <id>: close_intake_on_finalize_report:" form.
+  local _log_pfx
+  if [[ "${_task_id}" == "sweep" ]]; then
+    _log_pfx="sweep-census:"
+  else
+    _log_pfx="task ${_task_id}: close_intake_on_finalize_report:"
+  fi
 
   # Guard 1: finalize capability must be "report".
   # All other values (tag, publish, none) skip this block entirely so that
@@ -1648,40 +1675,16 @@ close_intake_on_finalize_report() {
     return 0
   fi
 
-  # Guard 2: task README ## Constraints must contain "finalize_mode: report".
-  # inject_simple_tester_task writes this constraint on the TESTER finalizer
-  # task; regular TESTER tasks in release workflows do not carry it.
-  local _readme_has_finalize_report=false
-  if [[ -f "$_task_readme" ]]; then
-    _readme_has_finalize_report="$(python3 - "$_task_readme" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-except Exception:
-    print("false"); raise SystemExit(0)
-# Parse ## Constraints section (ends at next ## heading or EOF)
-m = re.search(
-    r'^##\s+Constraints\s*\n(.*?)(?=\n##|\Z)',
-    text, flags=re.S | re.M
-)
-if m and re.search(r'^\s*[-*]?\s*finalize_mode\s*:\s*report\s*$', m.group(1), re.M):
-    print("true")
-else:
-    print("false")
-PY
-)"
-  fi
-
-  if [[ "$_readme_has_finalize_report" != "true" ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: finalize_mode:report not found in README constraints — skipping intake closure (not a finalize=report terminal ticket)"
-    return 0
-  fi
-
-  # Extract requirements file path: the first absolute path in ## Inputs.
-  # create_task_folder prepends requirements_path to inputs so it is always
-  # the first entry when present.
+  # Resolve the requirements file path.
+  # When a path override is provided (sweep call site), use it directly.
+  # Otherwise extract the first absolute path from the task README ## Inputs
+  # (create_task_folder always prepends the requirements path as the first
+  # entry when one is present).
   local _req_path=""
-  _req_path="$(python3 - "$_task_readme" <<'PY'
+  if [[ -n "$_req_path_override" ]]; then
+    _req_path="$_req_path_override"
+  else
+    _req_path="$(python3 - "$_task_readme" <<'PY'
 import pathlib, re, sys
 try:
     text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
@@ -1700,34 +1703,43 @@ for line in m.group(1).splitlines():
 raise SystemExit(1)
 PY
 )" || true
+  fi
 
   if [[ -z "$_req_path" ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: could not extract requirements path from README ## Inputs — skipping intake closure"
+    log "${_log_pfx} could not extract requirements path from README ## Inputs — skipping intake closure"
     return 0
   fi
 
   if [[ ! -f "$_req_path" ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: requirements file not found at ${_req_path} — skipping intake closure"
+    log "${_log_pfx} requirements file not found at ${_req_path} — skipping intake closure"
     return 0
   fi
 
-  log "task ${_task_id}: close_intake_on_finalize_report: requirements file identified: ${_req_path}"
+  log "${_log_pfx} requirements file identified: ${_req_path}"
 
-  # Mid-run failure check: scan sibling tasks (same requirements file in
-  # ## Inputs) for BLOCKED state.  A BLOCKED sibling means the run did not
-  # complete cleanly; intake item must remain running.
-  local _blocked_sibling=false
+  # Completion census: scan ALL task folders under tasks_root whose README
+  # ## Inputs cite the same requirements path.  Closure fires only when every
+  # sibling (current task included, called post-transition as DONE) is
+  # terminal.  Terminal states: DONE, WONT-DO.  Non-terminal: everything else
+  # (WORKING, BACKLOG, WAITING, BLOCKED).  Prior-run corpses in WONT-DO are
+  # terminal and do not prevent closure.
+  local _census_result=""
   if [[ -d "$_tasks_root" ]]; then
-    _blocked_sibling="$(python3 - "$_tasks_root" "$_req_path" <<'PY'
+    _census_result="$(python3 - "$_tasks_root" "$_req_path" <<'PY'
 import pathlib, re, sys
+
+TERMINAL = {"DONE", "WONT-DO"}
 
 tasks_root = pathlib.Path(sys.argv[1])
 req_path   = sys.argv[2]
 
+total      = 0
+non_terminal = []  # list of "id:state" strings
+
 for task_dir in sorted(tasks_root.iterdir()):
     if not task_dir.is_dir() or task_dir.name == "queues":
         continue
-    readme = task_dir / "README.md"
+    readme      = task_dir / "README.md"
     status_file = task_dir / "status.md"
     if not readme.is_file() or not status_file.is_file():
         continue
@@ -1735,55 +1747,201 @@ for task_dir in sorted(tasks_root.iterdir()):
         readme_text = readme.read_text(encoding="utf-8")
     except OSError:
         continue
-    # Check if this task's ## Inputs contains the same requirements path
+    # Filter to tasks whose ## Inputs cite the same requirements path
     m = re.search(r'^##\s+Inputs\s*\n(.*?)(?=\n##|\Z)', readme_text, flags=re.S | re.M)
-    if not m:
+    if not m or req_path not in m.group(1):
         continue
-    inputs_text = m.group(1)
-    if req_path not in inputs_text:
-        continue
-    # Sibling task found — check its state
+    total += 1
+    # Read sibling state
     try:
         status_text = status_file.read_text(encoding="utf-8")
     except OSError:
+        # Unreadable status — treat as non-terminal to be safe
+        non_terminal.append(f"{task_dir.name}:UNKNOWN")
         continue
     state_m = re.search(r'^##\s+State\s*\n\s*(\S+)', status_text, re.M)
-    if state_m and state_m.group(1).strip().upper() == "BLOCKED":
-        print("true")
-        raise SystemExit(0)
+    state = state_m.group(1).strip().upper() if state_m else "UNKNOWN"
+    if state not in TERMINAL:
+        non_terminal.append(f"{task_dir.name}:{state}")
 
-print("false")
+if non_terminal:
+    summary = ", ".join(non_terminal)
+    print(f"skip:{total} sibling(s), {len(non_terminal)} non-terminal: {summary}")
+else:
+    print(f"ok:{total}")
 PY
 )" || true
   fi
 
-  if [[ "$_blocked_sibling" == "true" ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: BLOCKED sibling task found — intake item stays running (mid-run failure guard)"
+  # Parse census result: "ok:N" means all siblings are terminal; "skip:..." means not.
+  if [[ -z "$_census_result" || "$_census_result" == skip:* ]]; then
+    local _census_detail="${_census_result#skip:}"
+    log "${_log_pfx} census incomplete — skipping intake closure (${_census_detail:-tasks_root not found or unreadable})"
     return 0
   fi
 
-  # All guards passed: invoke canonical close_item helper.
+  # All siblings are terminal: invoke canonical close_item helper.
   # Key is the requirements file basename without the .md extension.
   local _req_key
   _req_key="$(basename "$_req_path" .md)"
 
-  log "task ${_task_id}: close_intake_on_finalize_report: closing intake item '${_req_key}' (finalize=report terminal ticket complete; parity with CM Step 16b)"
+  log "${_log_pfx} closing intake item '${_req_key}' (finalize=report terminal ticket complete; parity with CM Step 16b)"
 
   local _close_exit=0
   set +e
-  python3 -m pgai_agent_kanban.ops close_item "$_project_root" "$_req_key" done 2>&1 | \
-    while IFS= read -r _line; do log "close_intake_on_finalize_report: ${_line}"; done
+  pp_run_ops pgai_agent_kanban.ops close_item "$_project_root" "$_req_key" done 2>&1 | \
+    while IFS= read -r _line; do log "${_log_pfx} ${_line}"; done
   _close_exit="${PIPESTATUS[0]}"
   set -e
 
   if [[ $_close_exit -eq 0 ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: intake item '${_req_key}' closed done (BUG-0066 fix)"
+    log "${_log_pfx} intake item '${_req_key}' closed done"
   elif [[ $_close_exit -eq 2 ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: WARNING: ambiguous key '${_req_key}' — could not uniquely identify intake item; item left at running"
+    log "${_log_pfx} WARNING: ambiguous key '${_req_key}' — could not uniquely identify intake item; item left at running"
   elif [[ $_close_exit -eq 3 ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: WARNING: intake item '${_req_key}' not found — nothing to close"
+    log "${_log_pfx} WARNING: intake item '${_req_key}' not found — nothing to close"
   else
-    log "task ${_task_id}: close_intake_on_finalize_report: WARNING: close_item exited ${_close_exit} for '${_req_key}'; item may not have been closed"
+    log "${_log_pfx} WARNING: close_item exited ${_close_exit} for '${_req_key}'; item may not have been closed"
+  fi
+
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# sweep_running_intake_census
+#
+# Per-wake self-healing pass: close stranded intake items whose sibling tasks
+# all reached a terminal state but whose own ## Status is still "running".
+# Called from the per-wake re-check sweep (alongside recheck_waiting_tasks and
+# recheck_blocked_tasks) so that items whose closing moment was missed by a
+# crash, restart, or clock-racing tick are healed on the next wake.
+#
+# Context: runs inside run_project_chain after pp_load_config, so the
+# following shell variables are available:
+#   _CURRENT_PROJECT — the project currently being processed
+#   PGAI_PROJECT_ROOT — the project root directory
+#   TASKS_ROOT — tasks/ directory for this project
+#
+# Resolution: workflow type and finalize capability are resolved PER ITEM from
+# each requirements doc's "## Workflow Type" field (not from project.cfg).
+# A project whose cfg lacks workflow_type, or a project hosting items of mixed
+# workflow types, is handled correctly: each item is evaluated independently.
+# project.cfg is at most a hint; it is never the gate.
+#
+# Plugin cache: wf_load_plugin is called at most once per distinct workflow
+# type per wake — an associative array keyed by type memoises the finalize
+# value within this function's scope so repeated items of the same type do
+# not repeat the plugin load.
+#
+# Narration: every item-level outcome is logged at the standard log level so
+# there is always at least one sweep-census line per wake when running items
+# exist.  Silent early returns are eliminated.
+#
+# Guard (one glob): if the requirements directory is absent or empty the
+# function logs a skip line and returns after one directory iteration.
+#
+# For each running intake item where finalize=report the existing
+# close_intake_on_finalize_report census logic runs: all sibling tasks must
+# be terminal (DONE or WONT-DO) before the item is flipped to done.
+#
+# Returns 0 always (never blocks the caller).
+# ---------------------------------------------------------------------------
+sweep_running_intake_census() {
+  # Guard: find the requirements directory for this project.
+  # pp_requirements_dir echoes "<project_root>/requirements".
+  local _swc_req_dir=""
+  _swc_req_dir="$(pp_requirements_dir "${_CURRENT_PROJECT:-}" 2>/dev/null || true)"
+  if [[ -z "$_swc_req_dir" || ! -d "$_swc_req_dir" ]]; then
+    log "sweep-census: project ${_CURRENT_PROJECT:-}: skipped — no requirements directory"
+    return 0
+  fi
+
+  # Per-wake plugin cache: declare -A in local scope.
+  # Keys are workflow type strings; values are the resolved finalize capability.
+  # "LOAD_FAILED" is stored when wf_load_plugin returns non-zero so the
+  # failure is cached and not retried for subsequent items of the same type.
+  declare -A _swc_finalize_cache
+
+  # Iterate over requirements files (one glob); check each for running status.
+  local _swc_found_running=false
+  local _swc_req_file
+  for _swc_req_file in "$_swc_req_dir"/*.md; do
+    [[ -f "$_swc_req_file" ]] || continue
+
+    # Read ## Status from the requirements doc.
+    local _swc_status=""
+    _swc_status="$(python3 - "$_swc_req_file" <<'PY'
+import pathlib, re, sys
+try:
+    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+except Exception:
+    raise SystemExit(1)
+m = re.search(r'^##\s+Status\s*\n\s*(\S+)', text, re.M)
+print(m.group(1).strip().lower() if m else "")
+PY
+    )" || true
+
+    [[ "$_swc_status" == "running" ]] || continue
+
+    _swc_found_running=true
+
+    # Read ## Workflow Type from the requirements doc (item-level resolution).
+    # Defaults to "release" when the field is absent or unreadable.
+    local _swc_item_wf_type=""
+    _swc_item_wf_type="$(python3 - "$_swc_req_file" <<'PY'
+import pathlib, re, sys
+try:
+    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+except Exception:
+    print("release"); raise SystemExit(0)
+m = re.search(r'^##\s+Workflow\s+Type[^\S\n]*\n(.*?)(\n+##|\Z)', text, flags=re.S|re.M|re.I)
+if not m:
+    print("release"); raise SystemExit(0)
+val = m.group(1).strip().lower()
+print(val if val else "release")
+PY
+    )" || _swc_item_wf_type="release"
+
+    # Resolve finalize capability from cache or by loading the plugin.
+    local _swc_item_finalize=""
+    if [[ -v _swc_finalize_cache["$_swc_item_wf_type"] ]]; then
+      _swc_item_finalize="${_swc_finalize_cache[$_swc_item_wf_type]}"
+    else
+      local _swc_plugin_exit=0
+      set +e
+      wf_load_plugin "${_swc_item_wf_type}" 2>/dev/null
+      _swc_plugin_exit=$?
+      set -e
+      if [[ $_swc_plugin_exit -eq 0 ]]; then
+        _swc_item_finalize="${WF_MANIFEST_FINALIZE:-}"
+      else
+        _swc_item_finalize="LOAD_FAILED"
+      fi
+      _swc_finalize_cache["$_swc_item_wf_type"]="$_swc_item_finalize"
+    fi
+
+    if [[ "$_swc_item_finalize" == "LOAD_FAILED" ]]; then
+      log "sweep-census: skipped — ${_swc_req_file}: workflow type '${_swc_item_wf_type}' plugin failed to load"
+      continue
+    fi
+
+    if [[ "$_swc_item_finalize" != "report" ]]; then
+      log "sweep-census: skipped — ${_swc_req_file}: finalize=${_swc_item_finalize} — not report"
+      continue
+    fi
+
+    log "sweep-census: project ${_CURRENT_PROJECT:-}: running intake item ${_swc_req_file}; attempting completion census"
+    close_intake_on_finalize_report \
+      "sweep" \
+      "" \
+      "${PGAI_PROJECT_ROOT:-}" \
+      "${TASKS_ROOT:-}" \
+      "report" \
+      "$_swc_req_file"
+  done
+
+  if [[ "$_swc_found_running" == "false" ]]; then
+    log "sweep-census: project ${_CURRENT_PROJECT:-}: no running intake items"
   fi
 
   return 0

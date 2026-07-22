@@ -93,7 +93,7 @@ def resolve_item(ctx: OpsContext, project: str, key: str) -> ResolveResult:
         ctx:     OpsContext carrying the kanban root path.
         project: Project name as registered in projects.cfg.
         key:     Task folder name (e.g. CODER-20260622-001-foo) or intake file
-                 base name (e.g. BUG-0001).
+                 base name (e.g. an earlier defect).
 
     Returns:
         ResolveResult with item_type, path, and state on success.

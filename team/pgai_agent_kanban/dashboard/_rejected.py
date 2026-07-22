@@ -25,7 +25,7 @@ Usage::
 
     from pgai_agent_kanban.dashboard._rejected import read_reason_sidecar
 
-    info = read_reason_sidecar("/path/to/rejected/BUG-0001-foo.md.reason")
+    info = read_reason_sidecar("/path/to/rejected/an earlier defect-foo.md.reason")
     print(info["reason"])          # e.g. "malformed filename"
     print(info["retry_count"])     # e.g. 3, or None if absent
 """
@@ -105,8 +105,8 @@ def read_reason_sidecar(
 def sidecar_path_for(quarantined_file: "str | pathlib.Path") -> pathlib.Path:
     """Return the expected .reason sidecar path for a quarantined file.
 
-    Convenience helper: given ``/path/to/rejected/BUG-0001-foo.md``, returns
-    ``/path/to/rejected/BUG-0001-foo.md.reason``.
+    Convenience helper: given ``/path/to/rejected/an earlier defect-foo.md``, returns
+    ``/path/to/rejected/an earlier defect-foo.md.reason``.
 
     Args:
         quarantined_file: Path to the quarantined file inside rejected/.

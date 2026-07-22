@@ -16,6 +16,8 @@ Use the WRITER role for tasks that produce standalone documents — files a read
 
 Do **not** use WRITER for inline documentation that lives with code (docstrings, code comments, type hints, swagger annotations) — that's CODER's job. The split is structural: if a reader will encounter the text by opening a separate file, it's yours. If they'll see it because they're reading code, it's not.
 
+**Any code that ships from a WRITER document (config examples in a guide, generator scripts embedded in a runbook, sample scripts in a tutorial) follows `docs/coding-standards.md` — the same authoritative directives that govern CODER's output.** WRITER does not restate those rules inside role or governance docs; the standards document owns them.
+
 ## Governance Stack
 
 Read these in order before doing the work:
@@ -369,6 +371,23 @@ The placeholder removes the guess. WRITER states the facts it knows (what shippe
 **What CM does with the placeholder.** At release time, `cm-release.sh` replaces `PENDING-RELEASE` with the ship-policy decision and commits the stamped notes on the RC branch before the single squash into the prefixed main branch. A guard HALTs the release if the placeholder survives the stamp step, so a forgotten or malformed placeholder fails loudly rather than shipping wrong. You do not run the stamp — CM does. Your job is to write the placeholder correctly.
 
 **Scope note.** This convention applies only to the `## Status` field of a release-notes file. Author every other section normally. If your task is not authoring release notes, this section does not apply.
+
+---
+
+## Authoring Release Notes: CHANGELOG.md Is Writer-Generated, Never Hand-Authored
+
+`CHANGELOG.md` is not a WRITER deliverable. WRITER's release-notes lane is `release-notes/vX.Y.Z.md` only. The `CHANGELOG.md` file at the repository root is produced exclusively by `team/pgai_agent_kanban/cm/changelog_writer.py` (invoked directly during regeneration) or by `cm/release.sh` Step 11b at release time — it is never hand-edited by any role.
+
+**The four rules.**
+
+1. **No direct edits to `CHANGELOG.md`.** WRITER never opens `CHANGELOG.md` to add, revise, or rewrite a `## vX.Y.Z` section. Not to fix a typo, not to add a bullet, not to reconcile a stale entry. If `CHANGELOG.md` looks wrong, the fix is to regenerate it via the writer, not to patch it by hand.
+2. **`release-notes/vX.Y.Z.md` is the authored artifact.** All release-notes writing lands in `release-notes/<version>.md`. The changelog writer reads that file (plus the bug ledger) to render the corresponding `CHANGELOG.md` section deterministically.
+3. **No internal bug identifiers in the release-notes body.** The release-notes body must refer to bugs by symptom and public identifier, not by internal ticket ID. Do not write internal identifiers of the form the changelog writer's safety pass is designed to strip — describe the failure ("intake closure was inert in production", "changelog freshness gate misfired on RC branches") rather than citing a project-internal bug number. If a public identifier exists for the issue, use that; otherwise describe the symptom.
+4. **Regeneration happens at release time, not at authoring time.** The changelog writer and `cm/release.sh` Step 11b own the rendering of `CHANGELOG.md`. WRITER writes the release notes, marks the task DONE, and stops. CM regenerates `CHANGELOG.md` from the notes and the bug ledger when the release ships.
+
+**Why this rule exists.** Hand-authoring the `## vX.Y.Z` section in `CHANGELOG.md` bypasses the changelog writer's internal-identifier safety pass and desynchronizes the writer's byte-exact rendering. When that happens, two things break at once: the freshness gate in the gated test runners rejects the RC because the checked-in section does not match a fresh regeneration, and the internal-bug-identifier unit test fails because a project-internal token slipped through. Both failures are diagnostic — they signal that a bypass occurred — but they block the RC's authoritative test verdict from turning green until the file is regenerated the sanctioned way. Trust the pipeline: write the notes, let CM render the changelog.
+
+**Scope note.** This convention applies to any WRITER task that touches release documentation. If your task README's `## Required Output` names `CHANGELOG.md`, stop and treat it as a scope error — route it back for clarification. The correct output for release-notes work is always `release-notes/vX.Y.Z.md`.
 
 ---
 
