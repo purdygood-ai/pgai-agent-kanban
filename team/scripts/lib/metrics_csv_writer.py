@@ -3,6 +3,7 @@
 metrics_csv_writer.py -- Append-only CSV writer for cumulative RC metrics history.
 
 Implements the cumulative CSV format specified in
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 PRIORITY-0037-20260517-metrics-canonicalization-and-rollup.md.
 
 OUTPUT FORMAT
@@ -81,6 +82,7 @@ USAGE (as module)
                   "cache_write": 945678,
               },
           },
+          # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
           "bugs_filed_during_verification": ["BUG-0099"],
           "operator_interventions":         [],
       },
@@ -311,6 +313,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Append one RC row to the cumulative metrics history CSV.\n"
+            # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
             "Implements the append-only format specified in PRIORITY-0037."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -587,6 +587,19 @@ grep -rnEi '(pytest\.skip|mark\.skip|reason=|#\s*SKIP:|\bskip\s*\()[^)]*BUG-[0-9
 
 The gated runners already invoke `team/scripts/lint_skip_bug_gate.sh` (which performs both checks) before pytest, so a violation normally surfaces as a `UNIT_EXIT == 1` lint-pre-flight failure in Step 6.6. This step is the explicit verification-time confirmation: a placeholder hit or a `MISSING:` line is a finding. Categorize it in Step 7 (typically `bug` — the skip faked the follow-up half of the never-block instruction) and file it via Path C. The check is the source of truth; the in-test comment is not.
 
+#### Step 6.14 — Coding-standards spot-check
+
+Spot-check the RC's new or heavily modified code against `docs/coding-standards.md`. Spot-check, not exhaustive audit — pick a few of the RC's diff sites and confirm they honor the directives, then move on.
+
+Cheap places to look:
+
+- Any new script under `team/scripts/` or a project's `scripts/` — does it ship a `--help` that names every argument (directive 6)?
+- Any new production string in changed files — does a comment, docstring, `--help` line, or log line cite a bug ID, task ID, or version (directive 8 violation)?
+- Any new operational value hardcoded in code that an operator might reasonably want to change (directive 5)?
+- Any newly duplicated implementation of an operation that already exists in `lib/` (directives 1 and 3)?
+
+Grep is enough for most of these. Time-box: five minutes. A hit is a finding — categorize per Step 7 (typically `bug` when the code violates a directive, `pass-with-caveat` when it is borderline) and file via Path C. This is not an exhaustive audit and is not the source of truth for standards compliance — CODER already binds every produced artifact to the standards doc; TESTER's job here is to catch the obvious misses that slipped through.
+
 ### 7. Categorize findings
 
 For each finding, assign one of:

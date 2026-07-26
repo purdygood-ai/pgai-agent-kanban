@@ -1,0 +1,3 @@
+# Fixture requirements-test.txt — clean project (lint must pass)
+-r requirements.txt
+pytest>=7

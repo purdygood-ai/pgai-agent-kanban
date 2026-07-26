@@ -12,8 +12,15 @@
 #     version of the kanban framework).
 #   - Read the dev tree path from the project's project.cfg (dev_tree_path key),
 #     or fall back to PGAI_DEV_TREE_PATH.
-#   - Run `git describe --tags HEAD` in the dev tree to get the head commit
-#     description.
+#   - Read branch_prefix from project.cfg so the git-describe --match pattern
+#     honours the project's tag naming convention.  The pattern is constructed
+#     by git_describe_tag_pattern (from version_stamp.sh): non-empty prefix
+#     produces "<prefix>v[0-9]*" (e.g. "ai_v[0-9]*"); empty prefix collapses
+#     to "v[0-9]*", preserving that defect's latest-alias exclusion.
+#   - Run `git describe --tags --match <pattern> HEAD` in the dev tree to get
+#     the head commit description. The --match filter restricts to the project's
+#     own release tags so alias tags (e.g. 'latest') and mismatched-prefix tags
+#     are never considered.
 #   - If the two strings differ, log an action-log entry via overwatch_log_action
 #     and emit a diagnostic to stderr.
 #
@@ -97,23 +104,41 @@ _cvd_resolve_env() {
         _CVD_DEV_TREE="${PGAI_DEV_TREE_PATH}"
     fi
 
+    # Read branch_prefix so the describe --match pattern is prefix-aware.
+    _CVD_BRANCH_PREFIX=""
+    if [[ -n "${_cfg_file}" ]]; then
+        _CVD_BRANCH_PREFIX="$(grep -E '^[[:space:]]*branch_prefix[[:space:]]*=' "${_cfg_file}" \
+            | head -n1 \
+            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+    fi
+
     return 0
 }
 
 # ---------------------------------------------------------------------------
 # _cvd_load_protocol
-# Ensure overwatch_log_action is available.
+# Ensure overwatch_log_action and git_describe_tag_pattern are available.
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _cvd_load_protocol() {
-    if declare -f overwatch_log_action >/dev/null 2>&1; then
-        return 0
-    fi
     local lib_dir
     lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
         echo "check-version-divergence: cannot resolve lib dir" >&2
         return 1
     }
+
+    # Load git_describe_tag_pattern from the shared version_stamp helper.
+    if ! declare -f git_describe_tag_pattern >/dev/null 2>&1; then
+        local version_stamp_sh="${lib_dir}/../version_stamp.sh"
+        if [[ -f "${version_stamp_sh}" ]]; then
+            # shellcheck source=/dev/null
+            source "${version_stamp_sh}"
+        fi
+    fi
+
+    if declare -f overwatch_log_action >/dev/null 2>&1; then
+        return 0
+    fi
     local protocol_sh="${lib_dir}/../overwatch_protocol.sh"
     if [[ ! -f "${protocol_sh}" ]]; then
         echo "check-version-divergence: overwatch_protocol.sh not found at ${protocol_sh}" >&2
@@ -147,20 +172,34 @@ _cvd_read_installed_version() {
 }
 
 # ---------------------------------------------------------------------------
-# _cvd_read_dev_describe <dev_tree>
-# Run `git describe --tags HEAD` in the dev tree.
+# _cvd_read_dev_describe <dev_tree> [<branch_prefix>]
+# Run `git describe --tags --match <pattern> HEAD` in the dev tree, where
+# <pattern> is resolved by git_describe_tag_pattern using <branch_prefix>.
+# The --match filter restricts results to numeric release tags of the
+# project's own shape, preventing alias tags (e.g. 'latest') from being
+# picked when they share a commit, and preventing bare-v ancestors from
+# being picked on prefixed lanes.
 # Echoes the result, or "unknown" on any failure.
 # ---------------------------------------------------------------------------
 _cvd_read_dev_describe() {
     local dev_tree="$1"
+    local branch_prefix="${2:-}"
 
     if [[ -z "${dev_tree}" || ! -d "${dev_tree}" ]]; then
         echo "unknown"
         return 0
     fi
 
+    local _match_pattern
+    if declare -f git_describe_tag_pattern >/dev/null 2>&1; then
+        _match_pattern="$(git_describe_tag_pattern "$branch_prefix")"
+    else
+        # Fallback when helper is unavailable: use prefix directly.
+        _match_pattern="${branch_prefix}v[0-9]*"
+    fi
+
     local desc
-    desc="$(git -C "${dev_tree}" describe --tags HEAD 2>/dev/null || true)"
+    desc="$(git -C "${dev_tree}" describe --tags --match "$_match_pattern" HEAD 2>/dev/null || true)"
     if [[ -z "${desc}" ]]; then
         # Fallback: try without --tags (any ref)
         desc="$(git -C "${dev_tree}" describe HEAD 2>/dev/null || true)"
@@ -183,6 +222,7 @@ overwatch_check_version_divergence() {
 
     local kanban_root="${KANBAN_ROOT}"
     local dev_tree="${_CVD_DEV_TREE:-}"
+    local branch_prefix="${_CVD_BRANCH_PREFIX:-}"
 
     echo "check-version-divergence: reading installed VERSION from ${kanban_root}/VERSION" >&2
 
@@ -216,7 +256,7 @@ overwatch_check_version_divergence() {
 
     echo "check-version-divergence: running git describe in ${dev_tree}" >&2
     local dev_describe
-    dev_describe="$(_cvd_read_dev_describe "${dev_tree}")"
+    dev_describe="$(_cvd_read_dev_describe "${dev_tree}" "${branch_prefix}")"
     echo "check-version-divergence: dev_describe=${dev_describe}" >&2
 
     if [[ "${installed_version}" == "${dev_describe}" ]]; then

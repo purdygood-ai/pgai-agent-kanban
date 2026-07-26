@@ -130,6 +130,7 @@ scripts/reset.sh --project my-app --key v0.1.2
 | `--project <name>` | yes | Project the item lives in. |
 | `--key <key>` | yes | Task key (`ROLE-YYYYMMDD-NNN`) or intake key (`BUG-NNNN`, `PRIORITY-NNNN`, version). The prefix selects the reset mode. |
 | `--keep-artifacts` | no | Agent resets only: preserve `artifacts/` (default: clear). |
+| `--force` | no | Agent resets only: clear a stale worktree (registration and/or on-disk path left by a prior run) before resetting. Without `--force`, a detected stale worktree causes a warning with the manual removal recipe and exits 2. With `--force`, reset.sh performs the cleanup itself (git worktree remove, prune, rm -rf) narrating each step to stderr, then completes the reset. Use `--force` as the standard corpse-clearing step when a prior run left a zombie worktree. |
 | `--help`/`-h` | no | Print usage and exit 0. |
 
 **Agent-task reset** returns the task to freshly-materialized state — total
@@ -139,6 +140,11 @@ regenerated to `BACKLOG`, `artifacts/` and task `logs/` cleared
 attempt's `feature/<task-id>` branch deleted with stale worktrees pruned. The
 README (the work definition) and queue position are untouched. A TESTER task key
 also tears down a retained TESTER worktree.
+
+**Stale-worktree corpse clearing:** if a prior run left a zombie worktree
+(registration in `.git/worktrees/` and/or an on-disk directory), bare reset
+refuses with exit 2 and prints the three-command removal recipe. Re-run with
+`--force` to have reset.sh clear the corpse automatically in one call.
 
 **Intake reset** flips the item's `## Status` back to its open value and clears
 its backlog-cache marker so discovery bundles it again. `--requirement`
@@ -150,8 +156,10 @@ Resetting a `BLOCKED` task is also how you un-gate a project: while any task is
 blocked task once its cause is fixed and dispatch resumes.
 
 **Exit codes:** `0` reset completed · `1` usage error or key not found /
-ambiguous · `2` `WORKING`-state refusal (agent resets only — an agent holds the
-task; wait or investigate).
+ambiguous · `2` `WORKING`-state refusal or stale-worktree refusal without
+`--force` (agent resets only) · `3` key not found · `4` `--force` aborted
+because the on-disk worktree path is an active mount target (the blocking mount
+is named in stderr; no partial cleanup occurs).
 
 ---
 

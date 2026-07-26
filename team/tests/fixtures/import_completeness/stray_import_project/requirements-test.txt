@@ -1,0 +1,3 @@
+# Fixture requirements-test.txt — stray_import_project (lint must FAIL)
+-r requirements.txt
+pytest>=7

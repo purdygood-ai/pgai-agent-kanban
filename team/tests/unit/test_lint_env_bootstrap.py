@@ -104,7 +104,10 @@ _lint = _import_lint_module()
 # Fixture content imports
 # ---------------------------------------------------------------------------
 
-from tests.fixtures.fixture_missing_env_bootstrap_sh import BASH_VIOLATION_CONTENT
+from tests.fixtures.fixture_missing_env_bootstrap_sh import (
+    BASH_VIOLATION_CONTENT,
+    BASH_ORDERING_VIOLATION_CONTENT,
+)
 from tests.fixtures.fixture_direct_env_read_py import PYTHON_VIOLATION_CONTENT
 
 
@@ -248,6 +251,258 @@ def test_bash_side_scratch_negative_violation_message_is_actionable(
             return
 
     pytest.fail("Fixture file not among reported violations.")
+
+
+# ---------------------------------------------------------------------------
+# Case 2b — Bash-side ordering violation: source after first usage is flagged
+# (BUG-0073 closed-hole proof — kept as a regression fixture)
+# ---------------------------------------------------------------------------
+
+
+def test_bash_side_ordering_violation_is_flagged(tmp_path: Path) -> None:
+    """Bash-side check flags a script that sources env_bootstrap.sh AFTER first usage.
+
+    This is the closed-hole proof for BUG-0073.  The pre-fix po-agent.sh pattern
+    (and eight other scripts) had env_bootstrap.sh sourced after the first runtime
+    use of PGAI_AGENT_KANBAN_ROOT_PATH.  The old presence-only predicate passed
+    those files; the ordering check must catch them.
+
+    If this test fails, the ordering check has regressed and the predicate hole
+    has re-opened.
+    """
+    scripts = _make_minimal_scripts_dir(tmp_path)
+    fixture_sh = scripts / "ordering_violation_entry.sh"
+    _write_sh(fixture_sh, BASH_ORDERING_VIOLATION_CONTENT, executable=True)
+
+    violations = _lint.check_bash_side(scripts, verbose=False)
+
+    assert violations, (
+        "Expected the bash-side check to flag the ordering violation (source after "
+        "first usage), but it returned no violations.  The ordering predicate may "
+        "have regressed — the BUG-0073 hole may be re-open."
+    )
+    violation_paths = [v.path for v in violations]
+    assert fixture_sh in violation_paths, (
+        f"Violation not reported for the ordering-violation fixture.\n"
+        f"Fixture: {fixture_sh}\n"
+        f"Reported violations: {violation_paths}"
+    )
+
+
+def test_bash_side_ordering_violation_message_names_lines(tmp_path: Path) -> None:
+    """The ordering-violation message names the source line and the first-usage line.
+
+    Actionable error messages must tell the operator exactly where to move the
+    source call.  Both line numbers must appear in the message.
+    """
+    scripts = _make_minimal_scripts_dir(tmp_path)
+    fixture_sh = scripts / "ordering_violation_entry.sh"
+    _write_sh(fixture_sh, BASH_ORDERING_VIOLATION_CONTENT, executable=True)
+
+    violations = _lint.check_bash_side(scripts, verbose=False)
+
+    for v in violations:
+        if v.path == fixture_sh:
+            # The message must reference line numbers (ordering context).
+            assert "line" in v.message.lower(), (
+                f"Ordering-violation message does not mention 'line':\n{v.message!r}"
+            )
+            return
+
+    pytest.fail("Ordering-violation fixture not among reported violations.")
+
+
+def test_source_precedes_first_usage_passes_correct_ordering() -> None:
+    """_source_precedes_first_usage returns True when source comes before usage."""
+    text = (
+        "#!/usr/bin/env bash\n"
+        'source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"\n'
+        "KANBAN_ROOT=${PGAI_AGENT_KANBAN_ROOT_PATH}\n"
+    )
+    ok, src_line, use_line = _lint._source_precedes_first_usage(text)
+    assert ok is True, (
+        f"Expected correct ordering to be accepted; src={src_line}, use={use_line}"
+    )
+
+
+def test_source_precedes_first_usage_fails_reversed_ordering() -> None:
+    """_source_precedes_first_usage returns False when usage comes before source."""
+    text = (
+        "#!/usr/bin/env bash\n"
+        "KANBAN_ROOT=${PGAI_AGENT_KANBAN_ROOT_PATH}\n"
+        'source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"\n'
+    )
+    ok, src_line, use_line = _lint._source_precedes_first_usage(text)
+    assert ok is False, (
+        f"Expected reversed ordering to be rejected; src={src_line}, use={use_line}"
+    )
+    assert use_line < src_line, (
+        f"Expected use_line ({use_line}) < src_line ({src_line}) for reversed ordering"
+    )
+
+
+def test_source_precedes_first_usage_no_usage_is_ok() -> None:
+    """_source_precedes_first_usage returns True when there is no usage of the var."""
+    text = (
+        "#!/usr/bin/env bash\n"
+        'source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"\n'
+        "echo hello\n"
+    )
+    ok, src_line, use_line = _lint._source_precedes_first_usage(text)
+    assert ok is True, "Source with no usage should be accepted"
+    assert use_line == 0, f"Expected use_line=0 (not found), got {use_line}"
+
+
+# ---------------------------------------------------------------------------
+# Case 2c — Heredoc body exclusion: var mention in heredoc body above source
+#           must NOT produce an ordering violation (regression guard for BUG-0087)
+# ---------------------------------------------------------------------------
+
+
+def test_source_precedes_first_usage_heredoc_only_mention_is_not_flagged() -> None:
+    """A heredoc body that mentions PGAI_AGENT_KANBAN_ROOT_PATH above the source line
+    must NOT be treated as a runtime usage.
+
+    This is the regression guard for BUG-0087: cm/finalize.sh and cm/open-doc.sh
+    have --help heredocs that document the env var above the source call.  The lint
+    must not flag that pattern as an ordering violation because the heredoc body is
+    documentation, not executable code.
+    """
+    text = textwrap.dedent("""\
+        #!/usr/bin/env bash
+        _help() {
+          cat <<HELPTEXT
+        Usage: my-script.sh <args>
+
+        Configuration:
+          PGAI_AGENT_KANBAN_ROOT_PATH  kanban root (default: ~/pgai_agent_kanban)
+        HELPTEXT
+        }
+
+        for _arg in "$@"; do
+          case "$_arg" in
+            --help|-h) _help; exit 0 ;;
+          esac
+        done
+
+        # shellcheck source=../lib/env_bootstrap.sh
+        source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+    """)
+    ok, src_line, use_line = _lint._source_precedes_first_usage(text)
+    assert ok is True, (
+        f"A heredoc-only mention of the env var above the source line must not "
+        f"be flagged as an ordering violation (BUG-0087 regression).  "
+        f"src_line={src_line}, use_line={use_line}"
+    )
+
+
+def test_heredoc_body_line_numbers_identifies_body_lines() -> None:
+    """_heredoc_body_line_numbers returns the correct set of body line numbers."""
+    lines = [
+        "#!/usr/bin/env bash",               # 1
+        "cat <<HELPTEXT",                     # 2  (opener — not in body)
+        "  some documentation text",          # 3  (body)
+        "HELPTEXT",                           # 4  (close-tag — not in body)
+        "echo done",                          # 5
+    ]
+    body = _lint._heredoc_body_line_numbers(lines)
+    assert 3 in body, f"Line 3 (body) should be in heredoc_body; got {body}"
+    assert 2 not in body, "Opener line 2 must not be in heredoc_body"
+    assert 4 not in body, "Close-tag line 4 must not be in heredoc_body"
+    assert 1 not in body, "Lines before heredoc must not be in heredoc_body"
+    assert 5 not in body, "Lines after heredoc must not be in heredoc_body"
+
+
+def test_heredoc_body_line_numbers_quoted_delimiter() -> None:
+    """_heredoc_body_line_numbers handles quoted heredoc delimiters (<<'TOKEN')."""
+    lines = [
+        "cat <<'HELPTEXT'",    # 1  opener
+        "body line",           # 2  body
+        "HELPTEXT",            # 3  close-tag
+        "done",                # 4
+    ]
+    body = _lint._heredoc_body_line_numbers(lines)
+    assert 2 in body, "Body line inside <<'TOKEN'...TOKEN block must be identified"
+    assert 1 not in body
+    assert 3 not in body
+    assert 4 not in body
+
+
+def test_bash_side_heredoc_only_mention_does_not_violate(tmp_path: Path) -> None:
+    """check_bash_side does not flag a script whose only pre-source mention of the
+    env var is inside a heredoc body (--help usage block pattern).
+
+    This is the integration-level regression guard for BUG-0087.
+    """
+    scripts = _make_minimal_scripts_dir(tmp_path)
+    heredoc_sh = scripts / "heredoc_help_entry.sh"
+    _write_sh(
+        heredoc_sh,
+        textwrap.dedent("""\
+            #!/usr/bin/env bash
+            _help() {
+              cat <<HELPTEXT
+            Configuration:
+              PGAI_AGENT_KANBAN_ROOT_PATH  kanban root (default: ~/pgai_agent_kanban)
+            HELPTEXT
+            }
+            for _arg in "$@"; do
+              case "$_arg" in
+                --help|-h) _help; exit 0 ;;
+              esac
+            done
+            source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+            KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+        """),
+        executable=True,
+    )
+
+    violations = _lint.check_bash_side(scripts, verbose=False)
+
+    violation_paths = [v.path for v in violations]
+    assert heredoc_sh not in violation_paths, (
+        "Script with env var mentioned only inside a heredoc body (above the source "
+        "line) was incorrectly flagged as an ordering violation (BUG-0087 regression)."
+    )
+
+
+def test_bash_side_non_heredoc_usage_before_source_still_violates(
+    tmp_path: Path,
+) -> None:
+    """check_bash_side still flags a script that uses the env var in live code
+    (not a heredoc body) before the source line.
+
+    This guard ensures the heredoc exemption does not weaken the ordering check
+    for genuine pre-source runtime uses.
+    """
+    scripts = _make_minimal_scripts_dir(tmp_path)
+    violation_sh = scripts / "real_usage_before_source.sh"
+    _write_sh(
+        violation_sh,
+        textwrap.dedent("""\
+            #!/usr/bin/env bash
+            # Deliberate: genuine live use of the var before source — must still fail.
+            _help() {
+              cat <<HELPTEXT
+            Configuration:
+              PGAI_AGENT_KANBAN_ROOT_PATH  kanban root
+            HELPTEXT
+            }
+            KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
+            source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+        """),
+        executable=True,
+    )
+
+    violations = _lint.check_bash_side(scripts, verbose=False)
+
+    violation_paths = [v.path for v in violations]
+    assert violation_sh in violation_paths, (
+        "Script with a genuine live use of the env var before the source line must "
+        "still be flagged as an ordering violation even when a heredoc body also "
+        "mentions the var."
+    )
 
 
 # ---------------------------------------------------------------------------

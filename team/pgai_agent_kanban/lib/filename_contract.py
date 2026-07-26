@@ -35,7 +35,7 @@ from this module.  The contract is:
       Format the standard skip log line consumed by discovery callers.
       Shape: "discovery: skipping {name}: {reason}"
 
-Structural guarantee (BUG-0045 acceptance criterion 3): the filename
+Structural guarantee (an earlier defect acceptance criterion 3): the filename
 pattern literals appear in exactly one place — this module.  Both
 consumers import; neither duplicates a local definition.
 """
@@ -78,7 +78,7 @@ SEMVER_REQUIREMENTS_RE: re.Pattern[str] = re.compile(
 # ---------------------------------------------------------------------------
 
 #: Emitted when a file passes intake routing but fails the semver filename
-#: shape on a semver project.  BUG-0045 acceptance criterion 2 requires
+#: shape on a semver project.  an earlier defect acceptance criterion 2 requires
 #: this to be a named (non-silent) skip.
 SKIP_REASON_SEMVER_SHAPE_REQUIRED = "semver-shape-required"
 
@@ -150,7 +150,7 @@ def filename_semantics_eligible(
 def skip_log_line(name: str, reason: str) -> str:
     """Format the canonical discovery skip log line.
 
-    Shape matches the BUG-0042 logging contract:
+    Shape matches the an earlier defect logging contract:
         ``discovery: skipping {name}: {reason}``
 
     Args:

@@ -359,6 +359,7 @@ process_one_task() {
   local task_id task_dir task_readme task_status task_log_dir task_artifact_dir
   local current_state final_state claude_exit prompt role SUBAGENT
   local unsatisfied_prereqs prereq_exit
+  local assigned_agent dispatch_role invalid_assignment_reason
 
   LAST_TASK_FINAL_STATE=""
 
@@ -417,19 +418,48 @@ process_one_task() {
   ensure_status_file "$task_status"
   setup_project_directories "$task_log_dir" "$task_artifact_dir" || return 1
 
+  # --- Pre-dispatch assertion ---
+  # Role is the capability descriptor; Assigned Agent (when present) selects
+  # the executing subagent. Neither may fail open to CODER: a missing or
+  # invalid Role, or an Assigned Agent that is invalid or does not match the
+  # queue this task was pulled from, blocks dispatch entirely.
   role="$(get_role_from_readme "$task_readme")"
-  case "$role" in
+  assigned_agent="$(get_assigned_agent_from_readme "$task_readme")"
+  invalid_assignment_reason=""
+
+  if ! role_is_valid_agent "$role"; then
+    invalid_assignment_reason="Role '${role:-<missing>}' in ${task_readme} is missing or not a recognized role (CODER, WRITER, CM, TESTER, PO, PM)."
+  elif [[ -n "$assigned_agent" ]]; then
+    if ! role_is_valid_agent "$assigned_agent"; then
+      invalid_assignment_reason="Assigned Agent '${assigned_agent}' in ${task_readme} is not a recognized role (CODER, WRITER, CM, TESTER, PO, PM)."
+    elif [[ "$assigned_agent" != "${AGENT^^}" ]]; then
+      invalid_assignment_reason="Assigned Agent '${assigned_agent}' in ${task_readme} does not match the queue this task was dispatched from ('${AGENT}')."
+    fi
+  fi
+
+  if [[ -n "$invalid_assignment_reason" ]]; then
+    log "task ${task_id} failed pre-dispatch assertion: ${invalid_assignment_reason}"
+    set_state "$task_status" "BLOCKED"
+    set_block "$task_status" "Blockers" "INVALID_TASK_ASSIGNMENT: ${invalid_assignment_reason}"
+    set_block "$task_status" "Needs Human" "yes"
+    normalize_status_file "$task_status"
+    mark_backlog "$task_id" "B"
+    LAST_TASK_FINAL_STATE="BLOCKED"
+    return 0
+  fi
+
+  # Assigned Agent, when present and validated above, selects the executing
+  # subagent; Role remains the capability descriptor and is not required to
+  # match it. When Assigned Agent is absent, Role selects the subagent —
+  # this is the byte-identical path for normal, well-formed tasks.
+  dispatch_role="${assigned_agent:-$role}"
+  case "$dispatch_role" in
     CODER)  SUBAGENT="coder" ;;
     WRITER) SUBAGENT="writer" ;;
     CM)     SUBAGENT="cm" ;;
     TESTER) SUBAGENT="tester" ;;
     PO)     SUBAGENT="po" ;;
     PM)     SUBAGENT="pm" ;;
-    *)
-      log "unknown role '$role' in $task_readme; defaulting to coder"
-      SUBAGENT="coder"
-      role="CODER"
-      ;;
   esac
 
   # --- Per-agent debug log path (per-project) ---
@@ -458,29 +488,28 @@ process_one_task() {
   fi
 
   # --- Model Selection ---
-  # Resolution order (config_loader applies tiers 1-3 before wake runs):
-  #   1. PGAI_<ROLE>_MODEL from env (set by operator or prior export)
-  #   2. [models.<provider>] <role> in kanban.cfg (per-role config)
-  #   3. [models.<provider>] default in kanban.cfg (provider-wide fallback)
-  #   4. Task-level ## Model Override in task README
-  #   5. Provider CLI default (empty selected_model; warning logged below)
+  # Resolution order (SOP.md "Model Override Mechanism" 3-tier chain,
+  # highest wins):
+  #   1. Task-level ## Model Override in task README
+  #   2. PGAI_<ROLE>_MODEL env — populated by config_loader.sh before wake
+  #      runs from kanban.cfg (operator export > [models.<provider>] <role>
+  #      > [models.<provider>] default), or set manually by the operator
+  #   3. Provider CLI default (empty selected_model; warning logged below)
   local model_override selected_model model_source agent_upper agent_model_var
   agent_upper="${AGENT^^}"
   agent_model_var="PGAI_${agent_upper}_MODEL"
 
-  if [[ -n "${!agent_model_var:-}" ]]; then
+  model_override="$(get_model_override_from_readme "$task_readme")"
+  if [[ -n "${model_override:-}" ]]; then
+    selected_model="$model_override"
+    model_source="task force override"
+  elif [[ -n "${!agent_model_var:-}" ]]; then
     selected_model="${!agent_model_var}"
     model_source="PGAI_${agent_upper}_MODEL env"
   else
-    model_override="$(get_model_override_from_readme "$task_readme")"
-    if [[ -n "${model_override:-}" ]]; then
-      selected_model="$model_override"
-      model_source="task force override"
-    else
-      log "no model configured (role unset and [models.${ACTIVE_PROVIDER}] default empty) - provider CLI default will be used"
-      selected_model=""
-      model_source="subagent default for ${SUBAGENT}"
-    fi
+    log "no model configured (role unset and [models.${ACTIVE_PROVIDER}] default empty) - provider CLI default will be used"
+    selected_model=""
+    model_source="subagent default for ${SUBAGENT}"
   fi
 
   current_state="$(get_state "$task_status")"
@@ -1479,12 +1508,14 @@ PY_POL
     fi
   fi
 
-  # --- Post-TESTER finalize=report intake closure (BUG-0066) ---
-  # When the terminal roster ticket of a testing-only (finalize=report) run
-  # completes DONE, flip the originating intake item from running to done.
-  # Guards: SUBAGENT==tester, final_state==DONE, WF_MANIFEST_FINALIZE==report,
-  # plus README constraint "finalize_mode: report" (written by inject_simple_tester_task).
-  # Release/document workflow closure paths are byte-identical (no change here).
+  # --- Post-TESTER event-hook: finalize=report intake closure ---
+  # When the completing TESTER task reaches DONE, run the completion census to
+  # determine whether all sibling tasks sharing the same requirements path are
+  # terminal.  If so, flip the originating intake item from running to done.
+  # Guards: SUBAGENT==tester, final_state==DONE, WF_MANIFEST_FINALIZE==report.
+  # This is the low-latency path: closure lands in the same wake tick that
+  # completes the final task.  The per-wake sweep (sweep_running_intake_census)
+  # is the eventual-consistency guarantee for items whose closing tick is missed.
   if [[ "$SUBAGENT" == "tester" && "$final_state" == "DONE" ]]; then
     close_intake_on_finalize_report \
       "$task_id" \
@@ -1640,9 +1671,10 @@ run_project_chain() {
   fi
 
   # --- Per-project repo flock ---
-  local _project_repo_id
-  _project_repo_id="$(printf '%s' "$project_name" | tr '/' '_' | tr -cd '[:alnum:]_-')"
-  local _project_lock_file="${LOCK_DIR}/repo-wake-${_project_repo_id}.lock"
+  # pp_repo_lock_path is the single source of truth for this path — OVERWATCH
+  # resolves the same lock file via the same helper.
+  local _project_lock_file
+  _project_lock_file="$(pp_repo_lock_path "$project_name")" || return 0
 
   local _project_lock_fd
   exec {_project_lock_fd}>"$_project_lock_file"
@@ -1820,6 +1852,7 @@ PY
     reconcile_stale_active
     recheck_waiting_tasks
     recheck_blocked_tasks
+    sweep_running_intake_census
 
     set +e
     process_one_task
@@ -1858,6 +1891,7 @@ PY
 
   recheck_waiting_tasks
   recheck_blocked_tasks
+  sweep_running_intake_census
 
   fi  # end: if [[ "$_dispatch_gated" == "false" ]]
 
@@ -1886,6 +1920,7 @@ PY
                   reconcile_stale_active
                   recheck_waiting_tasks
                   recheck_blocked_tasks
+                  sweep_running_intake_census
                   set +e
                   process_one_task
                   _post_disc_exit=$?

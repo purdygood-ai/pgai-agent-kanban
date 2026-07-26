@@ -10,3 +10,16 @@
 
 # Workflow YAML parsing (team/pm-agent/lib/workflow_loader.py).
 PyYAML>=6.0
+
+# Operator REST API (team/pgai_agent_kanban/api/). [standard] extra pulls
+# httpx, required by fastapi.testclient.TestClient in the API test suites.
+fastapi[standard]>=0.100
+
+# Data validation; used directly via BaseModel in
+# team/pgai_agent_kanban/api/routers/operations.py and
+# team/scripts/lint_api_parity.py.
+pydantic>=2.0
+
+# ASGI server that runs the operator REST API; imported directly in
+# team/pgai_agent_kanban/api/main.py. [standard] extra adds websocket support.
+uvicorn[standard]>=0.20

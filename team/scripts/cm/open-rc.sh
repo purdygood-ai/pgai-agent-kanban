@@ -3,9 +3,10 @@
 # Human-invoked or CM-agent-invoked: opens a release candidate branch from main.
 #
 # Usage:
-#   cm-open-rc.sh [--project <name>] <version> [task-id]
+#   cm-open-rc.sh [--project <name>] <version> [task-id] [--help]
 #
 # --project <name>   explicit project name (overrides PGAI_PROJECT_NAME env var)
+# --help, -h         print full usage and exit 0
 # <version>          must be in format vX.Y.Z (e.g. v0.4.0)
 # [task-id]          optional: the CM agent task ID that invoked this script.
 #                    Recorded as "RC Opened By Task" in release-state.md.
@@ -24,9 +25,13 @@
 #   5. git fetch origin                      (skipped when push_to_remote=false)
 #   6. git checkout main && git pull --ff-only    (pull skipped when push_to_remote=false)
 #   7. Writes project-scoped release-state.md using here-doc template (canonical format)
-#      Only RC fields are written (Active RC, RC Opened At, RC Opened By Task).
-#      Last Released* fields are NOT read from or written to release-state.md;
-#      the canonical Last Released record is the git tag created by cm-release.sh.
+#      Writes the three RC-tracking fields (Active RC, RC Opened At, RC Opened
+#      By Task) plus the pre-existing Last Released field, read from the file
+#      being overwritten and carried forward unchanged (or "none" if absent).
+#      The canonical "what version are we at" answer is still the git tag
+#      created by cm-release.sh (via pp_last_released_version); Last Released
+#      in release-state.md is a narrower, latching field consumed only by the
+#      HALT-AFTER rc:vX.Y.Z drain check.
 #   8. git checkout -b rc/<version>
 #   9. git push -u origin rc/<version>
 #  10. git checkout main
@@ -53,12 +58,59 @@ VERSION=""
 TASK_ID=""
 _POSITIONAL=()
 
+_cm_open_rc_usage() {
+  echo "Usage: $(basename "$0") [--project <name>] <version> [task-id] [--help]" >&2
+  echo "" >&2
+  echo "  --project <name>  project name (required when PGAI_PROJECT_NAME not set)" >&2
+  echo "  <version>         RC version to open (required; format: vX.Y.Z)" >&2
+  echo "  [task-id]         CM agent task ID logged in release-state.md (optional)" >&2
+  echo "  --help, -h        print full usage and exit 0" >&2
+}
+
+_cm_open_rc_help() {
+  cat <<HELPTEXT
+Usage: $(basename "$0") [--project <name>] <version> [task-id] [--help]
+
+Open a release candidate branch from the project main branch.
+
+Arguments:
+  --project <name>  project name; overrides PGAI_PROJECT_NAME env var
+  <version>         RC version to open (required; format: vX.Y.Z, e.g. v0.4.0)
+  [task-id]         CM agent task ID recorded as "RC Opened By Task" in
+                    release-state.md (default: cm-open-rc.sh (manual))
+  --help, -h        print this message and exit 0
+
+Project context resolution (highest to lowest precedence):
+  1. --project <name> flag
+  2. PGAI_PROJECT_NAME environment variable
+  3. FAIL — prints error naming both knobs, exits non-zero
+
+Exit codes:
+  0  RC branch opened successfully (or --help requested)
+  1  Validation failure, pre-condition error, or mid-sequence git error
+     (rollback attempted on non-zero exit)
+
+Example:
+  cm-open-rc.sh --project my-project v1.5.0
+  cm-open-rc.sh --project my-project v1.5.0 CM-YYYYMMDD-NNN-open-rc
+
+Configuration:
+  PGAI_PROJECT_NAME  fallback project name (when --project flag not used)
+  REPO_ROOT          override path to the repository root
+HELPTEXT
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --help|-h)
+      _cm_open_rc_help
+      exit 0
+      ;;
     --project)
       if [[ -z "${2:-}" ]]; then
         echo "ERROR: --project requires a value" >&2
-        echo "Usage: $(basename "$0") [--project <name>] <version> [task-id]" >&2
+        echo "" >&2
+        _cm_open_rc_usage
         exit 1
       fi
       PROJECT_ARG="$2"
@@ -66,7 +118,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     --*)
       echo "ERROR: unknown flag: $1" >&2
-      echo "Usage: $(basename "$0") [--project <name>] <version> [task-id]" >&2
+      echo "" >&2
+      _cm_open_rc_usage
       exit 1
       ;;
     *)
@@ -82,11 +135,7 @@ TASK_ID="${_POSITIONAL[1]:-cm-open-rc.sh (manual)}"
 if [[ -z "$VERSION" ]]; then
   echo "ERROR: missing required argument <version>" >&2
   echo "" >&2
-  echo "Usage: $(basename "$0") [--project <name>] <version> [task-id]" >&2
-  echo "" >&2
-  echo "  --project: project name (overrides PGAI_PROJECT_NAME env var)" >&2
-  echo "  version:   format vX.Y.Z (e.g. v0.4.0)" >&2
-  echo "  task-id:   optional CM agent task ID (default: cm-open-rc.sh (manual))" >&2
+  _cm_open_rc_usage
   exit 1
 fi
 
@@ -267,9 +316,15 @@ if [[ "$ACTIVE_RC" != "none" ]]; then
   exit 1
 fi
 
-# Note: Last Released* fields are intentionally not read here.
-# The canonical Last Released record is the git tag created by cm-release.sh.
-# release-state.md tracks only in-flight RC state.
+# Read the pre-existing Last Released value so the rewrite below can carry it
+# forward unchanged. This field is monotonic and latching (SOP.md "Release
+# State File") -- open-rc must never clear or alter it, only preserve it.
+# read_field returns "none" when the heading is absent or empty (fresh
+# project that has never shipped), which is itself a valid schema value.
+# Named distinctly from LAST_RELEASED (Guard 2 below) -- that variable holds
+# pp_last_released_version's git-tag-derived answer, a different value used
+# only for the version-collision check, not the release-state.md field value.
+RELEASE_STATE_LAST_RELEASED="$(read_field "Last Released")"
 
 # --- Check rc/<version> does not already exist locally ---
 if git -C "$REPO_ROOT" rev-parse --verify "refs/heads/$RC_BRANCH" >/dev/null 2>&1; then
@@ -326,8 +381,10 @@ fi
 
 # --- Write project-scoped release-state.md using here-doc template (canonical format) ---
 # Single blank line between sections. Written directly to the live install path.
-# Only RC fields are written. Last Released* fields are NOT written — the git tag
-# created by cm-release.sh is the canonical Last Released record.
+# The three RC-tracking fields are refreshed for the new RC; Last Released is
+# carried forward unchanged from RELEASE_STATE_LAST_RELEASED (read above) --
+# open-rc never computes or fabricates that value, it only preserves whatever
+# was already on disk.
 # The dev tree's team/release-state.md is NOT modified.
 OPENED_AT="$(date -Iseconds)"
 
@@ -343,6 +400,9 @@ ${OPENED_AT}
 
 ## RC Opened By Task
 ${TASK_ID}
+
+## Last Released
+${RELEASE_STATE_LAST_RELEASED}
 EOF
 RELEASE_STATE_WRITTEN=1
 
@@ -366,6 +426,33 @@ RC_STATE_DIR="$(pp_project_root "$PROJECT_NAME")/release-state"
 RC_STATE_JSON="${RC_STATE_DIR}/${VERSION}.json"
 OPENED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mkdir -p "$RC_STATE_DIR"
+
+# If a prior cancelled JSON exists at this slot, archive it to history/ first
+# so the audit trail is preserved and the fresh record does not overwrite it.
+# This is the freeing-semantics step: a cancelled version's history record is
+# moved to history/ by cancel-rc.sh, but if it wasn't (e.g. cancel ran before
+# this fix shipped) we handle it here as well. Idempotent — no-op when absent.
+if [[ -f "$RC_STATE_JSON" ]]; then
+  _prior_outcome="$(python3 - "$RC_STATE_JSON" <<'PY'
+import json, sys
+try:
+    d = json.loads(open(sys.argv[1]).read())
+    print(d.get('outcome', ''))
+except Exception:
+    print('')
+PY
+)"
+  if [[ "$_prior_outcome" == "cancelled" ]]; then
+    python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" archive-cancelled \
+      "$RC_STATE_JSON" "$VERSION" "$OPENED_AT_UTC" 2>&1 || \
+      echo "  WARNING: could not archive prior cancelled JSON at $RC_STATE_JSON" >&2
+  elif [[ "$_prior_outcome" == "in_progress" ]]; then
+    # A live in_progress JSON already exists — this should not happen because
+    # open-rc blocks on Active RC != none. Warn and overwrite so recovery runs proceed.
+    echo "  WARNING: stale in_progress JSON found at $RC_STATE_JSON; overwriting (recovery run)." >&2
+  fi
+fi
+
 python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" open "$VERSION" "$OPENED_AT_UTC" > "$RC_STATE_JSON"
 echo "  Per-RC release-state JSON written: $RC_STATE_JSON"
 

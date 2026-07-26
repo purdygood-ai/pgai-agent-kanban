@@ -12,6 +12,18 @@ operator-edited ``docs/api/ICD_VERSION``.  The parity gate in the test suite
 verifies this equality; invoking this generator is the one-step mechanism for
 bumping the contract version across both copies at once.
 
+Also re-freezes the current-version baseline at
+``docs/api/baselines/icd-v<ICD_VERSION>.json`` so it stays byte-identical to
+the freshly written ``docs/api/icd.json``.  This runs on every regeneration
+that targets the canonical output path (not on regenerations that target a
+custom ``--output``, e.g. the freshness gate's scratch-file comparison), so a
+docstring-only or description-only ICD edit at an unchanged version can never
+leave the frozen baseline stale.  When the version was bumped, this also
+creates that new version's baseline file; adding the new version to
+``docs/api/baselines/SUPPORTED`` remains a deliberate, separate operator
+decision — freezing a baseline does not imply the compatibility gate protects
+it.
+
 Determinism is achieved by:
   - ``json.dumps`` with ``sort_keys=True`` and ``indent=2`` (fixed, reproducible layout)
   - A single trailing newline (no additional whitespace)
@@ -50,6 +62,7 @@ _THIS_FILE = pathlib.Path(__file__).resolve()
 _DEV_TREE_ROOT = _THIS_FILE.parent.parent.parent.parent
 _ICD_VERSION_FILE = _DEV_TREE_ROOT / "docs" / "api" / "ICD_VERSION"
 _DEFAULT_OUTPUT = _DEV_TREE_ROOT / "docs" / "api" / "icd.json"
+_DEFAULT_BASELINES_DIR = _DEV_TREE_ROOT / "docs" / "api" / "baselines"
 
 # Package-data copy — kept in byte-sync with _ICD_VERSION_FILE by generate_icd().
 # This is the file that travels with the installed package on live deployments.
@@ -95,6 +108,7 @@ def generate_icd(
     output_path: pathlib.Path = _DEFAULT_OUTPUT,
     icd_version_file: pathlib.Path = _ICD_VERSION_FILE,
     package_version_file: pathlib.Path = _PACKAGE_DATA_VERSION_FILE,
+    baselines_dir: pathlib.Path = _DEFAULT_BASELINES_DIR,
 ) -> None:
     """Generate the deterministic ICD artifact and write it to output_path.
 
@@ -108,6 +122,19 @@ def generate_icd(
     parity gate in the test suite asserts this equality; calling ``generate_icd``
     (or its ``generate-icd.sh`` wrapper) is the one-step mechanism for bumping
     the contract version everywhere at once.
+
+    When ``output_path`` resolves to the canonical artifact location
+    (``docs/api/icd.json`` under the dev tree root — i.e. a real regeneration,
+    not a scratch-file comparison such as the freshness gate's), also
+    re-freezes the current-version baseline at
+    ``<baselines_dir>/icd-v<ICD_VERSION>.json`` to the same bytes.  A
+    regeneration that changes ``icd.json`` without bumping ``ICD_VERSION``
+    (e.g. a docstring or description sync) can therefore never leave the
+    frozen current-version baseline stale — freezing is unconditional on
+    every canonical regeneration.  Bumping a version and re-freezing does not
+    add the new version to ``docs/api/baselines/SUPPORTED`` — that remains a
+    deliberate, separate operator decision (see docs/operator-api.md "ICD —
+    the published API contract").
 
     No running server is required; the build is entirely in-process.
     Two calls with the same tree produce byte-identical output.
@@ -124,6 +151,10 @@ def generate_icd(
                               Receives the same bytes as ``icd_version_file``
                               so the installed package always reflects the
                               operator-chosen version.
+        baselines_dir:        Directory holding the frozen per-version baseline
+                              files.  Defaults to ``docs/api/baselines`` relative
+                              to the dev tree root.  Only consulted when
+                              ``output_path`` is the canonical artifact path.
 
     Raises:
         SystemExit: On ICD_VERSION read failure, output write failure, or
@@ -189,6 +220,28 @@ def generate_icd(
 
     print(f"ICD artifact written to {output_path}  (info.version={version!r})")
     print(f"Package-data ICD_VERSION synced to {package_version_file}")
+
+    # Re-freeze the current-version baseline, but only for a real regeneration
+    # of the canonical artifact — not for a scratch-file comparison such as the
+    # freshness gate's (which passes a temp-file output_path).  Comparing
+    # resolved paths means a caller invoking with a relative
+    # "docs/api/icd.json" from the repo root still matches.
+    if output_path.resolve() == _DEFAULT_OUTPUT:
+        baselines_dir = pathlib.Path(baselines_dir)
+        baselines_dir.mkdir(parents=True, exist_ok=True)
+        baseline_path = baselines_dir / f"icd-v{version}.json"
+        try:
+            baseline_path.write_bytes(json_bytes)
+        except OSError as exc:
+            print(
+                f"ERROR: cannot re-freeze baseline at {baseline_path}: {exc}\n"
+                "The ICD artifact was written successfully, but the "
+                "current-version baseline could not be refreshed. Copy "
+                f"{output_path} to {baseline_path} manually before committing.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(f"Baseline re-frozen at {baseline_path}  (matches info.version={version!r})")
 
 
 # ---------------------------------------------------------------------------

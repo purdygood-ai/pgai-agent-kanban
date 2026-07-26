@@ -878,8 +878,12 @@ info ""
 #
 # Per-provider behavior:
 #   - CLI detection: provider binary not on PATH → skip with warning.
-#   - Directory creation: ~/.{provider}/agents/ absent → prompt to create
-#     (default Y); --force creates without prompting.
+#   - Directory creation: ~/.{provider}/agents/ absent → always created via
+#     mkdir -p (ensure_provider_agents_dir in
+#     team/scripts/lib/subagent_deploy.sh) before any wrapper is copied;
+#     --dry-run reports the pending creation without writing; creation
+#     failure (permissions, read-only HOME) fails loud naming the path and
+#     exits non-zero.
 #   - Per-file write via safe_overwrite_file from safe_overwrite.sh:
 #       Target does not exist:     prompt to install, default Y.
 #       Target exists, identical:  silent no-op (cmp -s check).
@@ -887,6 +891,8 @@ info ""
 #       Operator declines:         prints manual cp command, skips.
 #       --force mode:              copies directly without interactive prompts.
 #       --dry-run mode:            prints what would happen, no writes.
+#   - Narration: "created <path>" once if the directory had to be created,
+#     then "deployed N wrapper(s)" always after the per-agent loop.
 #
 # State tracking:
 #   $KANBAN_ROOT/.installed-subagents records the manifest set this install
@@ -907,6 +913,18 @@ else
   warn "Subagent installation will use basic copy without interactive prompts."
 fi
 unset _SUBAGENT_SAFE_OVERWRITE_LIB
+
+# --- Source shared provider-agent deploy helpers ---
+_SUBAGENT_DEPLOY_LIB="$SCRIPT_DIR/team/scripts/lib/subagent_deploy.sh"
+if [[ -f "$_SUBAGENT_DEPLOY_LIB" ]]; then
+  # shellcheck source=team/scripts/lib/subagent_deploy.sh
+  source "$_SUBAGENT_DEPLOY_LIB"
+else
+  err "subagent_deploy.sh not found at $_SUBAGENT_DEPLOY_LIB"
+  err "This file is required and ships with the kanban repo."
+  exit 1
+fi
+unset _SUBAGENT_DEPLOY_LIB
 
 # --- Determine providers list ---
 # Try kanban.cfg [providers] available first; fall back to hardcoded list.
@@ -1012,30 +1030,16 @@ for _provider in $_subagent_providers; do
 
   _provider_agents_dir="$HOME/.${_provider}/agents"
 
-  # Directory creation: prompt when absent (skip prompt in force/dry-run mode).
-  if [[ ! -d "$_provider_agents_dir" ]]; then
-    if [[ "$DRY_RUN" == "true" ]]; then
-      info "[dry-run] would prompt to create directory: $_provider_agents_dir"
-    elif [[ "$FORCE" == "true" ]]; then
-      mkdir -p "$_provider_agents_dir"
-      ok "Created: $_provider_agents_dir"
-    else
-      _prompt_tty "$(printf 'Create directory %s for %s provider wrappers? [Y/n] ' "$_provider_agents_dir" "$_provider")" _dir_response
-      case "${_dir_response:-Y}" in
-        [yY]*)
-          mkdir -p "$_provider_agents_dir"
-          ok "Created: $_provider_agents_dir"
-          ;;
-        *)
-          warn "Skipping $_provider: directory creation declined."
-          warn "To create manually: mkdir -p $_provider_agents_dir"
-          continue
-          ;;
-      esac
-    fi
+  # Directory creation: always ensured before deploying wrappers — a missing
+  # target directory must never silently no-op the deploy. See
+  # ensure_provider_agents_dir() in team/scripts/lib/subagent_deploy.sh for
+  # the fail-loud contract on creation failure.
+  if ! ensure_provider_agents_dir "$_provider_agents_dir" "$DRY_RUN"; then
+    exit 1
   fi
 
   # Deploy each manifest agent into this provider's agents directory.
+  _provider_deployed_count=0
   for agent in "${CURRENT_SUBAGENTS[@]}"; do
     src="$SCRIPT_DIR/subagents/${agent}.md"
     dst="${_provider_agents_dir}/${agent}.md"
@@ -1044,6 +1048,8 @@ for _provider in $_subagent_providers; do
       warn "Subagent source missing: $src"
       continue
     fi
+
+    _provider_deployed_count=$((_provider_deployed_count + 1))
 
     if [[ "$DRY_RUN" == "true" ]]; then
       if [[ -f "$dst" ]]; then
@@ -1067,6 +1073,7 @@ for _provider in $_subagent_providers; do
       install_path "$src" "$dst" "subagent: $_provider/$agent"
     fi
   done
+  ok "deployed ${_provider_deployed_count} wrapper(s)"
 
   # --- Remove obsolete subagents (state-file aware, per-provider) ---
   # Only deletes subagent files that were INSTALLED BY A PREVIOUS RUN and
@@ -1118,7 +1125,7 @@ if [[ "$DRY_RUN" != "true" && "$_ANY_PROVIDER_FLAG_SET" == "true" ]]; then
   info "Updated installed-subagents state file: $INSTALLED_AGENTS_STATE"
 fi
 
-unset _provider _provider_agents_dir _dir_response _subagent_providers
+unset _provider _provider_agents_dir _provider_deployed_count _subagent_providers
 unset PREVIOUSLY_INSTALLED prev still_shipped current obsolete_file
 unset _subagent_safe_overwrite_available _ANY_PROVIDER_FLAG_SET
 
@@ -1370,11 +1377,18 @@ echo "See $KANBAN_ROOT/README.md for the full documentation."
 echo ""
 
 # --- Write VERSION and VERSION_DETAIL files (last step before exit) ---
-# Uses the shared stamp helper to write VERSION (clean tag, suffix-stripped)
-# and VERSION_DETAIL (full describe + deposit SHA).  The helper is the single
-# implementation; upgrade.sh calls the same function.
-# When --stamp-version is supplied, VERSION is written verbatim (no suffix to
-# strip; no VERSION_DETAIL written) and the advisory is bypassed.
+# Uses the shared stamp helper to propagate VERSION and write VERSION_DETAIL.
+# The helper is the single implementation; upgrade.sh calls the same function.
+#
+# Normal deposit path (no --stamp-version):
+#   - VERSION comes from the source tree's committed VERSION file when present.
+#     The committed file IS the identity; no git-describe rewrite occurs.
+#   - VERSION_DETAIL (full describe + deposit SHA) is always tool-written as
+#     deployment provenance; it is not committed.
+#
+# Override path (--stamp-version STRING):
+#   - VERSION is written verbatim from the explicit value.
+#   - VERSION_DETAIL is NOT written.
 _INSTALL_STAMP_LIB="${SCRIPT_DIR}/team/scripts/lib/version_stamp.sh"
 if [[ -f "$_INSTALL_STAMP_LIB" ]]; then
   # shellcheck source=team/scripts/lib/version_stamp.sh
@@ -1384,33 +1398,16 @@ unset _INSTALL_STAMP_LIB
 
 if [[ "$DRY_RUN" != "true" ]]; then
   if [[ -n "$STAMP_VERSION" ]]; then
-    # Operator override: write verbatim via shared helper; skip advisory.
+    # Operator override: write verbatim via shared helper; no VERSION_DETAIL.
     ok "VERSION stamp: using --stamp-version override: $STAMP_VERSION"
     stamp_version_files "$SCRIPT_DIR" "$KANBAN_ROOT" "$STAMP_VERSION"
     ok "Wrote VERSION: $STAMP_VERSION -> $KANBAN_ROOT/VERSION"
   else
-    # Resolve from HEAD via git describe; emit divergence advisory when the
-    # deployed tree is ahead of the latest published tag.
-    _INSTALL_FULL_DESCRIBE="$(git -C "$SCRIPT_DIR" describe --tags 2>/dev/null || true)"
-    _INSTALL_FULL_DESCRIBE="${_INSTALL_FULL_DESCRIBE:-unknown-dev}"
-
-    # Advisory: when the latest unprefixed tag merged to origin/main differs
-    # from the describe result, inform the operator of the staged-vs-published
-    # gap.  The advisory is one line only; never a prompt or a blocking error.
-    _OLD_VER="$(git -C "$SCRIPT_DIR" tag --merged origin/main 2>/dev/null \
-      | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-      | sort -V \
-      | tail -n1 || true)"
-    if [[ -n "$_OLD_VER" ]] && [[ "$_INSTALL_FULL_DESCRIBE" != "$_OLD_VER" ]]; then
-      info "deploying $_INSTALL_FULL_DESCRIBE ; latest published tag is $_OLD_VER"
-    fi
-    unset _OLD_VER
-
-    # Write VERSION (clean tag) and VERSION_DETAIL (forensics) via shared helper.
+    # Normal deposit: copy committed VERSION (when present) and write VERSION_DETAIL.
     stamp_version_files "$SCRIPT_DIR" "$KANBAN_ROOT"
     _INSTALL_CLEAN_TAG="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
-    ok "Wrote VERSION: ${_INSTALL_CLEAN_TAG} -> $KANBAN_ROOT/VERSION"
-    unset _INSTALL_FULL_DESCRIBE _INSTALL_CLEAN_TAG
+    ok "VERSION: ${_INSTALL_CLEAN_TAG} (from source tree; detail in VERSION_DETAIL)"
+    unset _INSTALL_CLEAN_TAG
   fi
 fi
 

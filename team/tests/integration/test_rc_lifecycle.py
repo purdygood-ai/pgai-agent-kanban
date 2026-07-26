@@ -540,6 +540,126 @@ class TestFullRCLifecycleLocalOnly:
             f"stdout: {result.stdout}"
         )
 
+    def test_open_rc_preserves_last_released_field(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """cm-open-rc.sh carries forward a pre-existing ## Last Released value.
+
+        Reproduces BUG-0111: release-state.md starts with ## Active RC: none
+        and a populated ## Last Released field from a prior ship. Opening a
+        new RC must rewrite the three RC-tracking fields (Active RC, RC
+        Opened At, RC Opened By Task) while preserving the existing
+        Last Released value verbatim -- it is monotonic and latching per
+        SOP.md and must never be dropped or altered by open-rc.
+        """
+        import re as _re
+        version = "v0.2.0"
+        prior_last_released = "v0.1.0"
+        project_name = "last_released_preserve_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root_for_rc(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        # Overwrite the idle release-state.md fixture with one carrying a
+        # populated Last Released field, matching BUG-0111's precondition.
+        release_state_path = kanban_root / "projects" / project_name / "release-state.md"
+        release_state_path.write_text(
+            "# Release State\n\n"
+            "## Active RC\n"
+            "none\n\n"
+            "## RC Opened At\n"
+            "none\n\n"
+            "## RC Opened By Task\n"
+            "none\n\n"
+            "## Last Released\n"
+            f"{prior_last_released}\n",
+            encoding="utf-8",
+        )
+
+        result = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        state_text = release_state_path.read_text(encoding="utf-8")
+
+        # Assert: exactly the four canonical fields are present, in SOP order.
+        headings = _re.findall(r"^## (.+)$", state_text, _re.MULTILINE)
+        assert headings == [
+            "Active RC", "RC Opened At", "RC Opened By Task", "Last Released"
+        ], (
+            f"release-state.md must contain exactly the four canonical SOP "
+            f"fields in order; got {headings}.\nContent:\n{state_text}"
+        )
+
+        # Assert: Last Released still reads the pre-existing value, unchanged.
+        match = _re.search(r"##\s*Last Released\s*\n(.+?)(?=\n##|\Z)", state_text, _re.DOTALL)
+        assert match is not None, (
+            f"'## Last Released' heading missing after cm-open-rc.sh.\n"
+            f"Content:\n{state_text}"
+        )
+        assert match.group(1).strip() == prior_last_released, (
+            f"Expected Last Released = '{prior_last_released}' preserved after "
+            f"cm-open-rc.sh, got '{match.group(1).strip()}'.\n"
+            f"release-state.md content:\n{state_text}\n"
+            f"stdout: {result.stdout}"
+        )
+
+    def test_open_rc_writes_none_for_last_released_on_fresh_project(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """cm-open-rc.sh writes 'none' (not a fabricated version) when the
+        overwritten release-state.md had no pre-existing ## Last Released field.
+
+        A project that has never shipped has no Last Released value to carry
+        forward. open-rc must not invent one -- the rewritten file must still
+        be schema-valid with the field present and set to the 'none' sentinel,
+        consistent with how the other three fields represent "not set".
+        """
+        import re as _re
+        version = "v0.1.0"
+        project_name = "last_released_fresh_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        # _build_kanban_root_for_rc's fixture release-state.md has no
+        # ## Last Released field at all -- the fresh-project case.
+        kanban_root = _build_kanban_root_for_rc(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        result = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        release_state_path = kanban_root / "projects" / project_name / "release-state.md"
+        state_text = release_state_path.read_text(encoding="utf-8")
+
+        match = _re.search(r"##\s*Last Released\s*\n(.+?)(?=\n##|\Z)", state_text, _re.DOTALL)
+        assert match is not None, (
+            f"'## Last Released' heading missing on fresh-project open-rc run.\n"
+            f"Content:\n{state_text}"
+        )
+        assert match.group(1).strip() == "none", (
+            f"Expected Last Released = 'none' (no fabricated version) on a "
+            f"fresh project, got '{match.group(1).strip()}'.\n"
+            f"release-state.md content:\n{state_text}"
+        )
+
     def test_coder_commit_on_rc_branch_is_reachable_from_main_after_release(
         self, tmp_path: pathlib.Path
     ) -> None:

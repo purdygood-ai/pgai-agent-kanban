@@ -24,6 +24,7 @@ front of you.
 | [dashboard.md](dashboard.md), [DASHBOARD-PANES.md](DASHBOARD-PANES.md) | The tmux dashboard: metrics window and the pane inventory. |
 | [projects-cfg.md](projects-cfg.md) | The project registry format. |
 | [public-contract.md](public-contract.md) | Stable-surface guarantees across the 1.x line. |
+| [coding-standards.md](coding-standards.md) | The authoritative coding-standards directives — every code-producing role in the shop, and every project the kanban builds, follows this list. |
 | [hybrid-shop-setup.md](hybrid-shop-setup.md) | Configure a shop where humans and agents share the same repo. |
 | [operator-checkpoints/](operator-checkpoints/) | Operator-run verification checkpoints filed against past releases. |
 | [../release-notes/](../release-notes/) | One file per shipped version; `## Status` stamped `FUNCTIONAL`, `KNOWN-BUGS`, or `NON-FUNCTIONAL` at release time. |

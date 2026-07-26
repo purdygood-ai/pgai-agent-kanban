@@ -382,10 +382,15 @@ class ResetBody(BaseModel):
         project:        Project name.
         key:            Task key or intake identifier (kind-agnostic selector).
         agent:          Agent task ID (e.g. ``CODER-20260101-001-slug``).
-        bug:            Bug intake key (e.g. ``BUG-0042``).
+        bug:            Bug intake key (e.g. ``an earlier defect``).
         priority:       Priority intake key (e.g. ``PRIORITY-0007``).
         requirement:    Requirement intake version (e.g. ``v0.1.2``).
         keep_artifacts: When True, passes ``--keep-artifacts`` to reset.sh.
+        force:          When True, passes ``--force`` to reset.sh, which performs
+                        stale-worktree cleanup (git worktree remove, prune, rm -rf)
+                        before the normal amnesia reset.  Without force, a detected
+                        stale worktree causes a non-zero exit with the removal recipe
+                        printed to stderr.  Agent-task resets only.
         dry_run:        When True, short-circuits dispatch — no subprocess spawned.
     """
 
@@ -398,6 +403,7 @@ class ResetBody(BaseModel):
     priority: Optional[str] = None
     requirement: Optional[str] = None
     keep_artifacts: Optional[bool] = None
+    force: Optional[bool] = None
     dry_run: bool = False
 
 
@@ -554,10 +560,11 @@ class CreateProjectBody(BaseModel):
     (body fields use underscores; script flags use hyphens where applicable).
 
     Note on path flags: ``dev_tree`` (``--dev-tree``) and ``git_repo`` (``--git-repo``)
-    are included for API-parity completeness.  create-project.sh deliberately rejects
-    these flags with a clear message pointing operators at manual project.cfg editing.
-    If supplied, the script's refusal propagates unchanged in the envelope (HTTP 500,
-    exit_code non-zero).  No server-side re-implementation of that guard.
+    are written verbatim into the generated project.cfg's ``dev_tree_path``/
+    ``git_repo_url`` fields when supplied — only a non-empty check is applied.
+    A ``dev_tree`` path that does not currently exist on the host produces a
+    WARN on the script's stderr (propagated in the envelope) but the value is
+    still written and the script still exits 0.
 
     Fields:
         project:       Project name (required).
@@ -573,10 +580,10 @@ class CreateProjectBody(BaseModel):
                        Passed as ``--no-migrate``.
         dry_run:       When True, short-circuits dispatch — no subprocess spawned.
                        Also passes ``--dry-run`` to the script when not short-circuited.
-        dev_tree:      Rejected by create-project.sh with a clear message; included for
-                       parity lint.  Passed as ``--dev-tree`` if supplied; script refuses.
-        git_repo:      Rejected by create-project.sh with a clear message; included for
-                       parity lint.  Passed as ``--git-repo`` if supplied; script refuses.
+        dev_tree:      Written verbatim into project.cfg's dev_tree_path.  Passed as
+                       ``--dev-tree`` if supplied; a nonexistent path WARNs but still writes.
+        git_repo:      Written verbatim into project.cfg's git_repo_url.  Passed as
+                       ``--git-repo`` if supplied.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -933,10 +940,12 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
     - ``project``        (required) — project name.
     - ``key``            (optional) — kind-agnostic task or intake key.
     - ``agent``          (optional) — agent task ID (e.g. ``CODER-20260101-001-slug``).
-    - ``bug``            (optional) — bug intake key (e.g. ``BUG-0042``).
+    - ``bug``            (optional) — bug intake key (e.g. ``an earlier defect``).
     - ``priority``       (optional) — priority intake key (e.g. ``PRIORITY-0007``).
     - ``requirement``    (optional) — requirement intake version (e.g. ``v0.1.2``).
     - ``keep_artifacts`` (optional, bool) — when True, passes ``--keep-artifacts``.
+    - ``force``          (optional, bool) — when True, passes ``--force`` to perform
+                                            stale-worktree cleanup before the reset.
     - ``dry_run``        (optional, bool) — when True, returns the planned action description
                                             without resetting anything.
 
@@ -996,6 +1005,8 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
     flags: dict = {"project": body.project, "key": resolved_key}
     if body.keep_artifacts:
         flags["keep-artifacts"] = True
+    if body.force:
+        flags["force"] = True
     planned_argv = build_argv(script, flags)
 
     short_circuit = _dry_run_envelope(body.dry_run, planned_argv, warnings)
@@ -1453,13 +1464,15 @@ def post_create_project(body: CreateProjectBody, request: Request) -> JSONRespon
     """Bootstrap a new project directory and register it in projects.cfg.
 
     Thin passthrough to create-project.sh.  All script guards (project already
-    exists, invalid workflow type, bad ceiling values, rejected path flags)
+    exists, invalid workflow type, bad ceiling values, empty path-flag values)
     propagate unchanged in the envelope as non-zero exit_code.
 
     The ``dev_tree`` and ``git_repo`` body fields are forwarded to the script
-    when supplied; create-project.sh rejects them with a clear message pointing
-    at manual project.cfg editing — that refusal propagates unchanged in the
-    envelope.  No server-side re-implementation of that guard.
+    when supplied and written verbatim into the generated project.cfg's
+    ``dev_tree_path``/``git_repo_url`` fields.  A ``dev_tree`` path that does
+    not currently exist on the host produces a WARN on stderr (propagated in
+    the envelope) but the script still writes the value and exits 0 — no
+    server-side re-implementation of that guard.
 
     Body fields:
 
@@ -1474,8 +1487,9 @@ def post_create_project(body: CreateProjectBody, request: Request) -> JSONRespon
     - ``no_migrate``    (optional, bool) — when True, suppresses projects.cfg migration.
     - ``dry_run``       (optional, bool) — when True, returns the planned action description
                                             without creating anything.
-    - ``dev_tree``      (optional) — parity-lint placeholder; script rejects this flag.
-    - ``git_repo``      (optional) — parity-lint placeholder; script rejects this flag.
+    - ``dev_tree``      (optional) — written verbatim to project.cfg's dev_tree_path;
+                                      a nonexistent path WARNs but still writes.
+    - ``git_repo``      (optional) — written verbatim to project.cfg's git_repo_url.
 
     Response envelope:
       ``{"exit_code": int, "stdout": str, "stderr": str, "warnings": list}``

@@ -1,12 +1,18 @@
-# Demos — three worked examples
+# Demos — four worked examples
 
-These are three complete, runnable examples that show how the kanban drives real
+These are four complete, runnable examples that show how the kanban drives real
 work end-to-end. You run them yourself, entirely on your own machine — nothing
 here auto-runs, nothing pushes to any remote, nothing is seeded for you. You
 create the project, you deposit the work, you watch the chain build it.
 
-There are three demos, one per shipped workflow type:
+The demos span from a 10-minute proof-of-life to full workflow tours:
 
+- **`helloworld-demo/`** — **start here if you're in a hurry.** The fastest
+  possible proof the pipeline works: drop in a one-goal requirements doc
+  ([team/demos/helloworld-demo/README.md](helloworld-demo/README.md)), come back
+  in ~10–15 minutes, find a tagged `v0.1.0` and a `hello.py` that prints exactly
+  `Hello, World!` in your local repo. Same `release` workflow as Chomp-Man, but
+  reduced to the smallest imaginable Python program.
 - **`chomp-man-demo/`** — the **release** workflow. Builds a small arcade game
   (a Pac-Man-style "Chomp-Man") feature by feature, with bugs and enhancements
   dropped in between, each shipping a tagged release into a local git repo.
@@ -20,21 +26,24 @@ There are three demos, one per shipped workflow type:
 
 ## Which to run first
 
-Start with **`three-bears-demo/`**. It's the document workflow — simpler, no git
-repo to set up, no code to build — so it's the fastest way to see the chain wake,
-decompose, work, and finalize. Then do **`chomp-man-demo/`** for the full release
-lifecycle (RC branches, tests, tagged releases) and to see bugs and priorities
-flow through the patch lane. Finish with **`testing-only-demo/`** — it audits
-the tag your Chomp-Man run just shipped, which closes the loop: you will have
-watched the system build software, write prose, and then verify its own earlier
-output. If the audit finds a genuine defect, it files a bug back onto the
-Chomp-Man lane — and whether Chomp-Man acts on it autonomously is governed by
-that project's own configuration. That last chapter is the suite behaving as a
-system, and it is worth letting run.
+Start with **`helloworld-demo/`**. It's the 10-minute proof-of-life: one goal,
+one unit test, one tagged release — the whole `release` workflow reduced to its
+smallest correct example, so you see the chain wake, decompose, build, verify,
+and tag without any surrounding complexity. Then do **`three-bears-demo/`** for
+the **document** workflow — no git repo to set up, no code to build, the fastest
+way to see the chain evolve a document across revisions. Then **`chomp-man-demo/`**
+for the full release lifecycle (RC branches, tests, tagged releases) and to see
+bugs and priorities flow through the patch lane. Finish with **`testing-only-demo/`**
+— it audits the tag your Chomp-Man run just shipped, which closes the loop: you
+will have watched the system build software, write prose, and then verify its
+own earlier output. If the audit finds a genuine defect, it files a bug back
+onto the Chomp-Man lane — and whether Chomp-Man acts on it autonomously is
+governed by that project's own configuration. That last chapter is the suite
+behaving as a system, and it is worth letting run.
 
 ## Everything is local and safe
 
-All three demos run without touching any remote — the chain produces real
+All four demos run without touching any remote — the chain produces real
 commits, real tags, real reports, and real artifacts, but never pushes
 (**`push_to_remote = false`** on the build lanes; the testing-only demo goes
 further and never writes to the target repository at all — its worktree is

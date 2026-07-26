@@ -928,6 +928,13 @@ fi
 # the protected set by default.  Passing --add-claude-agents / --add-codex-agents
 # explicitly OPTs IN to refreshing those wrappers for the named provider.
 # Without the flag, NOTHING is written under the provider directory.
+#
+# Once opted in, the target agents directory is always created via mkdir -p
+# (ensure_provider_agents_dir in team/scripts/lib/subagent_deploy.sh) when
+# absent, before any wrapper is copied — a missing directory never causes a
+# silent no-op. Creation failure (permissions, read-only HOME) fails loud
+# naming the path and exits non-zero. Narration: "created <path>" once if
+# the directory had to be created, then "deployed N wrapper(s)" always.
 # ---------------------------------------------------------------------------
 _SUBAGENT_SAFE_OVERWRITE_LIB="$DEV_TREE/team/scripts/lib/safe_overwrite.sh"
 _subagent_safe_overwrite_available=false
@@ -937,6 +944,17 @@ if [[ -f "$_SUBAGENT_SAFE_OVERWRITE_LIB" ]]; then
   _subagent_safe_overwrite_available=true
 fi
 unset _SUBAGENT_SAFE_OVERWRITE_LIB
+
+_SUBAGENT_DEPLOY_LIB="$DEV_TREE/team/scripts/lib/subagent_deploy.sh"
+if [[ -f "$_SUBAGENT_DEPLOY_LIB" ]]; then
+  # shellcheck source=team/scripts/lib/subagent_deploy.sh
+  source "$_SUBAGENT_DEPLOY_LIB"
+else
+  err "subagent_deploy.sh not found at $_SUBAGENT_DEPLOY_LIB"
+  err "This file is required and ships with the kanban repo."
+  exit 1
+fi
+unset _SUBAGENT_DEPLOY_LIB
 
 _SUBAGENT_INI_PARSER_LIB="$DEV_TREE/team/scripts/lib/ini_parser.sh"
 _subagent_providers=""
@@ -1005,22 +1023,21 @@ for _provider in $_subagent_providers; do
 
   _provider_agents_dir="$HOME/.${_provider}/agents"
 
-  if [[ ! -d "$_provider_agents_dir" ]]; then
-    if [[ "$FORCE_UPGRADE" == "true" ]]; then
-      mkdir -p "$_provider_agents_dir"
-      ok "Created: $_provider_agents_dir"
-    else
-      warn "Provider agents directory missing: $_provider_agents_dir"
-      warn "To create and deploy, re-run with --force or create manually:"
-      warn "  mkdir -p $_provider_agents_dir"
-      continue
-    fi
+  # Directory creation: always ensured before deploying wrappers — a missing
+  # target directory must never silently no-op the deploy. See
+  # ensure_provider_agents_dir() in team/scripts/lib/subagent_deploy.sh for
+  # the fail-loud contract on creation failure.
+  if ! ensure_provider_agents_dir "$_provider_agents_dir" "false"; then
+    exit 1
   fi
 
+  _provider_deployed_count=0
   for agent in "${CURRENT_SUBAGENTS[@]}"; do
     src="$DEV_TREE/subagents/${agent}.md"
     dst="${_provider_agents_dir}/${agent}.md"
     [[ -f "$src" ]] || { warn "Subagent source missing: $src"; continue; }
+
+    _provider_deployed_count=$((_provider_deployed_count + 1))
 
     if [[ "$FORCE_UPGRADE" == "true" ]]; then
       cp "$src" "$dst"
@@ -1031,6 +1048,7 @@ for _provider in $_subagent_providers; do
       deposit_item "$src" ".${_provider}/agents/${agent}.md" "subagent: $_provider/$agent"
     fi
   done
+  ok "deployed ${_provider_deployed_count} wrapper(s)"
 
   # Remove obsolete subagents (previously installed, no longer in manifest).
   if [[ ${#PREVIOUSLY_INSTALLED[@]} -gt 0 ]]; then
@@ -1063,7 +1081,7 @@ if [[ "$_ANY_PROVIDER_FLAG_SET" == "true" ]] && [[ ${#CURRENT_SUBAGENTS[@]} -gt 
   info "Updated installed-subagents state file: $INSTALLED_AGENTS_STATE"
 fi
 
-unset _provider _provider_agents_dir _subagent_providers
+unset _provider _provider_agents_dir _provider_deployed_count _subagent_providers
 unset PREVIOUSLY_INSTALLED prev still_shipped current obsolete_file
 unset _subagent_safe_overwrite_available _ANY_PROVIDER_FLAG_SET
 
@@ -1157,11 +1175,18 @@ unset _INSTALL_PSEUDOCRON_SH _is_temp_root
 # ---------------------------------------------------------------------------
 # Write VERSION and VERSION_DETAIL files.
 # ---------------------------------------------------------------------------
-# Uses the shared stamp helper to write VERSION (clean tag, suffix-stripped)
-# and VERSION_DETAIL (full describe + deposit SHA).  The helper is the single
-# implementation; install.sh calls the same function.
-# When --stamp-version is supplied, VERSION is written verbatim (no suffix to
-# strip; no VERSION_DETAIL written) and the advisory is bypassed.
+# Uses the shared stamp helper to propagate VERSION and write VERSION_DETAIL.
+# The helper is the single implementation; install.sh calls the same function.
+#
+# Normal deposit path (no --stamp-version):
+#   - VERSION comes from the dev tree's committed VERSION file when present.
+#     The committed file IS the identity; no git-describe rewrite occurs.
+#   - VERSION_DETAIL (full describe + deposit SHA) is always tool-written as
+#     deployment provenance; it is not committed.
+#
+# Override path (--stamp-version STRING):
+#   - VERSION is written verbatim from the explicit value.
+#   - VERSION_DETAIL is NOT written.
 _UPG_STAMP_LIB="$DEV_TREE/team/scripts/lib/version_stamp.sh"
 if [[ -f "$_UPG_STAMP_LIB" ]]; then
   # shellcheck source=team/scripts/lib/version_stamp.sh
@@ -1170,20 +1195,40 @@ fi
 unset _UPG_STAMP_LIB
 
 if [[ -d "$DEV_TREE/.git" ]]; then
+  # Resolve branch_prefix for this project so the git-describe --match
+  # pattern uses the project's own tag shape (<prefix>v[0-9]*).
+  # Resolution: read the single registered project's project.cfg via
+  # pp_branch_prefix when the helper is available; default to empty (no
+  # prefix) on any failure so the an earlier defect latest-exclusion is preserved.
+  _UPG_BRANCH_PREFIX=""
+  if declare -f pp_branch_prefix >/dev/null 2>&1; then
+    _projects_cfg="${KANBAN_ROOT}/projects.cfg"
+    if [[ -f "$_projects_cfg" ]]; then
+      _upg_project_name="$(awk \
+        '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1];exit}' \
+        "$_projects_cfg" 2>/dev/null || true)"
+      if [[ -n "$_upg_project_name" ]]; then
+        _UPG_BRANCH_PREFIX="$(KANBAN_ROOT="$KANBAN_ROOT" pp_branch_prefix "$_upg_project_name" 2>/dev/null || true)"
+      fi
+    fi
+    unset _projects_cfg _upg_project_name
+  fi
+
   if [[ -n "$STAMP_VERSION" ]]; then
     # Operator override: write verbatim via shared helper; skip advisory.
     ok "VERSION stamp: using --stamp-version override: $STAMP_VERSION"
     stamp_version_files "$DEV_TREE" "$KANBAN_ROOT" "$STAMP_VERSION"
     ok "VERSION updated: $STAMP_VERSION"
   else
-    # Resolve from HEAD via git describe; emit divergence advisory when the
-    # deployed tree is ahead of the latest published tag.
-    _cur_full_describe="$(git -C "$DEV_TREE" describe --tags 2>/dev/null || true)"
+    # Normal deposit: describe is used only for the advisory and VERSION_DETAIL,
+    # not to determine VERSION.  VERSION comes from the dev tree's committed file.
+    _upg_match_pattern="$(git_describe_tag_pattern "$_UPG_BRANCH_PREFIX")"
+    _cur_full_describe="$(git -C "$DEV_TREE" describe --tags --match "$_upg_match_pattern" 2>/dev/null || true)"
     _cur_full_describe="${_cur_full_describe:-unknown-dev}"
 
-    # Advisory: when the latest unprefixed tag merged to origin/main differs
-    # from the describe result, inform the operator of the staged-vs-published
-    # gap.  The advisory is one line only; never a prompt or a blocking error.
+    # Advisory: when the latest published tag differs from the describe result,
+    # inform the operator of the staged-vs-published gap.  The advisory is one
+    # line only; never a prompt or a blocking error.
     _VER_SH="$DEV_TREE/team/scripts/dashboard/lib/version.sh"
     if [[ -f "$_VER_SH" ]]; then
       # shellcheck source=team/scripts/dashboard/lib/version.sh
@@ -1194,15 +1239,17 @@ if [[ -d "$DEV_TREE/.git" ]]; then
       fi
       unset _old_answer
     fi
-    unset _VER_SH
+    unset _VER_SH _upg_match_pattern
 
-    # Write VERSION (clean tag) and VERSION_DETAIL (forensics) via shared helper.
-    stamp_version_files "$DEV_TREE" "$KANBAN_ROOT"
+    # Propagate committed VERSION (when present) and write VERSION_DETAIL.
+    # branch_prefix is passed so the describe inside stamp_version_files is
+    # prefix-aware when building VERSION_DETAIL.
+    stamp_version_files "$DEV_TREE" "$KANBAN_ROOT" "" "$_UPG_BRANCH_PREFIX"
     _upg_clean_tag="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
-    ok "Target version resolved: $_cur_full_describe"
-    ok "VERSION updated: ${_upg_clean_tag} (clean tag; detail in VERSION_DETAIL)"
+    ok "VERSION updated: ${_upg_clean_tag} (from source tree; detail in VERSION_DETAIL)"
     unset _cur_full_describe _upg_clean_tag
   fi
+  unset _UPG_BRANCH_PREFIX
 fi
 
 # ---------------------------------------------------------------------------

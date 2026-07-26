@@ -71,6 +71,12 @@ done
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/../lib/project_paths.sh"
 
+# Local-only render guard: this is a dashboard render path, so
+# pp_last_released_version below must never perform a network git fetch.
+# Honored by pp_last_released_version before its `git fetch origin --tags`
+# call; local tags/refs already on disk are authoritative for last-released.
+export PGAI_GIT_LOCAL_ONLY=1
+
 # shellcheck source=lib/projects.sh
 source "${SCRIPT_DIR}/../lib/projects.sh"
 

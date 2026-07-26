@@ -51,6 +51,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source helpers
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/../lib/project_paths.sh"
+
+# Local-only render guard: this is a dashboard render path, so
+# pp_last_released_version below (per-project last-released resolution) must
+# never perform a network git fetch.
+export PGAI_GIT_LOCAL_ONLY=1
+
 # shellcheck source=lib/projects.sh
 source "${SCRIPT_DIR}/../lib/projects.sh"
 # shellcheck source=lib/dev_tree.sh

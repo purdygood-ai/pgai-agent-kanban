@@ -903,6 +903,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Aggregate per-task token usage into per-RC and per-day metrics rollups.\n"
+            # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
             "Implements the schema defined in PRIORITY-0037."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

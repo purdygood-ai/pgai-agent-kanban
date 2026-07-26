@@ -99,6 +99,10 @@ _DSB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "${_DSB_SCRIPT_DIR}/../lib/ini_parser.sh" ]]    && source "${_DSB_SCRIPT_DIR}/../lib/ini_parser.sh"
 [[ -f "${_DSB_SCRIPT_DIR}/../lib/project_paths.sh" ]] && source "${_DSB_SCRIPT_DIR}/../lib/project_paths.sh"
 [[ -f "${_DSB_SCRIPT_DIR}/../lib/projects.sh" ]]      && source "${_DSB_SCRIPT_DIR}/../lib/projects.sh"
+# Local-only render guard: this is a dashboard render path, so
+# pp_last_released_version below (PROJECT_VERSION resolution) must never
+# perform a network git fetch.
+export PGAI_GIT_LOCAL_ONLY=1
 # Source shared Python-helper resolver (live-install anchor first — D3 fix).
 # halt_scope.sh also sources this; guard against double-sourcing via sentinel.
 # shellcheck source=lib/helper_resolver.sh

@@ -113,7 +113,17 @@ fi
 # Resolve library paths (BEFORE strict mode)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Bootstrap: self-locate → source shell-env → fail loud
+# ---------------------------------------------------------------------------
+# Must happen before the first use of PGAI_AGENT_KANBAN_ROOT_PATH so the
+# script runs from a fresh shell without manual pre-sourcing.  Explicit
+# operator exports win via env_bootstrap.sh's idempotency guard.
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+
 # Resolve KANBAN_ROOT
+# PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh or the operator.
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 # Source env/config before strict mode — these files may use unset vars or
@@ -149,8 +159,6 @@ _TMP_ROOT="$(pgai_temp_dir)"
 # Enable strict mode for our own code
 # ---------------------------------------------------------------------------
 set -euo pipefail
-# shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve project name and repo root

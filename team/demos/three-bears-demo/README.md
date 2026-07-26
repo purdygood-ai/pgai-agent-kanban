@@ -16,6 +16,7 @@ real editing goes (you try something, change your mind, restore it).
 
 Create the project as a **document**-workflow project:
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/create-project.sh --project pgai-three-bears --workflow-type document
 ```
@@ -24,6 +25,7 @@ Then open its config and set it to local-only (the document workflow does not
 push anywhere, but set this for consistency and so nothing ever touches a
 remote):
 
+<!-- doc-lint: skip — interactive editor invocation ($EDITOR) in a non-TTY environment; harness cannot open an interactive editing session -->
 ```bash
 $EDITOR projects/pgai-three-bears/project.cfg
 #   set:  push_to_remote = false
@@ -46,6 +48,7 @@ sequence is one-in, one-out.
 
 ### 1. The story (v0.0.1)
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-three-bears \
   --file demos/three-bears-demo/intake/v0.0.1-three-bears-story.md
@@ -55,6 +58,7 @@ Watch: PM decomposes → WRITER writes the bedtime story → CM finalizes. Check
 
 ### 2. Add a friendly fox at the stream (v0.0.2)
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-three-bears \
   --file demos/three-bears-demo/intake/v0.0.2-three-bears-friendly-fox-at-the-stream.md
@@ -64,6 +68,7 @@ publishes.
 
 ### 3. Add an interior scene (v0.0.3)
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-three-bears \
   --file demos/three-bears-demo/intake/v0.0.3-bears-add-interior-scene.md
@@ -71,6 +76,7 @@ scripts/intake.sh --project pgai-three-bears \
 
 ### 4. Remove the fox (v0.0.4)
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-three-bears \
   --file demos/three-bears-demo/intake/v0.0.4-bears-remove-fox.md
@@ -80,6 +86,7 @@ A real document evolves like this.
 
 ### 5. Restore the fox (v0.0.5)
 
+<!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-three-bears \
   --file demos/three-bears-demo/intake/v0.0.5-bears-restore-fox.md

@@ -36,6 +36,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source project_paths lib for pp_* helpers
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/../lib/project_paths.sh"
+
+# Local-only render guard: this is a dashboard render path, so
+# pp_last_released_version below (DISPLAY_VERSION resolution) must never
+# perform a network git fetch.  Also exported into the data.sh subprocess
+# invoked below, which independently sets the same guard for its own
+# pp_last_released_version call.
+export PGAI_GIT_LOCAL_ONLY=1
+
 # Source shared Python-helper resolver (live-install anchor first — D3 fix)
 # shellcheck source=lib/helper_resolver.sh
 source "${SCRIPT_DIR}/lib/helper_resolver.sh"

@@ -8,15 +8,13 @@
 #   team/scripts/install-pseudocron.sh --wake-tier=large   # (8+ core hosts)
 #
 # install-pseudocron.sh selects the matching tier template from
-# team/templates/install/pseudocron-{small,medium,large}.cfg.example, substitutes the
-# __KANBAN_ROOT__ placeholder with the real kanban root path, and writes
+# team/templates/install/pseudocron-{small,medium,large}.cfg.example and writes
 # pseudocron.cfg to $PGAI_AGENT_KANBAN_ROOT_PATH.
 #
 # To install manually from a tier template (e.g. small):
 #
-#   sed "s|__KANBAN_ROOT__|$PGAI_AGENT_KANBAN_ROOT_PATH|g" \
-#     team/templates/install/pseudocron-small.cfg.example \
-#     > "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.cfg"
+#   cp team/templates/install/pseudocron-small.cfg.example \
+#      "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.cfg"
 #
 # To start pseudocron after installing:
 #
@@ -58,11 +56,11 @@
 # Stagger agents by 1–2 minutes so they do not compete for resources.
 # For a full tier-appropriate schedule use install-pseudocron.sh (see above).
 #
-# 5   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=pm
-# 6   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=coder
-# 7   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=writer
-# 8   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=tester
-# 9   /home/rocky/pgai_agent_kanban/scripts/wake-batch.sh --agent=cm
+# 5   scripts/wake-batch.sh --agent=pm
+# 6   scripts/wake-batch.sh --agent=coder
+# 7   scripts/wake-batch.sh --agent=writer
+# 8   scripts/wake-batch.sh --agent=tester
+# 9   scripts/wake-batch.sh --agent=cm
 
 # --- Health check ---
 # 30  curl -fsS https://example.com/health >> /tmp/health.log 2>&1

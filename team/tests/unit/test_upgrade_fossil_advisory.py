@@ -64,6 +64,7 @@ _REAL_PROJECT_PATHS_SH = _TEAM_SCRIPTS_DIR / "lib" / "project_paths.sh"
 _REAL_TEMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "temp.sh"
 _REAL_RETIRED_LINT_SH = _TEAM_SCRIPTS_DIR / "lib" / "retired_files_lint.sh"
 _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
+_REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
 
 _TEAM_TEMPLATES_DIR = pathlib.Path(__file__).parent.parent.parent / "templates"
 _REAL_RETIRED_FILES_TXT = _TEAM_TEMPLATES_DIR / "retired-files.txt"
@@ -140,6 +141,7 @@ def _build_fossil_sandbox(
         _REAL_TEMP_SH,
         _REAL_RETIRED_LINT_SH,
         _REAL_VERSION_STAMP_SH,
+        _REAL_SUBAGENT_DEPLOY_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, installed_lib / lib_src.name)
@@ -236,6 +238,7 @@ def _build_fossil_sandbox(
         _REAL_TEMP_SH,
         _REAL_RETIRED_LINT_SH,
         _REAL_VERSION_STAMP_SH,
+        _REAL_SUBAGENT_DEPLOY_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_team_lib / lib_src.name)

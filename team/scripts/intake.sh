@@ -42,6 +42,10 @@ source "${_INTAKE_LIB_DIR}/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
 source "${_INTAKE_LIB_DIR}/project_paths.sh"
 
+# --- Source the shared Python invocation helper ---
+# shellcheck source=lib/pp_run_ops.sh
+source "${_INTAKE_LIB_DIR}/pp_run_ops.sh"
+
 # ---------------------------------------------------------------------------
 # Declared flag vocabulary for this script.
 # intake accepts: --project --file --help
@@ -77,7 +81,8 @@ _intake_usage() {
         "to .rejected/ by the discovery pipeline." \
         "" \
         "Examples:" \
-        "  intake.sh --project myproject /tmp/BUG-0400-some-slug.md" \
+        "  intake.sh --project myproject /tmp/an earlier defect-some-slug.md" \
+        # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
         "  intake.sh --project myproject --file /tmp/PRIORITY-0010-urgent.md" \
         "" \
         "Exit codes:" \
@@ -186,7 +191,7 @@ _project_root="$(pp_project_root "${_project_value}")" || exit 1
 
 # --- Execute the intake operation via the Python library ---
 _intake_rc=0
-_deposited_path="$(python3 -m pgai_agent_kanban.ops deposit_intake \
+_deposited_path="$(pp_run_ops pgai_agent_kanban.ops deposit_intake \
     "${_project_root}" "${_file_value}")" \
     || _intake_rc=$?
 

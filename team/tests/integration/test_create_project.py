@@ -584,3 +584,196 @@ class TestCreateProjectGuardBehavior:
             "Expected error output to reference the invalid workflow type or 'workflow'.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+
+class TestCreateProjectDevTreeAndGitRepoFlags:
+    """create-project.sh --dev-tree/--git-repo (and their aliases) write project.cfg fields.
+
+    Covers BUG-0101: the flags were documented in the script header and --help
+    but silently ignored — the generated project.cfg always carried empty
+    dev_tree_path/git_repo_url fields regardless of what was passed on the
+    command line.
+    """
+
+    def test_dev_tree_and_git_repo_flags_write_values_verbatim(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """--dev-tree and --git-repo values land verbatim in project.cfg.
+
+        No transformation or normalization is expected -- the operator's exact
+        string shows up in the generated file.
+        """
+        root = _build_minimal_kanban_root(tmp_path)
+        dev_tree = tmp_path / "some-dev-tree"
+        dev_tree.mkdir()
+
+        result = _run_create_project(
+            root,
+            "flags-verbatim-test",
+            workflow_type="release",
+            extra_args=[
+                "--dev-tree", str(dev_tree),
+                "--git-repo", "git@example.com:org/flags-verbatim-test.git",
+            ],
+        )
+        assert result.returncode == 0, (
+            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        cfg_text = _read_project_cfg(root, "flags-verbatim-test")
+        assert f"dev_tree_path = {dev_tree}" in cfg_text, (
+            f"Expected dev_tree_path = {dev_tree} in project.cfg.\ncfg content:\n{cfg_text}"
+        )
+        assert "git_repo_url = git@example.com:org/flags-verbatim-test.git" in cfg_text, (
+            f"Expected git_repo_url to carry the supplied URL verbatim.\ncfg content:\n{cfg_text}"
+        )
+
+    def test_dev_tree_path_and_git_repo_url_aliases_write_the_same_fields(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """--dev-tree-path and --git-repo-url (the documented aliases) also work.
+
+        BUG-0101 named all four spellings as required; the alias forms must
+        write into the same project.cfg fields as their canonical counterparts.
+        """
+        root = _build_minimal_kanban_root(tmp_path)
+        dev_tree = tmp_path / "aliased-dev-tree"
+        dev_tree.mkdir()
+
+        result = _run_create_project(
+            root,
+            "flags-alias-test",
+            workflow_type="release",
+            extra_args=[
+                "--dev-tree-path", str(dev_tree),
+                "--git-repo-url", "git@example.com:org/flags-alias-test.git",
+            ],
+        )
+        assert result.returncode == 0, (
+            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        cfg_text = _read_project_cfg(root, "flags-alias-test")
+        assert f"dev_tree_path = {dev_tree}" in cfg_text, (
+            f"Expected dev_tree_path = {dev_tree} in project.cfg.\ncfg content:\n{cfg_text}"
+        )
+        assert "git_repo_url = git@example.com:org/flags-alias-test.git" in cfg_text, (
+            f"Expected git_repo_url to carry the supplied URL verbatim.\ncfg content:\n{cfg_text}"
+        )
+
+    def test_omitted_flags_produce_empty_fields_with_edit_manually_guidance(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """With neither flag, dev_tree_path/git_repo_url stay empty (back-compat).
+
+        This is the byte-identical-to-today contract: omitting the flags must
+        reproduce the pre-fix output exactly -- empty fields plus the
+        edit-manually guidance comment.
+        """
+        root = _build_minimal_kanban_root(tmp_path)
+
+        result = _run_create_project(root, "flags-omitted-test", workflow_type="release")
+        assert result.returncode == 0, (
+            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        cfg_text = _read_project_cfg(root, "flags-omitted-test")
+        assert "dev_tree_path =\n" in cfg_text, (
+            f"Expected dev_tree_path to be written empty when --dev-tree is omitted.\n"
+            f"cfg content:\n{cfg_text}"
+        )
+        assert "git_repo_url =\n" in cfg_text, (
+            f"Expected git_repo_url to be written empty when --git-repo is omitted.\n"
+            f"cfg content:\n{cfg_text}"
+        )
+        assert "IMPORTANT: dev_tree_path and git_repo_url are intentionally empty." in cfg_text, (
+            f"Expected the edit-manually guidance comment to be retained for the "
+            f"omitted-flag case.\ncfg content:\n{cfg_text}"
+        )
+
+    def test_nonexistent_dev_tree_path_warns_but_still_writes_and_exits_zero(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A --dev-tree path that does not exist yet still succeeds, with a WARN.
+
+        Projects are often registered before their dev tree is cloned, so a
+        missing path is not an error -- the script names the path in a WARN
+        and writes the value into project.cfg anyway, exiting 0.
+        """
+        root = _build_minimal_kanban_root(tmp_path)
+        missing_path = tmp_path / "not-cloned-yet" / "dev-tree"
+
+        result = _run_create_project(
+            root,
+            "flags-missing-path-test",
+            workflow_type="release",
+            extra_args=["--dev-tree", str(missing_path)],
+        )
+        assert result.returncode == 0, (
+            f"Expected exit 0 for a nonexistent --dev-tree path (WARN, not fail).\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "WARN" in result.stderr.upper(), (
+            f"Expected a WARN naming the nonexistent path on stderr.\nstderr: {result.stderr}"
+        )
+        assert str(missing_path) in result.stderr, (
+            f"Expected the WARN to name the nonexistent path.\nstderr: {result.stderr}"
+        )
+
+        cfg_text = _read_project_cfg(root, "flags-missing-path-test")
+        assert f"dev_tree_path = {missing_path}" in cfg_text, (
+            f"Expected the nonexistent path to be written verbatim into project.cfg anyway.\n"
+            f"cfg content:\n{cfg_text}"
+        )
+
+    def test_empty_dev_tree_flag_value_is_rejected(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """--dev-tree= (explicit empty value) is rejected -- non-empty check only.
+
+        The acceptance criteria call for "no validation beyond non-empty";
+        an explicitly empty value must still be refused.
+        """
+        root = _build_minimal_kanban_root(tmp_path)
+
+        result = _run_create_project(
+            root,
+            "flags-empty-value-test",
+            workflow_type="release",
+            extra_args=["--dev-tree="],
+        )
+        assert result.returncode != 0, (
+            f"Expected create-project.sh to reject an explicitly empty --dev-tree value.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "non-empty" in result.stderr.lower(), (
+            f"Expected the error to name the non-empty requirement.\nstderr: {result.stderr}"
+        )
+
+    def test_help_names_all_four_dev_tree_and_git_repo_flag_spellings(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """--help documents --dev-tree, --dev-tree-path, --git-repo, --git-repo-url.
+
+        BUG-0101 requires the flags to be documented as real (not silently
+        inert); --help is the operator-facing contract that must name all
+        four spellings.
+        """
+        root = _build_minimal_kanban_root(tmp_path)
+        base_env = dict(os.environ)
+        base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(root)
+
+        result = subprocess.run(
+            ["bash", str(_CREATE_PROJECT_SCRIPT), "--help"],
+            capture_output=True,
+            text=True,
+            env=base_env,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"--help must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        for flag in ("--dev-tree", "--dev-tree-path", "--git-repo", "--git-repo-url"):
+            assert flag in result.stdout, (
+                f"Expected --help to name {flag}.\nstdout: {result.stdout}"
+            )

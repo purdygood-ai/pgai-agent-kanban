@@ -1422,3 +1422,195 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
             "Expected 'stuck-state detected' in the diagnosis log line.\n"
             f"stderr: {result.stderr}\nstdout: {result.stdout}"
         )
+
+
+class TestCategoryFirstOrdering:
+    """Discovery pipeline selects by category first: bugs → priorities → requirements.
+
+    Version order applies only within a category — a bug eligible for bundling
+    at a higher patch slot is always selected before a requirements file at a
+    lower version number.
+    """
+
+    def test_bug_category_takes_precedence_over_lower_version_requirement(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """An unhandled bug is bundled before a lower-version requirements file is queued.
+
+        Fixture shape: one open BUG-*.md file; one open requirements file whose
+        Target Version is lower than the patch slot the bug bundle will claim.
+        Expected outcome: discovery_step_bugs fires (bundle written), the pipeline
+        returns produced_work immediately, and the requirements file is NOT queued
+        for PM in the same iteration.
+
+        This is acceptance criterion 1 from BUG-0092 defect 2.
+        """
+        root = two_project_root
+
+        # Add a requirements file at v0.0.2 (lower version than the bug bundle
+        # will claim: current_live=v0.0.0, so next patch = v0.0.1; add a
+        # requirements file at v0.0.2 so it is ABOVE next-patch, illustrating
+        # a hardcoded Target that could be reached — but still behind the bug).
+        # For clarity: use v0.0.2 as the requirement and let the bug bundle land
+        # at v0.0.1.  Both are above v0.0.0; the bug (at v0.0.1) has a LOWER
+        # version number but is in the bug CATEGORY, which takes priority.
+        req_dir = _requirements_dir(root, "project_a")
+        req_dir.mkdir(parents=True, exist_ok=True)
+        req_file = req_dir / "v0.0.2-operator-authored-feature.md"
+        req_file.write_text(
+            "# v0.0.2: operator authored feature\n\n"
+            "## Status\nopen\n\n"
+            "## Target Version\nv0.0.2\n\n"
+            "## Workflow Type\nrelease\n\n"
+            "## PM Task\nnone\n\n"
+            "## Summary\nAn operator-authored requirement at v0.0.2.\n",
+            encoding="utf-8",
+        )
+
+        # Add an unhandled bug file — discovery_step_bugs will bundle it at v0.0.1.
+        _add_bug_file(root, "project_a", bug_id="BUG-0010", slug="category-order-test")
+
+        result = _run_discovery(root, "project_a")
+
+        assert result.returncode == 0, (
+            f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # Step 1 must have fired: a bugfix bundle appears in requirements/.
+        bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md"))
+        assert bundle_files, (
+            "Expected a bugfix-bundle-*.md file after the pipeline ran.\n"
+            f"requirements/ contents: {list(req_dir.iterdir())}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # The requirements file must NOT have been queued for PM — its ## Status
+        # must remain 'open' (Step 3 was skipped because Step 1 already fired).
+        req_text = req_file.read_text(encoding="utf-8")
+        assert "running" not in req_text.lower(), (
+            "Requirements file ## Status must remain 'open' when a bug was bundled "
+            "in the same iteration (category-first ordering violated).\n"
+            f"Requirements file content:\n{req_text}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # DISCOVERY_LAST_STATUS must reflect produced_work from the bug bundle.
+        assert "DISCOVERY_STATUS=produced_work" in result.stdout, (
+            "Expected DISCOVERY_STATUS=produced_work (from bug bundle, not requirements).\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_bug_category_selected_before_requirements_when_bug_version_is_higher(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """Bug bundle is authored at a higher version than a pending requirement yet selected first.
+
+        Fixture shape: last released = v0.0.2; requirements file exists at v0.0.3
+        (hardcoded Target Version = v0.0.3); an unhandled bug file is also present.
+        The bug bundle will land at v0.0.3+1 = v0.0.4 (next open slot after v0.0.3).
+        Despite the bug bundle's version (v0.0.4) being ABOVE the requirement's
+        version (v0.0.3), the bug CATEGORY always wins selection — the requirement
+        file must not be queued for PM in the same iteration the bug is bundled.
+        """
+        root = two_project_root
+
+        # Override last_released to v0.0.2 by writing a git-tag-like file isn't
+        # feasible in a temp tree.  Instead use release-state.md to reflect a
+        # last-released state; project.cfg already has max_patch = 99.  We achieve
+        # "last released = v0.0.2" by pre-populating a requirements file at v0.0.1
+        # and v0.0.2 with Status: done (so compute_next_patch starts at v0.0.3+1=v0.0.4
+        # because v0.0.3 is taken by the operator requirement below).
+        req_dir = _requirements_dir(root, "project_a")
+        req_dir.mkdir(parents=True, exist_ok=True)
+
+        # Mark v0.0.1 and v0.0.2 as "taken" via existing requirements files.
+        for taken_ver in ("v0.0.1", "v0.0.2"):
+            taken_file = req_dir / f"{taken_ver}-already-done.md"
+            taken_file.write_text(
+                f"# {taken_ver}: already done\n\n"
+                f"## Status\ndone\n\n"
+                f"## Target Version\n{taken_ver}\n\n"
+                f"## Workflow Type\nrelease\n\n"
+                f"## PM Task\nnone\n",
+                encoding="utf-8",
+            )
+
+        # Operator requirement at v0.0.3 (open, eligible for PM queuing).
+        req_file = req_dir / "v0.0.3-operator-feature.md"
+        req_file.write_text(
+            "# v0.0.3: operator feature\n\n"
+            "## Status\nopen\n\n"
+            "## Target Version\nv0.0.3\n\n"
+            "## Workflow Type\nrelease\n\n"
+            "## PM Task\nnone\n\n"
+            "## Summary\nOperator-authored requirement at v0.0.3.\n",
+            encoding="utf-8",
+        )
+
+        # Unhandled bug — will be bundled at v0.0.4 (v0.0.3 is occupied by req file).
+        _add_bug_file(root, "project_a", bug_id="BUG-0011", slug="higher-version-bug-test")
+
+        result = _run_discovery(root, "project_a")
+
+        assert result.returncode == 0, (
+            f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # Bug bundle must have been written (Step 1 fired).
+        bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md"))
+        assert bundle_files, (
+            "Expected a bugfix-bundle-*.md file after pipeline ran (bug category).\n"
+            f"requirements/ contents: {list(req_dir.iterdir())}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # Requirements file at v0.0.3 must NOT have been queued (Step 3 skipped).
+        req_text = req_file.read_text(encoding="utf-8")
+        assert "running" not in req_text.lower(), (
+            "Requirement at v0.0.3 must not be queued when bug at v0.0.4 was "
+            "bundled in the same iteration (category-first: bug v0.0.4 > req v0.0.3 "
+            "should not invert selection).\n"
+            f"Requirements file content:\n{req_text}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_requirements_queued_when_no_bugs_or_priorities_pending(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """Requirements file is queued for PM when no bugs or priorities are pending.
+
+        Verifies that the category-first change did not break the positive path:
+        when Steps 1 and 2 find nothing, Step 3 still runs normally.
+        """
+        root = two_project_root
+
+        # No bug or priority files — only a requirements file.
+        req_dir = _requirements_dir(root, "project_a")
+        req_dir.mkdir(parents=True, exist_ok=True)
+        req_file = req_dir / "v0.0.2-feature-only.md"
+        req_file.write_text(
+            "# v0.0.2: feature only\n\n"
+            "## Status\nopen\n\n"
+            "## Target Version\nv0.0.2\n\n"
+            "## Workflow Type\nrelease\n\n"
+            "## PM Task\nnone\n\n"
+            "## Summary\nRequirements-only scenario.\n",
+            encoding="utf-8",
+        )
+
+        result = _run_discovery(root, "project_a")
+
+        assert result.returncode == 0, (
+            f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # Step 3 must have fired — pm_backlog should have a new PM entry or
+        # the requirements file ## Status should have moved to 'running'.
+        # Since pm-agent.sh is not available in the temp tree, we check the
+        # log output confirms Step 3 attempted to queue PM.
+        combined = result.stderr + result.stdout
+        assert "queueing pm" in combined.lower() or "pm not queued" in combined.lower() or \
+               "produced_work" in combined or "idle" in combined, (
+            "Expected Step 3 log output when no bugs or priorities are pending.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )

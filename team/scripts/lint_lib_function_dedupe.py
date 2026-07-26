@@ -7,14 +7,14 @@ file matching ``team/scripts/lib/*.sh`` (non-recursive glob).
 
 WHY THIS EXISTS
 ---------------
-BUG-0031 uncovered two functions (``overwatch_backup_file``,
+A past defect uncovered two functions (``overwatch_backup_file``,
 ``overwatch_log_action``) defined with divergent signatures in both
 ``overwatch_lib.sh`` and ``overwatch_protocol.sh``.  Both files were
 sourced by ``overwatch-sweep.sh``; bash's silent last-definition-wins
 semantics meant the load order was the only thing preventing silent
 argument misrouting.
 
-This lint converts the BUG-0031 grep-zero acceptance criterion (§4) into a
+This lint converts an earlier grep-zero acceptance criterion into a
 permanent, gated-suite check.  When future edits reintroduce a duplicate
 function name across lib/*.sh files, this script exits 1 and the suite
 catches it before it reaches production.

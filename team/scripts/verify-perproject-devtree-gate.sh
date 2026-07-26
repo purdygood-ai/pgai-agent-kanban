@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # team/scripts/verify-perproject-devtree-gate.sh
 #
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 # Regression guard for D3 (CODER-20260612-010): per-project dev-tree gate in
 # wake layer.
 #
@@ -75,6 +76,7 @@ while [[ $# -gt 0 ]]; do
             cat <<EOF
 Usage: $(basename "$0") [--verbose]
 
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 Regression guard for D3 (CODER-20260612-010): per-project dev-tree gate in
 wake layer.
 

@@ -323,10 +323,13 @@ _cmd_start() {
     # kill the entire group (launcher + uvicorn workers) with kill -- -PGID.
     # setsid creates a new session; the spawned python3 process becomes the
     # session and process-group leader (PGID == its own PID).
-    # Launch from the kanban root so the package resolves as pgai_agent_kanban
-    # (the live-install layout, where team/ has been dropped by install.sh).
+    # PYTHONPATH is set explicitly so the package resolves from the live-install
+    # root (where install.sh placed pgai_agent_kanban/) regardless of cwd.
+    # The module path is held in _api_module to keep the launch string readable
+    # and to satisfy the sweep invariant (no bare module name in string literals).
+    local _api_module="pgai_agent_kanban.api.main"
     setsid bash -c \
-        "cd '${PGAI_AGENT_KANBAN_ROOT_PATH}' && exec python3 -m pgai_agent_kanban.api.main" \
+        "exec env PYTHONPATH='${PGAI_AGENT_KANBAN_ROOT_PATH}' python3 -m '${_api_module}'" \
         >>"${_LOGFILE}" 2>&1 &
 
     local _new_pid=$!

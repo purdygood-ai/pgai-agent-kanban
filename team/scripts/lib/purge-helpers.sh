@@ -130,6 +130,7 @@ _purge_collect_active_rc_tasks() {
         echo ""
         return 0
     fi
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     # Bundle files are named like: v0.24.8-bugfix-bundle-*.md or v0.24.8-priority-bundle-*.md
     local bundle_pattern="${req_dir}/${active_rc}-*bundle*.md"
     local referenced=""

@@ -12,8 +12,9 @@
 # demonstrates the chain immediately, while major releases remain an operator-only
 # gate. Ceilings are operator checkpoints; raise or lower per project as needed.
 #
-# Path fields (dev_tree_path, git_repo_url) are intentionally written empty.
-# Edit project.cfg manually to supply these before the first release.
+# Path fields (dev_tree_path, git_repo_url) are written empty by default.
+# Supply --dev-tree/--git-repo (see below) to fill them in at creation time,
+# or edit project.cfg manually afterward.
 #
 # projects.cfg format handling:
 #   When projects.cfg is in colon-legacy format, this script automatically
@@ -33,14 +34,19 @@
 #   create-project.sh --project <name> --priority <int>         # registry priority (default: next available)
 #   create-project.sh --project <name> --color '#RRGGBB'        # registry display color (default: next unused palette entry)
 #                                                               # (quote hex colors: unquoted '#' is treated as a shell comment)
+#   create-project.sh --project <name> --dev-tree <path>        # write dev_tree_path (alias: --dev-tree-path)
+#   create-project.sh --project <name> --git-repo <url>         # write git_repo_url (alias: --git-repo-url)
 #   create-project.sh --project <name> --no-migrate             # skip auto-migration; append colon line (not recommended)
 #   create-project.sh --project <name> --dry-run                # preview, no writes
 #
-# Path fields are NOT flag-overridable:
-#   dev_tree_path and git_repo_url are always written empty. After creating the
-#   project, edit projects/<name>/project.cfg directly to fill in these paths.
-#   Flags --dev-tree, --dev-tree-path, --git-repo, and --git-repo-url are
-#   rejected with a clear message pointing you at manual editing.
+# Path fields (--dev-tree / --dev-tree-path, --git-repo / --git-repo-url):
+#   When supplied, the value is written verbatim into project.cfg (only a
+#   non-empty check is applied — no further validation). When --dev-tree
+#   names a path that does not currently exist on this host, the script WARNs
+#   (naming the path) but still writes the value and exits 0 — projects are
+#   often registered before their dev tree is cloned. When either flag is
+#   omitted, its field is written empty exactly as before, and you edit
+#   project.cfg manually to supply it later.
 #
 # Defaults written to project.cfg:
 #   workflow_type=release
@@ -48,8 +54,8 @@
 #   max_patch=21            (permissive; working out of the box)
 #   max_minor=13            (permissive; ceilings are operator checkpoints)
 #   max_major=0             (operator gate; raise explicitly when ready)
-#   dev_tree_path=          (empty; edit manually)
-#   git_repo_url=           (empty; edit manually)
+#   dev_tree_path=          (empty unless --dev-tree/--dev-tree-path given)
+#   git_repo_url=           (empty unless --git-repo/--git-repo-url given)
 #
 # Typical operator workflow:
 #   1. create-project.sh --project <name> [--workflow-type ...] [--max-minor ...]
@@ -92,24 +98,6 @@ source "${SCRIPT_DIR}/lib/operator_args.sh"
 source "${SCRIPT_DIR}/lib/workflow.sh"
 
 # ---------------------------------------------------------------------------
-# _reject_path_flag <flag-name>
-# Prints a clear error message and exits 1 when the operator passes a flag
-# that would set dev_tree_path or git_repo_url.
-# ---------------------------------------------------------------------------
-_reject_path_flag() {
-    local flag="$1"
-    echo "ERROR: ${flag} is not supported." >&2
-    echo "" >&2
-    echo "  dev_tree_path and git_repo_url are intentionally not flag-overridable." >&2
-    echo "  They are written empty in project.cfg so you can fill in the correct" >&2
-    echo "  paths for your machine without relying on fragile command-line flags." >&2
-    echo "" >&2
-    echo "  After creating the project, edit project.cfg directly:" >&2
-    echo "    \$EDITOR \$KANBAN_ROOT/projects/<name>/project.cfg" >&2
-    exit 1
-}
-
-# ---------------------------------------------------------------------------
 # _validate_non_negative_integer <flag-name> <value>
 # Exits 1 if the value is not a non-negative integer.
 # ---------------------------------------------------------------------------
@@ -117,6 +105,18 @@ _validate_non_negative_integer() {
     local flag="$1" value="$2"
     if ! [[ "$value" =~ ^[0-9]+$ ]]; then
         echo "ERROR: ${flag} requires a non-negative integer; got: '${value}'" >&2
+        exit 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# _validate_non_empty <flag-name> <value>
+# Exits 1 if value is empty (e.g. the operator passed --flag= explicitly).
+# ---------------------------------------------------------------------------
+_validate_non_empty() {
+    local flag="$1" value="$2"
+    if [[ -z "$value" ]]; then
+        echo "ERROR: ${flag} requires a non-empty value." >&2
         exit 1
     fi
 }
@@ -132,6 +132,8 @@ PRIORITY=""
 COLOR=""
 DRY_RUN="false"
 NO_MIGRATE="false"
+DEV_TREE_PATH=""
+GIT_REPO_URL=""
 
 # Declared flag vocabulary for all flags this command accepts.
 OPERATOR_VALID_FLAGS=(project dry-run help workflow-type max-patch max-minor max-major git-remote priority color no-migrate dev-tree dev-tree-path git-repo git-repo-url h)
@@ -139,7 +141,8 @@ OPERATOR_VALID_FLAGS=(project dry-run help workflow-type max-patch max-minor max
 # --- Parse args ---
 # Value-taking flags: project plus script-specific
 #   (workflow-type, max-patch, max-minor, max-major, git-remote, priority, color,
-#   dev-tree, dev-tree-path, git-repo, git-repo-url — last four rejected).
+#   dev-tree/dev-tree-path, git-repo/git-repo-url — the last two pairs are
+#   flag/alias pairs that write dev_tree_path/git_repo_url into project.cfg).
 # Boolean flags: dry-run, no-migrate, force, yes, help.
 argparse_parse \
     --value-flags "project workflow-type max-patch max-minor max-major git-remote priority color dev-tree dev-tree-path git-repo git-repo-url" \
@@ -167,17 +170,14 @@ if argparse_has "help" || argparse_has "h"; then
         "  --git-remote NAME    git_remote_name (default: origin)" \
         "  --priority INT       registry priority (default: next available)" \
         "  --color '#RRGGBB'    registry display color (default: next unused)" \
-        "  --no-migrate         skip auto-migration of projects.cfg (not recommended)"
+        "  --dev-tree PATH      dev_tree_path (alias: --dev-tree-path; default: empty, edit manually)" \
+        "  --git-repo URL       git_repo_url (alias: --git-repo-url; default: empty, edit manually)" \
+        "  --no-migrate         skip auto-migration of projects.cfg (not recommended)" \
+        "" \
+        "Note: when --dev-tree names a path that does not currently exist, the" \
+        "script WARNs (naming the path) but still writes the value and exits 0."
     exit 0
 fi
-
-# Rejected path flags (value-taking or boolean — reject either way).
-for _rf in dev-tree dev-tree-path git-repo git-repo-url; do
-    if argparse_has "$_rf"; then
-        _reject_path_flag "--${_rf}"
-    fi
-done
-unset _rf
 
 # Reject unexpected positional arguments (hard-cut: no positional project name).
 if [[ "${#ARGPARSE_POSITIONAL[@]}" -gt 0 ]]; then
@@ -203,11 +203,34 @@ if argparse_has "git-remote";    then GIT_REMOTE_NAME="${ARGPARSE_FLAGS[git-remo
 if argparse_has "priority";      then PRIORITY="${ARGPARSE_FLAGS[priority]}"; fi
 if argparse_has "color";         then COLOR="${ARGPARSE_FLAGS[color]}"; fi
 
+# dev-tree/dev-tree-path and git-repo/git-repo-url are flag/alias pairs that
+# both write the same project.cfg field. The alias is checked after the
+# canonical flag so it wins when the operator supplies both (same precedence
+# as install-crontab.sh's --wake-tier/--tier pair).
+if argparse_has "dev-tree";      then DEV_TREE_PATH="${ARGPARSE_FLAGS[dev-tree]}"; fi
+if argparse_has "dev-tree-path"; then DEV_TREE_PATH="${ARGPARSE_FLAGS[dev-tree-path]}"; fi
+if argparse_has "git-repo";      then GIT_REPO_URL="${ARGPARSE_FLAGS[git-repo]}"; fi
+if argparse_has "git-repo-url";  then GIT_REPO_URL="${ARGPARSE_FLAGS[git-repo-url]}"; fi
+
 # Per-script value validation (unchanged from before).
 if [[ -n "$MAX_PATCH" ]]; then _validate_non_negative_integer "--max-patch"  "$MAX_PATCH"; fi
 if [[ -n "$MAX_MINOR" ]]; then _validate_non_negative_integer "--max-minor"  "$MAX_MINOR"; fi
 if [[ -n "$MAX_MAJOR" ]]; then _validate_non_negative_integer "--max-major"  "$MAX_MAJOR"; fi
 if [[ -n "$COLOR" ]];     then _validate_color_flag           "--color"       "$COLOR";    fi
+
+# dev-tree/git-repo: only a non-empty check (values are written verbatim).
+# A path that does not currently exist is legitimate (projects are often
+# registered before their dev tree is cloned) — WARN below, do not fail.
+if argparse_has "dev-tree" || argparse_has "dev-tree-path"; then
+    _validate_non_empty "--dev-tree/--dev-tree-path" "$DEV_TREE_PATH"
+fi
+if argparse_has "git-repo" || argparse_has "git-repo-url"; then
+    _validate_non_empty "--git-repo/--git-repo-url" "$GIT_REPO_URL"
+fi
+if [[ -n "$DEV_TREE_PATH" && ! -e "$DEV_TREE_PATH" ]]; then
+    echo "WARNING: --dev-tree path does not currently exist: ${DEV_TREE_PATH}" >&2
+    echo "         Writing it into project.cfg anyway; clone or create the tree before the first release." >&2
+fi
 
 if [[ -z "$NAME" ]]; then
     echo "ERROR: project name is required (--project <name>)" >&2
@@ -321,8 +344,8 @@ fi
 echo "Creating project: $NAME"
 echo "  Project root:   $PROJECT_DIR"
 echo "  Workflow:       $WORKFLOW"
-echo "  Dev tree:       <empty — edit project.cfg after creation>"
-echo "  Git repo:       <empty — edit project.cfg after creation>"
+echo "  Dev tree:       ${DEV_TREE_PATH:-<empty — edit project.cfg after creation>}"
+echo "  Git repo:       ${GIT_REPO_URL:-<empty — edit project.cfg after creation>}"
 echo "  Git remote:     $GIT_REMOTE_NAME"
 echo "  max_patch:      $MAX_PATCH"
 echo "  max_minor:      $MAX_MINOR"
@@ -387,8 +410,10 @@ mkdir -p "${PROJECT_DIR}/logs"
 echo "  + created directory layout"
 
 # --- Write project.cfg (INI format) ---
-# NOTE: dev_tree_path and git_repo_url are intentionally written empty.
-# The operator must edit project.cfg manually to supply machine-specific paths.
+# dev_tree_path and git_repo_url are written verbatim from --dev-tree/--git-repo
+# (and their --dev-tree-path/--git-repo-url aliases) when supplied; otherwise
+# they are written empty exactly as before, and the operator edits project.cfg
+# manually to supply machine-specific paths.
 #
 # branch_prefix must be written bare (no surrounding quotes).
 # For hybrid shops where AI and human branches share the same repo: write ai_.
@@ -397,6 +422,22 @@ echo "  + created directory layout"
 # string "" rather than empty, causing version-resolution to seek non-existent tags.
 _BRANCH_PREFIX_LINE="branch_prefix = ai_"
 
+# dev_tree_path/git_repo_url lines and the header comment describing them are
+# built conditionally so the omitted-flag case stays byte-identical to the
+# original always-empty output.
+_DEV_TREE_LINE="dev_tree_path ="
+_GIT_REPO_LINE="git_repo_url ="
+[[ -n "$DEV_TREE_PATH" ]] && _DEV_TREE_LINE="dev_tree_path = ${DEV_TREE_PATH}"
+[[ -n "$GIT_REPO_URL" ]]  && _GIT_REPO_LINE="git_repo_url = ${GIT_REPO_URL}"
+
+if [[ -n "$DEV_TREE_PATH" || -n "$GIT_REPO_URL" ]]; then
+    _PATH_FIELDS_COMMENT="# dev_tree_path and/or git_repo_url were supplied via --dev-tree/--git-repo
+# at creation time. Edit this file directly if either value needs to change."
+else
+    _PATH_FIELDS_COMMENT="# IMPORTANT: dev_tree_path and git_repo_url are intentionally empty.
+# Edit this file to supply them before the chain runs its first release."
+fi
+
 cat > "${PROJECT_DIR}/project.cfg" <<EOF
 # project.cfg for ${NAME}
 # Generated by create-project.sh on $(date -Iseconds)
@@ -404,8 +445,7 @@ cat > "${PROJECT_DIR}/project.cfg" <<EOF
 # INI-format per-project configuration.
 # Parsed by: team/scripts/lib/ini_parser.sh::read_ini
 #
-# IMPORTANT: dev_tree_path and git_repo_url are intentionally empty.
-# Edit this file to supply them before the chain runs its first release.
+${_PATH_FIELDS_COMMENT}
 #
 # Ceilings are operator checkpoints — raise or lower per project as needed:
 #   set-version-ceiling.sh --project ${NAME} --minor <N>
@@ -414,8 +454,8 @@ cat > "${PROJECT_DIR}/project.cfg" <<EOF
 project_name = ${NAME}
 workflow_type = ${WORKFLOW}
 git_remote_name = ${GIT_REMOTE_NAME}
-dev_tree_path =
-git_repo_url =
+${_DEV_TREE_LINE}
+${_GIT_REPO_LINE}
 # --- Git branch topology (release workflow only; ignored for document) -----
 # Before this project's FIRST release, the chain's single base branch must
 # exist: <prefix>main. With the default prefix that is ai_main; with an
@@ -483,7 +523,7 @@ reasoning_trace = false
 # Default: (empty — no agents; explicit opt-in required)
 training_agents =
 EOF
-unset _BRANCH_PREFIX_LINE
+unset _BRANCH_PREFIX_LINE _DEV_TREE_LINE _GIT_REPO_LINE _PATH_FIELDS_COMMENT
 echo "  + wrote project.cfg"
 
 # --- Seed queue files ---

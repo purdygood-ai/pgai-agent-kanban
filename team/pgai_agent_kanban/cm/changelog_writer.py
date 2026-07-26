@@ -277,6 +277,55 @@ def _first_sentence(text: str) -> str:
     return text
 
 
+def _sanitize_symptom_for_title(raw: str) -> str:
+    """Sanitize a raw Symptom block so it is safe to render in a Fixed entry.
+
+    Strips content that must never appear in public CHANGELOG output:
+      - Triple-backtick code fence blocks (including their contents)
+      - Lines that start with ``FAILED`` (pytest failure lines)
+      - Lines that start with ``$`` (shell command prompts)
+
+    After stripping, collapses remaining text to a single flat string and
+    extracts the first sentence.  Falls back to any non-empty remaining token
+    when no sentence boundary is found.
+
+    This sanitization is applied to the Symptom section before it is stored in
+    BugRecord.  It guarantees that even an ugly bug file (traceback in Symptom,
+    backticks, command lines, multi-paragraph body) produces a clean one-line
+    title when rendered in a Fixed entry.
+    """
+    if not raw:
+        return ""
+
+    # Step 1: strip triple-backtick code fence blocks (``` ... ```)
+    # Use a non-greedy match across newlines to remove all fence blocks.
+    raw = re.sub(r"```.*?```", "", raw, flags=re.DOTALL)
+
+    # Step 2: filter lines that start with FAILED or $ (common diagnostic markers)
+    filtered_lines = []
+    for line in raw.splitlines():
+        stripped = line.lstrip()
+        if re.match(r"FAILED\b", stripped, re.IGNORECASE):
+            continue
+        if stripped.startswith("$ ") or stripped == "$":
+            continue
+        filtered_lines.append(line)
+    cleaned = "\n".join(filtered_lines)
+
+    # Step 3: extract the first sentence from what remains
+    result = _first_sentence(cleaned)
+    if result:
+        return result
+
+    # Fallback: return any non-empty, non-fence token from the filtered text
+    for line in filtered_lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped
+
+    return ""
+
+
 def _extract_bug_id(text: str) -> str:
     """Extract the canonical BUG-NNNN identifier from a bullet line.
 
@@ -329,15 +378,16 @@ def parse_bug_file(path: pathlib.Path) -> BugRecord:
     status = status_raw.split()[0] if status_raw else "open"
 
     symptom_raw = _parse_section_value(text, "Symptom")
-    # Strip HTML comments, then extract the first complete sentence.
-    # A sentence ends at period / exclamation / question followed by whitespace
-    # or end-of-string.  When no sentence boundary exists, fall back to the
-    # first non-empty, non-comment line so that code-fence-only symptoms still
-    # produce some (if ugly) output rather than an empty string.
+    # Strip HTML comments, then sanitize and extract a clean one-line title.
+    # Sanitization removes code fence blocks, FAILED traceback lines, and shell
+    # command-prompt lines before extracting the first complete sentence.  This
+    # ensures that even an ugly bug file (traceback in Symptom, backticks,
+    # multi-paragraph body) produces a clean title rather than dumping diagnostic
+    # content into the public CHANGELOG Fixed section.
     symptom_no_comments = re.sub(r"<!--.*?-->", "", symptom_raw, flags=re.DOTALL)
-    symptom = _first_sentence(symptom_no_comments)
+    symptom = _sanitize_symptom_for_title(symptom_no_comments)
     if not symptom:
-        # Fallback: first non-empty non-comment line
+        # Fallback: first non-empty non-comment line (covers degenerate cases)
         for line in symptom_no_comments.splitlines():
             stripped = line.strip()
             if stripped:
@@ -893,19 +943,51 @@ def _strip_internal_ids(text: str) -> str:
     return cleaned
 
 
+# Pattern that matches a public Known-Issue identifier on a bullet line.
+# Captures the KI-X.Y.Z.N token so the caller can look up the bug.
+# Matches at the start of a bullet line (after optional list marker / dash).
+_KI_ID_PATTERN = re.compile(
+    r"^[\s\-\*]*"         # optional leading whitespace / bullet marker
+    r"(KI-\d+\.\d+\.\d+\.\d+)"  # the KI identifier
+    r"(?:\s*[—\-]+\s*|\s+)"      # separator: em-dash, hyphen, or whitespace
+)
+
+
+def _extract_ki_id_from_line(line: str) -> str:
+    """Extract the KI-X.Y.Z.N identifier from a Bugs-Resolved bullet line.
+
+    Matches bare KI IDs at the canonical leading position in a bullet line
+    (the same position _extract_bug_id uses for BUG-NNNN tokens).  Returns
+    the KI identifier string (e.g. 'KI-1.0.0.1') or '' if the line does
+    not start with a KI token.
+
+    Lines like '- KI-1.0.0.1 — resolved' or '- KI-1.0.0.2' match; prose
+    lines that happen to mention a KI identifier mid-sentence do not.
+    """
+    m = _KI_ID_PATTERN.match(line.strip())
+    if m:
+        return m.group(1)
+    return ""
+
+
 def _render_fixed_items(
     entry: ReleaseEntry,
     bugs_by_id: dict[str, BugRecord],
     published: list[str],
+    public_id_to_bug: dict[str, BugRecord] | None = None,
 ) -> list[str]:
     """Render the Fixed section items for a release entry.
 
     - BUG-NNNN items:
-        - Disclosed bug: render as "KI-A.B.C.n — symptom"
-        - Internal-only bug: render as plain symptom line (no ID)
-    - Non-BUG items: render as-is (stripped of any accidental BUG-NNNN refs)
+        - Disclosed bug: render as "KI-A.B.C.n — <sanitized title>"
+        - Internal-only bug: render as plain sanitized title line (no ID)
+    - Non-BUG items that carry a bare KI identifier (e.g. from a Bugs-Resolved
+      section listing "KI-1.0.0.1 — resolved"): joined against the bug ledger
+      to produce "KI-A.B.C.n — <sanitized title>; affects vA · <status>".
+    - Other non-BUG items: render as-is (stripped of any accidental BUG-NNNN refs)
     """
     lines = []
+    reverse_index = public_id_to_bug or {}
 
     for bug_id in entry.fixed_bug_ids:
         bug = bugs_by_id.get(bug_id)
@@ -916,13 +998,24 @@ def _render_fixed_items(
             # placeholder never surfaces in CHANGELOG output.
             continue
         if bug.public_id:
-            # Disclosed bug — render with public ID and symptom
+            # Disclosed bug — render with public ID and sanitized title
             lines.append(f"{bug.public_id} — {bug.symptom}")
         else:
-            # Internal-only — render symptom with no identifier
+            # Internal-only — render sanitized title with no identifier
             lines.append(bug.symptom if bug.symptom else "(internal fix)")
 
     for line in entry.fixed_other_lines:
+        # Check whether this line starts with a bare KI identifier.  When a
+        # Bugs-Resolved section lists entries like "KI-1.0.0.1 — resolved", join
+        # against the bug ledger to produce a proper disclosed-bug Fixed line
+        # rather than propagating the bare placeholder text.
+        ki_id = _extract_ki_id_from_line(line)
+        if ki_id and ki_id in reverse_index:
+            bug = reverse_index[ki_id]
+            ki_line = _render_known_issue(bug, ki_id, published)
+            lines.append(ki_line)
+            continue
+
         cleaned = _strip_internal_ids(line)
         if cleaned.strip():
             lines.append(cleaned.strip())
@@ -992,9 +1085,13 @@ def regenerate(
     # --- Assign Public IDs (modifies bug files on first assignment) ---
     # Sort disclosable bugs by (anchor_version, existing_id or file order)
     # to ensure consistent assignment order.
-    # First pass: read existing IDs and build counter state.
+    # First pass: read existing IDs from ALL bugs (not just disclosable) and
+    # build counter state.  A bug may carry a stamped KI Public ID even if it
+    # is currently non-disclosable (e.g. its Fixed In is an unparseable prose
+    # placeholder).  Reserving its slot here prevents ID collisions when a new
+    # disclosable bug is assigned the same anchor.
     counters: dict[str, int] = defaultdict(int)
-    for bug in disclosable:
+    for bug in all_bugs:
         if bug.public_id:
             id_match = re.match(r"KI-(\d+\.\d+\.\d+)\.(\d+)$", bug.public_id)
             if id_match:
@@ -1029,6 +1126,13 @@ def regenerate(
             if _bug_intersects_published(b, published_manifest)
         ]
 
+    # --- Build reverse index: public_id → BugRecord ---
+    # Used by _render_fixed_items to join titles for bare KI IDs sourced from
+    # release-notes Bugs-Resolved sections (e.g. "KI-1.0.0.1 — resolved").
+    public_id_to_bug: dict[str, BugRecord] = {
+        b.public_id: b for b in all_bugs if b.public_id
+    }
+
     # --- Parse release notes ---
     notes_dir = repo_root / "release-notes"
     entries: list[ReleaseEntry] = []
@@ -1057,7 +1161,9 @@ def regenerate(
 
         # Fixed section — classification is load-bearing:
         # a bundle with BUG items must never produce Fixed: None
-        fixed_items = _render_fixed_items(entry, bugs_by_id, published_manifest)
+        fixed_items = _render_fixed_items(
+            entry, bugs_by_id, published_manifest, public_id_to_bug
+        )
         if not fixed_items and entry.fixed_bug_ids:
             # Should never happen: BUG items in release notes but no rendered output.
             # This indicates a bug file lookup failure — emit a placeholder.

@@ -91,9 +91,13 @@ get_kanban_version() {
     fi
 
     # Tier 3: get_latest_released_tag() (reachability-independent)
+    # This is a dashboard-render-only helper: it never performs a network git
+    # operation. get_latest_released_tag() reads "git tag --merged origin/main",
+    # which is a purely local ref comparison (origin/main is whatever the
+    # remote-tracking ref already holds on disk) — no fetch, ls-remote, pull,
+    # push, or clone. A stale or absent origin/main simply yields an empty
+    # result here, which falls through to Tier 4/5 below.
     if [[ -z "$_ver" ]] && [[ -n "$repo_root" ]] && [[ -d "${repo_root}/.git" ]]; then
-        # Best-effort fetch so the tag list is current; failure is silently ignored.
-        git -C "$repo_root" fetch origin --tags --quiet 2>/dev/null || true
         _ver="$(get_latest_released_tag "$repo_root")"
     fi
 

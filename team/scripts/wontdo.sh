@@ -32,6 +32,10 @@ source "${_WONTDO_LIB_DIR}/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
 source "${_WONTDO_LIB_DIR}/project_paths.sh"
 
+# --- Source the shared Python invocation helper ---
+# shellcheck source=lib/pp_run_ops.sh
+source "${_WONTDO_LIB_DIR}/pp_run_ops.sh"
+
 # --- Declare accepted flags for this script ---
 OPERATOR_VALID_FLAGS=(project key help)
 
@@ -74,10 +78,10 @@ fi
 _project_root="$(pp_project_root "${_project}")" || exit 1
 
 # --- Execute the operation via the Python library ---
-# python3 -m pgai_agent_kanban.ops wontdo_item PROJECT_ROOT KEY
+# pp_run_ops pgai_agent_kanban.ops wontdo_item PROJECT_ROOT KEY
 # Exit codes: 0 success, 1 error, 2 ambiguous, 3 not found, 4 mutation failed.
 _wontdo_rc=0
-python3 -m pgai_agent_kanban.ops wontdo_item "${_project_root}" "${_key}" \
+pp_run_ops pgai_agent_kanban.ops wontdo_item "${_project_root}" "${_key}" \
     || _wontdo_rc=$?
 
 case "${_wontdo_rc}" in

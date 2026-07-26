@@ -52,6 +52,8 @@
 #   min_rows_per_project    OPTIONAL  3
 #   max_rows_per_project    OPTIONAL  8
 #   max_rows                OPTIONAL  20
+#   dashboard_status_glyph  OPTIONAL  ■  (single visible character; multi-char values
+#                                         are rejected non-zero naming the key)
 #
 # [wake]
 #   max_tasks_per_wake      OPTIONAL  5
@@ -63,6 +65,10 @@
 #   max_task_seconds        OPTIONAL  5400
 #   max_project_seconds     OPTIONAL  14400  (per-project runtime cap; 0 = disabled)
 #   kill_grace_seconds      OPTIONAL  30
+#   transient_retry_cap     OPTIONAL  3  (single ceiling for the durable
+#                                         ## Transient Retry record; see
+#                                         transient_retry_limit in
+#                                         overwatch_protocol.sh)
 #
 # [models.claude]   — all OPTIONAL, default ""
 #   default                               — fallback model for any unset role
@@ -164,6 +170,22 @@ load_config() {
     DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "$cfg" dashboard rows_per_column 21)}"
     export DASHBOARD_ROWS_PER_COLUMN
 
+    # [dashboard] dashboard_status_glyph → DASHBOARD_STATUS_GLYPH
+    # OPTIONAL; default is U+25A0 "■". Validated: must be exactly one visible
+    # character. Multi-character values exit non-zero with an error naming the
+    # key and the config file path — do not silently truncate.
+    if [[ -z "${DASHBOARD_STATUS_GLYPH:-}" ]]; then
+        local _glyph _char_count
+        _glyph="$(read_ini "$cfg" dashboard dashboard_status_glyph "■")"
+        _glyph="${_glyph:-■}"
+        _char_count=$(printf '%s' "$_glyph" | wc -m)
+        if [[ "$_char_count" -ne 1 ]]; then
+            echo "ERROR: load_config: dashboard_status_glyph must be exactly one character (got ${_char_count}): ${cfg}" >&2
+            return 1
+        fi
+        export DASHBOARD_STATUS_GLYPH="$_glyph"
+    fi
+
     # [wake] max_tasks_per_wake → MAX_TASKS_PER_WAKE
     export MAX_TASKS_PER_WAKE="${MAX_TASKS_PER_WAKE:-$(read_ini "$cfg" wake max_tasks_per_wake 5)}"
 
@@ -204,6 +226,14 @@ load_config() {
     # Seconds between SIGTERM and SIGKILL when the per-task timeout fires.
     # Default: 30.
     export KILL_GRACE_SECONDS="${KILL_GRACE_SECONDS:-$(read_ini "$cfg" wake kill_grace_seconds 30)}"
+
+    # [wake] transient_retry_cap → TRANSIENT_RETRY_CAP
+    # The ONE ceiling for the durable ## Transient Retry record.
+    # Consumed by wake_common.sh's handle_working_after_exit / recheck_blocked_tasks
+    # and by OVERWATCH's check-transient-api-error.sh, both via
+    # transient_retry_limit() in overwatch_protocol.sh — never hardcode a second
+    # ceiling elsewhere. Default: 3.
+    export TRANSIENT_RETRY_CAP="${TRANSIENT_RETRY_CAP:-$(read_ini "$cfg" wake transient_retry_cap 3)}"
 
     # [cleanup] retention_days → PGAI_CLEANUP_RETENTION_DAYS
     export PGAI_CLEANUP_RETENTION_DAYS="${PGAI_CLEANUP_RETENTION_DAYS:-$(read_ini "$cfg" cleanup retention_days 30)}"

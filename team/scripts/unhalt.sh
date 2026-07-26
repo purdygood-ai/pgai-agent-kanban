@@ -26,6 +26,10 @@ source "${_UNHALT_LIB_DIR}/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
 source "${_UNHALT_LIB_DIR}/project_paths.sh"
 
+# --- Source the shared Python invocation helper ---
+# shellcheck source=lib/pp_run_ops.sh
+source "${_UNHALT_LIB_DIR}/pp_run_ops.sh"
+
 # --- Declare accepted flags for this script ---
 OPERATOR_VALID_FLAGS=(project help)
 
@@ -58,7 +62,7 @@ fi
 _project_root="$(pp_project_root "${_project}")" || exit 1
 
 # --- Execute the operation via Python library ---
-if python3 -m pgai_agent_kanban.ops unhalt "${_project_root}"; then
+if pp_run_ops pgai_agent_kanban.ops unhalt "${_project_root}"; then
     printf 'unhalt: HALT signal cleared for project %s (%s/HALT removed)\n' \
         "${_project}" "${_project_root}"
     exit 0

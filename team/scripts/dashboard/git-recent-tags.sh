@@ -10,9 +10,14 @@
 # (newest first), one per line with the tag date shown alongside each tag.
 #
 # Document-workflow projects (workflow_type=document) are omitted.
-# A release project whose dev tree is missing or not a git repo degrades that
-# project's section gracefully without breaking the window or affecting other
-# projects' sections.
+# A release project whose dev tree is missing, unconfigured, or not a git
+# repo renders a clear-error line ("git tree not available: <path>") for
+# that project's section and continues to the next project, without
+# breaking the window or performing any network git operation.
+#
+# All tag data rendered by this script comes from local tag refs only
+# (`git tag --list`, `git log -1`) — no fetch, pull, push, clone, or
+# ls-remote is ever invoked here.
 #
 # Usage:
 #   dashboard-git-recent-tags.sh [--kanban-root <path>] [--project <name>]
@@ -129,23 +134,23 @@ render_project_recent_tags() {
   printf '\n'
 
   # -------------------------------------------------------------------------
-  # Validate dev tree — degrade gracefully without breaking the window
+  # Validate dev tree — clear-error render, never a prompt or hang.
   # -------------------------------------------------------------------------
   if [[ -z "$dev_tree" ]]; then
-    printf '%sdev tree path not configured for project %s%s\n' "$YELLOW" "$proj_name" "$RESET"
+    printf '%sgit tree not available: (dev tree path not configured for project %s)%s\n' "$YELLOW" "$proj_name" "$RESET"
     printf '\n'
     return 0
   fi
 
   if [[ ! -d "$dev_tree" ]]; then
-    printf '%sdev tree unavailable: %s%s\n' "$YELLOW" "$dev_tree" "$RESET"
+    printf '%sgit tree not available: %s%s\n' "$YELLOW" "$dev_tree" "$RESET"
     printf '\n'
     return 0
   fi
 
-  # Verify it is a git repository
+  # Verify it is a git repository (local check only — never touches network)
   if ! git -C "$dev_tree" rev-parse --git-dir &>/dev/null; then
-    printf '%sdev tree at %s is not a git repository%s\n' "$YELLOW" "$dev_tree" "$RESET"
+    printf '%sgit tree not available: %s%s\n' "$YELLOW" "$dev_tree" "$RESET"
     printf '\n'
     return 0
   fi

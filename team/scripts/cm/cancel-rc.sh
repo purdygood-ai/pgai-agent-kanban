@@ -513,18 +513,34 @@ else
   echo "  Active RC already none — skipping release-state.md reset (idempotent)."
 fi
 
-# --- Write/update per-RC release-state JSON with cancelled outcome ---
+# --- Write/update per-RC release-state JSON with cancelled outcome, then archive ---
 # Written after the cancel operation completes (branch deleted, release-state.md cleared).
 # Reads existing opened_at from the file if present (written by open-rc.sh).
 # If no state file exists (open-rc ran before this fix shipped), writes a minimal record.
+#
+# After marking the JSON cancelled, it is moved to release-state/history/ as
+# vX.Y.Z-cancelled-TIMESTAMP.json. This frees the version slot so a re-selected
+# requirement with the same hardcoded Target can invoke open-rc without collision,
+# while preserving the full audit trail in history/.
+#
+# Idempotent: if the JSON is already absent (already archived), the archive step
+# is a no-op and produces no error.
+#
 # Non-blocking: any failure is logged as a warning; cancel exit code is unaffected.
 _rc_state_dir="${KANBAN_ROOT}/projects/${PROJECT_NAME}/release-state"
 _rc_state_json="${_rc_state_dir}/${VERSION}.json"
 _cancel_closed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mkdir -p "$_rc_state_dir" 2>/dev/null || true
+
+# Step A: mark the JSON cancelled (preserves opened_at, sets outcome=cancelled)
 python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" cancel \
   "$_rc_state_json" "$VERSION" "$_cancel_closed_at" 2>&1 || \
   echo "  WARNING: could not update per-RC release-state JSON at $_rc_state_json" >&2
+
+# Step B: archive the cancelled JSON to history/ — frees the version slot for re-use
+python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" archive-cancelled \
+  "$_rc_state_json" "$VERSION" "$_cancel_closed_at" 2>&1 || \
+  echo "  WARNING: could not archive per-RC release-state JSON from $_rc_state_json" >&2
 
 echo ""
 echo "RC cancellation complete."

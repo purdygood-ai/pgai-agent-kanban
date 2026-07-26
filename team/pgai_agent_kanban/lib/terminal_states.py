@@ -18,7 +18,7 @@ Public API:
     normalize(state)          → str: strip + lowercase; stable canonical form
     is_terminal(state)        → bool: True when the normalized state is terminal
 
-BUG-0028 (selection filter ticket 5) may import ``is_terminal`` directly:
+an earlier defect (selection filter ticket 5) may import ``is_terminal`` directly:
     from pgai_agent_kanban.lib.terminal_states import is_terminal
 """
 

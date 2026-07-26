@@ -61,6 +61,7 @@ import pytest
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _PM_MATERIALIZE = _TEAM_DIR / "pm-agent" / "pm_materialize.py"
 _REAL_WORKFLOWS_DIR = _TEAM_DIR / "workflows"
+_WAKE_BATCH = _TEAM_DIR / "scripts" / "wake-batch.sh"
 
 # Workflow plugins needed by the testing-only materializer path.
 _WORKFLOW_PLUGINS = ["release", "document", "testing-only"]
@@ -1027,3 +1028,432 @@ class TestOneTicketTestingOnlyPipeline:
                 f"Expected task ID {task_id!r} in tester_backlog.md.\n"
                 f"Backlog content:\n{backlog_text}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Wake-dispatch harness helpers
+# ---------------------------------------------------------------------------
+
+# Path to the stub wake harness (exercises real wake substrate without LLM).
+_WAKE_HARNESS = _TEAM_DIR / "scripts" / "wake" / "harness.sh"
+
+
+def _build_harness_kanban_root(
+    parent: pathlib.Path,
+    project_name: str = "cert_proj",
+    source_branch: str = "rc/v1.22.4",
+) -> pathlib.Path:
+    """Build a kanban root configured for the harness wake provider.
+
+    Identical to _build_testing_only_kanban_root but writes
+    '[providers] active = harness' into kanban.cfg so that harness.sh
+    passes its own active-provider guard before sourcing wake_common.sh.
+
+    Args:
+        parent:        Parent temp directory (use pytest's tmp_path).
+        project_name:  Name of the project to create.
+        source_branch: Source branch recorded in the requirements doc.
+
+    Returns:
+        pathlib.Path — the kanban root.
+    """
+    root = _build_testing_only_kanban_root(
+        parent, project_name=project_name, source_branch=source_branch
+    )
+    # Overwrite kanban.cfg to add [providers] active = harness.
+    # wake_common.sh's load_config reads this on startup; the harness's own
+    # active-provider guard also reads it directly via Python.
+    (root / "kanban.cfg").write_text(
+        "[paths]\n\n"
+        "[chain]\npm_mode = automatic\n\n"
+        "[wake]\nmax_tasks_per_wake = 10\n\n"
+        "[providers]\nactive = harness\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def _run_wake_harness(
+    kanban_root: pathlib.Path,
+    project_root: pathlib.Path,
+    *,
+    max_tasks: int = 10,
+    agent: str = "tester",
+) -> subprocess.CompletedProcess:
+    """Invoke wake/harness.sh as a subprocess against a temp kanban root.
+
+    Exercises the REAL wake substrate (wake_common.sh including
+    close_intake_on_finalize_report and the completion census) without
+    invoking an LLM.  This is 'real wake dispatch' in the sense that the
+    intake closure path (process_one_task → close_intake_on_finalize_report)
+    is exercised end-to-end in a subprocess; only provider_invoke_agent is
+    stubbed.
+
+    Args:
+        kanban_root:  Kanban root for the temp tree (must have
+                      [providers] active = harness in kanban.cfg).
+        project_root: Project root (projects/<name>/ inside kanban_root).
+        max_tasks:    --max-tasks argument for the harness.
+        agent:        --agent argument (default: tester).
+
+    Returns:
+        subprocess.CompletedProcess with returncode, stdout, stderr.
+    """
+    env = dict(os.environ)
+    env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
+    env["PGAI_PROJECT_ROOT"] = str(project_root)
+    # Remove test-harness-inherited overrides so wake_common.sh derives paths
+    # from PGAI_AGENT_KANBAN_ROOT_PATH.
+    env.pop("PGAI_TASKS_DIR", None)
+    env.pop("PGAI_REQUIREMENTS_DIR", None)
+    env.pop("PGAI_DEV_TREE_PATH", None)
+    # Ensure pgai_agent_kanban is importable in the subprocess environment:
+    # close_intake_on_finalize_report in wake_common.sh calls
+    # `python3 -m pgai_agent_kanban.ops close_item`, and the package lives
+    # under team/ (two levels up from this test file).
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        f"{str(_TEAM_DIR)}:{existing_pp}" if existing_pp else str(_TEAM_DIR)
+    )
+
+    cmd = [
+        "bash",
+        str(_WAKE_HARNESS),
+        f"--agent={agent}",
+        f"--max-tasks={max_tasks}",
+    ]
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(kanban_root),
+        timeout=120,
+    )
+
+
+def _get_intake_status(req_path: pathlib.Path) -> str:
+    """Return the ## Status value from an intake requirements doc.
+
+    Args:
+        req_path: Path to the requirements Markdown file.
+
+    Returns:
+        str — status value (stripped, lowercase), or "" if absent.
+    """
+    if not req_path.is_file():
+        return ""
+    text = req_path.read_text(encoding="utf-8")
+    m = re.search(r"^##\s+Status\s*\n\s*(\S+)", text, re.MULTILINE)
+    return m.group(1).strip().lower() if m else ""
+
+
+def _plant_task_state(status_file: pathlib.Path, state: str) -> None:
+    """Write a specific ## State value into a status.md file.
+
+    Used by wake-dispatch tests to pre-seed sibling task states before
+    running the harness, simulating mid-run (WORKING) or prior-run (WONT-DO)
+    scenarios.
+
+    Args:
+        status_file: Path to the task status.md.
+        state:       State value to write (e.g. 'WORKING', 'WONT-DO').
+    """
+    if not status_file.is_file():
+        raise FileNotFoundError(f"status.md not found at {status_file}")
+    text = status_file.read_text(encoding="utf-8")
+    text_new, n = re.subn(
+        r"(^## State\s*\n)(\S+)",
+        lambda m: m.group(1) + state,
+        text,
+        flags=re.MULTILINE,
+    )
+    if n == 0:
+        # Append if absent.
+        text_new = text + f"\n## State\n{state}\n"
+    status_file.write_text(text_new, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Wake-dispatch test class
+# ---------------------------------------------------------------------------
+
+
+class TestOneTicketWakeDispatchClosure:
+    """Wake-dispatch certification fixture: one-ticket testing-only closure via real substrate.
+
+    Each test in this class exercises the real wake substrate
+    (close_intake_on_finalize_report + the completion census introduced by
+    CODER-20260715-007 to fix BUG-0068) through a subprocess invocation of
+    wake/harness.sh.
+
+    BUG-0068 production diagnosis anchor (must be caught by these tests):
+      [2026-07-14T14:04:10+00:00] wake(tester): task
+      TESTER-20260714-008-verify-pvg-closure-check:
+      close_intake_on_finalize_report: finalize_mode:report not found
+      in README constraints — skipping intake closure (not a
+      finalize=report terminal ticket)
+
+    The root cause: the old guard looked for a 'finalize_mode:report'
+    marker in the task README ## Constraints section.  That marker was only
+    written by inject_simple_tester_task (the synthetic companion path), not
+    by PM-authored one-ticket plans.  The census fix (CODER-20260715-007)
+    replaced the marker with a full sibling scan so the guard is shape-blind.
+
+    Test topology
+    -------------
+    1. test_wake_dispatch_closes_intake_on_all_terminal_tickets
+       Full closure: all TESTER siblings reach DONE via the harness.
+    2. test_wake_dispatch_census_skips_closure_when_sibling_nonterminal
+       Mid-run guard: one sibling pre-seeded to WORKING; census skips closure.
+    3. test_wake_dispatch_closure_fires_with_wontdo_corpse_sibling
+       Corpse tolerance: one sibling pre-seeded to WONT-DO; closure still fires.
+
+    None of the tests call close_intake_on_finalize_report directly from
+    Python — all closure assertions are based on intake ## Status and the
+    wake log lines emitted by the REAL shell function.
+    """
+
+    def test_wake_dispatch_closes_intake_on_all_terminal_tickets(
+        self,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """Harness run closes the intake item when all TESTER siblings reach DONE.
+
+        After pm_materialize produces two TESTER task folders (plan ticket +
+        injected companion), the harness processes both.  When both reach DONE,
+        the real close_intake_on_finalize_report calls the completion census
+        which returns ok:2, then invokes python3 -m pgai_agent_kanban.ops
+        close_item to flip the intake ## Status from running to done.
+
+        This is the primary regression test for BUG-0068: the census-based
+        approach must succeed for PM-authored one-ticket plans where the old
+        'finalize_mode:report' marker was absent.
+
+        Asserts:
+        - Intake ## Status == 'done' after harness run.
+        - Wake log contains 'closed done' (from close_intake_on_finalize_report).
+        - At least one TESTER task artifact dir contains report.md.
+        """
+        source_branch = "rc/v1.22.4"
+        root = _build_harness_kanban_root(tmp_path, source_branch=source_branch)
+        proj = root / "projects" / "cert_proj"
+        req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
+
+        plan = _build_one_tester_plan(
+            project_name="cert_proj",
+            source_branch=source_branch,
+            requirements_path=str(req_path),
+        )
+        plan_file = tmp_path / "plan.json"
+        plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+        mat_result = _run_pm_materialize(
+            plan_file, root, proj, requirements_path=str(req_path)
+        )
+        assert mat_result.returncode == 0, (
+            f"pm_materialize.py exited {mat_result.returncode}.\n"
+            f"stdout: {mat_result.stdout}\nstderr: {mat_result.stderr}"
+        )
+
+        # Run the harness: processes all BACKLOG TESTER tasks (max-tasks=10).
+        wake_result = _run_wake_harness(root, proj, max_tasks=10)
+        combined_log = wake_result.stdout + wake_result.stderr
+
+        assert wake_result.returncode == 0, (
+            f"wake/harness.sh exited {wake_result.returncode}.\n"
+            f"stdout: {wake_result.stdout}\nstderr: {wake_result.stderr}"
+        )
+
+        # Guard 1: intake ## Status must be 'done'.
+        intake_status = _get_intake_status(req_path)
+        assert intake_status == "done", (
+            f"Expected intake ## Status == 'done' after harness wake dispatch; "
+            f"got {intake_status!r}.\n"
+            f"Requirements file: {req_path}\n"
+            f"Content:\n{req_path.read_text(encoding='utf-8') if req_path.is_file() else 'FILE MISSING'}\n"
+            f"Wake log:\n{combined_log}"
+        )
+
+        # Guard 2: wake log must contain the closure confirmation line.
+        assert "closed done" in combined_log, (
+            f"Expected 'closed done' in wake log "
+            f"(close_intake_on_finalize_report census confirmation).\n"
+            f"Wake log:\n{combined_log}"
+        )
+
+        # Guard 3: at least one report artifact must be present.
+        tasks_root = proj / "tasks"
+        tester_dirs = sorted(
+            d for d in tasks_root.iterdir()
+            if d.is_dir() and d.name.startswith("TESTER-")
+        )
+        report_found = any(
+            (d / "artifacts" / "report.md").is_file()
+            for d in tester_dirs
+        )
+        assert report_found, (
+            f"Expected at least one TESTER task artifacts/report.md; "
+            f"found none under {tasks_root}.\n"
+            f"Wake log:\n{combined_log}"
+        )
+
+    def test_wake_dispatch_census_skips_closure_when_sibling_nonterminal(
+        self,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """Census skips intake closure when a WORKING sibling task is present.
+
+        This mid-run guard test pre-seeds one TESTER sibling to WORKING state,
+        then runs the harness with max-tasks=1 so only the BACKLOG task is
+        processed.  When close_intake_on_finalize_report runs its census, it
+        sees the WORKING sibling and emits a 'census incomplete — skipping'
+        log line instead of closing the intake.
+
+        This proves the census correctly protects against premature closure
+        during a multi-agent run where siblings are still in progress.
+
+        Asserts:
+        - Intake ## Status remains 'running' (not 'done').
+        - Wake log contains 'census incomplete' (census skip confirmation).
+        """
+        source_branch = "rc/v1.22.4"
+        root = _build_harness_kanban_root(tmp_path, source_branch=source_branch)
+        proj = root / "projects" / "cert_proj"
+        req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
+
+        plan = _build_one_tester_plan(
+            project_name="cert_proj",
+            source_branch=source_branch,
+            requirements_path=str(req_path),
+        )
+        plan_file = tmp_path / "plan.json"
+        plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+        mat_result = _run_pm_materialize(
+            plan_file, root, proj, requirements_path=str(req_path)
+        )
+        assert mat_result.returncode == 0, (
+            f"pm_materialize.py exited {mat_result.returncode}.\n"
+            f"stdout: {mat_result.stdout}\nstderr: {mat_result.stderr}"
+        )
+
+        # Pre-seed one TESTER sibling to WORKING to simulate a mid-run scenario.
+        tasks_root = proj / "tasks"
+        tester_dirs = sorted(
+            d for d in tasks_root.iterdir()
+            if d.is_dir() and d.name.startswith("TESTER-")
+        )
+        assert len(tester_dirs) >= 2, (
+            f"Expected at least 2 TESTER task folders for mid-run test; "
+            f"found {len(tester_dirs)}"
+        )
+        # Mark the second TESTER task as WORKING (simulates a sibling in progress).
+        sibling_status = tester_dirs[1] / "status.md"
+        _plant_task_state(sibling_status, "WORKING")
+
+        # Run the harness with max-tasks=1: processes only the first BACKLOG task
+        # (the first TESTER dir with BACKLOG state, i.e. tester_dirs[0]).
+        wake_result = _run_wake_harness(root, proj, max_tasks=1)
+        combined_log = wake_result.stdout + wake_result.stderr
+
+        assert wake_result.returncode == 0, (
+            f"wake/harness.sh exited {wake_result.returncode}.\n"
+            f"stdout: {wake_result.stdout}\nstderr: {wake_result.stderr}"
+        )
+
+        # Guard 1: intake ## Status must NOT be 'done' — census must have skipped.
+        intake_status = _get_intake_status(req_path)
+        assert intake_status != "done", (
+            f"Intake ## Status is 'done' but census should have skipped due to "
+            f"WORKING sibling.  Expected 'running' (or similar non-done value).\n"
+            f"Requirements file: {req_path}\n"
+            f"Content:\n{req_path.read_text(encoding='utf-8') if req_path.is_file() else 'FILE MISSING'}\n"
+            f"Wake log:\n{combined_log}"
+        )
+
+        # Guard 2: wake log must confirm census skip.
+        assert "census incomplete" in combined_log, (
+            f"Expected 'census incomplete' in wake log "
+            f"(close_intake_on_finalize_report census skip confirmation).\n"
+            f"Wake log:\n{combined_log}"
+        )
+
+    def test_wake_dispatch_closure_fires_with_wontdo_corpse_sibling(
+        self,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """Census treats WONT-DO prior-run corpse siblings as terminal.
+
+        A WONT-DO task citing the same requirements path is a prior-run corpse
+        (e.g. a cancelled earlier attempt).  The census counts WONT-DO as a
+        terminal state alongside DONE, so when all remaining siblings complete,
+        the intake closure fires even if a WONT-DO corpse is present.
+
+        This test pre-seeds one TESTER task to WONT-DO state, then runs the
+        harness to process the remaining BACKLOG task.  When that task reaches
+        DONE, the census sees DONE + WONT-DO = all terminal → closes intake.
+
+        Asserts:
+        - Intake ## Status == 'done' after harness run.
+        - Wake log contains 'closed done'.
+        """
+        source_branch = "rc/v1.22.4"
+        root = _build_harness_kanban_root(tmp_path, source_branch=source_branch)
+        proj = root / "projects" / "cert_proj"
+        req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
+
+        plan = _build_one_tester_plan(
+            project_name="cert_proj",
+            source_branch=source_branch,
+            requirements_path=str(req_path),
+        )
+        plan_file = tmp_path / "plan.json"
+        plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+        mat_result = _run_pm_materialize(
+            plan_file, root, proj, requirements_path=str(req_path)
+        )
+        assert mat_result.returncode == 0, (
+            f"pm_materialize.py exited {mat_result.returncode}.\n"
+            f"stdout: {mat_result.stdout}\nstderr: {mat_result.stderr}"
+        )
+
+        # Pre-seed one TESTER task as WONT-DO (prior-run corpse).
+        tasks_root = proj / "tasks"
+        tester_dirs = sorted(
+            d for d in tasks_root.iterdir()
+            if d.is_dir() and d.name.startswith("TESTER-")
+        )
+        assert len(tester_dirs) >= 2, (
+            f"Expected at least 2 TESTER task folders for corpse test; "
+            f"found {len(tester_dirs)}"
+        )
+        corpse_status = tester_dirs[1] / "status.md"
+        _plant_task_state(corpse_status, "WONT-DO")
+
+        # Run the harness with max-tasks=1: processes the remaining BACKLOG task.
+        wake_result = _run_wake_harness(root, proj, max_tasks=1)
+        combined_log = wake_result.stdout + wake_result.stderr
+
+        assert wake_result.returncode == 0, (
+            f"wake/harness.sh exited {wake_result.returncode}.\n"
+            f"stdout: {wake_result.stdout}\nstderr: {wake_result.stderr}"
+        )
+
+        # Guard 1: intake ## Status must be 'done' — WONT-DO is terminal.
+        intake_status = _get_intake_status(req_path)
+        assert intake_status == "done", (
+            f"Expected intake ## Status == 'done' after harness wake dispatch "
+            f"with WONT-DO corpse sibling; got {intake_status!r}.\n"
+            f"Requirements file: {req_path}\n"
+            f"Content:\n{req_path.read_text(encoding='utf-8') if req_path.is_file() else 'FILE MISSING'}\n"
+            f"Wake log:\n{combined_log}"
+        )
+
+        # Guard 2: wake log must contain the closure confirmation line.
+        assert "closed done" in combined_log, (
+            f"Expected 'closed done' in wake log "
+            f"(close_intake_on_finalize_report census confirmation).\n"
+            f"Wake log:\n{combined_log}"
+        )

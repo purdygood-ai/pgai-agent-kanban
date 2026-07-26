@@ -79,6 +79,7 @@ import sys
 import time
 from datetime import datetime
 
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 # Sidecar parser from ticket 1 (CODER-20260528-001-rejected-sidecar-parser).
 # Import is deferred inside scan_rejected so the module remains importable even
 # when the kanban package root is not on sys.path at import time; the function

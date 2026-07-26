@@ -4,14 +4,15 @@ test_operator_commands.py
 Integration tests for operator commands end-to-end against a live temporary tree.
 
 Commands covered:
-  show     — emit task status.md or README.md; emit intake item content
-  reset    — reset a task to BACKLOG; reset an intake item to open; refuse WORKING state
-  close    — set task to DONE; close intake items; flip backlog marker to [x]
-  wontdo   — mark a task WONT-DO; flip backlog marker to [x]
-  delete   — delete a DONE task directory; guard refuses non-terminal items
-  halt     — create per-project HALT file; idempotent; blocks discovery
+  show        — emit task status.md or README.md; emit intake item content
+  reset       — reset a task to BACKLOG; reset an intake item to open; refuse WORKING state
+  close       — set task to DONE; close intake items; flip backlog marker to [x]
+  wontdo      — mark a task WONT-DO; flip backlog marker to [x]
+  delete      — delete a DONE task directory; guard refuses non-terminal items
+  halt        — create per-project HALT file; idempotent; blocks discovery
   halt-global — create kanban-root HALT file; blocks all projects
-  intake   — deposit a staged file into the correct intake directory; routes by prefix
+  unhalt-global — remove kanban-root HALT file; resumes all projects
+  intake      — deposit a staged file into the correct intake directory; routes by prefix
 
 Each test asserts both:
   - On-disk state after the command runs (task folder, status.md, HALT marker, etc.)
@@ -28,6 +29,12 @@ Design notes:
   - Test names describe the behavior under test; no bug IDs, version numbers, or
     scaffolding labels appear in function names (SOP.md Anti-pattern 6).
   - No order dependence: each test is fully self-contained and isolated.
+  - Scrubbed-env + foreign-cwd tests (see TestCloseShForeignCwd and
+    TestHaltUnhaltGlobalScrubbedEnv) simulate the wake's cron-shaped environment:
+    env -i with only HOME, PATH, and PGAI_AGENT_KANBAN_ROOT_PATH, invoked from a
+    working directory other than the kanban root.  These tests verify that
+    pp_run_ops resolves the package correctly without PYTHONPATH pre-set by the
+    caller, and that all scripts function from an arbitrary cwd.
 """
 
 from __future__ import annotations
@@ -60,6 +67,7 @@ _WONTDO_SCRIPT = _SCRIPTS_DIR / "wontdo.sh"
 _DELETE_SCRIPT = _SCRIPTS_DIR / "delete.sh"
 _HALT_SCRIPT = _SCRIPTS_DIR / "halt.sh"
 _HALT_GLOBAL_SCRIPT = _SCRIPTS_DIR / "halt-global.sh"
+_UNHALT_GLOBAL_SCRIPT = _SCRIPTS_DIR / "unhalt-global.sh"
 _INTAKE_SCRIPT = _SCRIPTS_DIR / "intake.sh"
 
 
@@ -115,6 +123,53 @@ def _run_operator(
         text=True,
         env=base_env,
         cwd=str(kanban_root),
+        timeout=timeout,
+    )
+
+
+def _run_operator_scrubbed_foreign_cwd(
+    script: pathlib.Path,
+    args: list[str],
+    kanban_root: pathlib.Path,
+    foreign_cwd: pathlib.Path,
+    *,
+    timeout: int = 30,
+) -> subprocess.CompletedProcess:
+    """Run an operator bash script with a scrubbed env from a foreign working directory.
+
+    Simulates the wake's cron-shaped environment: env -i with only HOME, PATH,
+    and PGAI_AGENT_KANBAN_ROOT_PATH.  The subprocess is invoked from *foreign_cwd*,
+    which must NOT be the kanban root.  No PYTHONPATH is set in the environment —
+    pp_run_ops must derive PYTHONPATH from its own file location.
+
+    This shape exercises the production failure mode that BUG-0082 documented:
+    bare ``python3 -m pgai_agent_kanban.*`` invocations failed because PYTHONPATH
+    was not set and the working directory was not the kanban root.  Scripts that
+    route through pp_run_ops must pass this test; scripts that do not will fail.
+
+    Args:
+        script:      Absolute path to the bash script.
+        args:        Additional CLI arguments to pass to the script.
+        kanban_root: Path to the temporary kanban root.
+        foreign_cwd: Working directory for the subprocess.  Must exist and must
+                     not be kanban_root (to test cwd-independence).
+        timeout:     Subprocess timeout in seconds.
+
+    Returns:
+        subprocess.CompletedProcess with returncode, stdout, stderr.
+    """
+    scrubbed_env = {
+        "HOME": str(pathlib.Path.home()),
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
+    }
+
+    return subprocess.run(
+        ["bash", str(script)] + args,
+        capture_output=True,
+        text=True,
+        env=scrubbed_env,
+        cwd=str(foreign_cwd),
         timeout=timeout,
     )
 
@@ -1251,4 +1306,335 @@ class TestIntakeCommand:
         # The output must reference the deposited filename so operators can verify routing.
         assert "BUG-0202-intake-path-output.md" in result.stdout, (
             f"Expected deposited filename in stdout.\nstdout: {result.stdout}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: close.sh from a foreign working directory (cwd-independence)
+# ---------------------------------------------------------------------------
+
+
+class TestCloseShForeignCwd:
+    """close.sh succeeds when invoked from a directory other than the kanban root.
+
+    The production failure mode: bare ``python3 -m pgai_agent_kanban.ops``
+    invocations fail when the working directory is not the kanban root because
+    the package cannot be imported without PYTHONPATH set.  close.sh routes
+    through pp_run_ops, which sets PYTHONPATH from its own file location.
+    These tests verify that close.sh is cwd-independent.
+    """
+
+    def test_close_task_from_foreign_cwd(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """close.sh sets a task to DONE when invoked from a foreign working directory.
+
+        The script must not depend on the caller's working directory to resolve
+        the pgai_agent_kanban package.  A foreign cwd is a directory that is
+        neither the kanban root nor the team/ directory.
+        """
+        root = two_project_root
+        task_id = "CODER-20260628-T060-close-foreign-cwd"
+        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+
+        foreign_cwd = tmp_path / "foreign_cwd"
+        foreign_cwd.mkdir(parents=True, exist_ok=True)
+
+        result = _run_operator_scrubbed_foreign_cwd(
+            _CLOSE_SCRIPT,
+            ["--project", "project_a", "--key", task_id],
+            root,
+            foreign_cwd,
+        )
+
+        assert result.returncode == 0, (
+            f"close.sh from a foreign cwd exited non-zero.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}\n"
+            "Likely cause: pp_run_ops failed to resolve PYTHONPATH from its "
+            "own file location when invoked from an arbitrary working directory."
+        )
+        assert _read_status_state(task_dir) == "DONE", (
+            f"Expected status.md ## State to be DONE after close from foreign cwd.\n"
+            f"Actual content:\n{(task_dir / 'status.md').read_text(encoding='utf-8')}"
+        )
+
+    def test_close_bug_intake_item_from_foreign_cwd(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """close.sh closes a bug intake item when invoked from a foreign working directory.
+
+        Intake items are closed via the same pp_run_ops pathway.  Verifies that
+        both task-close and intake-close succeed when cwd is not the kanban root.
+        """
+        root = two_project_root
+        bug_file = _build_bug_file(
+            root, "project_a", bug_id="BUG-0130", slug="close-foreign-cwd-intake"
+        )
+        bug_key = "BUG-0130-close-foreign-cwd-intake"
+
+        foreign_cwd = tmp_path / "foreign_cwd_intake"
+        foreign_cwd.mkdir(parents=True, exist_ok=True)
+
+        result = _run_operator_scrubbed_foreign_cwd(
+            _CLOSE_SCRIPT,
+            ["--project", "project_a", "--key", bug_key, "--state", "done"],
+            root,
+            foreign_cwd,
+        )
+
+        assert result.returncode == 0, (
+            f"close.sh for intake item from a foreign cwd exited non-zero.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        bug_text = bug_file.read_text(encoding="utf-8")
+        assert "done" in bug_text.lower(), (
+            f"Expected bug file ## Status to contain 'done' after close.\n"
+            f"Actual:\n{bug_text}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: halt-global.sh and unhalt-global.sh under scrubbed env + foreign cwd
+# ---------------------------------------------------------------------------
+
+
+class TestHaltUnhaltGlobalScrubbedEnv:
+    """halt-global.sh and unhalt-global.sh succeed under a scrubbed cron-shaped environment.
+
+    The scripts must work when:
+      - The environment contains only HOME, PATH, and PGAI_AGENT_KANBAN_ROOT_PATH.
+      - The working directory is a foreign temp directory (not the kanban root).
+      - PYTHONPATH is not set in the caller's environment.
+
+    These conditions mirror the production cron invocation shape.  pp_run_ops
+    derives PYTHONPATH from its own file location so both scripts are
+    cwd-independent and env-independent beyond the three variables above.
+    """
+
+    def test_halt_global_from_scrubbed_env_foreign_cwd(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """halt-global.sh creates the global HALT file under scrubbed env + foreign cwd.
+
+        Verifies that halt-global.sh is not fragile to the working directory or
+        to the absence of PYTHONPATH — the same shape as a cron wake invocation.
+        """
+        root = two_project_root
+        global_halt = root / "HALT"
+        assert not global_halt.exists(), "Pre-condition: global HALT must not exist."
+
+        foreign_cwd = tmp_path / "halt_foreign_cwd"
+        foreign_cwd.mkdir(parents=True, exist_ok=True)
+
+        result = _run_operator_scrubbed_foreign_cwd(
+            _HALT_GLOBAL_SCRIPT,
+            [],
+            root,
+            foreign_cwd,
+        )
+
+        assert result.returncode == 0, (
+            f"halt-global.sh exited non-zero under scrubbed env + foreign cwd.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}\n"
+            "Likely cause: pp_run_ops failed to resolve PYTHONPATH when PYTHONPATH "
+            "was not set and working directory was not the kanban root."
+        )
+        assert global_halt.exists(), (
+            f"Expected global HALT file to be created at {global_halt}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_unhalt_global_from_scrubbed_env_foreign_cwd(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """unhalt-global.sh removes the global HALT file under scrubbed env + foreign cwd.
+
+        First halt-global.sh creates the HALT file (normal env), then
+        unhalt-global.sh removes it under the scrubbed-env + foreign-cwd shape.
+        Verifies that the remove path is also cwd-independent and env-independent.
+        """
+        root = two_project_root
+
+        # Create the HALT file using the normal env first.
+        _run_operator(_HALT_GLOBAL_SCRIPT, [], root)
+        assert (root / "HALT").exists(), "Pre-condition: HALT must exist before unhalt."
+
+        foreign_cwd = tmp_path / "unhalt_foreign_cwd"
+        foreign_cwd.mkdir(parents=True, exist_ok=True)
+
+        result = _run_operator_scrubbed_foreign_cwd(
+            _UNHALT_GLOBAL_SCRIPT,
+            [],
+            root,
+            foreign_cwd,
+        )
+
+        assert result.returncode == 0, (
+            f"unhalt-global.sh exited non-zero under scrubbed env + foreign cwd.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}\n"
+            "Likely cause: pp_run_ops failed to resolve PYTHONPATH when PYTHONPATH "
+            "was not set and working directory was not the kanban root."
+        )
+        assert not (root / "HALT").exists(), (
+            f"Expected global HALT file to be removed after unhalt.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_halt_global_idempotent_under_scrubbed_env(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """halt-global.sh is idempotent under scrubbed env: second call exits 0 cleanly.
+
+        A second halt invocation when HALT already exists must return 0 — both
+        in the normal env (tested in TestHaltGlobalCommand) and the scrubbed env.
+        """
+        root = two_project_root
+        foreign_cwd = tmp_path / "halt_idempotent_cwd"
+        foreign_cwd.mkdir(parents=True, exist_ok=True)
+
+        # First call — creates HALT.
+        first = _run_operator_scrubbed_foreign_cwd(
+            _HALT_GLOBAL_SCRIPT, [], root, foreign_cwd
+        )
+        assert first.returncode == 0, (
+            f"First halt-global.sh call failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
+        )
+        assert (root / "HALT").exists(), "HALT must exist after first call."
+
+        # Second call — must exit 0 (idempotent).
+        second = _run_operator_scrubbed_foreign_cwd(
+            _HALT_GLOBAL_SCRIPT, [], root, foreign_cwd
+        )
+        assert second.returncode == 0, (
+            f"Second halt-global.sh call under scrubbed env exited non-zero.\n"
+            f"stdout: {second.stdout}\nstderr: {second.stderr}"
+        )
+        assert (root / "HALT").exists(), "HALT file must still exist after second call."
+
+    def test_unhalt_global_idempotent_under_scrubbed_env(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """unhalt-global.sh is idempotent under scrubbed env: exits 0 when no HALT exists.
+
+        Calling unhalt when no HALT file is present must exit 0 gracefully.
+        """
+        root = two_project_root
+        assert not (root / "HALT").exists(), "Pre-condition: HALT must not exist."
+
+        foreign_cwd = tmp_path / "unhalt_idempotent_cwd"
+        foreign_cwd.mkdir(parents=True, exist_ok=True)
+
+        result = _run_operator_scrubbed_foreign_cwd(
+            _UNHALT_GLOBAL_SCRIPT, [], root, foreign_cwd
+        )
+
+        assert result.returncode == 0, (
+            f"unhalt-global.sh exited non-zero when no HALT existed (expected idempotent 0).\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: scrubbed-env fixture for the census closer (pp_run_ops via close_item)
+# ---------------------------------------------------------------------------
+
+
+class TestScrubbedEnvCensusCloser:
+    """The pp_run_ops-based close_item pathway succeeds under scrubbed env + foreign cwd.
+
+    This is the production failure shape from BUG-0082: the census closer
+    in wake_common.sh calls pp_run_ops to invoke close_item.  When run from
+    a cron environment (scrubbed env, foreign cwd, no PYTHONPATH), bare
+    python3 -m invocations fail.  pp_run_ops resolves PYTHONPATH from its
+    own location, making the invocation cwd-independent.
+
+    These tests exercise the same pathway end-to-end by invoking close.sh
+    (which sources pp_run_ops and calls close_item) under the same
+    scrubbed-env shape the census closer runs in.  A passing test here
+    confirms that the failure mode from BUG-0082 is fixed and remains fixed.
+    """
+
+    def test_close_item_via_pp_run_ops_from_scrubbed_env(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """close_item succeeds when PYTHONPATH is absent and cwd is foreign.
+
+        This is the canonical scrubbed-env + foreign-cwd regression: the exact
+        environment shape that caused the production BUG-0082 failure.  close.sh
+        routes through pp_run_ops, which sets PYTHONPATH correctly from its own
+        file location regardless of the caller's environment.
+        """
+        root = two_project_root
+        task_id = "CODER-20260628-T070-close-item-scrubbed-env"
+        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+
+        foreign_cwd = tmp_path / "census_closer_scrubbed_cwd"
+        foreign_cwd.mkdir(parents=True, exist_ok=True)
+
+        result = _run_operator_scrubbed_foreign_cwd(
+            _CLOSE_SCRIPT,
+            ["--project", "project_a", "--key", task_id],
+            root,
+            foreign_cwd,
+        )
+
+        assert result.returncode == 0, (
+            f"close_item via pp_run_ops failed under scrubbed env + foreign cwd.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}\n"
+            "This is the BUG-0082 production failure shape: python3 -m pgai_agent_kanban.ops "
+            "must be cwd-independent.  Ensure all call sites use pp_run_ops."
+        )
+        assert _read_status_state(task_dir) == "DONE", (
+            f"Task must be DONE after close_item via pp_run_ops under scrubbed env.\n"
+            f"status.md:\n{(task_dir / 'status.md').read_text(encoding='utf-8')}"
+        )
+
+    def test_close_item_does_not_require_pythonpath_in_environment(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """close_item succeeds with PYTHONPATH absent from the environment.
+
+        pp_run_ops derives the own-tree root from BASH_SOURCE and constructs
+        PYTHONPATH internally.  The calling environment must not need to provide
+        PYTHONPATH at all for close_item to succeed.
+        """
+        root = two_project_root
+        task_id = "CODER-20260628-T071-no-pythonpath-needed"
+        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+
+        foreign_cwd = tmp_path / "no_pythonpath_cwd"
+        foreign_cwd.mkdir(parents=True, exist_ok=True)
+
+        # Explicitly verify PYTHONPATH is absent (scrubbed env has only HOME/PATH/root).
+        result = _run_operator_scrubbed_foreign_cwd(
+            _CLOSE_SCRIPT,
+            ["--project", "project_a", "--key", task_id],
+            root,
+            foreign_cwd,
+        )
+
+        assert result.returncode == 0, (
+            f"close_item failed when PYTHONPATH was absent from environment.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}\n"
+            "pp_run_ops must not require PYTHONPATH to be set by the caller."
+        )
+        assert _read_status_state(task_dir) == "DONE", (
+            "Task must be DONE; close_item must work without caller-provided PYTHONPATH.\n"
+            f"status.md:\n{(task_dir / 'status.md').read_text(encoding='utf-8')}"
         )

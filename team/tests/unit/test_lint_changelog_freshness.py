@@ -37,6 +37,21 @@ Tests cover:
      fails in normal mode (no env var).  Also asserts that a genuine
      CHANGELOG content edit still fails in RC mode (non-KI staleness).
 
+  8. **Writer-migration drift tolerance (BUG-0077 / BUG-0080 enumeration)**:
+     Three test cases using the _diff_is_rc_tolerable() helper directly to
+     verify the three new drift categories are correctly handled:
+
+     (a) Fixture with all three drift categories present in the checked-in
+         content but absent from the regenerated content → _diff_is_rc_tolerable()
+         returns True (RC-mode tolerates the three removals).
+
+     (b) Lint exits non-zero on ai_main even when PGAI_LINT_CHANGELOG_MODE=rc
+         is set — the branch check in _is_rc_mode() overrides the env var.
+
+     (c) Fixture with a drift line that is NOT one of the three tolerable
+         categories (a genuine non-drift removal) → _diff_is_rc_tolerable()
+         returns False (no over-broad admission).
+
 All temp paths use pytest's tmp_path (redirected to the framework temp root
 by conftest.py when PGAI_AGENT_KANBAN_TEMP_DIR is set).  No bare /tmp paths.
 """
@@ -50,6 +65,7 @@ import re
 import shutil
 import subprocess
 import sys
+import unittest.mock
 
 import pytest
 
@@ -722,14 +738,19 @@ test-fixture
         temp_bugs_dir = self._make_temp_bugs_dir(_REAL_BUGS_DIR, tmp_path)
         self._add_synthetic_post_rc_bug(temp_bugs_dir)
 
-        # Run in RC mode.
+        # Run in RC mode.  Patch _current_git_branch so the branch-aware check
+        # in _is_rc_mode() treats this as an RC branch regardless of the
+        # actual worktree branch (which may be ai_feature/* during development).
         prev_mode = os.environ.get("PGAI_LINT_CHANGELOG_MODE", "")
         os.environ["PGAI_LINT_CHANGELOG_MODE"] = "rc"
         try:
-            result = _lint.check_freshness(
-                changelog_path=_CHANGELOG_ARTIFACT,
-                bugs_dir=temp_bugs_dir,
-            )
+            with unittest.mock.patch.object(
+                _lint, "_current_git_branch", return_value="ai_rc/v1.23.10"
+            ):
+                result = _lint.check_freshness(
+                    changelog_path=_CHANGELOG_ARTIFACT,
+                    bugs_dir=temp_bugs_dir,
+                )
         finally:
             if prev_mode:
                 os.environ["PGAI_LINT_CHANGELOG_MODE"] = prev_mode
@@ -901,14 +922,20 @@ test-fixture
             encoding="utf-8",
         )
         try:
-            # Run in RC mode with the real bugs dir.
+            # Run in RC mode with the real bugs dir.  Patch _current_git_branch so
+            # the branch-aware check in _is_rc_mode() treats this as an RC branch
+            # regardless of the actual worktree branch (which may be ai_feature/*
+            # during development).
             prev_mode = os.environ.get("PGAI_LINT_CHANGELOG_MODE", "")
             os.environ["PGAI_LINT_CHANGELOG_MODE"] = "rc"
             try:
-                result = _lint.check_freshness(
-                    changelog_path=_CHANGELOG_ARTIFACT,
-                    bugs_dir=_REAL_BUGS_DIR,
-                )
+                with unittest.mock.patch.object(
+                    _lint, "_current_git_branch", return_value="ai_rc/v1.23.10"
+                ):
+                    result = _lint.check_freshness(
+                        changelog_path=_CHANGELOG_ARTIFACT,
+                        bugs_dir=_REAL_BUGS_DIR,
+                    )
             finally:
                 if prev_mode:
                     os.environ["PGAI_LINT_CHANGELOG_MODE"] = prev_mode
@@ -930,4 +957,378 @@ test-fixture
             "check_freshness() did not mention RC mode or tolerance in its success "
             "message when the new-release-section clause fired.\n"
             f"stdout: {captured.out!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Writer-migration drift tolerance tests (BUG-0077 / BUG-0080 enumeration)
+# ---------------------------------------------------------------------------
+
+
+class TestWriterMigrationDriftTolerance:
+    """RC-mode tolerance for the three writer-migration drift categories (BUG-0077).
+
+    BUG-0080 requires that _diff_is_rc_tolerable() explicitly name and tolerate
+    the three drift categories that recur between releases due to older writer
+    rules being preserved in the committed CHANGELOG.md:
+
+    Category 3 — Fenced ``## Fixed`` sub-section header:
+        The older writer emitted ``## Fixed`` as a sub-section header; the
+        current writer omits it.  In the diff: a ``-## Fixed`` removed line.
+
+    Category 4 — Hyphen-prefixed KI-resolved line:
+        The older writer emitted ``- KI-N.N.N.N — resolved`` for resolved
+        Known Issues; the current writer emits a full-format KI title.
+        In the diff: ``-- KI-N.N.N.N — resolved`` removed lines.
+
+    Category 5 — Embedded triple-backtick code fence:
+        The older writer embedded ``` fences inside KI descriptions and Fixed
+        entries; the current writer strips them.  In the diff: ``-``` `` lines.
+
+    Tests use _diff_is_rc_tolerable() directly (not check_freshness()) because:
+    (a) they exercise the predicate logic, not the full regeneration pipeline;
+    (b) they avoid needing the live bugs dir or PUBLISHED manifest.
+
+    The fail-fast-on-ai_main test uses _is_rc_mode() directly and the
+    _current_git_branch() / _is_rc_branch() helpers to verify the branch-aware
+    suppression without spawning a subprocess.
+    """
+
+    # Minimal synthetic CHANGELOG base: a v1.0.0 entry with all three drift
+    # patterns present.  A fresh regeneration of this changelog would NOT have
+    # the drift lines (the current writer strips them).
+    #
+    # Category 3: line "## Fixed" (sub-section header, no content — just the header)
+    # Category 4: lines "- KI-1.0.0.1 — resolved" (hyphen-prefix resolved-KI)
+    # Category 5: triple-backtick fence lines wrapping embedded code in a KI entry;
+    #             the content between the fences is also drift and also removed.
+    #
+    # The checked-in CHANGELOG has the drift patterns; the regenerated CHANGELOG
+    # has them stripped.  The diff must be entirely explained by Categories 3/4/5.
+    # Checked-in CHANGELOG with all three BUG-0077 drift patterns.
+    # Structured so that ONLY the drift-category lines differ from the
+    # regenerated version (no incidental blank-line drift):
+    #   - "## Fixed" → Category 3 (sub-section header)
+    #   - "```" / "error output here" / "```" → Category 5 (fence + content)
+    #   - "- KI-1.0.0.2 — resolved" and "- KI-1.0.0.3 — resolved" → Category 4
+    # The blank lines and section headers that ARE shared between the two
+    # versions are kept identical so they appear as context lines in the diff.
+    _CHECKED_IN_WITH_DRIFT = (
+        "## v1.0.0 — 2026-01-01\n"
+        "\n"
+        "### Implemented\n"
+        "- Feature A\n"
+        "\n"
+        "## Fixed\n"
+        "### Known Issues\n"
+        "KI-1.0.0.1 — symptom text; affects v1.0.0 · open\n"
+        "```\n"
+        "error output here\n"
+        "```\n"
+        "- KI-1.0.0.2 — resolved\n"
+        "- KI-1.0.0.3 — resolved\n"
+    )
+
+    # Fresh regeneration without the three drift patterns.
+    # The ONLY diff from _CHECKED_IN_WITH_DRIFT is the removal of:
+    #   - "## Fixed" (Category 3)
+    #   - "```", "error output here", "```" (Category 5 fence)
+    #   - "- KI-1.0.0.2 — resolved", "- KI-1.0.0.3 — resolved" (Category 4)
+    _REGENERATED_WITHOUT_DRIFT = (
+        "## v1.0.0 — 2026-01-01\n"
+        "\n"
+        "### Implemented\n"
+        "- Feature A\n"
+        "\n"
+        "### Known Issues\n"
+        "KI-1.0.0.1 — symptom text; affects v1.0.0 · open\n"
+    )
+
+    def test_all_three_drift_categories_tolerated_in_rc_mode(self) -> None:
+        """_diff_is_rc_tolerable() accepts a diff containing only the three drift removals.
+
+        The checked-in CHANGELOG has all three writer-migration drift patterns
+        (fenced ## Fixed header, hyphen-prefix KI-resolved lines, triple-backtick
+        code fences); the regenerated CHANGELOG has them stripped.  RC-mode
+        tolerance (Categories 3, 4, 5) must accept this diff and return True.
+
+        This exercises BUG-0080 acceptance criterion (a): RC-mode admission
+        passes when the only diff is the three enumerated drift categories.
+        """
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(
+            self._CHECKED_IN_WITH_DRIFT,
+            self._REGENERATED_WITHOUT_DRIFT,
+        )
+        assert is_tolerable is True, (
+            "_diff_is_rc_tolerable() returned False for a diff containing only "
+            "the three writer-migration drift categories (BUG-0077 enumeration).\n"
+            "Categories 3 (## Fixed header removal), 4 (KI-resolved line removal), "
+            "and 5 (triple-backtick fence removal) must all be tolerable.\n"
+            f"Tolerance clause returned: {clause!r}"
+        )
+        assert "drift" in clause.lower() or "migration" in clause.lower(), (
+            "_diff_is_rc_tolerable() returned True but the clause description does "
+            "not mention drift or migration, suggesting a different clause fired.\n"
+            f"Clause: {clause!r}"
+        )
+
+    def test_non_enumerated_drift_still_fails_in_rc_mode(self) -> None:
+        """_diff_is_rc_tolerable() rejects a diff containing a non-enumerated removal.
+
+        A removed line that is NOT one of the three enumerated drift categories
+        must still cause _diff_is_rc_tolerable() to return False.  This verifies
+        that the tolerance set is not over-broad: only Categories 3, 4, and 5
+        are admitted; all other removals are genuine staleness.
+
+        This exercises BUG-0080 acceptance criterion (c): RC-mode does not
+        over-broadly admit non-enumerated drift.
+        """
+        # The checked-in content has a non-drift removed line: a genuine content
+        # line ("- Fixed item B") that is NOT one of the three drift categories.
+        checked_in_with_genuine_removal = (
+            "## v1.0.0 — 2026-01-01\n"
+            "\n"
+            "### Implemented\n"
+            "- Feature A\n"
+            "- Feature B (genuine content, will be removed in regen)\n"
+            "\n"
+            "### Known Issues\n"
+        )
+        # The fresh regeneration omits Feature B — a genuine content edit.
+        regenerated_without_feature_b = (
+            "## v1.0.0 — 2026-01-01\n"
+            "\n"
+            "### Implemented\n"
+            "- Feature A\n"
+            "\n"
+            "### Known Issues\n"
+        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(
+            checked_in_with_genuine_removal,
+            regenerated_without_feature_b,
+        )
+        assert is_tolerable is False, (
+            "_diff_is_rc_tolerable() returned True for a diff containing a "
+            "non-enumerated removed line ('- Feature B (genuine content...').\n"
+            "Only the three BUG-0077 drift categories are tolerable; any other "
+            "removal must be treated as genuine staleness and rejected.\n"
+            f"Clause returned: {clause!r}"
+        )
+
+    def test_fail_fast_on_ai_main_overrides_rc_env_var(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_is_rc_mode() returns False on ai_main even when the env var is set to 'rc'.
+
+        When PGAI_LINT_CHANGELOG_MODE=rc is set but the current git branch is
+        ai_main (not rc/* or ai_rc/*), RC-mode tolerance must be suppressed.
+        This is the fail-fast-on-ai_main behaviour: drift is caught before an
+        RC opens rather than being masked at every RC verification.
+
+        The test monkeypatches _current_git_branch to return 'ai_main' and sets
+        PGAI_LINT_CHANGELOG_MODE=rc, then asserts _is_rc_mode() returns False.
+
+        This exercises BUG-0080 acceptance criterion (b): lint exits non-zero
+        (fail-fast) on ai_main for the same drift that RC-mode would tolerate.
+        """
+        monkeypatch.setenv("PGAI_LINT_CHANGELOG_MODE", "rc")
+        # Patch _current_git_branch at the module level to return 'ai_main'.
+        monkeypatch.setattr(
+            _lint, "_current_git_branch", lambda _root: "ai_main"
+        )
+        result = _lint._is_rc_mode()
+        assert result is False, (
+            "_is_rc_mode() returned True when the branch is 'ai_main' even "
+            "with PGAI_LINT_CHANGELOG_MODE=rc set in the environment.\n"
+            "RC-mode tolerance must be suppressed on ai_main unconditionally "
+            "(fail-fast-on-ai_main requirement from BUG-0080).\n"
+            "Branch-aware suppression: 'ai_main' does not match rc/* or ai_rc/*."
+        )
+
+    def test_rc_mode_active_on_rc_branch_with_env_var(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_is_rc_mode() returns True on an ai_rc/* branch when env var is 'rc'.
+
+        Complements the fail-fast-on-ai_main test: when both conditions are met
+        (env var is 'rc' AND branch is ai_rc/*), _is_rc_mode() must return True.
+        This ensures the branch-aware check does not over-suppress RC mode.
+        """
+        monkeypatch.setenv("PGAI_LINT_CHANGELOG_MODE", "rc")
+        monkeypatch.setattr(
+            _lint, "_current_git_branch", lambda _root: "ai_rc/v1.23.10"
+        )
+        result = _lint._is_rc_mode()
+        assert result is True, (
+            "_is_rc_mode() returned False for branch 'ai_rc/v1.23.10' with "
+            "PGAI_LINT_CHANGELOG_MODE=rc set.\n"
+            "RC-mode tolerance must be active when both conditions hold: "
+            "the env var is 'rc' AND the branch matches the rc/* or ai_rc/* prefix."
+        )
+
+    def test_rc_mode_inactive_without_env_var_on_rc_branch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_is_rc_mode() returns False when env var is absent, even on an rc/* branch.
+
+        If the operator runs the lint directly (without the gated runner setting
+        PGAI_LINT_CHANGELOG_MODE=rc), RC-mode tolerance must not activate, even
+        when the branch is rc/*.  This preserves strict byte-compare for direct
+        invocations.
+        """
+        monkeypatch.delenv("PGAI_LINT_CHANGELOG_MODE", raising=False)
+        monkeypatch.setattr(
+            _lint, "_current_git_branch", lambda _root: "ai_rc/v1.23.10"
+        )
+        result = _lint._is_rc_mode()
+        assert result is False, (
+            "_is_rc_mode() returned True for branch 'ai_rc/v1.23.10' WITHOUT "
+            "PGAI_LINT_CHANGELOG_MODE=rc set in the environment.\n"
+            "RC-mode tolerance requires BOTH conditions: the env var AND an RC branch. "
+            "Without the env var, even an RC branch must use strict byte-compare."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Detached-HEAD _current_git_branch() fallback tests (BUG-0081)
+# ---------------------------------------------------------------------------
+
+
+class TestCurrentGitBranchDetachedHead:
+    """Unit tests for _current_git_branch() detached-HEAD sentinel-skip logic.
+
+    Tests cover three scenarios, all mocking subprocess.run so no live git
+    repository is required:
+
+    1. Sentinel-skip + rc-preference: symbolic-ref fails, 'git branch --points-at
+       HEAD' emits '(no branch)' then 'ai_rc/v1.23.11' — assert the function
+       returns 'ai_rc/v1.23.11' (skips sentinel, returns rc-prefixed branch).
+
+    2. No rc-branch fallback: same failure scenario but 'git branch --points-at
+       HEAD' emits '(no branch)' then 'feature/foo' — assert the function
+       returns '' (no rc-prefixed branch at HEAD, byte-exact fallback preserved).
+
+    3. Symbolic-ref success path (unchanged): symbolic-ref succeeds and emits
+       'ai_rc/v1.23.11' — assert the function returns 'ai_rc/v1.23.11' without
+       reaching the fallback loop.
+
+    Mocking strategy: _current_git_branch() uses 'import subprocess as _sp'
+    inside the function body.  The local _sp is the cached subprocess module
+    from sys.modules, so patching 'subprocess.run' intercepts the _sp.run call.
+    """
+
+    def _make_run_side_effect(self, symbolic_ref_output, symbolic_ref_rc,
+                              points_at_output, points_at_rc):
+        """Return a side_effect callable for subprocess.run mock.
+
+        The side_effect dispatches on the command list to return the appropriate
+        CompletedProcess for each of the two git calls inside _current_git_branch().
+
+        Args:
+            symbolic_ref_output: stdout for 'git symbolic-ref --short HEAD'.
+            symbolic_ref_rc:     returncode for the symbolic-ref call.
+            points_at_output:    stdout for 'git branch --points-at HEAD'.
+            points_at_rc:        returncode for the points-at call.
+
+        Returns:
+            A callable suitable as unittest.mock.patch side_effect.
+        """
+        import subprocess
+
+        def _side_effect(cmd, **kwargs):
+            if "symbolic-ref" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=symbolic_ref_rc,
+                    stdout=symbolic_ref_output,
+                    stderr="",
+                )
+            # 'git branch --points-at HEAD'
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=points_at_rc,
+                stdout=points_at_output,
+                stderr="",
+            )
+
+        return _side_effect
+
+    def test_sentinel_skipped_rc_branch_returned(self) -> None:
+        """(no branch) sentinel is skipped; ai_rc/v1.23.11 is returned.
+
+        Simulates a detached-HEAD worktree where 'git symbolic-ref --short HEAD'
+        fails (exit 128) and 'git branch --format=%(refname:short) --points-at HEAD'
+        emits '(no branch)\\nai_rc/v1.23.11\\n'.
+
+        _current_git_branch() must skip '(no branch)' (starts with '('), find
+        'ai_rc/v1.23.11', confirm _is_rc_branch() returns True, and return
+        'ai_rc/v1.23.11'.
+        """
+        side_effect = self._make_run_side_effect(
+            symbolic_ref_output="",
+            symbolic_ref_rc=128,
+            points_at_output="(no branch)\nai_rc/v1.23.11\n",
+            points_at_rc=0,
+        )
+        with unittest.mock.patch("subprocess.run", side_effect=side_effect):
+            result = _lint._current_git_branch(pathlib.Path("."))
+
+        assert result == "ai_rc/v1.23.11", (
+            "_current_git_branch() returned {result!r} instead of 'ai_rc/v1.23.11' "
+            "when 'git branch --points-at HEAD' emitted '(no branch)\\nai_rc/v1.23.11\\n'.\n"
+            "The '(no branch)' sentinel line must be skipped; the rc-prefixed branch "
+            "that follows must be returned."
+        )
+
+    def test_no_rc_branch_returns_empty_string(self) -> None:
+        """Empty string is returned when no rc-prefixed branch is found at HEAD.
+
+        Simulates a detached-HEAD worktree where 'git branch --points-at HEAD'
+        emits '(no branch)\\nfeature/foo\\n' — there is no rc/* or ai_rc/* branch.
+
+        _current_git_branch() must skip '(no branch)', skip 'feature/foo'
+        (not rc-prefixed per _is_rc_branch), and return '' so that
+        _is_rc_mode() stays False (byte-exact fallback preserved).
+        """
+        side_effect = self._make_run_side_effect(
+            symbolic_ref_output="",
+            symbolic_ref_rc=128,
+            points_at_output="(no branch)\nfeature/foo\n",
+            points_at_rc=0,
+        )
+        with unittest.mock.patch("subprocess.run", side_effect=side_effect):
+            result = _lint._current_git_branch(pathlib.Path("."))
+
+        assert result == "", (
+            f"_current_git_branch() returned {result!r} instead of '' "
+            "when 'git branch --points-at HEAD' emitted '(no branch)\\nfeature/foo\\n'.\n"
+            "No rc-prefixed branch is present at HEAD; the function must return '' "
+            "so that _is_rc_mode() stays False for feature branches and unrelated worktrees."
+        )
+
+    def test_symbolic_ref_success_path_unchanged(self) -> None:
+        """Primary symbolic-ref success path returns the branch name unchanged.
+
+        When 'git symbolic-ref --short HEAD' succeeds (exit 0) and emits
+        'ai_rc/v1.23.11', _current_git_branch() must return 'ai_rc/v1.23.11'
+        directly without reaching the detached-HEAD fallback loop.
+
+        This test verifies the fix does not regress the non-detached case.
+        """
+        side_effect = self._make_run_side_effect(
+            symbolic_ref_output="ai_rc/v1.23.11\n",
+            symbolic_ref_rc=0,
+            # The points-at call must NOT be reached; provide a clearly wrong
+            # value so a regression would produce an obviously wrong result.
+            points_at_output="(no branch)\nwrong-branch\n",
+            points_at_rc=0,
+        )
+        with unittest.mock.patch("subprocess.run", side_effect=side_effect):
+            result = _lint._current_git_branch(pathlib.Path("."))
+
+        assert result == "ai_rc/v1.23.11", (
+            f"_current_git_branch() returned {result!r} instead of 'ai_rc/v1.23.11' "
+            "when 'git symbolic-ref --short HEAD' succeeded with 'ai_rc/v1.23.11'.\n"
+            "The primary symbolic-ref success path must return the branch name as-is "
+            "without entering the detached-HEAD fallback loop."
         )

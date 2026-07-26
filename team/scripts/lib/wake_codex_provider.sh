@@ -404,6 +404,9 @@ provider_invoke_agent() {
 
     # --json: emit JSONL event stream to stdout
     # --dangerously-bypass-approvals-and-sandbox: run non-interactively
+    # llm_thinking_enabled (kanban.cfg [providers]): future-mapped — when the
+    #   Codex lane gains a thinking/reasoning switch, wire it here. No behavior
+    #   change yet.
     codex_cmd+=(--json --dangerously-bypass-approvals-and-sandbox)
 
     # Prompt is the last positional argument

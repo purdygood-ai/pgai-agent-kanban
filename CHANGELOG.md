@@ -6,7 +6,80 @@
 
 ---
 
-## v1.23.0 — unknown
+## v1.27.0 — 2026-07-26
+
+v1.27.0 is the third public release: the container-and-credibility
+era. Everything from v1.23.0 to this release was built by the
+framework itself, on its own board.
+
+### Implemented
+- **Containerized deployment — the workspace model.** Debian and
+  Rocky Linux 9 image flavors with an audited dependency set; a
+  minimal fail-loud entrypoint landing an interactive shell at the
+  kanban root; a launcher (`scripts/container-shell.sh`) with a
+  config-selectable engine (docker or podman). The container is a
+  workspace — the operator starts the scheduler and dashboard
+  exactly as on a host. `docs/docker.md`.
+- **Relocatable scheduling.** Pseudocron configs carry
+  root-relative commands and run from the resolved kanban root —
+  one config works on a host, in a container, or anywhere the
+  install moves.
+- **Coding standards, self-enforced.** `docs/coding-standards.md`
+  binds every code-producing agent, backed by a lint fleet
+  (help-presence, comment-provenance, import-completeness) the
+  framework runs against its own tree — and has already used to
+  reject its own work.
+- **Executable documentation.** A doc-lint harness runs every
+  fenced command in the public docs verbatim; links, fossils, and
+  feature coverage are gated the same way.
+- **Committed VERSION.** Releases stamp their identity into the
+  tree at ship; installs and containers report exactly what they
+  run.
+- **Operator experience.** An operator dashboard window (the full
+  board over a working shell — the container operator's
+  workspace), configurable status glyphs, force-reset with
+  worktree cleanup, a provider extended-thinking compatibility
+  toggle, and complete in-container test tooling.
+
+### Fixed
+Consolidated across the arc, described by pattern:
+- **Control-plane hardening from an external code audit**, fixed
+  and regression-tested by the framework itself: the safety
+  observer resolves the same per-project lock the agents hold and
+  can never remove an operator-placed HALT; transient-error
+  retries live in one durable machine-readable record with one
+  owner and one ceiling; task dispatch honors the assigned agent
+  and fails closed on invalid roles (both providers); task-level
+  model overrides take precedence over environment configuration,
+  as documented.
+- **Dashboards observe locally.** No dashboard window performs
+  network git operations — render paths read the local tree only,
+  missing state degrades with a clear message, and a lint gate
+  plus a network-stub fixture keep it that way. Displays can no
+  longer contend with releases for the repository lock or wedge
+  on fresh SSH state.
+- **Release-engineering semantics.** Cancelled version numbers
+  free cleanly for re-use, bug fixes always precede feature work
+  at selection, and the cancel/reset recovery drill is
+  race-guarded.
+- **Verification honesty.** The post-suite listener-cleanliness
+  gate attributes leaked servers to the run that spawned them
+  (stale cross-task orphans no longer fail unrelated
+  verifications); documentation commands are annotated and
+  executed by the harness rather than trusted.
+- **KI-1.23.0.1 resolved** — testing-only intake items are now
+  closed by the machinery (completion event hook plus a sweep
+  census); affects v1.23.0 · fixed in v1.27.0.
+
+### Known Issues
+
+None open at release.
+
+*Details: [release-notes/v1.27.0.md](release-notes/v1.27.0.md)*
+
+---
+
+## v1.23.0 — 2026-07-14
 
 v1.23.0 is the second public release and the consolidation of everything since v1.0.0: the pluggable workflow architecture, the operator REST API with its browser dashboard, the OVERWATCH observer and PO intake agent, a unified fail-loud environment contract across every entry point, and a third shipped workflow type — testing-only — certified end-to-end with zero operator interventions.
 
@@ -73,20 +146,21 @@ selection model. Defects are tracked on the internal ledger and
 described by pattern in the CHANGELOG.
 All five public Known Issues disclosed at v1.0.0 are resolved as of
 this release:
-- KI-1.0.0.1 — resolved
-- KI-1.0.0.2 — resolved
-- KI-1.0.0.3 — resolved
-- KI-1.0.0.4 — resolved
-- KI-1.0.0.5 — resolved
+KI-1.0.0.1 — `scripts/dashboard/create.sh` fails on Ubuntu 24.04 with `size missing` emitted by tmux, leaving the dashboard partially constructed (window 0 never splits past one pane).; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.2 — `shell-env_example` line 34 references a misspelled variable in the commented-out convenience export: `$PGA_AGENT_KANBAN_ROOT_PATH` (missing the `I`) instead of `$PGAI_AGENT_KANBAN_ROOT_PATH` (the correct variable, defined one line above on line 33).; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.3 — Discovery/PM re-activates a requirements bundle that the operator has terminally closed, overwriting its terminal state.; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.4 — `delete.sh` refuses to delete an intake item that IS in a terminal state, and its refusal message contradicts itself: The item's state is `wont-do`; the guard says that is "not a terminal state"; the remedy text says to move it to "DONE or WONT-DO first" — i.e.; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.5 — The tmux dashboard's per-project agent columns sort task rows by ID descending (`column-render.sh` ~line 914/963: `reverse=True`) and truncate to `max_rows_per_project` (default 8).; affects v1.0.0 · fixed in v1.0.0
 
 ### Known Issues
-None
+(writer mints KI-1.23.0.1 at the next regen — v1.23.0 is in
+PUBLISHED; do not hand-assign) — A testing-only run completes fully — verification, report at the finalize location, no-mutation attestation — but the originating requirements intake item is not flipped to `done` by the machinery.; affects v1.23.0 · fix pending next release
 
 *Details: [release-notes/v1.23.0.md](release-notes/v1.23.0.md)*
 
 ---
 
-## v1.0.0 — unknown
+## v1.0.0 — 2026-07-03
 
 ### Implemented
 None (bugfix release)
@@ -96,9 +170,9 @@ None
 
 ### Known Issues
 KI-1.0.0.1 — `scripts/dashboard/create.sh` fails on Ubuntu 24.04 with `size missing` emitted by tmux, leaving the dashboard partially constructed (window 0 never splits past one pane).; affects v1.0.0 · fixed in v1.23.0
-KI-1.0.0.2 — `shell-env_example` line 34 references a misspelled variable in the commented-out convenience export: ``` # export KANBAN_ROOT_PATH="$PGA_AGENT_KANBAN_ROOT_PATH" ``` `$PGA_AGENT_KANBAN_ROOT_PATH` (missing the `I`) instead of `$PGAI_AGENT_KANBAN_ROOT_PATH` (the correct variable, defined one line above on line 33).; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.2 — `shell-env_example` line 34 references a misspelled variable in the commented-out convenience export: `$PGA_AGENT_KANBAN_ROOT_PATH` (missing the `I`) instead of `$PGAI_AGENT_KANBAN_ROOT_PATH` (the correct variable, defined one line above on line 33).; affects v1.0.0 · fixed in v1.23.0
 KI-1.0.0.3 — Discovery/PM re-activates a requirements bundle that the operator has terminally closed, overwriting its terminal state.; affects v1.0.0 · fixed in v1.23.0
-KI-1.0.0.4 — `delete.sh` refuses to delete an intake item that IS in a terminal state, and its refusal message contradicts itself: ``` $ scripts/close.sh --project pgai-agent-kanban --key <item> --state wont-do close: <item> closed (status: wont-do) $ scripts/delete.sh --project pgai-agent-kanban --key <item> delete_item: refused to delete '<item>' — state is 'wont-do' (not a terminal state).; affects v1.0.0 · fixed in v1.23.0
+KI-1.0.0.4 — `delete.sh` refuses to delete an intake item that IS in a terminal state, and its refusal message contradicts itself: The item's state is `wont-do`; the guard says that is "not a terminal state"; the remedy text says to move it to "DONE or WONT-DO first" — i.e.; affects v1.0.0 · fixed in v1.23.0
 
 *Details: [release-notes/v1.0.0.md](release-notes/v1.0.0.md)*
 

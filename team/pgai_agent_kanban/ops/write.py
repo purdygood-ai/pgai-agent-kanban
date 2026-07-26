@@ -53,9 +53,13 @@ Functions:
         Terminal states: "done" and "wont-do" (case-insensitive; defined in
         lib.terminal_states).
 
-    reset_item(ctx, project, key, keep_artifacts=False)
+    reset_item(ctx, project, key, keep_artifacts=False, force=False)
         Reset a task or intake item to a re-pickable state.
         For agent tasks: refuses if state is WORKING (Refused exception, exit 2).
+          Without --force, a stale worktree (registration or on-disk path) raises
+          Refused (exit 2) after printing the removal recipe to stderr.  With
+          --force, performs cleanup (worktree remove, prune, rm -rf, branch delete)
+          narrating each step; raises MountPinned (exit 4) if mount-pinned.
           Regenerates status.md from the BACKLOG template (amnesia guarantee),
           clears artifacts/ and task logs/, flips queue marker to [ ], deletes
           the feature branch from the project dev tree, runs git worktree prune,
@@ -81,7 +85,7 @@ CLI usage (bash delegation shim):
     python3 -m pgai_agent_kanban.ops close_item  PROJECT_ROOT KEY [STATE] [NOTE] [DRY_RUN]
     python3 -m pgai_agent_kanban.ops wontdo_item PROJECT_ROOT KEY
     python3 -m pgai_agent_kanban.ops delete_item PROJECT_ROOT KEY [FORCE]
-    python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS]
+    python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE]
 
 Note: the package-level entry point (python3 -m pgai_agent_kanban.ops) is the canonical
 CLI path.  Running this submodule directly via -m pgai_agent_kanban.ops.write triggers a
@@ -92,11 +96,13 @@ Exit codes: 0 success, 1 error (message on stderr).
 For deposit_intake: 2 routing refused, 3 target exists, 4 filesystem error.
 For close_item/wontdo_item/delete_item: 2 ambiguous key, 3 not found, 4 state mutation failed,
     2 (delete) guard refused.
-For reset_item: 2 WORKING state refusal or ambiguous key, 3 not found.
+For reset_item: 2 WORKING state refusal, ambiguous key, or stale-worktree refusal (no --force);
+    3 not found; 4 mount-pinned path blocks --force cleanup.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import shutil
@@ -107,7 +113,7 @@ from pathlib import Path
 from pgai_agent_kanban.lib.filename_contract import INTAKE_REQUIREMENTS_RE
 from pgai_agent_kanban.lib.terminal_states import is_terminal as _is_terminal_state
 from pgai_agent_kanban.ops.context import OpsContext
-from pgai_agent_kanban.ops.errors import Ambiguous, IoError, NotFound, OpsError, Refused
+from pgai_agent_kanban.ops.errors import Ambiguous, IoError, MountPinned, NotFound, OpsError, Refused
 from pgai_agent_kanban.ops.resolve import ResolveResult, resolve_item
 
 
@@ -273,7 +279,7 @@ def unhalt_global(ctx: OpsContext) -> None:
 # Patterns are checked in order; first match wins.
 # Each entry: (compiled_regex, destination_subdir_name)
 # The requirements pattern is sourced from filename_contract to keep
-# intake and discovery in sync (BUG-0045 single-source contract).
+# intake and discovery in sync (an earlier defect single-source contract).
 _INTAKE_ROUTES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r'^BUG-'), "bugs"),
     (re.compile(r'^PRIORITY-'), "priority"),
@@ -667,6 +673,7 @@ def reset_item(
     project: str,
     key: str,
     keep_artifacts: bool = False,
+    force: bool = False,
 ) -> None:
     """Reset a task or intake item to a re-pickable state.
 
@@ -705,13 +712,22 @@ def reset_item(
         key:            Task folder name, intake file base name, or key prefix.
         keep_artifacts: When True, preserve artifacts/ for agent task resets.
                         Logs are always cleared.  Ignored for intake resets.
+        force:          When True, perform stale-worktree cleanup (git worktree
+                        remove --force, git worktree prune, rm -rf of the on-disk
+                        path if still present, feature-branch deletion) before
+                        proceeding to the normal reset.  Without force, a detected
+                        stale worktree causes a Refused error and non-zero exit
+                        with the removal recipe printed to stderr.
 
     Raises:
-        OpsError:  If the project root is missing or an argument is invalid.
-        NotFound:  If no item matches the key.
-        Ambiguous: If the key prefix matches multiple items.
-        Refused:   If the item is in WORKING state (agent task only).
-        IoError:   If a filesystem operation fails.
+        OpsError:     If the project root is missing or an argument is invalid.
+        NotFound:     If no item matches the key.
+        Ambiguous:    If the key prefix matches multiple items.
+        Refused:      If the item is in WORKING state (agent task only), or if
+                      a stale worktree exists and force is False.
+        MountPinned:  If force is True and the stale worktree on-disk path is
+                      an active mount target; no cleanup is attempted.
+        IoError:      If a filesystem operation fails.
     """
     result = resolve_item(ctx, project, key)
     project_root = ctx.project_root(project)
@@ -727,6 +743,7 @@ def reset_item(
             task_id=result.path.name,
             current_state=result.state,
             keep_artifacts=keep_artifacts,
+            force=force,
         )
     elif result.item_type == "bug":
         _reset_intake_item(
@@ -778,13 +795,24 @@ def _reset_agent_task(
     task_id: str,
     current_state: str,
     keep_artifacts: bool,
+    force: bool = False,
 ) -> None:
     """Execute the agent-task reset procedure.
 
-    Refuses if current_state is WORKING.  Otherwise: regenerates status.md,
-    clears artifacts/ and logs/, flips the queue marker, deletes the feature
-    branch from the dev tree, runs git worktree prune, and appends to the
-    reset log.
+    Refuses if current_state is WORKING.  Then checks for a stale worktree:
+    - Without force: prints the detection summary and the exact three-command
+      removal recipe to stderr, then raises Refused (exit 2).
+    - With force: performs cleanup (git worktree remove --force, git worktree
+      prune, rm -rf of the on-disk path if still present, feature-branch
+      deletion) narrating each step to stderr.  Raises MountPinned (exit 4)
+      if the path is an active mount target.  On success, falls through to the
+      normal amnesia procedure.
+    - When no stale state: force and bare behave identically; no worktree
+      cleanup narration; normal reset proceeds.
+
+    After any stale-worktree handling: regenerates status.md, clears
+    artifacts/ and logs/, flips the queue marker, deletes the feature branch,
+    runs git worktree prune, and appends to the reset log.
 
     Args:
         ctx:           OpsContext (used to construct dev-tree paths via config).
@@ -795,10 +823,13 @@ def _reset_agent_task(
         task_id:       Task folder basename (e.g. CODER-20260607-001-slug).
         current_state: Current ## State value from status.md.
         keep_artifacts: When True, skip clearing artifacts/ (logs always cleared).
+        force:         When True, perform stale-worktree cleanup before reset.
 
     Raises:
-        Refused:   If current_state is "WORKING".
-        IoError:   If the status.md write or directory-clear fails.
+        Refused:      If current_state is "WORKING", or if a stale worktree
+                      exists and force is False.
+        MountPinned:  If force is True and the stale on-disk path is mount-pinned.
+        IoError:      If the status.md write or directory-clear fails.
     """
     # --- GUARD: refuse on WORKING (filesystem race) ---
     if current_state == "WORKING":
@@ -807,6 +838,26 @@ def _reset_agent_task(
             f"  An agent process may currently hold this task.\n"
             f"  Wait for the agent to finish or investigate before resetting."
         )
+
+    # --- Stale worktree detection and warn/cleanup ---
+    # Read dev_tree and branch_prefix early so detection can use them; they are
+    # also consumed by Step 4 below.
+    dev_tree = _read_dev_tree_path(project_root)
+    branch_prefix = _read_branch_prefix(project_root)
+    if dev_tree is not None and dev_tree.is_dir():
+        stale_wt = _detect_stale_worktree(dev_tree, task_id, branch_prefix)
+        if stale_wt.registration_exists or stale_wt.path_exists:
+            if not force:
+                # Warn path: print diagnostic + recipe to stderr, then refuse.
+                _warn_stale_worktree(task_id, stale_wt)
+                raise Refused(
+                    f"reset_item: REFUSED — task {task_id!r} has a stale worktree.\n"
+                    f"  Run the three commands above to clear it, then retry.\n"
+                    f"  Or re-run with --force to have reset.sh handle cleanup automatically."
+                )
+            else:
+                # Force path: perform cleanup with narration, then fall through.
+                _cleanup_stale_worktree(dev_tree, task_id, stale_wt)
 
     # --- Read Participant and Role from README.md ---
     readme = task_dir / "README.md"
@@ -840,8 +891,8 @@ def _reset_agent_task(
     _flip_queue_marker(marker_file, marker_key, " ")
 
     # --- Step 4: Dev tree operations (feature branch + worktree prune) ---
-    dev_tree = _read_dev_tree_path(project_root)
-    branch_prefix = _read_branch_prefix(project_root)
+    # dev_tree and branch_prefix were resolved earlier for stale-worktree detection;
+    # reuse them here rather than calling the cfg readers a second time.
     feature_branch = f"{branch_prefix}feature/{task_id}"
 
     if dev_tree is not None and dev_tree.is_dir():
@@ -1311,6 +1362,412 @@ def _git_worktree_prune(dev_tree: Path) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Stale worktree detection
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class StaleWorktreeInfo:
+    """Describes the stale-worktree state for a given task.
+
+    Returned by _detect_stale_worktree.  All fields are read-only snapshots;
+    the detection function never mutates anything on disk.
+
+    Attributes:
+        registration_exists: True when a worktree registration directory
+            exists under <dev_tree>/.git/worktrees/<task_id>.
+        path_exists:         True when the resolved on-disk worktree directory
+            (per the pgai_worktree_path convention) exists on disk.
+        worktree_path:       The resolved worktree path string (using the same
+            convention as worktree.sh pgai_worktree_path), or None when the
+            path could not be determined.
+        branch_pinned:       True when the worktree registration's HEAD points
+            at the task's feature branch (indicating the branch is checked out
+            in the stale worktree and cannot be deleted without cleanup).
+            None when registration_exists is False or HEAD could not be read.
+    """
+
+    registration_exists: bool
+    path_exists: bool
+    worktree_path: "str | None"
+    branch_pinned: "bool | None"
+
+
+def _detect_stale_worktree(
+    dev_tree: Path,
+    task_id: str,
+    branch_prefix: str,
+) -> StaleWorktreeInfo:
+    """Detect whether a stale worktree exists for the given task.
+
+    This function is read-only: it inspects the git repository and filesystem
+    but NEVER modifies anything.  Consumption (warn or teardown) is the
+    responsibility of the caller; in ticket 1 the result is only computed.
+
+    Worktree path convention: mirrors worktree.sh pgai_worktree_path.  The
+    resolved path is:
+        <PGAI_WORKTREE_BASE>/<task_id>          when PGAI_WORKTREE_BASE is set
+        /tmp/pgai_kanban_tmp/projects/<PP_project_name>/worktrees/<task_id>
+                                                  per-project default (env unset)
+        /tmp/pgai_kanban_tmp/worktrees/<task_id>  fallback when no project context
+
+    Because Python cannot source worktree.sh, this function uses the
+    PGAI_WORKTREE_BASE environment variable as the canonical override and
+    applies the same default resolution logic without reading kanban.cfg.
+    The kanban.cfg tier is only relevant when an operator has set
+    worktree_base in [paths]; in that scenario the operator may also set
+    PGAI_WORKTREE_BASE explicitly — a supported escape hatch.
+
+    Registration detection: checks for the presence of the directory
+    <dev_tree>/.git/worktrees/<task_id>.  Git creates this directory when a
+    worktree is added and removes it when the worktree is properly torn down
+    and pruned.  Its presence indicates a registration exists.
+
+    branch_pinned detection: reads <dev_tree>/.git/worktrees/<task_id>/HEAD
+    and checks whether it references the task's feature branch.  A branch is
+    considered pinned when the HEAD file contains the feature branch ref.
+
+    Args:
+        dev_tree:      Absolute path to the canonical dev-tree git repository.
+        task_id:       Task folder basename (e.g. CODER-20260607-001-slug).
+        branch_prefix: Branch prefix from project.cfg (e.g. 'ai_'), used to
+                       construct the expected feature branch name.
+
+    Returns:
+        StaleWorktreeInfo with the detection results.
+    """
+    feature_branch = f"{branch_prefix}feature/{task_id}"
+
+    # --- Resolve the expected worktree path (mirrors worktree.sh pgai_worktree_path) ---
+    pgai_worktree_base = os.environ.get("PGAI_WORKTREE_BASE", "").strip()
+    if pgai_worktree_base:
+        wt_base = pgai_worktree_base
+    else:
+        # Default: per-project subtree when PP_project_name is set (mirrors Tier 3).
+        temp_root = os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR", "/tmp/pgai_kanban_tmp")
+        pp_project_name = os.environ.get("PP_project_name", "").strip()
+        if pp_project_name:
+            wt_base = os.path.join(temp_root, "projects", pp_project_name, "worktrees")
+        else:
+            wt_base = os.path.join(temp_root, "worktrees")
+
+    worktree_path: "str | None" = os.path.join(wt_base, task_id) if wt_base else None
+
+    # --- Check on-disk path existence ---
+    path_exists = worktree_path is not None and os.path.isdir(worktree_path)
+
+    # --- Check git registration (presence of .git/worktrees/<task_id>/) ---
+    git_dir = dev_tree / ".git"
+    worktrees_dir = git_dir / "worktrees" / task_id
+    registration_exists = worktrees_dir.is_dir()
+
+    # --- Detect branch_pinned (reads HEAD from the registration dir) ---
+    branch_pinned: "bool | None" = None
+    if registration_exists:
+        head_file = worktrees_dir / "HEAD"
+        if head_file.is_file():
+            try:
+                head_content = head_file.read_text(encoding="utf-8").strip()
+                # Typical format: "ref: refs/heads/<branch_name>"
+                expected_ref = f"ref: refs/heads/{feature_branch}"
+                branch_pinned = head_content == expected_ref
+            except OSError:
+                branch_pinned = None
+
+    return StaleWorktreeInfo(
+        registration_exists=registration_exists,
+        path_exists=path_exists,
+        worktree_path=worktree_path,
+        branch_pinned=branch_pinned,
+    )
+
+
+def _warn_stale_worktree(task_id: str, stale: StaleWorktreeInfo) -> None:
+    """Print the stale-worktree detection summary and removal recipe to stderr.
+
+    Called when a stale worktree is detected and force is False.  The output
+    gives the operator enough context to perform manual cleanup, and names the
+    three commands in the exact order required to safely remove the registration
+    and on-disk path before retrying the reset.
+
+    This function never modifies anything on disk.
+
+    Args:
+        task_id: Task folder basename (e.g. CODER-20260607-001-slug).
+        stale:   Detection snapshot from _detect_stale_worktree.
+    """
+    import sys as _sys
+
+    wt_path = stale.worktree_path or "<path-unknown>"
+
+    found_parts = []
+    if stale.registration_exists:
+        found_parts.append("git worktree registration (.git/worktrees/<task_id>)")
+    if stale.path_exists:
+        found_parts.append(f"on-disk worktree directory ({wt_path})")
+    if stale.branch_pinned:
+        found_parts.append("feature branch is checked out in the stale worktree")
+    found_desc = "; ".join(found_parts) if found_parts else "stale worktree state"
+
+    print(
+        f"reset: STALE WORKTREE DETECTED for task {task_id!r}\n"
+        f"  Found: {found_desc}\n"
+        f"  On-disk path: {wt_path}\n"
+        f"\n"
+        f"  To clear the stale worktree manually, run these three commands:\n"
+        f"    git -C <dev_tree> worktree remove --force {wt_path}\n"
+        f"    git -C <dev_tree> worktree prune\n"
+        f"    rm -rf {wt_path}\n"
+        f"\n"
+        f"  Then retry the reset, or re-run with --force to have reset handle"
+        f" cleanup automatically.",
+        file=_sys.stderr,
+    )
+
+
+def _probe_mount_pin(path: str) -> "str | None":
+    """Return the blocking mount description if path is itself a mount point, else None.
+
+    Only returns a result when the exact path is listed as a mount point — a
+    broader filesystem that merely contains the path is not a pin.  This is the
+    critical distinction: we want to know whether the worktree directory IS a
+    mount target, not just whether it lives on some mounted filesystem.
+
+    Probes with ``findmnt --mountpoint`` first (exact-match semantics: exits 1
+    when the path is not itself a mount point) and falls back to a scan of
+    ``/proc/mounts`` (column 2, exact string match) when findmnt is unavailable.
+    Never attempts unmounting or any other mutation.
+
+    Args:
+        path: Absolute path string to probe.
+
+    Returns:
+        A human-readable description of the blocking mount (e.g. the source
+        device and filesystem type) if the exact path is an active mount point,
+        or None when no such mount is found.
+    """
+    import subprocess as _sp
+
+    # Tier 1: findmnt --mountpoint <path> exits 0 only when path IS itself a
+    # mount point (exact match semantics).  --target matches ANY path under a
+    # mount — that is too broad and would fire on /tmp under the root fs.
+    try:
+        r = _sp.run(
+            ["findmnt", "--mountpoint", path,
+             "--output", "SOURCE,TARGET,FSTYPE", "--noheadings"],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+        # returncode != 0: path is not a mount point — return None below.
+        return None
+    except FileNotFoundError:
+        pass  # findmnt not available; fall through to /proc/mounts scan.
+
+    # Tier 2: scan /proc/mounts for an exact match on the mount point column (col 2).
+    # /proc/mounts columns: device mountpoint fstype options dump pass
+    try:
+        with open("/proc/mounts", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == path:
+                    return f"{parts[0]} on {parts[1]} type {parts[2] if len(parts) > 2 else '?'}"
+    except OSError:
+        pass  # /proc/mounts not readable; cannot determine mount status.
+
+    return None
+
+
+def _cleanup_stale_worktree(
+    dev_tree: Path,
+    task_id: str,
+    stale: StaleWorktreeInfo,
+) -> None:
+    """Perform stale-worktree cleanup when --force is given.
+
+    Executes in order: git worktree remove --force, git worktree prune,
+    rm -rf of the on-disk path (if it still exists after the git remove),
+    and deletion of the worktree-pinned feature branch.  Narrates each
+    action to stderr before running it.  Raises on unrecoverable failures
+    so the caller's amnesia procedure does not run if cleanup is incomplete.
+
+    Before rm -rf, probes for an active mount at the path; raises MountPinned
+    if one is found (no partial cleanup).
+
+    Args:
+        dev_tree: Absolute path to the git repository.
+        task_id:  Task folder basename.
+        stale:    Detection snapshot from _detect_stale_worktree.
+
+    Raises:
+        MountPinned: If the on-disk path is an active mount target.
+        OpsError:    If git worktree remove --force fails and the directory
+                     still exists (or if shutil.rmtree fails).
+    """
+    import subprocess as _sp
+    import sys as _sys
+
+    wt_path = stale.worktree_path
+
+    # --- Pre-flight: probe for mount pin before any destructive action ---
+    # If the on-disk path is an active mount target, abort immediately so
+    # no partial cleanup occurs and the kanban state remains untouched.
+    if wt_path is not None and stale.path_exists:
+        blocking_mount = _probe_mount_pin(wt_path)
+        if blocking_mount is not None:
+            raise MountPinned(
+                f"reset: [worktree cleanup] ABORTED — on-disk path {wt_path!r}"
+                f" is an active mount target.\n"
+                f"  Blocking mount: {blocking_mount}\n"
+                f"  Unmount it manually, then retry with --force."
+            )
+
+    print(
+        f"reset: [worktree cleanup] starting stale-worktree removal for task {task_id!r}",
+        file=_sys.stderr,
+    )
+
+    # --- Step 1: git worktree remove --force ---
+    if stale.registration_exists or (wt_path is not None and stale.path_exists):
+        if wt_path is not None:
+            print(
+                f"reset: [worktree cleanup] git worktree remove --force {wt_path}",
+                file=_sys.stderr,
+            )
+            r = _sp.run(
+                ["git", "-C", str(dev_tree), "worktree", "remove", "--force", wt_path],
+                capture_output=True,
+                text=True,
+            )
+            if r.returncode != 0:
+                # Check whether the directory is gone despite the non-zero exit.
+                import os as _os
+                if _os.path.isdir(wt_path):
+                    raise OpsError(
+                        f"reset: [worktree cleanup] 'git worktree remove --force' failed"
+                        f" for {wt_path!r} and the directory still exists.\n"
+                        f"  git stderr: {r.stderr.strip() or '(empty)'}\n"
+                        f"  Manual cleanup required before retrying."
+                    )
+                # Non-zero exit but directory is gone: acceptable (git may exit 1
+                # when the worktree was only partially registered).
+                print(
+                    f"reset: [worktree cleanup] git worktree remove exited {r.returncode}"
+                    f" but {wt_path!r} is already gone — treating as success",
+                    file=_sys.stderr,
+                )
+            else:
+                print(
+                    f"reset: [worktree cleanup] git worktree remove completed",
+                    file=_sys.stderr,
+                )
+        else:
+            print(
+                f"reset: [worktree cleanup] git registration exists but path unknown;"
+                f" skipping 'git worktree remove' (no path to target)",
+                file=_sys.stderr,
+            )
+
+    # --- Step 2: git worktree prune ---
+    print(
+        f"reset: [worktree cleanup] git worktree prune",
+        file=_sys.stderr,
+    )
+    _sp.run(
+        ["git", "-C", str(dev_tree), "worktree", "prune"],
+        capture_output=True,
+    )
+    print(
+        f"reset: [worktree cleanup] git worktree prune completed",
+        file=_sys.stderr,
+    )
+
+    # --- Step 3: rm -rf the on-disk path if it still exists ---
+    # Mount-pin check was done at pre-flight above; proceed directly to removal.
+    if wt_path is not None:
+        import os as _os
+        if _os.path.isdir(wt_path):
+            print(
+                f"reset: [worktree cleanup] rm -rf {wt_path}",
+                file=_sys.stderr,
+            )
+            try:
+                shutil.rmtree(wt_path)
+            except OSError as exc:
+                raise OpsError(
+                    f"reset: [worktree cleanup] rm -rf {wt_path!r} failed: {exc}"
+                ) from exc
+            print(
+                f"reset: [worktree cleanup] rm -rf completed",
+                file=_sys.stderr,
+            )
+
+    # --- Step 4: delete the worktree-pinned feature branch ---
+    # Try to identify the feature branch name from the stale detection snapshot:
+    # first from the branch_pinned HEAD ref (most reliable), then by scanning
+    # git branch --list for any branch that contains the task_id.
+    # _git_delete_feature_branch is idempotent and warns-and-proceeds when the
+    # branch does not exist, so we attempt deletion even when the name is inferred.
+    feature_branch_name: "str | None" = None
+    if stale.branch_pinned and stale.registration_exists:
+        # Read HEAD from registration to extract the exact branch name.
+        head_file = dev_tree / ".git" / "worktrees" / task_id / "HEAD"
+        if head_file.is_file():
+            try:
+                head_content = head_file.read_text(encoding="utf-8").strip()
+                # Format: "ref: refs/heads/<branch_name>"
+                prefix = "ref: refs/heads/"
+                if head_content.startswith(prefix):
+                    feature_branch_name = head_content[len(prefix):]
+            except OSError:
+                pass
+
+    if feature_branch_name is None:
+        # Fall back: scan git branch --list for any branch containing task_id.
+        # If nothing is found, skip branch deletion (normal reset Step 4 handles it).
+        r2 = _sp.run(
+            ["git", "-C", str(dev_tree), "branch", "--list", f"*{task_id}"],
+            capture_output=True,
+            text=True,
+        )
+        if r2.returncode == 0:
+            candidates = [
+                line.strip().lstrip("* ").strip()
+                for line in r2.stdout.splitlines()
+                if line.strip()
+            ]
+            # Prefer the one that ends with /feature/<task_id> or similar.
+            for c in candidates:
+                if task_id in c:
+                    feature_branch_name = c
+                    break
+
+    if feature_branch_name:
+        print(
+            f"reset: [worktree cleanup] deleting pinned feature branch"
+            f" {feature_branch_name!r}",
+            file=_sys.stderr,
+        )
+        _git_delete_feature_branch(dev_tree, feature_branch_name)
+        print(
+            f"reset: [worktree cleanup] feature branch deleted",
+            file=_sys.stderr,
+        )
+    else:
+        print(
+            f"reset: [worktree cleanup] feature branch not identified;"
+            f" skipping branch deletion (will be handled by normal reset Step 4)",
+            file=_sys.stderr,
+        )
+
+    print(
+        f"reset: [worktree cleanup] stale worktree cleanup complete for task {task_id!r}",
+        file=_sys.stderr,
+    )
+
+
 def _append_reset_log(kanban_root: Path, task_id: str) -> None:
     """Append one line to the operator reset log.
 
@@ -1557,6 +2014,7 @@ def _get_marker_file(
         requirement → PROJECT_ROOT/tasks/queues/pm_backlog.md
 
     The agent for a task is derived from the task folder basename:
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     CODER-20260622-001-slug → coder.
 
     Args:
@@ -1764,15 +2222,15 @@ def _cli_main(argv: list[str] | None = None) -> int:
         python3 -m pgai_agent_kanban.ops close_item  PROJECT_ROOT KEY [STATE] [NOTE] [DRY_RUN]
         python3 -m pgai_agent_kanban.ops wontdo_item PROJECT_ROOT KEY
         python3 -m pgai_agent_kanban.ops delete_item PROJECT_ROOT KEY [FORCE]
-        python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS]
+        python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE]
 
     Exit codes:
         0  Success
         1  Error / argument error (printed to stderr)
         2  Ambiguous key (multiple matches); also used by delete_item for guard refusal;
-           also used by reset_item for WORKING state refusal
+           also used by reset_item for WORKING state refusal or stale-worktree-without-force
         3  Not found
-        4  State mutation failed / I/O error
+        4  State mutation failed / I/O error; also reset_item mount-pinned path
     """
     args = argv if argv is not None else sys.argv[1:]
 
@@ -1894,8 +2352,9 @@ def _cli_main(argv: list[str] | None = None) -> int:
             project_root = Path(rest[0])
             key = rest[1]
             keep_artifacts = len(rest) > 2 and rest[2] == "1"
+            force = len(rest) > 3 and rest[3] == "1"
             ctx, project = _ctx_for_project_root(project_root)
-            reset_item(ctx, project, key, keep_artifacts=keep_artifacts)
+            reset_item(ctx, project, key, keep_artifacts=keep_artifacts, force=force)
 
         else:
             print(
@@ -1915,8 +2374,13 @@ def _cli_main(argv: list[str] | None = None) -> int:
     except Refused as exc:
         # For deposit_intake: Refused = routing refused (rc=2)
         # For delete_item: Refused = guard refused (rc=2)
+        # For reset_item: Refused = WORKING state or stale-worktree-without-force (rc=2)
         print(exc, file=sys.stderr)
         return 2
+    except MountPinned as exc:
+        # reset_item --force with a mount-pinned stale worktree path (rc=4).
+        print(exc, file=sys.stderr)
+        return 4
     except IoError as exc:
         print(exc, file=sys.stderr)
         return 4

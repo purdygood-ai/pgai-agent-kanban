@@ -495,13 +495,48 @@ class TestPerRepoLockContention:
         protocol declines to act and returns sentinel 4, preventing OVERWATCH
         from modifying state while an agent is mid-flight.
 
-        This test holds the `repo-wake-pgai-kanban.lock` file and verifies
-        that the overwatch_protocol script emits the sentinel-4 message.
+        Regression coverage for BUG-0105: the project used here ("project_a")
+        is deliberately NOT named "pgai-kanban" — OVERWATCH must resolve the
+        SAME lock path (via pp_repo_lock_path, the single shared helper) that
+        a wake dispatcher would hold for this project, not a hardcoded
+        "repo-wake-pgai-kanban.lock" that only matched by coincidence for a
+        project literally named "pgai-kanban". The lock path is computed via
+        the shared bash helper (not re-derived in Python) so this test fails
+        if the helper and the fixture ever diverge.
         """
         root = two_project_root
+        project_name = "project_a"
 
-        # Create the specific lock file the overwatch_protocol checks.
-        lock_file = root / "locks" / "repo-wake-pgai-kanban.lock"
+        # Resolve the lock path the SAME way both wake dispatch and OVERWATCH
+        # do: via pp_repo_lock_path. This is the string-compare-equal check
+        # from BUG-0105's acceptance criteria — the fixture does not hardcode
+        # "repo-wake-<anything>.lock" itself.
+        resolve_lock_path_script = textwrap.dedent(f"""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            source "{_SCRIPTS_LIB}/ini_parser.sh"
+            source "{_SCRIPTS_LIB}/temp.sh"
+            source "{_SCRIPTS_LIB}/project_paths.sh"
+            KANBAN_ROOT="{root}"
+            export KANBAN_ROOT
+            pp_repo_lock_path "{project_name}"
+        """)
+        resolve_result = subprocess.run(
+            ["bash", "-c", resolve_lock_path_script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert resolve_result.returncode == 0, (
+            f"pp_repo_lock_path failed to resolve a lock path for '{project_name}'.\n"
+            f"stdout: {resolve_result.stdout}\nstderr: {resolve_result.stderr}"
+        )
+        lock_file = pathlib.Path(resolve_result.stdout.strip())
+        assert lock_file == root / "locks" / f"repo-wake-{project_name}.lock", (
+            f"pp_repo_lock_path resolved an unexpected path for project "
+            f"'{project_name}': {lock_file}"
+        )
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
         lock_file.touch()
 
         # Hold the lock in a background process.
@@ -535,7 +570,9 @@ class TestPerRepoLockContention:
 
             # Run the overwatch_protocol's overwatch_halt_first_fix function.
             # When the per-repo lock is held, it must emit the sentinel-4 message
-            # and return exit code 4.
+            # and return exit code 4. OVERWATCH_PROJECT is deliberately the SAME
+            # non-"pgai-kanban" project name used to resolve lock_file above, so
+            # this exercises the real resolution path end to end.
             protocol_script = textwrap.dedent(f"""\
                 #!/usr/bin/env bash
                 set +e
@@ -545,7 +582,7 @@ class TestPerRepoLockContention:
                 source "{_SCRIPTS_LIB}/overwatch_lib.sh"
                 source "{_SCRIPTS_LIB}/overwatch_protocol.sh"
                 KANBAN_ROOT="{root}"
-                OVERWATCH_PROJECT="pgai-agent-kanban"
+                OVERWATCH_PROJECT="{project_name}"
                 export KANBAN_ROOT OVERWATCH_PROJECT
 
                 # Provide a no-op function for the halt_first_fix wrapper to call.
@@ -564,7 +601,7 @@ class TestPerRepoLockContention:
                     **os.environ,
                     "KANBAN_ROOT": str(root),
                     "TEAM_ROOT": str(root),
-                    "OVERWATCH_PROJECT": "pgai-agent-kanban",
+                    "OVERWATCH_PROJECT": project_name,
                 },
             )
 

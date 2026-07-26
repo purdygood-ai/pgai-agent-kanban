@@ -78,6 +78,22 @@ source "${SCRIPT_DIR}/../lib/config_loader.sh"
 # shellcheck source=scripts/lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 
+# --- Source pp_run_ops helper (cwd-independent python3 -m invocations) ---
+# Provides pp_run_ops() so all pgai_agent_kanban.* module calls are
+# cwd-independent and do not require a pre-set PYTHONPATH from the caller.
+# shellcheck source=scripts/lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
+
+# --- Source OVERWATCH protocol helpers (transient_retry_* substrate) ---
+# Provides transient_retry_limit / transient_retry_field / transient_retry_write:
+# the ONE durable machine-readable retry record used by
+# handle_working_after_exit and recheck_blocked_tasks below. Side-effect-free
+# on source (no top-level commands run; KANBAN_ROOT/OVERWATCH_PROJECT are only
+# needed by the overwatch_backup_file/overwatch_log_action/overwatch_halt_first_fix
+# functions, none of which wake calls).
+# shellcheck source=scripts/lib/overwatch_protocol.sh
+source "${SCRIPT_DIR}/../lib/overwatch_protocol.sh"
+
 # PGAI_PROJECT_ROOT / PGAI_PROJECT_NAME initial values.
 # These are pre-loop placeholders overridden per-project in wake_common_run.
 # Resolution: honor PGAI_PROJECT_NAME if already set in the environment
@@ -801,6 +817,11 @@ raise SystemExit(1)
 PY
 }
 
+# get_role_from_readme <readme-path>
+# Extracts the raw ## Role value, uppercased and trimmed. Prints an empty
+# string when the section is absent or empty. Does NOT validate or default
+# the value — callers must check the result against role_is_valid_agent
+# and fail closed (BLOCKED, never a silent CODER fallback) on a bad value.
 get_role_from_readme() {
   local readme="$1"
   python3 - "$readme" <<'PY'
@@ -808,13 +829,44 @@ import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text()
 m = re.search(r'^## Role\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
 if not m:
-    print("CODER")
+    print("")
     raise SystemExit(0)
 role = m.group(1).strip().split('|')[0].strip().upper()
-if role not in ("CODER", "WRITER", "CM", "TESTER", "PO", "PM"):
-    role = "CODER"
 print(role)
 PY
+}
+
+# get_assigned_agent_from_readme <readme-path>
+# Extracts the raw ## Assigned Agent value, uppercased and trimmed. Prints
+# an empty string when the section is absent, empty, or explicitly "none"
+# (case-insensitive) — those all mean "not present" to dispatch. A
+# non-empty result may still be invalid; callers validate with
+# role_is_valid_agent before using it to select a subagent.
+get_assigned_agent_from_readme() {
+  local readme="$1"
+  python3 - "$readme" <<'PY'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+m = re.search(r'^## Assigned Agent\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
+if not m:
+    print("")
+    raise SystemExit(0)
+value = m.group(1).strip().split('|')[0].strip().upper()
+if not value or value == "NONE":
+    value = ""
+print(value)
+PY
+}
+
+# role_is_valid_agent <value>
+# True (exit 0) when <value> is one of the six recognized task roles /
+# subagent names. Shared by every wake provider's dispatch assertion so the
+# valid-role set is defined in exactly one place.
+role_is_valid_agent() {
+  case "$1" in
+    CODER|WRITER|CM|TESTER|PO|PM) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 get_model_override_from_readme() {
@@ -1345,25 +1397,41 @@ PY
     fi
 
     # --- Transient API error auto-retry ---
-    # A task whose Blocked Reason begins with "TRANSIENT API ERROR" and whose
-    # Needs Human=no is eligible for automatic promotion back to BACKLOG so the
-    # next wake can retry it.  The retry count is embedded in the reason string
-    # (e.g. "retry 1/3").  If the count extracted here is already at or past the
-    # cap, the wake script that set the reason should have already escalated to
-    # Needs Human=yes — this branch is a safety double-check that also handles
-    # the case where TRANSIENT_RETRY_CAP was lowered between runs.
-    if [[ "$cleared" == "false" ]] && echo "$blocked_reason" | grep -qi "TRANSIENT API ERROR"; then
-      local _transient_cap="${TRANSIENT_RETRY_CAP:-3}"
-      local _retry_count=0
-      if echo "$blocked_reason" | grep -qE 'retry ([0-9]+)/'; then
-        _retry_count="$(echo "$blocked_reason" | grep -oE 'retry ([0-9]+)/' | grep -oE '[0-9]+' | tail -1 || echo 0)"
-      fi
-      if [[ "$_retry_count" -lt "$_transient_cap" ]]; then
-        cleared=true
-        cleared_desc="transient API error auto-retry (attempt ${_retry_count}/${_transient_cap})"
-        log "BLOCKED task ${task_id}: transient API error — scheduling auto-retry (attempt ${_retry_count}/${_transient_cap})"
-      else
-        log "BLOCKED task ${task_id}: transient API error — retry cap reached (${_retry_count}/${_transient_cap}); leaving for human"
+    # A task whose durable ## Transient Retry record has reason_code
+    # transient_api_error and whose Needs Human=no (already confirmed above)
+    # is eligible for automatic promotion back to BACKLOG so the next wake can
+    # retry it. This reads the SAME durable record that
+    # handle_working_after_exit writes — never the ## Blocked Reason prose
+    # (which promote_blocked_to_backlog resets to "none" on every promotion,
+    # so it cannot be trusted as a retry-count source of truth). The record's
+    # own retry_limit is preferred so a promoted-then-reclassified task is
+    # judged against the ceiling that was in effect when it was recorded;
+    # transient_retry_limit() is the fallback for older/malformed records.
+    #
+    # The comparison here is intentionally identical to handle_working_after_exit's
+    # ("< ceiling"): if handle_working_after_exit already escalated to
+    # Needs Human=yes at the ceiling, this branch is never reached for that task
+    # (filtered out by the needs_human=="yes" check above). This branch remains
+    # as a safety double-check for the case where TRANSIENT_RETRY_CAP was
+    # lowered between the record being written and this recheck running.
+    if [[ "$cleared" == "false" ]]; then
+      local _retry_reason_code
+      _retry_reason_code="$(transient_retry_field "$task_status" "reason_code" "")"
+      if [[ "$_retry_reason_code" == "transient_api_error" ]]; then
+        local _transient_cap
+        _transient_cap="$(transient_retry_field "$task_status" "retry_limit" "")"
+        [[ "$_transient_cap" =~ ^[0-9]+$ ]] || _transient_cap="$(transient_retry_limit)"
+        local _retry_count
+        _retry_count="$(transient_retry_field "$task_status" "retry_count" "0")"
+        [[ "$_retry_count" =~ ^[0-9]+$ ]] || _retry_count=0
+
+        if [[ "$_retry_count" -lt "$_transient_cap" ]]; then
+          cleared=true
+          cleared_desc="transient API error auto-retry (attempt ${_retry_count}/${_transient_cap})"
+          log "BLOCKED task ${task_id}: transient API error — scheduling auto-retry (attempt ${_retry_count}/${_transient_cap})"
+        else
+          log "BLOCKED task ${task_id}: transient API error — retry cap reached (${_retry_count}/${_transient_cap}); leaving for human"
+        fi
       fi
     fi
 
@@ -1498,15 +1566,25 @@ PY
 # Provider-neutral WORKING-after-exit handler.  Called by both claude.sh and
 # codex.sh when a task is still in WORKING state after the agent process exits.
 #
+# This is the ONE controller that classifies and records transient
+# retry state: it is the sole writer of the durable ## Transient Retry record
+# (via transient_retry_write, overwatch_protocol.sh). recheck_blocked_tasks
+# below, and OVERWATCH's check-transient-api-error.sh, only ever READ this
+# record — neither maintains its own counter or ceiling.
+#
 # Behaviour:
 #   1. Grep the tail of <log_file> for known transient provider error signatures
 #      (Anthropic: 5xx/overloaded/rate-limit/429; OpenAI: server_error/Rate limit
 #      reached/The server had an error/500-503/529).  'insufficient_quota' is
 #      intentionally excluded — it is a billing failure, not a retry-worthy hiccup.
-#   2. If a transient signature is found, read the previous retry count from the
-#      task's Blocked Reason field, increment it, and:
-#        - If still within TRANSIENT_RETRY_CAP: BLOCKED + Needs Human=no
-#        - If cap reached: BLOCKED + Needs Human=yes (escalate)
+#   2. If a transient signature is found, read the previous retry_count from the
+#      durable ## Transient Retry record (never from ## Blocked Reason prose —
+#      that section is promotion-erased and human-narrative-only), increment
+#      it, write the updated record, and:
+#        - If retry_count is still BELOW the ceiling (transient_retry_limit):
+#          BLOCKED + Needs Human=no
+#        - If retry_count has REACHED the ceiling: BLOCKED + Needs Human=yes
+#          (escalate; exactly-at-cap is never left in limbo)
 #   3. If no transient signature, fall through to the generic path:
 #        BLOCKED + Needs Human=yes (agent exited without updating state)
 #   4. Normalizes the status file and prints the resulting final_state ("BLOCKED")
@@ -1522,7 +1600,8 @@ handle_working_after_exit() {
   local log_file="${3:-}"
   local agent_exit="${4:-}"
 
-  local _transient_cap="${TRANSIENT_RETRY_CAP:-3}"
+  local _transient_cap
+  _transient_cap="$(transient_retry_limit)"
   local _transient_matched=false
   local _transient_sig=""
 
@@ -1558,31 +1637,42 @@ handle_working_after_exit() {
   fi
 
   if [[ "$_transient_matched" == "true" ]]; then
-    # Read the current Blocked Reason to extract the previous retry count (if any).
-    local _prev_reason
-    _prev_reason="$(python3 - "$task_status" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'^##\s+Blocked Reason\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-print(m.group(1).strip() if m else "")
-PY
-)"
-    local _retry_count=0
-    if echo "$_prev_reason" | grep -qE 'TRANSIENT API ERROR.*retry ([0-9]+)/'; then
-      _retry_count="$(echo "$_prev_reason" | grep -oE 'retry ([0-9]+)/' | grep -oE '[0-9]+' | tail -1 || echo 0)"
-    fi
+    # Read the previous retry_count from the durable ## Transient Retry record
+    # — NOT from ## Blocked Reason prose. The record is the ONE authoritative
+    # count and survives BACKLOG promotion; Blocked Reason is reset to "none"
+    # by promote_blocked_to_backlog and must never be relied on for state.
+    local _retry_count
+    _retry_count="$(transient_retry_field "$task_status" "retry_count" "0")"
+    [[ "$_retry_count" =~ ^[0-9]+$ ]] || _retry_count=0
     _retry_count=$(( _retry_count + 1 ))
 
-    if [[ "$_retry_count" -le "$_transient_cap" ]]; then
+    # Record the classification BEFORE branching so the durable record is
+    # always up to date, regardless of which branch below fires.
+    transient_retry_write "$task_status" "transient_api_error" "$_retry_count" \
+      "$_transient_cap" "${ACTIVE_PROVIDER:-unknown}" "$_transient_sig"
+
+    # Strictly-less-than the ceiling is the only
+    # condition that leaves Needs Human=no. Exactly AT the ceiling escalates
+    # immediately — there is no longer a limbo state where Needs Human=no but
+    # retry_count has already reached the cap (recheck_blocked_tasks below
+    # uses the identical "< ceiling" comparison against the same record, so
+    # the two paths can never disagree).
+    # NOTE: the "TRANSIENT API ERROR" prefix on ## Blocked Reason is preserved
+    # verbatim (not reworded) because team/pgai_agent_kanban/dashboard/scan_attention.py's
+    # _is_transient_blocked() does a case-insensitive startswith("TRANSIENT API
+    # ERROR") check on this exact field to render the dashboard's TRANSIENT
+    # section. The record (not this prose) is now the retry-count source of
+    # truth, but the prefix itself remains a stable narrative marker.
+    if [[ "$_retry_count" -lt "$_transient_cap" ]]; then
       log "task ${task_id} left in WORKING after transient API error (${_transient_sig}); marking BLOCKED+TRANSIENT (retry ${_retry_count}/${_transient_cap})"
       set_state "$task_status" "BLOCKED"
-      set_block "$task_status" "Blocked Reason" "TRANSIENT API ERROR — ${_transient_sig} — safe to retry (retry ${_retry_count}/${_transient_cap}); no human action required. See ${log_file}."
+      set_block "$task_status" "Blocked Reason" "TRANSIENT API ERROR — ${_transient_sig} — safe to retry (retry ${_retry_count}/${_transient_cap}; see ## Transient Retry record); no human action required. See ${log_file}."
       set_block "$task_status" "Blockers" "TRANSIENT API ERROR (retry ${_retry_count}/${_transient_cap}): ${_transient_sig}. See ${log_file}."
       set_block "$task_status" "Needs Human" "no"
     else
       log "task ${task_id} left in WORKING after transient API error (${_transient_sig}); retry cap reached (${_retry_count}/${_transient_cap}) — escalating to Needs Human=yes"
       set_state "$task_status" "BLOCKED"
-      set_block "$task_status" "Blocked Reason" "TRANSIENT API ERROR (retry cap ${_transient_cap} reached) — ${_transient_sig} — repeated transient failures; human investigation required. Exit code: ${agent_exit}. See ${log_file}."
+      set_block "$task_status" "Blocked Reason" "TRANSIENT API ERROR (retry cap ${_transient_cap} reached) — ${_transient_sig} — repeated transient failures; human investigation required (see ## Transient Retry record). Exit code: ${agent_exit}. See ${log_file}."
       set_block "$task_status" "Blockers" "TRANSIENT API ERROR (retry cap ${_transient_cap} reached): ${_transient_sig}. Exit code: ${agent_exit}. See ${log_file}."
       set_block "$task_status" "Needs Human" "yes"
     fi
@@ -1600,38 +1690,48 @@ PY
 # ---------------------------------------------------------------------------
 # close_intake_on_finalize_report
 #   <task_id> <task_readme> <project_root> <tasks_root> <wf_manifest_finalize>
+#   [<req_path_override>]
 #
 # Closure-parity helper for testing-only (finalize=report) workflows.
 # Mirrors the CM intake-item closure that cm/release.sh Step 16b performs for
-# release workflows via cm/promote_bundled_items.py, but keyed on:
-#   (a) the workflow plugin's finalize=report capability (WF_MANIFEST_FINALIZE)
-#   (b) the terminal roster ticket's README carrying "finalize_mode: report"
-#       in its ## Constraints section (written by inject_simple_tester_task)
+# release workflows via cm/promote_bundled_items.py.
 #
-# Both guards must be true before any closure is attempted — neither fires in
-# isolation.  This dual-gate prevents the closure from triggering on release
-# or document workflows (finalize != report).
+# Root-cause evidence (an earlier defect, 2026-07-14T14:04:10):
+#   "finalize_mode:report not found in README constraints — skipping intake
+#   closure (not a finalize=report terminal ticket)"
+# The prior Guard 2 checked for a README marker that inject_simple_tester_task
+# writes — but PM-authored one-ticket plans never carry it.  The fix replaces
+# that marker check with a completion census: every sibling task that shares
+# the same requirements path must be terminal before closure fires.  This is
+# shape-blind (one-ticket, two-ticket, injected or PM-authored) and mirrors
+# the same rule CM workflows implement implicitly (CM is positionally last).
 #
-# Reference: BUG-0066 (this fix), BUG-0063 (report half), BUG-0051 (design).
+# Reference: an earlier defect (this fix), an earlier defect (original helper), an earlier defect
+#   (report half), an earlier defect (design).
 # Parity with: cm/release.sh Step 16b + cm/promote_bundled_items.py.
 #
 # Behaviour:
 #   1. Guard 1: <wf_manifest_finalize> must equal "report".  Any other value
 #      (tag, publish, …) exits immediately — no-op for release/document paths.
-#   2. Guard 2: <task_readme> ## Constraints section must contain the line
-#      "finalize_mode: report" (written by inject_simple_tester_task).
-#   3. Requirements path: the first absolute-path entry in <task_readme>'s
-#      ## Inputs section (requirements file prepended by create_task_folder).
-#   4. Mid-run failure check: scan <tasks_root> for any task whose README
-#      lists the same requirements path in ## Inputs.  If any such sibling
-#      task has ## State: BLOCKED, abort — item stays running.
-#   5. Closure: invoke the canonical close_item helper via the ops package:
-#        python3 -m pgai_agent_kanban.ops close_item <project_root> <key>
+#   2. Requirements path: when <req_path_override> (6th arg) is non-empty it is
+#      used directly, bypassing README extraction.  Otherwise the first
+#      absolute-path entry in <task_readme>'s ## Inputs section is used
+#      (requirements file prepended by create_task_folder).
+#   3. Completion census: scan ALL task folders under <tasks_root> whose
+#      README ## Inputs cite the same requirements path.  Terminal states are
+#      exactly {DONE, WONT-DO}; all others (WORKING, BACKLOG, WAITING,
+#      BLOCKED) are non-terminal.  If every sibling is terminal, proceed to
+#      closure.  Otherwise log the census result (counts, non-terminal siblings
+#      by ID and state) and skip.  Note: the BLOCKED mid-run check from the
+#      prior implementation is subsumed here — BLOCKED is non-terminal and will
+#      prevent closure via the census, so no separate BLOCKED-only pass is
+#      needed.
+#   4. Closure: invoke the canonical close_item helper via the ops package:
+#        pp_run_ops pgai_agent_kanban.ops close_item <project_root> <key>
 #      where <key> is the requirements file's basename (without .md extension).
 #
 # Returns 0 on success (closure fired or legitimately skipped).
-# Returns non-zero only on unexpected internal errors (best-effort: never
-# fails the task that called it).
+# Never fails the caller — all internal error paths return 0.
 # ---------------------------------------------------------------------------
 close_intake_on_finalize_report() {
   local _task_id="${1:-}"
@@ -1639,6 +1739,17 @@ close_intake_on_finalize_report() {
   local _project_root="${3:-}"
   local _tasks_root="${4:-}"
   local _wf_finalize="${5:-}"
+  local _req_path_override="${6:-}"
+
+  # Narration prefix: when called from sweep_running_intake_census (_task_id=="sweep"),
+  # use "sweep-census:" so all sweep-mode helper lines share one grep-able prefix.
+  # Non-sweep callers keep the "task <id>: close_intake_on_finalize_report:" form.
+  local _log_pfx
+  if [[ "${_task_id}" == "sweep" ]]; then
+    _log_pfx="sweep-census:"
+  else
+    _log_pfx="task ${_task_id}: close_intake_on_finalize_report:"
+  fi
 
   # Guard 1: finalize capability must be "report".
   # All other values (tag, publish, none) skip this block entirely so that
@@ -1648,40 +1759,16 @@ close_intake_on_finalize_report() {
     return 0
   fi
 
-  # Guard 2: task README ## Constraints must contain "finalize_mode: report".
-  # inject_simple_tester_task writes this constraint on the TESTER finalizer
-  # task; regular TESTER tasks in release workflows do not carry it.
-  local _readme_has_finalize_report=false
-  if [[ -f "$_task_readme" ]]; then
-    _readme_has_finalize_report="$(python3 - "$_task_readme" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-except Exception:
-    print("false"); raise SystemExit(0)
-# Parse ## Constraints section (ends at next ## heading or EOF)
-m = re.search(
-    r'^##\s+Constraints\s*\n(.*?)(?=\n##|\Z)',
-    text, flags=re.S | re.M
-)
-if m and re.search(r'^\s*[-*]?\s*finalize_mode\s*:\s*report\s*$', m.group(1), re.M):
-    print("true")
-else:
-    print("false")
-PY
-)"
-  fi
-
-  if [[ "$_readme_has_finalize_report" != "true" ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: finalize_mode:report not found in README constraints — skipping intake closure (not a finalize=report terminal ticket)"
-    return 0
-  fi
-
-  # Extract requirements file path: the first absolute path in ## Inputs.
-  # create_task_folder prepends requirements_path to inputs so it is always
-  # the first entry when present.
+  # Resolve the requirements file path.
+  # When a path override is provided (sweep call site), use it directly.
+  # Otherwise extract the first absolute path from the task README ## Inputs
+  # (create_task_folder always prepends the requirements path as the first
+  # entry when one is present).
   local _req_path=""
-  _req_path="$(python3 - "$_task_readme" <<'PY'
+  if [[ -n "$_req_path_override" ]]; then
+    _req_path="$_req_path_override"
+  else
+    _req_path="$(python3 - "$_task_readme" <<'PY'
 import pathlib, re, sys
 try:
     text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
@@ -1700,34 +1787,43 @@ for line in m.group(1).splitlines():
 raise SystemExit(1)
 PY
 )" || true
+  fi
 
   if [[ -z "$_req_path" ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: could not extract requirements path from README ## Inputs — skipping intake closure"
+    log "${_log_pfx} could not extract requirements path from README ## Inputs — skipping intake closure"
     return 0
   fi
 
   if [[ ! -f "$_req_path" ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: requirements file not found at ${_req_path} — skipping intake closure"
+    log "${_log_pfx} requirements file not found at ${_req_path} — skipping intake closure"
     return 0
   fi
 
-  log "task ${_task_id}: close_intake_on_finalize_report: requirements file identified: ${_req_path}"
+  log "${_log_pfx} requirements file identified: ${_req_path}"
 
-  # Mid-run failure check: scan sibling tasks (same requirements file in
-  # ## Inputs) for BLOCKED state.  A BLOCKED sibling means the run did not
-  # complete cleanly; intake item must remain running.
-  local _blocked_sibling=false
+  # Completion census: scan ALL task folders under tasks_root whose README
+  # ## Inputs cite the same requirements path.  Closure fires only when every
+  # sibling (current task included, called post-transition as DONE) is
+  # terminal.  Terminal states: DONE, WONT-DO.  Non-terminal: everything else
+  # (WORKING, BACKLOG, WAITING, BLOCKED).  Prior-run corpses in WONT-DO are
+  # terminal and do not prevent closure.
+  local _census_result=""
   if [[ -d "$_tasks_root" ]]; then
-    _blocked_sibling="$(python3 - "$_tasks_root" "$_req_path" <<'PY'
+    _census_result="$(python3 - "$_tasks_root" "$_req_path" <<'PY'
 import pathlib, re, sys
+
+TERMINAL = {"DONE", "WONT-DO"}
 
 tasks_root = pathlib.Path(sys.argv[1])
 req_path   = sys.argv[2]
 
+total      = 0
+non_terminal = []  # list of "id:state" strings
+
 for task_dir in sorted(tasks_root.iterdir()):
     if not task_dir.is_dir() or task_dir.name == "queues":
         continue
-    readme = task_dir / "README.md"
+    readme      = task_dir / "README.md"
     status_file = task_dir / "status.md"
     if not readme.is_file() or not status_file.is_file():
         continue
@@ -1735,55 +1831,201 @@ for task_dir in sorted(tasks_root.iterdir()):
         readme_text = readme.read_text(encoding="utf-8")
     except OSError:
         continue
-    # Check if this task's ## Inputs contains the same requirements path
+    # Filter to tasks whose ## Inputs cite the same requirements path
     m = re.search(r'^##\s+Inputs\s*\n(.*?)(?=\n##|\Z)', readme_text, flags=re.S | re.M)
-    if not m:
+    if not m or req_path not in m.group(1):
         continue
-    inputs_text = m.group(1)
-    if req_path not in inputs_text:
-        continue
-    # Sibling task found — check its state
+    total += 1
+    # Read sibling state
     try:
         status_text = status_file.read_text(encoding="utf-8")
     except OSError:
+        # Unreadable status — treat as non-terminal to be safe
+        non_terminal.append(f"{task_dir.name}:UNKNOWN")
         continue
     state_m = re.search(r'^##\s+State\s*\n\s*(\S+)', status_text, re.M)
-    if state_m and state_m.group(1).strip().upper() == "BLOCKED":
-        print("true")
-        raise SystemExit(0)
+    state = state_m.group(1).strip().upper() if state_m else "UNKNOWN"
+    if state not in TERMINAL:
+        non_terminal.append(f"{task_dir.name}:{state}")
 
-print("false")
+if non_terminal:
+    summary = ", ".join(non_terminal)
+    print(f"skip:{total} sibling(s), {len(non_terminal)} non-terminal: {summary}")
+else:
+    print(f"ok:{total}")
 PY
 )" || true
   fi
 
-  if [[ "$_blocked_sibling" == "true" ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: BLOCKED sibling task found — intake item stays running (mid-run failure guard)"
+  # Parse census result: "ok:N" means all siblings are terminal; "skip:..." means not.
+  if [[ -z "$_census_result" || "$_census_result" == skip:* ]]; then
+    local _census_detail="${_census_result#skip:}"
+    log "${_log_pfx} census incomplete — skipping intake closure (${_census_detail:-tasks_root not found or unreadable})"
     return 0
   fi
 
-  # All guards passed: invoke canonical close_item helper.
+  # All siblings are terminal: invoke canonical close_item helper.
   # Key is the requirements file basename without the .md extension.
   local _req_key
   _req_key="$(basename "$_req_path" .md)"
 
-  log "task ${_task_id}: close_intake_on_finalize_report: closing intake item '${_req_key}' (finalize=report terminal ticket complete; parity with CM Step 16b)"
+  log "${_log_pfx} closing intake item '${_req_key}' (finalize=report terminal ticket complete; parity with CM Step 16b)"
 
   local _close_exit=0
   set +e
-  python3 -m pgai_agent_kanban.ops close_item "$_project_root" "$_req_key" done 2>&1 | \
-    while IFS= read -r _line; do log "close_intake_on_finalize_report: ${_line}"; done
+  pp_run_ops pgai_agent_kanban.ops close_item "$_project_root" "$_req_key" done 2>&1 | \
+    while IFS= read -r _line; do log "${_log_pfx} ${_line}"; done
   _close_exit="${PIPESTATUS[0]}"
   set -e
 
   if [[ $_close_exit -eq 0 ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: intake item '${_req_key}' closed done (BUG-0066 fix)"
+    log "${_log_pfx} intake item '${_req_key}' closed done"
   elif [[ $_close_exit -eq 2 ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: WARNING: ambiguous key '${_req_key}' — could not uniquely identify intake item; item left at running"
+    log "${_log_pfx} WARNING: ambiguous key '${_req_key}' — could not uniquely identify intake item; item left at running"
   elif [[ $_close_exit -eq 3 ]]; then
-    log "task ${_task_id}: close_intake_on_finalize_report: WARNING: intake item '${_req_key}' not found — nothing to close"
+    log "${_log_pfx} WARNING: intake item '${_req_key}' not found — nothing to close"
   else
-    log "task ${_task_id}: close_intake_on_finalize_report: WARNING: close_item exited ${_close_exit} for '${_req_key}'; item may not have been closed"
+    log "${_log_pfx} WARNING: close_item exited ${_close_exit} for '${_req_key}'; item may not have been closed"
+  fi
+
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# sweep_running_intake_census
+#
+# Per-wake self-healing pass: close stranded intake items whose sibling tasks
+# all reached a terminal state but whose own ## Status is still "running".
+# Called from the per-wake re-check sweep (alongside recheck_waiting_tasks and
+# recheck_blocked_tasks) so that items whose closing moment was missed by a
+# crash, restart, or clock-racing tick are healed on the next wake.
+#
+# Context: runs inside run_project_chain after pp_load_config, so the
+# following shell variables are available:
+#   _CURRENT_PROJECT — the project currently being processed
+#   PGAI_PROJECT_ROOT — the project root directory
+#   TASKS_ROOT — tasks/ directory for this project
+#
+# Resolution: workflow type and finalize capability are resolved PER ITEM from
+# each requirements doc's "## Workflow Type" field (not from project.cfg).
+# A project whose cfg lacks workflow_type, or a project hosting items of mixed
+# workflow types, is handled correctly: each item is evaluated independently.
+# project.cfg is at most a hint; it is never the gate.
+#
+# Plugin cache: wf_load_plugin is called at most once per distinct workflow
+# type per wake — an associative array keyed by type memoises the finalize
+# value within this function's scope so repeated items of the same type do
+# not repeat the plugin load.
+#
+# Narration: every item-level outcome is logged at the standard log level so
+# there is always at least one sweep-census line per wake when running items
+# exist.  Silent early returns are eliminated.
+#
+# Guard (one glob): if the requirements directory is absent or empty the
+# function logs a skip line and returns after one directory iteration.
+#
+# For each running intake item where finalize=report the existing
+# close_intake_on_finalize_report census logic runs: all sibling tasks must
+# be terminal (DONE or WONT-DO) before the item is flipped to done.
+#
+# Returns 0 always (never blocks the caller).
+# ---------------------------------------------------------------------------
+sweep_running_intake_census() {
+  # Guard: find the requirements directory for this project.
+  # pp_requirements_dir echoes "<project_root>/requirements".
+  local _swc_req_dir=""
+  _swc_req_dir="$(pp_requirements_dir "${_CURRENT_PROJECT:-}" 2>/dev/null || true)"
+  if [[ -z "$_swc_req_dir" || ! -d "$_swc_req_dir" ]]; then
+    log "sweep-census: project ${_CURRENT_PROJECT:-}: skipped — no requirements directory"
+    return 0
+  fi
+
+  # Per-wake plugin cache: declare -A in local scope.
+  # Keys are workflow type strings; values are the resolved finalize capability.
+  # "LOAD_FAILED" is stored when wf_load_plugin returns non-zero so the
+  # failure is cached and not retried for subsequent items of the same type.
+  declare -A _swc_finalize_cache
+
+  # Iterate over requirements files (one glob); check each for running status.
+  local _swc_found_running=false
+  local _swc_req_file
+  for _swc_req_file in "$_swc_req_dir"/*.md; do
+    [[ -f "$_swc_req_file" ]] || continue
+
+    # Read ## Status from the requirements doc.
+    local _swc_status=""
+    _swc_status="$(python3 - "$_swc_req_file" <<'PY'
+import pathlib, re, sys
+try:
+    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+except Exception:
+    raise SystemExit(1)
+m = re.search(r'^##\s+Status\s*\n\s*(\S+)', text, re.M)
+print(m.group(1).strip().lower() if m else "")
+PY
+    )" || true
+
+    [[ "$_swc_status" == "running" ]] || continue
+
+    _swc_found_running=true
+
+    # Read ## Workflow Type from the requirements doc (item-level resolution).
+    # Defaults to "release" when the field is absent or unreadable.
+    local _swc_item_wf_type=""
+    _swc_item_wf_type="$(python3 - "$_swc_req_file" <<'PY'
+import pathlib, re, sys
+try:
+    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+except Exception:
+    print("release"); raise SystemExit(0)
+m = re.search(r'^##\s+Workflow\s+Type[^\S\n]*\n(.*?)(\n+##|\Z)', text, flags=re.S|re.M|re.I)
+if not m:
+    print("release"); raise SystemExit(0)
+val = m.group(1).strip().lower()
+print(val if val else "release")
+PY
+    )" || _swc_item_wf_type="release"
+
+    # Resolve finalize capability from cache or by loading the plugin.
+    local _swc_item_finalize=""
+    if [[ -v _swc_finalize_cache["$_swc_item_wf_type"] ]]; then
+      _swc_item_finalize="${_swc_finalize_cache[$_swc_item_wf_type]}"
+    else
+      local _swc_plugin_exit=0
+      set +e
+      wf_load_plugin "${_swc_item_wf_type}" 2>/dev/null
+      _swc_plugin_exit=$?
+      set -e
+      if [[ $_swc_plugin_exit -eq 0 ]]; then
+        _swc_item_finalize="${WF_MANIFEST_FINALIZE:-}"
+      else
+        _swc_item_finalize="LOAD_FAILED"
+      fi
+      _swc_finalize_cache["$_swc_item_wf_type"]="$_swc_item_finalize"
+    fi
+
+    if [[ "$_swc_item_finalize" == "LOAD_FAILED" ]]; then
+      log "sweep-census: skipped — ${_swc_req_file}: workflow type '${_swc_item_wf_type}' plugin failed to load"
+      continue
+    fi
+
+    if [[ "$_swc_item_finalize" != "report" ]]; then
+      log "sweep-census: skipped — ${_swc_req_file}: finalize=${_swc_item_finalize} — not report"
+      continue
+    fi
+
+    log "sweep-census: project ${_CURRENT_PROJECT:-}: running intake item ${_swc_req_file}; attempting completion census"
+    close_intake_on_finalize_report \
+      "sweep" \
+      "" \
+      "${PGAI_PROJECT_ROOT:-}" \
+      "${TASKS_ROOT:-}" \
+      "report" \
+      "$_swc_req_file"
+  done
+
+  if [[ "$_swc_found_running" == "false" ]]; then
+    log "sweep-census: project ${_CURRENT_PROJECT:-}: no running intake items"
   fi
 
   return 0

@@ -25,6 +25,10 @@
 #
 # Optional flags (agent-task resets only):
 #   --keep-artifacts   Preserve artifacts/ contents (default: clear them)
+#   --force            Clear stale worktree (registration and/or on-disk path)
+#                      before resetting; required when a prior run left a stale
+#                      worktree that would block the reset.  Without --force,
+#                      a stale worktree causes a warning and non-zero exit.
 #
 # Optional flags (all modes):
 #   --help, -h         Show this help and exit 0
@@ -47,13 +51,18 @@
 #
 # Refusals (non-zero exit, no changes):
 #   agent-task resets:  WORKING state (an agent may currently hold the task)
+#   agent-task resets:  stale worktree detected without --force (recipe printed to stderr)
 #   all modes:          Ambiguous key, zero key matches, missing required flags,
 #                       unknown flags (e.g. old --agent selector is now gone)
 #
 # Exit codes:
 #   0  reset completed
 #   1  usage error, missing argument, or ambiguous/missing key
-#   2  WORKING state refusal (agent-task resets only)
+#   2  WORKING state refusal (agent-task resets only); or stale worktree detected
+#      without --force (removal recipe printed to stderr; agent-task resets only)
+#   3  key not found
+#   4  --force cleanup aborted because on-disk worktree path is a mount target
+#      (blocking mount name printed to stderr; agent-task resets only)
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
@@ -68,12 +77,14 @@ source "${_SCRIPT_DIR}/lib/operator_args.sh"
 source "${_SCRIPT_DIR}/lib/project_paths.sh"
 # shellcheck source=lib/worktree.sh
 source "${_SCRIPT_DIR}/lib/worktree.sh"
+# shellcheck source=lib/pp_run_ops.sh
+source "${_SCRIPT_DIR}/lib/pp_run_ops.sh"
 
 # ---------------------------------------------------------------------------
 # Declared flag vocabulary for this script.
-# reset accepts: --project --key --keep-artifacts --help
+# reset accepts: --project --key --keep-artifacts --force --help
 # ---------------------------------------------------------------------------
-OPERATOR_VALID_FLAGS=(project key keep-artifacts help)
+OPERATOR_VALID_FLAGS=(project key keep-artifacts force help)
 
 # ---------------------------------------------------------------------------
 # Usage / --help
@@ -83,6 +94,10 @@ _usage() {
         "$(basename "$0")" \
         "Reset agent tasks or intake items to re-pickable state (operator power tool)." \
         OPERATOR_VALID_FLAGS \
+        "  (--force is the stale-worktree cleanup flag: clears any residual" \
+        "   worktree registration and on-disk path before resetting the task;" \
+        "   without --force a detected stale worktree causes a warning and" \
+        "   non-zero exit.  Agent-task resets only.)" \
         "" \
         "         value: full item key (see formats):" \
         "                 Agent task:   ROLE-YYYYMMDD-NNN[-slug] (role in prefix)" \
@@ -91,16 +106,20 @@ _usage() {
         "                 Requirement:  version string (e.g. v0.1.2)" \
         "" \
         "Examples:" \
-        "  $(basename "$0") --project pgai-agent-kanban --key CODER-20260607-001-some-slug" \
-        "  $(basename "$0") --project pgai-agent-kanban --key TESTER-20260607-001" \
-        "  $(basename "$0") --project pgai-agent-kanban --key BUG-0042" \
-        "  $(basename "$0") --project pgai-agent-kanban --key PRIORITY-0007" \
+        "  $(basename "$0") --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN-some-slug" \
+        "  $(basename "$0") --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN" \
+        "  $(basename "$0") --project pgai-agent-kanban --key BUG-NNNN" \
+        "  $(basename "$0") --project pgai-agent-kanban --key PRIORITY-NNNN" \
         "  $(basename "$0") --project pgai-agent-kanban --key v0.1.2" \
         "" \
         "Exit codes:" \
         "  0  reset completed" \
         "  1  usage error or key not found / ambiguous" \
-        "  2  WORKING state refusal (agent-task resets only)"
+        "  2  WORKING state refusal (agent-task resets only); or stale worktree" \
+        "     detected without --force (recipe printed to stderr)" \
+        "  3  key not found" \
+        "  4  --force aborted: on-disk worktree path is a mount target" \
+        "     (blocking mount name printed to stderr)"
 }
 
 # ---------------------------------------------------------------------------
@@ -112,6 +131,7 @@ _usage() {
 _project_value="" # --project VALUE
 _key_value=""     # --key VALUE
 _keep_artifacts=false
+_force=false
 _show_help=false
 
 while [[ $# -gt 0 ]]; do
@@ -132,6 +152,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --keep-artifacts)
             _keep_artifacts=true
+            shift
+            ;;
+        --force)
+            _force=true
             shift
             ;;
         *)
@@ -190,11 +214,17 @@ if [[ "${_keep_artifacts}" == "true" ]]; then
     _keep_artifacts_flag="1"
 fi
 
+_force_flag="0"
+if [[ "${_force}" == "true" ]]; then
+    _force_flag="1"
+fi
+
 _py_rc=0
-python3 -m pgai_agent_kanban.ops reset_item \
+pp_run_ops pgai_agent_kanban.ops reset_item \
     "${_project_root}" \
     "${_key_value}" \
-    "${_keep_artifacts_flag}" || _py_rc=$?
+    "${_keep_artifacts_flag}" \
+    "${_force_flag}" || _py_rc=$?
 
 if [[ "${_py_rc}" -ne 0 ]]; then
     exit "${_py_rc}"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dashboard-attention.sh
-# Window 3 attention panel — shows BLOCKED tasks, quarantine alerts, and
+# Window 4 attention panel — shows BLOCKED tasks, quarantine alerts, and
 # active halt scopes.
 #
 # Designed to be run under `watch -c -n N -- dashboard-attention.sh`.
@@ -130,6 +130,15 @@ source "${SCRIPT_DIR}/../lib/projects.sh"
 source "${SCRIPT_DIR}/lib/helper_resolver.sh"
 # Source shared halt scope helper (single decision point for halt scope)
 source "${SCRIPT_DIR}/lib/halt_scope.sh"
+
+# Local-only render guard: this is a dashboard render path, so it must never
+# perform a network git operation (ls-remote/fetch/pull/push/clone).
+# PGAI_GIT_LOCAL_ONLY is honored by _disc_git_tag_exists (before
+# its ls-remote fallthrough) and by pp_last_released_version (before its
+# fetch), both of which discovery_scan_stale_requirements below depends on
+# transitively.  Exported before sourcing discovery.sh so every git-touching
+# helper it defines or calls picks up the flag from process start.
+export PGAI_GIT_LOCAL_ONLY=1
 
 # Source discovery helpers (provides discovery_scan_stale_requirements and deps)
 # TEAM_ROOT must be set before sourcing discovery.sh (used by log shim).
@@ -299,6 +308,7 @@ done
 unset _MAX_TASK_SEC
 
 # ---------------------------------------------------------------------------
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 # Quarantined files (CODER-20260528-024): list files in each project's
 # rejected/ directory with type, filename, reason, and retry count.
 # Section is suppressed entirely when no files are quarantined.

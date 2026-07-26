@@ -9,7 +9,8 @@ to distinguish individual subtypes.
     ├── NotFound    — requested resource (task, project, field) does not exist
     ├── Ambiguous   — lookup matched more than one result; caller must narrow
     ├── Refused     — operation was rejected by a policy or guard (e.g. HALT)
-    └── IoError     — underlying I/O failure reading kanban files
+    ├── IoError     — underlying I/O failure reading kanban files
+    └── MountPinned — stale worktree path is an active mount target; cannot rm -rf
 """
 
 from __future__ import annotations
@@ -73,4 +74,18 @@ class IoError(OpsError):
     files so callers can catch ops I/O failures separately from general
     Python I/O errors.  The original exception is available as
     ``__cause__`` (use ``raise IoError(...) from original_exc``).
+    """
+
+
+class MountPinned(OpsError):
+    """Raised when a stale worktree path cannot be removed because it is mount-pinned.
+
+    The on-disk path is an active mount target or contains an active mount.
+    The caller must not attempt umount or any other mount manipulation;
+    detection and reporting are the only sanctioned actions.
+
+    The error message names the blocking mount so the operator can identify
+    and unmount it manually before retrying the reset with --force.
+
+    Maps to exit code 4 in the reset_item CLI path.
     """

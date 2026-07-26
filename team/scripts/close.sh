@@ -45,6 +45,8 @@ _LIB_DIR="${_SCRIPT_DIR}/lib"
 source "${_LIB_DIR}/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
 source "${_LIB_DIR}/project_paths.sh"
+# shellcheck source=lib/pp_run_ops.sh
+source "${_LIB_DIR}/pp_run_ops.sh"
 
 # ---------------------------------------------------------------------------
 # Declared flag vocabulary for this script.
@@ -71,7 +73,9 @@ _usage() {
         "  cannot be resolved to a single target (not found or ambiguous)." \
         "" \
         "Example:" \
+        # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
         "  close.sh --project myproject --key BUG-0362 --state superseded \\" \
+        # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
         "           --note 'subsumed by PRIORITY-0099'" \
         "" \
         "Exit codes:" \
@@ -189,11 +193,11 @@ _project_root="$(pp_project_root "${_project_value}")" || exit 1
 #   - ## Status/State mutation + optional ## Close Note recording
 #   - queue/backlog marker flip
 #
-# CLI: python3 -m pgai_agent_kanban.ops close_item
+# CLI: pp_run_ops pgai_agent_kanban.ops close_item
 #      PROJECT_ROOT KEY [STATE] [NOTE] [DRY_RUN]
 # ---------------------------------------------------------------------------
 _close_rc=0
-python3 -m pgai_agent_kanban.ops close_item \
+pp_run_ops pgai_agent_kanban.ops close_item \
     "${_project_root}" "${_key_value}" "${_state_value}" "${_note_value}" "${_dry_run}" \
     || _close_rc=$?
 

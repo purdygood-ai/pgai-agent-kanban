@@ -72,6 +72,8 @@
 #   pp_prefix_branch  [name] <branch> — returns PREFIX+branch; identity when prefix is empty
 #   pp_prefix_tag     [name] <tag>    — returns PREFIX+tag; identity when prefix is empty
 #   pp_strip_prefix_from_tag [name] <tag> — strips prefix from tag; returns bare semver
+#   pp_repo_lock_path [name]  — path to the per-project repo flock file; single
+#                               source of truth shared by wake dispatch and OVERWATCH
 
 # ---------------------------------------------------------------------------
 # Source the INI parser (read_ini) once when this library is loaded.
@@ -322,7 +324,12 @@ pp_release_state() {
 #   2. Reads branch_prefix from the same config file (may be empty).
 #   3. Runs git -C "$dev_tree" fetch origin --tags --quiet (best-effort;
 #      failure is ignored so callers in air-gapped or read-only environments
-#      are not broken).
+#      are not broken). SKIPPED when PGAI_GIT_LOCAL_ONLY is set to any
+#      non-empty value — render-path callers (dashboards) opt into this so a
+#      version lookup never reaches the network; local tags become
+#      authoritative and resolution proceeds straight to step 4 using
+#      whatever refs are already on disk. Agent-side / wake-context callers
+#      must not set this flag.
 #   4. Tries to list git tags merged into origin/<main_branch> (e.g. origin/ai_main).
 #      When prefix is non-empty: filters to tags starting with PREFIX followed
 #      by 'v'; strips the prefix from each candidate before semver comparison.
@@ -503,8 +510,16 @@ PY
         return 0
     fi
 
-    # Best-effort fetch — never fail the function.
-    git -C "$dev_tree" fetch origin --tags --quiet 2>/dev/null || true
+    # Best-effort fetch — never fail the function.  Local-only render guard:
+    # PGAI_GIT_LOCAL_ONLY, checked BEFORE the fetch.  When set to any
+    # non-empty value, the fetch is skipped entirely and resolution proceeds
+    # with whatever tags/refs already exist on disk — render-path callers
+    # (dashboards) opt into this so a version lookup never performs a network
+    # operation.  Left unset, behavior is unchanged.  Wake context / agent-side
+    # discovery must not set this flag.
+    if [[ -z "${PGAI_GIT_LOCAL_ONLY:-}" ]]; then
+        git -C "$dev_tree" fetch origin --tags --quiet 2>/dev/null || true
+    fi
 
     # Resolve the canonical main branch name for this project.
     # When branch_prefix is non-empty (e.g. "ai_"), release.sh operates on
@@ -1463,4 +1478,43 @@ pp_hook_required() {
         echo "false"
     fi
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# pp_repo_lock_path [name]
+# Echoes the absolute path to the per-project repo flock file:
+#   $KANBAN_ROOT/locks/repo-wake-<project-repo-id>.lock
+#
+# <project-repo-id> is derived from the project name by replacing '/' with
+# '_' and stripping every character that is not alphanumeric, '_', or '-'.
+# This is the SAME sanitization the wake scripts (wake/claude.sh,
+# wake/codex.sh, wake/harness.sh) apply when they acquire the per-project
+# repo lock before processing a project's task queue.
+#
+# This is the single source of truth for the per-project repo lock path.
+# Every caller that needs to know "which lock file does the wake hold for
+# project X" — wake dispatch itself, or an independent observer like
+# OVERWATCH that must not act while a wake is mid-flight — MUST resolve the
+# path through this function. Do not re-derive the sanitization or the
+# "repo-wake-<id>.lock" naming convention elsewhere; a second independent
+# derivation is how the lock path a wake holds and the lock path an
+# observer inspects can silently diverge.
+#
+# Arguments:
+#   [name]  — project name (optional when PGAI_PROJECT_NAME is set)
+#
+# Example:
+#   pp_repo_lock_path "pgai-agent-kanban"
+#   # -> /path/to/kanban/locks/repo-wake-pgai-agent-kanban.lock
+# ---------------------------------------------------------------------------
+pp_repo_lock_path() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || return 1
+    local root
+    root="$(_pp_kanban_root)" || return 1
+
+    local repo_id
+    repo_id="$(printf '%s' "$name" | tr '/' '_' | tr -cd '[:alnum:]_-')"
+
+    echo "${root}/locks/repo-wake-${repo_id}.lock"
 }

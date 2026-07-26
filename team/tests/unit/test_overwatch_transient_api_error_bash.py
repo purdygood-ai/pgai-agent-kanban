@@ -11,6 +11,15 @@ Fixtures exercised:
   (C) Orphaned per-task worktree with no extra commits → pruned;
       action log has a matching action entry.
   (D) Worktree with local commits → bug-filed, worktree preserved.
+  (E) Non-transient log tail → no action taken.
+  (F) All documented transient signatures are matched.
+  (G) BLOCKED task with an existing (non-empty) ## Labels section →
+      requeue succeeds; the pre-existing label is preserved alongside the
+      newly appended TRANSIENT label (BUG-0106).
+  (H) A forced repair failure (the durable retry-record writer fails
+      mid-transaction) → overwatch_check_transient_api_error exits
+      non-zero with a narrated repair-failure count, instead of silently
+      reporting success (BUG-0106).
 
 All tests run against synthetic environments and never touch the live kanban root.
 """
@@ -108,9 +117,14 @@ def _build_blocked_task(
     task_id: str,
     requeue_count: int = 0,
     labels: str = "",
+    retry_limit: int = 3,
 ) -> pathlib.Path:
     """
     Create a minimal BLOCKED task directory with status.md and a queue entry.
+
+    requeue_count > 0 seeds the durable ## Transient Retry record (BUG-0107)
+    — the SAME record wake_common.sh's handle_working_after_exit writes —
+    rather than the retired ## Transient Requeue Count field.
 
     Returns the task directory path.
     """
@@ -126,7 +140,14 @@ def _build_blocked_task(
         f"## Needs Human\nno\n\n",
     ]
     if requeue_count > 0:
-        status_lines.append(f"## Transient Requeue Count\n{requeue_count}\n\n")
+        status_lines.append(
+            "## Transient Retry\n"
+            "reason_code: transient_api_error\n"
+            f"retry_count: {requeue_count}\n"
+            f"retry_limit: {retry_limit}\n"
+            "provider: overwatch\n"
+            "last_error: previously matched transient signature\n\n"
+        )
     if labels:
         status_lines.append(f"## Labels\n{labels}\n\n")
 
@@ -174,8 +195,18 @@ def _read_status(task_dir: pathlib.Path) -> str:
 
 
 def _stub_header(proj_dir: pathlib.Path) -> str:
-    """Return bash stubs for overwatch_log_action and overwatch_halt_first_fix."""
+    """Return bash stubs for overwatch_log_action and overwatch_halt_first_fix.
+
+    Sources the REAL overwatch_protocol.sh first so transient_retry_field /
+    transient_retry_write / transient_retry_limit (BUG-0107 — the durable
+    retry record shared with wake_common.sh) are the genuine production
+    functions, then overrides the three protocol functions the test wants to
+    intercept (backup/log/halt-first-fix) with lightweight stubs. Order
+    matters: sourcing after the overrides would clobber the stubs with the
+    real implementations.
+    """
     return textwrap.dedent(f"""\
+        source scripts/lib/overwatch_protocol.sh
         overwatch_log_action() {{
             local name="$1" target="$2" action="$3" backup="$4" reason="$5"
             printf '%s\\t%s\\t%s\\t%s\\n' "${{name}}" "${{action}}" "${{target}}" "${{reason}}" \
@@ -208,7 +239,7 @@ def test_transient_529_requeues_to_backlog(tmp_path: pathlib.Path) -> None:
     Expected:
       - status.md State flipped to BACKLOG
       - ## Labels contains 'TRANSIENT'
-      - ## Transient Requeue Count is 1
+      - ## Transient Retry durable record (BUG-0107) has retry_count: 1
       - action log contains 'transient-auto-requeued'
     """
     kanban_root = tmp_path / "kanban"
@@ -241,15 +272,23 @@ def test_transient_529_requeues_to_backlog(tmp_path: pathlib.Path) -> None:
     assert "TRANSIENT" in status, (
         f"TRANSIENT label should be present\nstatus:\n{status}\nstderr={result.stderr}"
     )
-    assert "Transient Requeue Count" in status, (
-        f"Transient Requeue Count field should be present\nstatus:\n{status}"
+    assert "## Transient Retry" in status, (
+        f"Durable ## Transient Retry record should be present\nstatus:\n{status}"
     )
     # Count should be 1
     import re as _re
-    count_match = _re.search(r"## Transient Requeue Count\s+(\d+)", status)
-    assert count_match is not None, f"Could not find Transient Requeue Count value\nstatus:\n{status}"
+    count_match = _re.search(r"retry_count:\s*(\d+)", status)
+    assert count_match is not None, f"Could not find retry_count value\nstatus:\n{status}"
     assert count_match.group(1) == "1", (
         f"Count should be 1, got {count_match.group(1)}\nstatus:\n{status}"
+    )
+    # retry_limit in the record should match the single ceiling (default 3;
+    # no kanban.cfg present in this synthetic root, so transient_retry_limit()
+    # falls back to its built-in default).
+    limit_match = _re.search(r"retry_limit:\s*(\d+)", status)
+    assert limit_match is not None, f"Could not find retry_limit value\nstatus:\n{status}"
+    assert limit_match.group(1) == "3", (
+        f"retry_limit should default to 3, got {limit_match.group(1)}\nstatus:\n{status}"
     )
 
     log = _action_log(proj_dir)
@@ -259,17 +298,23 @@ def test_transient_529_requeues_to_backlog(tmp_path: pathlib.Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# (B) Same task at ceiling (count=2) → bug-filed, no further requeue
+# (B) Same task at ceiling (retry_count == cap) → bug-filed, Needs Human=yes,
+#     no further requeue. BUG-0107: the ceiling is the single shared value
+#     (default 3, resolved via transient_retry_limit()) — not a second,
+#     independently-hardcoded ceiling of 2.
 # ---------------------------------------------------------------------------
 
 
-def test_transient_ceiling_bug_files_on_third_occurrence(tmp_path: pathlib.Path) -> None:
+def test_transient_ceiling_bug_files_at_cap(tmp_path: pathlib.Path) -> None:
     """
-    Fixture (B): BLOCKED task whose Transient Requeue Count is already 2.
+    Fixture (B): BLOCKED task whose durable ## Transient Retry retry_count
+    has already reached the shared ceiling (3, the default when no
+    kanban.cfg transient_retry_cap override is present).
 
     Expected:
       - A bug file is written under projects/<name>/bugs/
       - status.md State remains BLOCKED (no requeue)
+      - status.md Needs Human is escalated to yes (no limbo at exactly-at-cap)
       - action log contains 'transient-ceiling-bug-filed'
     """
     kanban_root = tmp_path / "kanban"
@@ -278,8 +323,11 @@ def test_transient_ceiling_bug_files_on_third_occurrence(tmp_path: pathlib.Path)
 
     proj_dir = _build_kanban(kanban_root, project_name)
     tasks_root = proj_dir / "tasks"
-    # requeue_count=2 means this is the 3rd occurrence → should bug-file
-    task_dir = _build_blocked_task(tasks_root, task_id, requeue_count=2, labels="TRANSIENT")
+    # retry_count=3 (== the default retry_limit) means the ceiling has
+    # already been reached → this occurrence should bug-file, not requeue.
+    task_dir = _build_blocked_task(
+        tasks_root, task_id, requeue_count=3, labels="TRANSIENT", retry_limit=3
+    )
     _build_queue_with_blocked(tasks_root / "queues", task_id)
     _write_log_with_error(task_dir, "API Error: 503 Service Unavailable")
 
@@ -300,6 +348,14 @@ def test_transient_ceiling_bug_files_on_third_occurrence(tmp_path: pathlib.Path)
     status = _read_status(task_dir)
     assert "BLOCKED" in status, (
         f"State should remain BLOCKED at ceiling\nstatus:\n{status}"
+    )
+
+    # Needs Human must be escalated to yes — no limbo state at exactly-at-cap.
+    import re as _re
+    needs_human_match = _re.search(r"## Needs Human\s*\n(\S+)", status)
+    assert needs_human_match is not None, f"Could not find Needs Human value\nstatus:\n{status}"
+    assert needs_human_match.group(1).strip().lower() == "yes", (
+        f"Needs Human should be escalated to 'yes' at exactly-at-cap\nstatus:\n{status}"
     )
 
     # A bug file must have been created
@@ -559,3 +615,135 @@ def test_all_transient_signatures_detected(tmp_path: pathlib.Path) -> None:
             f"Signature not detected: {sig_text!r}\n"
             f"stdout={result.stdout}\nstderr={result.stderr}"
         )
+
+
+# ---------------------------------------------------------------------------
+# (G) BLOCKED task WITH an existing Labels section → requeue succeeds and
+#     the pre-existing label is preserved alongside the newly appended
+#     TRANSIENT label. Regression coverage for BUG-0106: the dead lambda
+#     call that used to be passed as new_body to replace_section() crashed
+#     with AttributeError specifically on this path (a task that already
+#     had a ## Labels section), because that dead branch ran before the
+#     corrected re-read-and-append logic below it.
+# ---------------------------------------------------------------------------
+
+
+def test_transient_requeue_preserves_existing_labels(tmp_path: pathlib.Path) -> None:
+    """
+    Fixture (G): BLOCKED task whose ## Labels section already contains an
+    unrelated label when the transient requeue fires.
+
+    Expected:
+      - The check completes without error (no AttributeError / crash)
+      - status.md State flipped to BACKLOG
+      - ## Labels retains the pre-existing label AND gains TRANSIENT
+    """
+    kanban_root = tmp_path / "kanban"
+    project_name = "test-project-g"
+    task_id = "CODER-20260101-006-fixture-g"
+
+    proj_dir = _build_kanban(kanban_root, project_name)
+    tasks_root = proj_dir / "tasks"
+    task_dir = _build_blocked_task(
+        tasks_root, task_id, requeue_count=0, labels="EXISTING-LABEL"
+    )
+    _build_queue_with_blocked(tasks_root / "queues", task_id)
+    _write_log_with_error(task_dir, "rate limit exceeded on upstream API")
+
+    script = _stub_header(proj_dir) + textwrap.dedent(f"""\
+        set -euo pipefail
+        export KANBAN_ROOT="{kanban_root}"
+        export OVERWATCH_PROJECT="{project_name}"
+        source {_CHECK_TRANSIENT}
+        overwatch_check_transient_api_error
+    """)
+
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, (
+        f"check-transient-api-error should exit 0 for a task with an existing "
+        f"Labels section\nstderr={result.stderr}"
+    )
+
+    status = _read_status(task_dir)
+    assert "BACKLOG" in status, (
+        f"State should be BACKLOG after requeue\nstatus:\n{status}\nstderr={result.stderr}"
+    )
+
+    import re as _re
+    labels_match = _re.search(r"^## Labels\s*\n(.*?)(\n+##|\Z)", status, flags=_re.S | _re.M)
+    assert labels_match is not None, f"Labels section should still be present\nstatus:\n{status}"
+    labels_value = labels_match.group(1)
+    assert "EXISTING-LABEL" in labels_value, (
+        f"Pre-existing label must be preserved\nlabels:\n{labels_value}"
+    )
+    assert "TRANSIENT" in labels_value, (
+        f"TRANSIENT label should be appended\nlabels:\n{labels_value}"
+    )
+
+    log = _action_log(proj_dir)
+    assert "transient-auto-requeued" in log, (
+        f"Action log should contain 'transient-auto-requeued'\nlog:\n{log}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# (H) Forced repair failure → check exits non-zero, narrated (BUG-0106).
+# ---------------------------------------------------------------------------
+
+
+def test_transient_repair_failure_reports_nonzero_exit(tmp_path: pathlib.Path) -> None:
+    """
+    Fixture (H): the durable ## Transient Retry record writer
+    (transient_retry_write) is forced to fail mid-transaction, simulating an
+    I/O error during the requeue repair.
+
+    Expected:
+      - overwatch_check_transient_api_error exits non-zero (a failed repair
+        must never report success from the outer check)
+      - stderr narrates the repair failure (mentions "repair failure")
+      - the task is NOT left silently in a stale state: the requeue failure
+        is logged per-task in addition to the summary narration
+    """
+    kanban_root = tmp_path / "kanban"
+    project_name = "test-project-h"
+    task_id = "CODER-20260101-007-fixture-h"
+
+    proj_dir = _build_kanban(kanban_root, project_name)
+    tasks_root = proj_dir / "tasks"
+    task_dir = _build_blocked_task(tasks_root, task_id, requeue_count=0)
+    _build_queue_with_blocked(tasks_root / "queues", task_id)
+    _write_log_with_error(task_dir, "503 Service Unavailable from upstream API")
+
+    # Force the durable retry-record writer to fail after the real
+    # overwatch_protocol.sh has been sourced (see _stub_header), so the
+    # requeue repair transaction fails partway through — deterministic and
+    # independent of filesystem permission semantics (which behave
+    # differently for a root-run test process).
+    script = _stub_header(proj_dir) + textwrap.dedent(f"""\
+        set -euo pipefail
+        export KANBAN_ROOT="{kanban_root}"
+        export OVERWATCH_PROJECT="{project_name}"
+        transient_retry_write() {{
+            echo "stub transient_retry_write: forced failure" >&2
+            return 1
+        }}
+        source {_CHECK_TRANSIENT}
+        overwatch_check_transient_api_error
+    """)
+
+    result = run_bash(tmp_path, script)
+    assert result.returncode != 0, (
+        f"A failed repair must never report success from the outer check\n"
+        f"stdout={result.stdout}\nstderr={result.stderr}"
+    )
+    assert "repair failure" in result.stderr.lower(), (
+        f"Repair failure should be narrated on stderr\nstderr={result.stderr}"
+    )
+
+    # The task's status.md should remain BLOCKED — the requeue transaction
+    # failed before the State field was updated.
+    status = _read_status(task_dir)
+    assert "BLOCKED" in status, (
+        f"Task should remain BLOCKED when the repair transaction fails\n"
+        f"status:\n{status}\nstderr={result.stderr}"
+    )

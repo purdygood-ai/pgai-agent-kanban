@@ -14,9 +14,16 @@
 #   5. Recent tags (last 5, filtered by branch_prefix when configured)
 #
 # Document-workflow projects (workflow_type=document) are omitted.
-# A release project whose dev tree is missing or not a git repo degrades that
-# project's section gracefully (shows a warning) without breaking the window
-# or affecting other projects' sections.
+# A release project whose dev tree is missing, unconfigured, or not a git
+# repo renders a clear-error line ("git tree not available: <path>") for
+# that project's section and continues to the next project, without
+# breaking the window or performing any network git operation.
+#
+# All git data rendered by this script comes from the local dev tree only.
+# No git subcommand invoked here ever reaches the network (no fetch, pull,
+# push, clone, or ls-remote) — including the origin sync comparison, which
+# reads the already-resolved local origin/<branch> remote-tracking ref
+# rather than contacting origin.
 #
 # Usage:
 #   dashboard-git-status.sh [--kanban-root <path>] [--project <name>]
@@ -164,23 +171,23 @@ render_project_git_status() {
   fi
 
   # -------------------------------------------------------------------------
-  # Validate dev tree — degrade gracefully without breaking the window
+  # Validate dev tree — clear-error render, never a prompt or hang.
   # -------------------------------------------------------------------------
   if [[ -z "$dev_tree" ]]; then
-    printf '%sdev tree path not configured for project %s%s\n' "$YELLOW" "$proj_name" "$RESET"
+    printf '%sgit tree not available: (dev tree path not configured for project %s)%s\n' "$YELLOW" "$proj_name" "$RESET"
     printf '\n'
     return 0
   fi
 
   if [[ ! -d "$dev_tree" ]]; then
-    printf '%sdev tree unavailable: %s%s\n' "$YELLOW" "$dev_tree" "$RESET"
+    printf '%sgit tree not available: %s%s\n' "$YELLOW" "$dev_tree" "$RESET"
     printf '\n'
     return 0
   fi
 
-  # Verify it is a git repository
+  # Verify it is a git repository (local check only — never touches network)
   if ! git -C "$dev_tree" rev-parse --git-dir &>/dev/null; then
-    printf '%sdev tree at %s is not a git repository%s\n' "$YELLOW" "$dev_tree" "$RESET"
+    printf '%sgit tree not available: %s%s\n' "$YELLOW" "$dev_tree" "$RESET"
     printf '\n'
     return 0
   fi

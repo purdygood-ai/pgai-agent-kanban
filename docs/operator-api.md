@@ -1172,6 +1172,12 @@ and writes sorted-key, fixed-indent JSON with a trailing newline to
 artifact was stale before you ran it — commit the regenerated file
 before running the gated suites.
 
+Regeneration also re-freezes the current-version baseline at
+`docs/api/baselines/icd-v<ICD_VERSION>.json` to match the freshly written
+`icd.json`, so the frozen baseline can never drift out of sync with the
+artifact — whether or not the regeneration accompanied a version bump.
+Commit the updated baseline file alongside the regenerated artifact.
+
 Deterministic byte equality (not JSON-semantic equality) is the
 property the freshness gate depends on. A flapping generator would
 make the gate useless, so any change that adds nondeterminism to the

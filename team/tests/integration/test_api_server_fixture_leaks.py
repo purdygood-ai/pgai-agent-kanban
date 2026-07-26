@@ -116,6 +116,64 @@ def _run_listener_cleanliness_check() -> subprocess.CompletedProcess:
     )
 
 
+def _take_listener_snapshot(project_subtree: pathlib.Path) -> subprocess.CompletedProcess:
+    """Source temp.sh and call pgai_listener_snapshot for *project_subtree*.
+
+    Returns the CompletedProcess; stdout holds one matched pid per line.
+    """
+    script = f"source {str(_TEMP_SH)!r} && pgai_listener_snapshot {str(project_subtree)!r}"
+    return subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _run_listener_cleanliness_check_with_snapshot(
+    project_subtree: pathlib.Path, snapshot_file: pathlib.Path
+) -> subprocess.CompletedProcess:
+    """Source temp.sh and call pgai_listener_cleanliness_check with a pre-suite snapshot.
+
+    Returns the CompletedProcess so the caller can inspect returncode and stderr.
+    """
+    script = (
+        f"source {str(_TEMP_SH)!r} && "
+        f"pgai_listener_cleanliness_check {str(project_subtree)!r} {str(snapshot_file)!r}"
+    )
+    return subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _spawn_listening_subprocess(cwd: pathlib.Path, ready_tag: str) -> subprocess.Popen:
+    """Spawn a raw subprocess that binds an ephemeral port and holds it open.
+
+    Mirrors the negative test's inline listener script: binds 127.0.0.1:0 (OS
+    assigns the port), prints ``<ready_tag>:<port>`` once bound, then sleeps
+    until killed.  The caller is responsible for reading the readiness line
+    from stdout and for killing the process in a finally block.
+    """
+    listener_script = textwrap.dedent(f"""\
+        import socket, sys, time
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        sys.stdout.write("{ready_tag}:" + str(s.getsockname()[1]) + "\\n")
+        sys.stdout.flush()
+        while True:
+            time.sleep(1)
+    """)
+    return subprocess.Popen(
+        [sys.executable, "-c", listener_script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        cwd=str(cwd),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Positive test: injected-exception path leaves no listener
 # ---------------------------------------------------------------------------
@@ -282,3 +340,123 @@ def test_intentional_leaked_listener_detected_by_postflight_helper(
                 leaked_proc.wait(timeout=5)
             except Exception:  # noqa: BLE001
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Regression test: pre-suite snapshot scopes the gate to run-spawned listeners
+# ---------------------------------------------------------------------------
+
+
+def test_presuite_snapshot_excludes_preexisting_orphan_but_flags_new_listener(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A listener present before the pre-suite snapshot is not attributed to this run.
+
+    Simulates a cross-task orphan scenario end to end using the real helpers:
+
+      1. Spawn a listener BEFORE the snapshot is taken (stands in for a leaked,
+         orphaned server from an earlier, unrelated task).
+      2. Take a pre-suite snapshot with ``pgai_listener_snapshot`` and confirm
+         the pre-existing listener's pid is captured in it.
+      3. Call ``pgai_listener_cleanliness_check`` with that snapshot and assert
+         it returns 0 (with the pre-existing pid absent from stderr) even
+         though the pre-existing listener is still alive — it predates the
+         snapshot, so it is not this run's responsibility.
+      4. Spawn a SECOND listener AFTER the snapshot was taken (stands in for a
+         listener this run itself leaked).
+      5. Call the same check again with the same snapshot file and assert it
+         now returns non-zero, naming the second listener's pid but not the
+         first — proving the gate still catches genuine same-run leaks.
+      6. Kill both subprocesses in a finally block so nothing survives into
+         the suite-wide post-flight check the gated runners run after pytest.
+    """
+    scope_dir = tmp_path / "presuite_snapshot_scope"
+    preexisting_cwd = scope_dir / "preexisting_orphan"
+    run_spawned_cwd = scope_dir / "run_spawned"
+    preexisting_cwd.mkdir(parents=True, exist_ok=True)
+    run_spawned_cwd.mkdir(parents=True, exist_ok=True)
+
+    preexisting_proc: subprocess.Popen | None = None
+    run_spawned_proc: subprocess.Popen | None = None
+    try:
+        # --- Step 1: spawn the "pre-existing orphan" first ---
+        preexisting_proc = _spawn_listening_subprocess(preexisting_cwd, "PREEXISTING")
+        assert preexisting_proc.stdout is not None
+        ready_line = preexisting_proc.stdout.readline().decode("utf-8", errors="replace").strip()
+        assert ready_line.startswith("PREEXISTING:"), (
+            f"Pre-existing listener subprocess did not emit readiness signal; got: {ready_line!r}"
+        )
+        preexisting_pid = preexisting_proc.pid
+
+        # --- Step 2: take the pre-suite snapshot ---
+        snapshot_result = _take_listener_snapshot(scope_dir)
+        assert snapshot_result.returncode == 0, (
+            f"pgai_listener_snapshot exited non-zero: {snapshot_result.stderr!r}"
+        )
+        snapshot_pids = {
+            line.strip() for line in snapshot_result.stdout.splitlines() if line.strip()
+        }
+        assert str(preexisting_pid) in snapshot_pids, (
+            f"Pre-suite snapshot did not capture the pre-existing listener's pid "
+            f"{preexisting_pid}. Snapshot stdout: {snapshot_result.stdout!r}"
+        )
+
+        snapshot_file = tmp_path / "listener_presuite_snapshot.txt"
+        snapshot_file.write_text(snapshot_result.stdout)
+
+        # --- Step 3: the pre-existing listener alone must NOT fail the gate ---
+        result_orphan_only = _run_listener_cleanliness_check_with_snapshot(
+            scope_dir, snapshot_file
+        )
+        assert result_orphan_only.returncode == 0, (
+            f"pgai_listener_cleanliness_check returned non-zero (expected 0) for a "
+            f"listener that predates the pre-suite snapshot (pid {preexisting_pid}). "
+            f"stderr: {result_orphan_only.stderr!r}"
+        )
+        assert str(preexisting_pid) not in result_orphan_only.stderr, (
+            f"pgai_listener_cleanliness_check named the pre-existing orphan's pid "
+            f"{preexisting_pid} in stderr even though it predates the pre-suite "
+            f"snapshot and must not be attributed to this run. "
+            f"stderr: {result_orphan_only.stderr!r}"
+        )
+
+        # --- Step 4: spawn a second listener AFTER the snapshot was taken ---
+        run_spawned_proc = _spawn_listening_subprocess(run_spawned_cwd, "RUNSPAWNED")
+        assert run_spawned_proc.stdout is not None
+        ready_line = run_spawned_proc.stdout.readline().decode("utf-8", errors="replace").strip()
+        assert ready_line.startswith("RUNSPAWNED:"), (
+            f"Run-spawned listener subprocess did not emit readiness signal; got: {ready_line!r}"
+        )
+        run_spawned_pid = run_spawned_proc.pid
+
+        # --- Step 5: the gate must now flag the run-spawned listener ---
+        result_with_new_listener = _run_listener_cleanliness_check_with_snapshot(
+            scope_dir, snapshot_file
+        )
+        assert result_with_new_listener.returncode != 0, (
+            f"pgai_listener_cleanliness_check returned 0 (expected non-zero) once a "
+            f"listener spawned AFTER the pre-suite snapshot (pid {run_spawned_pid}) "
+            f"is alive. stderr: {result_with_new_listener.stderr!r}"
+        )
+        assert str(run_spawned_pid) in result_with_new_listener.stderr, (
+            f"pgai_listener_cleanliness_check stderr does not mention the "
+            f"run-spawned pid {run_spawned_pid}. stderr: {result_with_new_listener.stderr!r}"
+        )
+        assert str(preexisting_pid) not in result_with_new_listener.stderr, (
+            f"pgai_listener_cleanliness_check stderr mentions the pre-existing "
+            f"orphan's pid {preexisting_pid}, which was excluded via the pre-suite "
+            f"snapshot and must not be attributed to this run. "
+            f"stderr: {result_with_new_listener.stderr!r}"
+        )
+
+    finally:
+        # The test's own hygiene: kill both intentionally-spawned listeners
+        # before returning so neither survives into the suite-wide post-flight
+        # check the gated runners execute after pytest exits.
+        for proc in (preexisting_proc, run_spawned_proc):
+            if proc is not None:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                except Exception:  # noqa: BLE001
+                    pass

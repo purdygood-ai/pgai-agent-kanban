@@ -42,6 +42,17 @@ max_rows_per_project = 13
 # "... and N more".
 max_rows = 20
 
+# Marker character for dashboard status tags. Unicode "■" (U+25A0) by
+# default; set to an ASCII character (e.g. "#" or "*") for terminals or
+# fonts that render block glyphs poorly. Must be exactly one visible
+# character — multi-character values are rejected with a non-zero exit
+# naming this key and the config file path. Change takes effect on the
+# next dashboard refresh cycle (no restart required).
+# Common values (copy-paste one):  ■ ● ◆ ▲ ▪ •  — or any ASCII char: # * + o
+# To create unicode glyph; in VI, type => Ctrl-V u<the unicode character>
+# The default glyph below is => Ctrl-V u25a0
+dashboard_status_glyph = ■
+
 
 # ---------------------------------------------------------------------------
 # [chain] — pipeline and chain-execution settings
@@ -142,6 +153,33 @@ available = claude codex
 #       env variable when switching to "apikey mode"
 ai_auth_mode = oauth
 
+# llm_thinking_enabled — controls the provider's extended-thinking
+# (reasoning) feature on agent invocations. Some older HTTP proxies
+# reject responses carrying thinking blocks, failing every agent
+# call; set false on such deployments to pass the provider's
+# thinking-disable flag. Generic across providers: applies to the
+# claude lane today and maps to equivalent switches on other
+# provider lanes as they mature. Default: true.
+llm_thinking_enabled = true
+
+
+# ---------------------------------------------------------------------------
+# [docker] — container-engine selection for the container-shell launcher
+# ---------------------------------------------------------------------------
+[docker]
+
+# Binary the launcher invokes to build and run the kanban's container
+# workspace. Most sites run Docker; RedHat-lineage shops that standardize
+# on podman (RHEL/UBI hosts, sites where Docker Engine is not an approved
+# package) should set this to "podman" instead — the launcher passes the
+# same flags to either engine.
+# The configured value must resolve to an executable on PATH; an absent
+# [docker] section or blank value falls back to "docker" with no error,
+# but a configured value that cannot be found fails loud, naming this key
+# and the offending value.
+# Default: docker
+docker_exe = docker
+
 
 # ---------------------------------------------------------------------------
 # [wake] — wake-script tunables (loaded into env vars at wake startup)
@@ -222,6 +260,19 @@ max_project_seconds = 14400
 # Default: 30
 kill_grace_seconds = 30
 
+# Single ceiling for the durable ## Transient Retry status.md record
+# (BUG-0107). When a task is left in WORKING after a transient provider error
+# (5xx, overloaded, rate-limit, 429, 503, 529), wake_common.sh's
+# handle_working_after_exit blocks the task and increments this record's
+# retry_count. While retry_count is below this cap the task is left with
+# Needs Human=no so the next wake auto-retries it; once retry_count reaches
+# this cap the task is BLOCKED with Needs Human=yes (no limbo state).
+# This is the ONE ceiling — OVERWATCH's check-transient-api-error.sh reads
+# the same value via transient_retry_limit() rather than maintaining its own.
+# Override at invocation: TRANSIENT_RETRY_CAP=<N> wake-batch.sh ...
+# Default: 3
+transient_retry_cap = 3
+
 
 # ---------------------------------------------------------------------------
 # [models.<provider>] — per-role, per-provider model overrides
@@ -242,10 +293,10 @@ kill_grace_seconds = 30
 #   Leave blank to let the provider CLI choose its own default (a warning is
 #   logged when a role has no model). Set to your provider's current model.
 #   Model names change over time, so this is intentionally unset at install.
-#   Example (verify the current name for your CLI): claude-sonnet-4-6
+#   Example (verify the current name for your CLI): claude-sonnet-5
 default =
 # Per-role overrides (optional). Unset roles fall back to default above.
-# Example: pm = claude-opus-4-8
+# Examples: claude-sonnet-5, claude-opus-5, claude-fable-5
 pm =
 coder =
 writer =
@@ -258,10 +309,10 @@ po =
 #   Leave blank to let the provider CLI choose its own default (a warning is
 #   logged when a role has no model). Set to your provider's current model.
 #   Model names change over time, so this is intentionally unset at install.
-#   Example (verify the current name for your CLI): gpt-5.4
+#   Example (verify the current name for your CLI): gpt-5.6-luna
 default =
 # Per-role overrides (optional). Unset roles fall back to default above.
-# Example: gpt-5.5
+# Examples: gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol
 pm =
 coder =
 writer =

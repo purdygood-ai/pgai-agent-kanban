@@ -1,7 +1,7 @@
 """
 reads.py — GET (read-only) endpoints for the pgai-agent-kanban operator API.
 
-Implements every read endpoint defined in the v1.2.0 and v1.6.0 operator-REST-API requirements:
+Implements every read endpoint defined in the v1.2.0 operator-REST-API requirements:
 
   GET /status             → kanban-status.sh --project <name>
   GET /show               → show.sh --project <name> --key <key> [--file ...]

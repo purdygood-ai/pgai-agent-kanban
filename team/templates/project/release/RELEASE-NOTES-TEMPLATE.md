@@ -3,6 +3,23 @@ GUIDE NOT GATE: This template is a guide, not a gate.
 Agents must tolerate imperfect or missing sections.
 Use the structure when it helps; skip sections that do not apply.
 
+CHANGELOG.md IS NOT A WRITER DELIVERABLE
+========================================
+WRITER authors release-notes/vX.Y.Z.md ONLY. Do NOT edit CHANGELOG.md.
+CHANGELOG.md is regenerated deterministically from this release-notes
+file and the bug ledger by:
+  - team/pgai_agent_kanban/cm/changelog_writer.py, or
+  - cm/release.sh Step 11b at release time.
+Hand-editing CHANGELOG.md bypasses the changelog writer's internal-
+identifier safety pass and desynchronizes its byte-exact rendering,
+which trips the CHANGELOG freshness gate and the internal-bug-
+identifier unit test. Write the notes; let CM regenerate the changelog.
+
+The release-notes body must refer to bugs by symptom and public
+identifier — not by internal ticket ID. The changelog writer strips
+internal identifiers automatically when it renders CHANGELOG.md; writing
+symptoms here keeps both this file and the rendered changelog clean.
+
 STATUS FIELD GUIDE
 ==================
 WRITER authors notes with "## Status: PENDING-RELEASE" as a placeholder.

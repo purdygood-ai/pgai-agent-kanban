@@ -19,7 +19,15 @@
 # Configuration:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: $HOME/pgai_agent_kanban)
 
+# --- Bootstrap: self-locate → source shell-env → fail loud ---
+# Must happen before the first use of PGAI_AGENT_KANBAN_ROOT_PATH so the
+# script runs from a fresh shell without manual pre-sourcing.  Explicit
+# operator exports win via env_bootstrap.sh's idempotency guard.
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+
 # --- Resolve kanban root and script directory ---
+# PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh or the operator.
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 _RUT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -58,8 +66,6 @@ require_dev_tree "${PGAI_DEV_TREE_PATH:-}" "$TEAM_ROOT/kanban.cfg"
 
 # --- Now enable strict mode for our own code ---
 set -euo pipefail
-# shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Clean exit handling ---
 cleanup_on_exit() {
@@ -73,6 +79,30 @@ trap cleanup_on_exit EXIT
 # --- Resolve script directory to find the repo root ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# --- Resolve this project's temp subtree ---
+# Scopes both the pre-suite listener snapshot and the post-suite listener
+# cleanliness check (see below) to this project instead of the wide framework
+# temp root, so a sibling project's leaked listener is never attributed here.
+# Resolved once, up front, so the pre-suite snapshot and the post-suite check
+# agree on the same scope.  Deliberately kept as a plain (unexported) shell
+# variable here — NOT exported into the environment until after pytest exits
+# (see the post-suite section below) — so pytest and any fixture it spawns do
+# not inherit a narrowed scope; tests that invoke the listener helpers with no
+# explicit subtree continue to see the same wide-scope fallback they always
+# have.
+_PGAI_TEMP_ROOT="$(pgai_temp_dir)"
+_RUT_PROJECT_TEMP_SUBTREE=""
+if [[ "${REPO_ROOT}" == "${_PGAI_TEMP_ROOT}/projects/"* ]]; then
+    # REPO_ROOT is under <temp_root>/projects/<name>/worktrees/<branch>.
+    # Extract the project subtree as <temp_root>/projects/<name>.
+    _rel="${REPO_ROOT#"${_PGAI_TEMP_ROOT}/projects/"}"
+    _proj_name="${_rel%%/*}"
+    if [[ -n "${_proj_name}" ]]; then
+        _RUT_PROJECT_TEMP_SUBTREE="${_PGAI_TEMP_ROOT}/projects/${_proj_name}"
+    fi
+fi
+unset _PGAI_TEMP_ROOT _rel _proj_name
 
 # --- Parse arguments ---
 VERBOSE=false
@@ -149,6 +179,16 @@ unset _PYTEST_BASETEMP
 # The snapshot file lives under the framework temp root (not bare /tmp).
 _TMP_SNAPSHOT_FILE="$(pgai_mktemp tmp_cleanliness_snapshot)"
 pgai_tmp_snapshot > "$_TMP_SNAPSHOT_FILE"
+
+# --- Pre-suite listener snapshot ---
+# Capture the pids of framework-rooted TCP listeners that exist BEFORE this
+# suite launches pytest, scoped to _RUT_PROJECT_TEMP_SUBTREE (resolved above).
+# The post-suite listener-cleanliness check (below) excludes these pids, so a
+# pre-existing orphan left behind by an earlier, unrelated task is not
+# attributed to this run — only a listener first observed after this
+# snapshot (i.e. spawned during this run) is flagged.
+_LISTENER_SNAPSHOT_FILE="$(pgai_mktemp listener_presuite_snapshot)"
+pgai_listener_snapshot "${_RUT_PROJECT_TEMP_SUBTREE}" > "$_LISTENER_SNAPSHOT_FILE"
 
 # --- Build pytest arguments ---
 # tests/unit/                      — the main unit test tree
@@ -355,8 +395,8 @@ fi
 # Asserts that CHANGELOG.md is byte-identical to a fresh regeneration from the
 # current codebase via changelog_writer.  A stale artifact means the committed
 # CHANGELOG no longer reflects the actual release notes and bug ledger state.
-# Regenerate using cm-release or: python3 -m pgai_agent_kanban.cm.changelog_writer
-# <repo_root> <bugs_dir> and commit the result to fix.
+# Regenerate using cm-release (or run changelog_writer via pp_run_ops helper)
+# and commit the result to fix.
 #
 # RC-mode tolerance: when the worktree HEAD is on an rc/* or ai_rc/* branch,
 # PGAI_LINT_CHANGELOG_MODE=rc is set so the lint tolerates CHANGELOG staleness
@@ -391,7 +431,7 @@ unset _CHANGELOG_MODE_VAR
 if [[ $CHANGELOG_FRESHNESS_EXIT -ne 0 ]]; then
   echo "CHANGELOG freshness gate FAILED (exit code: $CHANGELOG_FRESHNESS_EXIT)" >&2
   echo "Fix: regenerate CHANGELOG.md via the changelog_writer and commit it." >&2
-  echo "  python3 -m pgai_agent_kanban.cm.changelog_writer <repo_root> <bugs_dir>" >&2
+  echo "  Run: bash team/scripts/regenerate-changelog.sh --project <name>" >&2
   exit 1
 fi
 
@@ -399,7 +439,7 @@ fi
 # Asserts that no function name is defined in more than one team/scripts/lib/*.sh
 # file.  A duplicated function name causes bash's last-sourced-wins semantics to
 # silently shadow one implementation whenever both files are sourced — exactly the
-# latent defect class documented in BUG-0031.  This check makes the constraint
+# latent defect class documented in the defect ledger.  This check makes the constraint
 # permanent and gated so future edits that reintroduce a duplicate are caught
 # before they reach production.
 echo "Running lib-function-dedupe lint..."
@@ -438,6 +478,67 @@ if [[ $ENV_BOOTSTRAP_LINT_EXIT -ne 0 ]]; then
   exit 1
 fi
 
+# --- Run help-presence lint ---
+# Asserts that every operator-facing shell script under team/scripts/ implements
+# a --help or -h flag.  Scripts listed in help_presence_exempt.txt are exempt.
+# Ships Directive 6 of docs/coding-standards.md as a permanent gated check so
+# future scripts that omit --help fail immediately rather than accumulating debt.
+echo "Running help-presence lint..."
+set +e
+python3 scripts/lint_help_presence.py
+HELP_PRESENCE_EXIT=$?
+set -e
+
+if [[ $HELP_PRESENCE_EXIT -ne 0 ]]; then
+  echo "Help-presence lint FAILED (exit code: $HELP_PRESENCE_EXIT)" >&2
+  echo "Fix: add a --help handler to each flagged script, or add its" >&2
+  echo "basename to team/scripts/help_presence_exempt.txt with a comment" >&2
+  echo "explaining the exemption category." >&2
+  exit 1
+fi
+
+# --- Run comment-provenance lint ---
+# Asserts that code files in team/scripts/ and team/pgai_agent_kanban/ do not
+# cite internal bug IDs, task IDs, priority IDs, or version-bundle names.
+# These identifiers belong in commit messages and task state, not in source
+# code comments.  Implements Directive 8 of docs/coding-standards.md.
+# Existing violations are suppressed with per-line provenance-allowlist markers
+# pending the coding-standards remediation release.
+echo "Running comment-provenance lint..."
+set +e
+python3 scripts/lint_comment_provenance.py
+COMMENT_PROV_EXIT=$?
+set -e
+
+if [[ $COMMENT_PROV_EXIT -ne 0 ]]; then
+  echo "Comment-provenance lint FAILED (exit code: $COMMENT_PROV_EXIT)" >&2
+  echo "Fix: remove internal ID references from code/comments and move them" >&2
+  echo "to the commit message or task status, or add a per-line opt-out:" >&2
+  echo "  # provenance-allowlist: <justification>" >&2
+  echo "within 5 lines before the flagged line." >&2
+  exit 1
+fi
+
+# --- Run import-completeness lint ---
+# Asserts that every third-party Python import across team/scripts/,
+# team/pgai_agent_kanban/, and team/tests/ is declared in requirements.txt or
+# requirements-test.txt.  An import not covered by the requirements union fails
+# immediately with the missing module name and the first offending source path,
+# preventing uninstallable imports from reaching a container environment.
+echo "Running import-completeness lint..."
+set +e
+python3 scripts/lint_python_import_completeness.py
+IMPORT_COMPLETENESS_EXIT=$?
+set -e
+
+if [[ $IMPORT_COMPLETENESS_EXIT -ne 0 ]]; then
+  echo "Import-completeness lint FAILED (exit code: $IMPORT_COMPLETENESS_EXIT)" >&2
+  echo "Fix: add the missing package to requirements.txt or requirements-test.txt." >&2
+  echo "If the pip package name differs from the import name, also add a mapping" >&2
+  echo "to _PACKAGE_TO_IMPORT_NAMES in team/scripts/lint_python_import_completeness.py." >&2
+  exit 1
+fi
+
 # --- Run tests ---
 echo "Running unit tests in $(pwd)/tests/ (unit/ + cm module tests)"
 set +e
@@ -471,25 +572,19 @@ echo "Bare-/tmp cleanliness check PASSED"
 # Assert the suite left no framework-rooted TCP listeners alive after pytest.
 # Runs only on success so the exit code reflects test failures cleanly.
 # Only listeners rooted in this project's own temp subtree are flagged; sibling
-# projects' leaked listeners are not attributed to this runner.  When the runner
-# is invoked from a path inside the framework temp tree the project subtree is
-# derived automatically; otherwise the check falls back to the wider basename
-# match (backward-compatible behavior for out-of-tree runs).
-_PGAI_TEMP_ROOT="$(pgai_temp_dir)"
-export PGAI_PROJECT_TEMP_SUBTREE=""
-if [[ "${REPO_ROOT}" == "${_PGAI_TEMP_ROOT}/projects/"* ]]; then
-    # REPO_ROOT is under <temp_root>/projects/<name>/worktrees/<branch>.
-    # Extract the project subtree as <temp_root>/projects/<name>.
-    _rel="${REPO_ROOT#"${_PGAI_TEMP_ROOT}/projects/"}"
-    _proj_name="${_rel%%/*}"
-    if [[ -n "${_proj_name}" ]]; then
-        export PGAI_PROJECT_TEMP_SUBTREE="${_PGAI_TEMP_ROOT}/projects/${_proj_name}"
-    fi
-fi
-unset _PGAI_TEMP_ROOT _rel _proj_name
+# projects' leaked listeners are not attributed to this runner.  The subtree
+# was resolved once, before pytest launched (_RUT_PROJECT_TEMP_SUBTREE), so the
+# pre-suite snapshot and this check agree on the same scope; PGAI_PROJECT_TEMP_SUBTREE
+# is exported here — after pytest has already exited — so callers/tests that
+# read the env var directly still see it, without pytest itself (or fixtures
+# it spawns) ever inheriting a narrowed scope.  Listeners already present in
+# the pre-suite snapshot (_LISTENER_SNAPSHOT_FILE) are pre-existing orphans and
+# are not flagged; only a listener first observed after that snapshot — i.e.
+# spawned by this run — causes a non-zero exit.
+export PGAI_PROJECT_TEMP_SUBTREE="${_RUT_PROJECT_TEMP_SUBTREE}"
 echo "Checking for framework-rooted TCP listener leaks..."
 set +e
-pgai_listener_cleanliness_check
+pgai_listener_cleanliness_check "${PGAI_PROJECT_TEMP_SUBTREE}" "${_LISTENER_SNAPSHOT_FILE}"
 _LISTENER_EXIT=$?
 set -e
 if [[ $_LISTENER_EXIT -ne 0 ]]; then

@@ -22,6 +22,10 @@ _UNHALT_GLOBAL_LIB_DIR="${_UNHALT_GLOBAL_SCRIPT_DIR}/lib"
 # shellcheck source=lib/operator_args.sh
 source "${_UNHALT_GLOBAL_LIB_DIR}/operator_args.sh"
 
+# --- Source the shared Python invocation helper ---
+# shellcheck source=lib/pp_run_ops.sh
+source "${_UNHALT_GLOBAL_LIB_DIR}/pp_run_ops.sh"
+
 # --- Declare accepted flags for this script ---
 # unhalt-global takes no project/key arguments; only --help is accepted.
 OPERATOR_VALID_FLAGS=(help)
@@ -63,7 +67,7 @@ if [[ ! -f "${_halt_path}" ]]; then
 fi
 
 # --- Remove the HALT sentinel via Python library ---
-if python3 -m pgai_agent_kanban.ops unhalt_global "${KANBAN_ROOT}"; then
+if pp_run_ops pgai_agent_kanban.ops unhalt_global "${KANBAN_ROOT}"; then
     printf 'global HALT cleared: %s removed — all projects will resume at next wake\n' "${_halt_path}"
     exit 0
 else

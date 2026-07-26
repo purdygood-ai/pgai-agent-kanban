@@ -60,6 +60,7 @@ _REAL_INI_PARSER_SH = _TEAM_SCRIPTS_DIR / "lib" / "ini_parser.sh"
 _REAL_PROJECT_PATHS_SH = _TEAM_SCRIPTS_DIR / "lib" / "project_paths.sh"
 _REAL_TEMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "temp.sh"
 _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
+_REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
 
 _SANDBOX_VERSION = "v1.7.0-sandbox-converted-reexec"
 
@@ -112,7 +113,7 @@ def _build_upgrade_sandbox(
     for lib_src in [
         _REAL_ARGPARSE_SH, _REAL_ENV_BOOTSTRAP_SH, _REAL_INI_PARSER_SH,
         _REAL_PROJECT_PATHS_SH, _REAL_TEMP_SH,
-        _REAL_VERSION_STAMP_SH,
+        _REAL_VERSION_STAMP_SH, _REAL_SUBAGENT_DEPLOY_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, installed_lib / lib_src.name)
@@ -169,7 +170,7 @@ def _build_upgrade_sandbox(
     for lib_src in [
         _REAL_ARGPARSE_SH, _REAL_ENV_BOOTSTRAP_SH, _REAL_INI_PARSER_SH,
         _REAL_PROJECT_PATHS_SH, _REAL_TEMP_SH,
-        _REAL_VERSION_STAMP_SH,
+        _REAL_VERSION_STAMP_SH, _REAL_SUBAGENT_DEPLOY_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_team_lib / lib_src.name)

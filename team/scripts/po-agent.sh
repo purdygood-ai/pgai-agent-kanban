@@ -29,8 +29,20 @@
 #   bashrc  — personal shell config
 #   env     — environment tunables
 
+# --- Bootstrap: self-locate → source shell-env → fail loud ---
+# Must happen before the first use of PGAI_AGENT_KANBAN_ROOT_PATH so the
+# script runs from a fresh shell without manual pre-sourcing.  env_bootstrap.sh
+# derives the kanban root from BASH_SOURCE[1] and sources shell-env; if the
+# root is still unset after that, it emits a diagnostic and returns 1.
+# The || exit 1 provides fail-loud behaviour before strict mode is active.
+# Explicit operator exports (PGAI_AGENT_KANBAN_ROOT_PATH set in the calling
+# shell) win: env_bootstrap.sh honours them via its idempotency guard.
+# shellcheck source=lib/env_bootstrap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+
 # --- Resolve kanban root ---
-# Done before strict mode so the error message is clean if it fails.
+# PGAI_AGENT_KANBAN_ROOT_PATH is now set (by env_bootstrap.sh above or by the
+# operator's environment).  Capture it before sourcing optional user config.
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 if [[ ! -d "$TEAM_ROOT" ]]; then
@@ -65,8 +77,6 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # --- Now enable strict mode for our own code ---
 set -euo pipefail
-# shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # --- Source project paths helper ---
 KANBAN_ROOT="$TEAM_ROOT"

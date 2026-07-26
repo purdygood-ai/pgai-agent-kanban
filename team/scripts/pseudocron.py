@@ -5,6 +5,10 @@ Reads pseudocron.cfg (schedule) and pseudocron.env (environment) from the
 kanban root directory, then loops forever firing jobs whose minute value
 matches the current minute.
 
+Each job runs with cwd set to the resolved kanban root so that ROOT-RELATIVE
+command strings in pseudocron.cfg (e.g. "scripts/wake-batch.sh --agent=pm")
+resolve correctly regardless of where pseudocron.py itself was launched from.
+
 Usage:
     python3 pseudocron.py
 
@@ -214,7 +218,7 @@ def main():
     while True:
         now = time.time()
         target = (int(now / 60) + 1) * 60
-        sleep_seconds = target - now
+        sleep_seconds = target - now + 0.89
         # Positive-sleep guard: never pass a non-positive value to sleep().
         if sleep_seconds > 0:
             time.sleep(sleep_seconds)
@@ -228,7 +232,11 @@ def main():
             print(f"{ts} fired (minute={minute:02d}): {command}", file=sys.stderr)
             sys.stdout.flush()
             try:
-                subprocess.Popen(["bash", "-c", command], env=child_env)
+                subprocess.Popen(
+                    ["bash", "-c", command],
+                    env=child_env,
+                    cwd=root,
+                )
             except Exception as exc:  # noqa: BLE001
                 print(
                     f"ERROR {ts} spawn failed (minute={minute:02d}):"

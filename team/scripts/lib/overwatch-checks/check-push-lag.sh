@@ -15,9 +15,10 @@
 # When push_to_remote is true (the default) and no CM agent flock is contended,
 # OVERWATCH pushes via overwatch_halt_first_fix to ensure origin stays in sync.
 #
-# The per-repo flock ($KANBAN_ROOT/locks/repo-wake-pgai-kanban.lock) is the
-# proxy for "a CM or other agent is actively running." If that lock is held,
-# OVERWATCH backs off and lets the live agent finish before touching origin.
+# The per-repo flock ($KANBAN_ROOT/locks/repo-wake-<project-repo-id>.lock,
+# resolved via pp_repo_lock_path in project_paths.sh) is the proxy for "a CM
+# or other agent is actively running." If that lock is held, OVERWATCH backs
+# off and lets the live agent finish before touching origin.
 #
 # This script is both:
 #   - Sourceable (for the OVERWATCH driver): source this file and call

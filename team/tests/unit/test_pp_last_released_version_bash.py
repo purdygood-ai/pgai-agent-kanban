@@ -75,11 +75,36 @@ def _make_tag(repo: pathlib.Path, tag: str) -> None:
 
 
 def _ensure_branch(repo: pathlib.Path, branch: str) -> None:
-    """Create (or reset) a local branch pointing at HEAD."""
-    try:
-        _git(repo, "branch", branch)
-    except subprocess.CalledProcessError:
+    """Create or reset a local branch pointing at HEAD.
+
+    When the target branch already exists and is currently checked out (or HEAD
+    is detached), this is a no-op: the branch already points at HEAD, and
+    ``git branch -f`` would fail with "cannot force update the branch used by
+    worktree".  Using ``git rev-parse --verify`` (plumbing) to detect existence
+    and ``git symbolic-ref`` to detect the current branch avoids parsing
+    porcelain output and handles both cases cleanly.
+    """
+    ref = f"refs/heads/{branch}"
+    branch_exists = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", ref],
+        capture_output=True,
+    ).returncode == 0
+
+    if branch_exists:
+        # Determine which branch HEAD currently points at (empty when detached).
+        head_ref = subprocess.run(
+            ["git", "-C", str(repo), "symbolic-ref", "--quiet", "HEAD"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        # When HEAD is on this branch (checked out) or detached, the branch
+        # already points at HEAD — no action needed.
+        if head_ref == ref or not head_ref:
+            return
+        # Branch exists but is not checked out; force-reset it to HEAD.
         _git(repo, "branch", "-f", branch)
+    else:
+        _git(repo, "branch", branch)
 
 
 def _run(

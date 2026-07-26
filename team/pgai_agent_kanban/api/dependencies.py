@@ -27,7 +27,7 @@ Currently exports one dependency:
 
 Design constraints:
   - ONE shared implementation for all read routes; no per-route duplication.
-  - Does NOT raise an exception; unknown params warn and execute (per BUG-0041 Design).
+  - Does NOT raise an exception; unknown params warn and execute (per the recorded defect Design).
   - The warning list is appended to the response by the route handler; this
     dependency only computes and returns it.
   - Only used on read (GET) routes; operation (POST) routes handle unknown body

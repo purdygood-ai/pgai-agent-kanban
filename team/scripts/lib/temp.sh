@@ -255,6 +255,7 @@ pgai_temp_cleanup_tests() {
     root="$(pgai_temp_dir)"
 
     # Belt-and-suspenders: refuse to operate on dangerous/bare paths.
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     # Mirrors the guards in pgai_temp_cleanup_all (CODER-20260608-012).
     if [[ -z "$root" ]]; then
         echo "temp.sh: pgai_temp_cleanup_tests: refusing to clean empty path — pgai_temp_dir returned empty string" >&2
@@ -331,6 +332,7 @@ pgai_temp_cleanup_all() {
     root="$(pgai_temp_dir)"
 
     # Belt-and-suspenders: refuse to operate on dangerous/bare paths.
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     # Guards added in CODER-20260608-012 to satisfy AC: "refuse to act if
     # computed root is empty, '/', or '/tmp' bare."
     if [[ -z "$root" ]]; then
@@ -355,6 +357,7 @@ pgai_temp_cleanup_all() {
         # literal string when the directory is empty.
         [[ -e "$item" ]] || continue
 
+        # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
         # Provider session dir fence (CODER-20260613-016): skip claude-*,
         # codex-*, gemini-* dirs — they are owned by the provider CLI process,
         # not by the kanban.  Deleting them while an agent runs destroys live
@@ -629,10 +632,157 @@ pgai_tmp_cleanliness_check() {
 }
 
 # ---------------------------------------------------------------------------
-# pgai_listener_cleanliness_check [project_subtree]
+# _pgai_listener_scan_matches <project_subtree>
+# Internal helper shared by pgai_listener_snapshot and
+# pgai_listener_cleanliness_check.  Enumerates current TCP listener pids
+# (ss first, lsof fallback) and prints one "<pid>\t<cmdline>" line per pid
+# whose /proc cwd or cmdline matches the given scope.
+#
+# Scope: when project_subtree is non-empty, matches a pid whose cwd equals or
+# is nested under that subtree, or whose cmdline contains the subtree as a
+# path component (see the boundary rules inlined below).  When
+# project_subtree is empty, falls back to a substring match against the
+# framework temp root's basename (wide-scope; catches all projects sharing
+# the same temp root — same behavior this file has always had for callers
+# that pass no scope).
+#
+# This is a private helper (leading underscore; not part of temp.sh's public
+# surface) factored out so pgai_listener_snapshot (pre-suite) and
+# pgai_listener_cleanliness_check (post-suite) enumerate and match listeners
+# identically — the two must agree on what counts as "framework-rooted" or a
+# pre-existing listener could be captured under one scope definition and
+# checked against another.
+#
+# Returns 0 when the scan ran (regardless of match count, including zero).
+# Returns 2 when neither ss nor lsof is available; prints nothing in that
+# case so the caller decides whether/how to warn (pgai_listener_snapshot
+# stays silent — an empty snapshot is harmless; pgai_listener_cleanliness_check
+# emits the operator-facing warning).
+# ---------------------------------------------------------------------------
+_pgai_listener_scan_matches() {
+    local project_subtree="${1:-}"
+    local root root_basename
+    root="$(pgai_temp_dir)"
+    root_basename="$(basename "$root")"
+
+    # Enumerate listening TCP pids.  We try ss first (iproute2, always present
+    # on RHEL9); fall back to lsof for environments where ss is absent.
+    local raw_pids=()
+    if command -v ss >/dev/null 2>&1; then
+        # ss -tlnp output includes pid fields like: users:(("python3",pid=12345,fd=9))
+        # Extract all numeric pid values from the users:() columns.
+        while IFS= read -r pid_val; do
+            [[ -n "$pid_val" ]] && raw_pids+=("$pid_val")
+        done < <(ss -tlnp 2>/dev/null \
+            | grep -oP 'pid=\K[0-9]+' \
+            | sort -u)
+    elif command -v lsof >/dev/null 2>&1; then
+        # lsof -iTCP -sTCP:LISTEN outputs one line per fd; column 2 is the pid.
+        while IFS= read -r pid_val; do
+            [[ -n "$pid_val" ]] && raw_pids+=("$pid_val")
+        done < <(lsof -iTCP -sTCP:LISTEN -n -P 2>/dev/null \
+            | awk 'NR>1 {print $2}' \
+            | sort -u)
+    else
+        return 2
+    fi
+
+    # For each listener pid, inspect /proc/<pid>/cwd and /proc/<pid>/cmdline.
+    local pid cwd_target cmdline matched
+    for pid in "${raw_pids[@]}"; do
+        # Skip if we cannot read this pid's proc entry (foreign user / race).
+        [[ -d "/proc/${pid}" ]] || continue
+
+        # Read cwd symlink target; empty when unreadable.
+        cwd_target="$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)"
+
+        # Read cmdline: NUL-delimited arguments; tr converts NULs to spaces so
+        # the result is a printable single line.  We pipe through tr rather than
+        # using $() on the raw binary file to avoid bash's "ignored null byte"
+        # warnings (bash command substitution silently drops NULs but emits the
+        # warning; tr handles the conversion cleanly before bash ever sees it).
+        cmdline="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
+        # Trim trailing space produced by the final NUL-to-space conversion.
+        cmdline="${cmdline% }"
+        # Flatten any embedded literal newlines (an argv element can legally
+        # contain one, e.g. a multi-line `python3 -c "..."` payload) to a
+        # single space.  This function's output is transported as one
+        # "<pid>\t<cmdline>" line per match through a pipe/here-string to its
+        # callers; an unflattened newline inside cmdline would otherwise be
+        # mistaken for a record separator downstream and corrupt parsing.
+        cmdline="${cmdline//$'\n'/ }"
+
+        # Flag based on the resolved scope:
+        #   - Project subtree set: match cwd against the subtree prefix; match
+        #     cmdline requiring a directory boundary after the subtree path so that
+        #     a sibling project whose name is a prefix extension of this project
+        #     (e.g. pgai-agent-kanban-ui vs pgai-agent-kanban) is not falsely
+        #     matched.  The cmdline check accepts the subtree followed by '/'
+        #     (another path component), ' ' (next whitespace-delimited token), or
+        #     at the end of the string (subtree is the final argument).
+        #   - No subtree: fall back to the basename substring check (wide scope).
+        matched=0
+        if [[ -n "${project_subtree}" ]]; then
+            if [[ "$cwd_target" == "${project_subtree}" || \
+                  "$cwd_target" == "${project_subtree}/"* || \
+                  "$cmdline" == *"${project_subtree}/"* || \
+                  "$cmdline" == *"${project_subtree} "* || \
+                  "$cmdline" == *"${project_subtree}" ]]; then
+                matched=1
+            fi
+        else
+            if [[ "$cwd_target" == *"${root_basename}"* || \
+                  "$cmdline" == *"${root_basename}"* ]]; then
+                matched=1
+            fi
+        fi
+
+        [[ "${matched}" -eq 1 ]] && printf '%s\t%s\n' "$pid" "$cmdline"
+    done
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# pgai_listener_snapshot [project_subtree]
+# Capture the pids of framework-rooted TCP listeners that exist RIGHT NOW,
+# using the identical scope resolution and matching rules that
+# pgai_listener_cleanliness_check applies.  Intended to be
+# called BEFORE pytest launches so the post-suite cleanliness check can tell
+# a pre-existing orphan (present in this snapshot) apart from a listener
+# spawned during the run (first observed only after this snapshot was taken).
+#
+# Output is a sorted, newline-delimited list of pids on stdout — redirect to
+# a file under the framework temp root (via pgai_mktemp; never bare /tmp).
+# An empty snapshot (no matching listeners, or neither ss nor lsof present)
+# is valid output: it means every listener the post-suite check later finds
+# is attributed to this run.
+#
+# Arguments:
+#   $1 (optional) — project subtree, same semantics as
+#                   pgai_listener_cleanliness_check's $1.  Falls back to
+#                   PGAI_PROJECT_TEMP_SUBTREE when omitted, then to no scope
+#                   (wide-scope match) when neither is set.
+#
+# Usage:
+#   _snap="$(pgai_mktemp listener_presuite_snapshot)"
+#   pgai_listener_snapshot "$PGAI_PROJECT_TEMP_SUBTREE" > "$_snap"
+#   ... launch pytest ...
+#   pgai_listener_cleanliness_check "$PGAI_PROJECT_TEMP_SUBTREE" "$_snap"
+# ---------------------------------------------------------------------------
+pgai_listener_snapshot() {
+    local project_subtree="${1:-${PGAI_PROJECT_TEMP_SUBTREE:-}}"
+    project_subtree="${project_subtree%/}"
+    _pgai_listener_scan_matches "${project_subtree}" 2>/dev/null \
+        | awk -F'\t' '{print $1}' | sort -un
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# pgai_listener_cleanliness_check [project_subtree] [presuite_snapshot_file]
 # Scan for TCP listeners whose owning process cwd or cmdline is under the
 # project's temp subtree (or the full framework temp root when no subtree is
-# given) and fail non-zero if any are found.
+# given) and fail non-zero if any are found THAT WERE NOT ALREADY PRESENT in
+# the optional pre-suite snapshot.
 #
 # This gates the class of listener-leak residue — the same philosophy as
 # pgai_tmp_cleanliness_check does for files.  A test that spawns a network
@@ -640,6 +790,19 @@ pgai_tmp_cleanliness_check() {
 # listener bound to a port.  This check surfaces such leaks after pytest
 # exits so the runner can fail non-zero with enough context for the operator
 # to correlate the leaked listener to its fixture.
+#
+# Pre-suite snapshot scoping (cross-run orphan tolerance):
+#   A framework-rooted listener can outlive the task that spawned it — an
+#   orphaned server reparented to init after its worktree was deleted, still
+#   bound to a port, with a cwd string that happens to resolve under the
+#   project's temp subtree.  Without a baseline, every later run's post-suite
+#   check attributes that orphan to itself and fails even though its own
+#   pytest suite left nothing behind.  When $2 (or a prior pgai_listener_snapshot
+#   capture) is supplied, any pid appearing in that snapshot is treated as
+#   pre-existing and is excluded from the flagged set — only pids first
+#   observed AFTER the snapshot was taken (i.e. spawned during this run) are
+#   flagged.  Omitting the snapshot preserves the pre-existing behavior of
+#   flagging every matching listener currently alive.
 #
 # Scope narrowing:
 #   When multiple projects share the same framework temp root (e.g.
@@ -663,9 +826,10 @@ pgai_tmp_cleanliness_check() {
 #   3b. When no project subtree is set: flag the pid if cwd or cmdline
 #       contains the framework temp root basename (wide-scope fallback, same
 #       as pre-narrowing behavior).
-#   4. For every flagged pid, print its pid and full cmdline to stderr.
-#   5. Return non-zero when at least one flagged listener is found; return 0
-#      when no flagged listeners exist.
+#   4. Drop any pid present in the pre-suite snapshot file, when one was given.
+#   5. For every remaining flagged pid, print its pid and full cmdline to stderr.
+#   6. Return non-zero when at least one flagged listener remains; return 0
+#      otherwise.
 #
 # Scope constraint:
 #   The check examines ONLY pids whose /proc entry is readable by the current
@@ -678,6 +842,13 @@ pgai_tmp_cleanliness_check() {
 #                   (e.g. /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban).
 #                   When provided, only listeners under this prefix are flagged.
 #                   Overrides PGAI_PROJECT_TEMP_SUBTREE when both are set.
+#   $2 (optional) — path to a pre-suite snapshot file produced by
+#                   pgai_listener_snapshot (one pid per line).  Pids listed in
+#                   this file are excluded from the flagged set.  A missing or
+#                   unreadable file is treated as an empty snapshot (a warning
+#                   is printed; nothing is excluded) rather than a hard error,
+#                   since a failed pre-suite capture should not itself hide a
+#                   real leak.
 #
 # Environment variables:
 #   PGAI_PROJECT_TEMP_SUBTREE (optional) — same as $1; used when the positional
@@ -685,25 +856,24 @@ pgai_tmp_cleanliness_check() {
 #                   check to the project being tested.
 #
 # Returns:
-#   0  — no project-scoped listeners found (or no listeners found under the
-#        framework temp root when running in wide-scope fallback mode)
-#   1  — at least one scoped listener found (details printed to stderr)
+#   0  — no project-scoped listeners found beyond the pre-suite snapshot (or
+#        no listeners found under the framework temp root when running in
+#        wide-scope fallback mode)
+#   1  — at least one scoped listener not present in the pre-suite snapshot
+#        found (details printed to stderr)
 #
 # Usage:
 #   pgai_listener_cleanliness_check
 #   pgai_listener_cleanliness_check "/tmp/pgai_kanban_tmp/projects/my-project"
+#   pgai_listener_cleanliness_check "/tmp/pgai_kanban_tmp/projects/my-project" "$_snap"
 #   PGAI_PROJECT_TEMP_SUBTREE="/tmp/pgai_kanban_tmp/projects/my-project" \
 #       pgai_listener_cleanliness_check
 # ---------------------------------------------------------------------------
 pgai_listener_cleanliness_check() {
-    local root root_basename
+    local root
     root="$(pgai_temp_dir)"
-    root_basename="$(basename "$root")"
 
     # Resolve the project subtree scope.  Precedence: positional arg > env var > none.
-    # When a subtree is set, the match is a full path-prefix check against cwd and a
-    # substring check against cmdline.  When no subtree is set, fall back to the
-    # basename substring match (wide-scope; catches all projects sharing this temp root).
     local project_subtree=""
     if [[ -n "${1:-}" ]]; then
         project_subtree="${1%/}"   # strip trailing slash for consistent prefix matching
@@ -711,79 +881,40 @@ pgai_listener_cleanliness_check() {
         project_subtree="${PGAI_PROJECT_TEMP_SUBTREE%/}"
     fi
 
-    # Enumerate listening TCP pids.  We try ss first (iproute2, always present
-    # on RHEL9); fall back to lsof for environments where ss is absent.
-    local raw_pids=()
-    if command -v ss >/dev/null 2>&1; then
-        # ss -tlnp output includes pid fields like: users:(("python3",pid=12345,fd=9))
-        # Extract all numeric pid values from the users:() columns.
-        while IFS= read -r pid_val; do
-            [[ -n "$pid_val" ]] && raw_pids+=("$pid_val")
-        done < <(ss -tlnp 2>/dev/null \
-            | grep -oP 'pid=\K[0-9]+' \
-            | sort -u)
-    elif command -v lsof >/dev/null 2>&1; then
-        # lsof -iTCP -sTCP:LISTEN outputs one line per fd; column 2 is the pid.
-        while IFS= read -r pid_val; do
-            [[ -n "$pid_val" ]] && raw_pids+=("$pid_val")
-        done < <(lsof -iTCP -sTCP:LISTEN -n -P 2>/dev/null \
-            | awk 'NR>1 {print $2}' \
-            | sort -u)
-    else
-        # Neither tool is available — skip the check rather than block the run.
+    # Load the pre-suite snapshot's pids (if a snapshot file was supplied) so
+    # they can be excluded below — see "Pre-suite snapshot scoping" above.
+    local presuite_snapshot_file="${2:-}"
+    local -A presuite_pids=()
+    if [[ -n "${presuite_snapshot_file}" ]]; then
+        if [[ -f "${presuite_snapshot_file}" ]]; then
+            local _pp
+            while IFS= read -r _pp; do
+                [[ -n "$_pp" ]] && presuite_pids["$_pp"]=1
+            done < "${presuite_snapshot_file}"
+        else
+            echo "[pgai-listener] WARNING: pre-suite snapshot file not found (${presuite_snapshot_file}); treating as empty (no pids excluded)." >&2
+        fi
+    fi
+
+    local scan_output scan_status
+    scan_output="$(_pgai_listener_scan_matches "${project_subtree}")"
+    scan_status=$?
+    if [[ ${scan_status} -eq 2 ]]; then
+        # Neither ss nor lsof is available — skip the check rather than block the run.
         echo "[pgai-listener] WARNING: neither ss nor lsof found; skipping listener cleanliness check." >&2
         return 0
     fi
 
-    # For each listener pid, inspect /proc/<pid>/cwd and /proc/<pid>/cmdline.
     local flagged_pids=() flagged_cmdlines=()
-    local pid cwd_target cmdline
-    for pid in "${raw_pids[@]}"; do
-        # Skip if we cannot read this pid's proc entry (foreign user / race).
-        [[ -d "/proc/${pid}" ]] || continue
-
-        # Read cwd symlink target; empty when unreadable.
-        cwd_target="$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)"
-
-        # Read cmdline: NUL-delimited arguments; tr converts NULs to spaces so
-        # the result is a printable single line.  We pipe through tr rather than
-        # using $() on the raw binary file to avoid bash's "ignored null byte"
-        # warnings (bash command substitution silently drops NULs but emits the
-        # warning; tr handles the conversion cleanly before bash ever sees it).
-        cmdline="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
-        # Trim trailing space produced by the final NUL-to-space conversion.
-        cmdline="${cmdline% }"
-
-        # Flag based on the resolved scope:
-        #   - Project subtree set: match cwd against the subtree prefix; match
-        #     cmdline requiring a directory boundary after the subtree path so that
-        #     a sibling project whose name is a prefix extension of this project
-        #     (e.g. pgai-agent-kanban-ui vs pgai-agent-kanban) is not falsely
-        #     matched.  The cmdline check accepts the subtree followed by '/'
-        #     (another path component), ' ' (next whitespace-delimited token), or
-        #     at the end of the string (subtree is the final argument).
-        #   - No subtree: fall back to the basename substring check (wide scope).
-        local matched=0
-        if [[ -n "${project_subtree}" ]]; then
-            if [[ "$cwd_target" == "${project_subtree}" || \
-                  "$cwd_target" == "${project_subtree}/"* || \
-                  "$cmdline" == *"${project_subtree}/"* || \
-                  "$cmdline" == *"${project_subtree} "* || \
-                  "$cmdline" == *"${project_subtree}" ]]; then
-                matched=1
-            fi
-        else
-            if [[ "$cwd_target" == *"${root_basename}"* || \
-                  "$cmdline" == *"${root_basename}"* ]]; then
-                matched=1
-            fi
-        fi
-
-        if [[ "${matched}" -eq 1 ]]; then
-            flagged_pids+=("$pid")
-            flagged_cmdlines+=("$cmdline")
-        fi
-    done
+    local pid cmdline
+    while IFS=$'\t' read -r pid cmdline; do
+        [[ -z "${pid}" ]] && continue
+        # Skip pids already present in the pre-suite snapshot: pre-existing
+        # orphans from earlier tasks/runs are not this run's responsibility.
+        [[ -n "${presuite_pids[${pid}]:-}" ]] && continue
+        flagged_pids+=("$pid")
+        flagged_cmdlines+=("$cmdline")
+    done <<< "${scan_output}"
 
     if [[ "${#flagged_pids[@]}" -eq 0 ]]; then
         return 0

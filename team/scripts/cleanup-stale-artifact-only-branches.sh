@@ -7,7 +7,7 @@
 # the task's entire deliverable lives inside the task folder.
 #
 # Detection criteria mirror TESTER.md Section 2a (Check-2 exemption rules)
-# and the false-positive lineage documented in BUG-0024.  The canonical
+# and the false-positive lineage documented in the defect ledger.  The canonical
 # example is WRITER-20260710-013-sop-disposition-table: Required Output names
 # only artifacts/sop-disposition-table.md, Constraints forbids all source-tree
 # edits, and the feature branch carries zero unique commits by design.

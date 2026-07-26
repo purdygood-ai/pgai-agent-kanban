@@ -43,6 +43,42 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
+# Argument handling: --help/-h only.
+# This script accepts no operator arguments; cadence is controlled via cron.
+# ---------------------------------------------------------------------------
+for _arg in "$@"; do
+    case "$_arg" in
+        --help|-h)
+            echo "Usage: $(basename "${BASH_SOURCE[0]}")"
+            echo ""
+            echo "OVERWATCH Tier-1 deterministic sweep runner."
+            echo ""
+            echo "Iterates all registered projects and runs every check-*.sh module"
+            echo "from team/scripts/lib/overwatch-checks/ in lexical order."
+            echo "This script accepts no operator arguments; cadence is set via cron."
+            echo ""
+            echo "Environment:"
+            echo "  KANBAN_ROOT / PGAI_AGENT_KANBAN_ROOT_PATH  Kanban installation root."
+            echo "  PGAI_AGENT_KANBAN_TEMP_DIR                  Temp root directory."
+            echo ""
+            echo "HALT gates (either alone suppresses the sweep run):"
+            echo "  \$KANBAN_ROOT/HALT            Global halt; stops all agents."
+            echo "  \$KANBAN_ROOT/HALT_OVERWATCH  Overwatch-specific halt."
+            echo ""
+            echo "Exit codes:"
+            echo "  0   Completed (all projects swept, or suppressed by a halt flag)."
+            echo "  1   Fatal setup error (library missing, registry unreadable)."
+            exit 0
+            ;;
+        *)
+            echo "overwatch-sweep: error: this script accepts no arguments (got: $_arg)" >&2
+            echo "Run with --help for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
 # Locate this script's directory and resolve library paths.
 # ---------------------------------------------------------------------------
 _SWEEP_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

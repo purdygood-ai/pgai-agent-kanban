@@ -201,6 +201,7 @@ CLAUDE-CM-TEST
 RSEOF
 
     # --- Check 1: empty file in priority/ ---
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     touch "${E2E_PROJECT_ROOT}/priority/PRIORITY-0099-empty-test.md"
 
     # --- Check 2: BLOCKED task (Needs Human=no, Active RC reason) ---
@@ -270,7 +271,9 @@ TEOF
 
     # --- Check 4: cache marker drift ---
     # PRIORITY file with Status=open but [x] in priority_backlog.md
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     cat > "${E2E_PROJECT_ROOT}/priority/PRIORITY-0088-drifted.md" <<'PEOF'
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 # PRIORITY-0088: Drifted cache marker test
 
 ## Status
@@ -281,6 +284,7 @@ PEOF
     cat > "${E2E_PROJECT_ROOT}/tasks/queues/claude/priority_backlog.md" <<'PBEOF'
 # Priority Backlog
 
+# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
 - [x] PRIORITY-0088-drifted
 PBEOF
 
@@ -480,6 +484,7 @@ fi
 
 # Verify dry-run did NOT mutate the fixture
 _assert_file_exists "dry-run/no-mutation/empty-priority-intact" \
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     "${E2E_PROJECT_ROOT}/priority/PRIORITY-0099-empty-test.md"
 
 _assert_file_exists "dry-run/no-mutation/tester-orphan-intact" \
@@ -510,8 +515,10 @@ _live_8="$(_run_check check-push-lag.sh || true)"
 
 # Fix 1: empty file renamed to .empty.orphan
 _assert_file_absent "live/fix-1/empty-file-gone" \
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     "${E2E_PROJECT_ROOT}/priority/PRIORITY-0099-empty-test.md"
 _assert_file_exists "live/fix-1/orphan-file-present" \
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     "${E2E_PROJECT_ROOT}/priority/PRIORITY-0099-empty-test.md.empty.orphan"
 
 # Fix 6: Active RC reset to none
@@ -531,6 +538,7 @@ _assert_file_absent "live/fix-3/tester-orphan-gone" \
 # Fix 4: cache marker reset from [x] to [ ]
 _assert_file_contains "live/fix-4/cache-marker-reset" \
     "${E2E_PROJECT_ROOT}/tasks/queues/claude/priority_backlog.md" \
+    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
     '\[ \]\s+PRIORITY-0088-drifted'
 
 # Fix 5: PM task marked WONT-DO

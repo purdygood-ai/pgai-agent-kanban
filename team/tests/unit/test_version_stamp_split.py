@@ -84,6 +84,7 @@ _REAL_INI_PARSER_SH = _LIB_DIR / "ini_parser.sh"
 _REAL_PROJECT_PATHS_SH = _LIB_DIR / "project_paths.sh"
 _REAL_TEMP_SH = _LIB_DIR / "temp.sh"
 _REAL_VERSION_STAMP_SH = _LIB_DIR / "version_stamp.sh"
+_REAL_SUBAGENT_DEPLOY_SH = _LIB_DIR / "subagent_deploy.sh"
 
 
 # ---------------------------------------------------------------------------
@@ -128,12 +129,16 @@ def _build_tag_exact_repo(tmp_path: pathlib.Path) -> tuple[pathlib.Path, str]:
     """Build a repo where HEAD is at an exact tag.
 
     Returns (repo_path, tag_name).
+
+    The tag uses the 'v[0-9]*' shape so it is matched by the --match filter
+    in stamp_version_files (which uses --match 'v[0-9]*' to exclude alias tags
+    like 'latest').
     """
     repo = _make_git_repo(tmp_path, "tag_exact_repo")
     (repo / "v.txt").write_text("initial\n", encoding="utf-8")
     _git_cmd(repo, "add", "v.txt")
     _git_cmd(repo, "commit", "-m", "Initial commit")
-    tag = "ai_v1.19.0"
+    tag = "v1.19.0"
     _git_cmd(repo, "tag", tag)
     return repo, tag
 
@@ -143,12 +148,16 @@ def _build_tag_plus_one_repo(tmp_path: pathlib.Path) -> tuple[pathlib.Path, str,
 
     Returns (repo_path, base_tag, full_describe).
     full_describe will be '<tag>-1-g<sha>'.
+
+    The tag uses the 'v[0-9]*' shape so it is matched by the --match filter
+    in stamp_version_files (which uses --match 'v[0-9]*' to exclude alias tags
+    like 'latest').
     """
     repo = _make_git_repo(tmp_path, "tag_plus_one_repo")
     (repo / "v.txt").write_text("initial\n", encoding="utf-8")
     _git_cmd(repo, "add", "v.txt")
     _git_cmd(repo, "commit", "-m", "Initial commit")
-    tag = "ai_v1.19.0"
+    tag = "v1.19.0"
     _git_cmd(repo, "tag", tag)
 
     # One polish commit past the tag.
@@ -156,7 +165,7 @@ def _build_tag_plus_one_repo(tmp_path: pathlib.Path) -> tuple[pathlib.Path, str,
     _git_cmd(repo, "add", "polish.txt")
     _git_cmd(repo, "commit", "-m", "Polish commit after tag")
 
-    full_describe = _git_cmd(repo, "describe", "--tags")
+    full_describe = _git_cmd(repo, "describe", "--tags", "--match", "v[0-9]*")
     return repo, tag, full_describe
 
 
@@ -471,6 +480,11 @@ def _build_advisory_sandbox(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     # Copy the shared version_stamp.sh helper so the dev-tree upgrade.sh can source it.
     if _REAL_VERSION_STAMP_SH.exists():
         shutil.copy2(_REAL_VERSION_STAMP_SH, dev_lib / _REAL_VERSION_STAMP_SH.name)
+
+    # Copy the shared subagent_deploy.sh helper so the dev-tree upgrade.sh can
+    # source it (required — the provider-agent deploy step fails loud if absent).
+    if _REAL_SUBAGENT_DEPLOY_SH.exists():
+        shutil.copy2(_REAL_SUBAGENT_DEPLOY_SH, dev_lib / _REAL_SUBAGENT_DEPLOY_SH.name)
 
     # Copy the version.sh dashboard lib so get_latest_released_tag is available.
     _dash_lib_src = _SCRIPTS_DIR / "dashboard" / "lib" / "version.sh"

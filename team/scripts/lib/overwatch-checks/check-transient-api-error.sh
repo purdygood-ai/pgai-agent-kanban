@@ -14,14 +14,24 @@
 #   - "503"
 #   - "529"
 #
+# This module reads and writes the SAME durable ## Transient Retry
+# record that wake_common.sh's handle_working_after_exit owns (see
+# overwatch_protocol.sh: transient_retry_field / transient_retry_write /
+# transient_retry_limit). There is exactly one retry_count and one ceiling —
+# this module no longer maintains an independent ## Transient Requeue Count
+# field or a hardcoded cap; the ceiling is transient_retry_limit()'s resolved
+# value (kanban.cfg [wake] transient_retry_cap, default 3 — the same value
+# handle_working_after_exit enforces).
+#
 # Requeue path (ceiling not reached):
 #   1. Back up status.md via overwatch_backup_file.
 #   2. Reset State to BACKLOG.
-#   3. Increment ## Transient Requeue Count in status.md (append field if absent).
+#   3. Increment retry_count in the durable ## Transient Retry record via
+#      transient_retry_write (append the record if absent).
 #   4. Append "TRANSIENT" to ## Labels in status.md (append field if absent).
 #   5. Log action via overwatch_log_action.
 #
-# Ceiling path (requeue count already >= 2):
+# Ceiling path (retry_count already >= transient_retry_limit):
 #   1. Write a bug report file under $KANBAN_ROOT/projects/$OVERWATCH_PROJECT/bugs/.
 #   2. Log action via overwatch_log_action.
 #   (Task is NOT modified — a human or future iteration acts on the bug.)
@@ -55,7 +65,13 @@
 #
 # Exit codes:
 #   0 — completed successfully (no transient tasks, or transient tasks handled)
-#   1 — internal error (missing dependencies, unreadable state, etc.)
+#   1 — internal error (missing dependencies, unreadable state, etc.), OR one
+#       or more repair attempts (requeue-to-BACKLOG or ceiling-hit
+#       Needs-Human escalation) failed partway through. A failed repair is
+#       never reported as success: overwatch_check_transient_api_error counts
+#       repair failures and returns non-zero (with a narrated summary line on
+#       stderr) whenever that count is greater than zero, even though other
+#       tasks in the same sweep may have been handled successfully.
 #
 # --dry-run: scans and logs findings but does NOT modify any task files.
 
@@ -216,13 +232,15 @@ _ctae_matches_transient_signature() {
 
 # ---------------------------------------------------------------------------
 # _ctae_read_requeue_count <status_file>
-# Echo the integer value of ## Transient Requeue Count from status.md,
-# or 0 if the field is absent or non-numeric.
+# Echo the integer retry_count from the durable ## Transient Retry record
+# (the SAME record wake_common.sh's handle_working_after_exit
+# writes; see overwatch_protocol.sh: transient_retry_field), or 0 if the
+# record is absent or the field is non-numeric.
 # ---------------------------------------------------------------------------
 _ctae_read_requeue_count() {
     local status_file="$1"
     local raw
-    raw="$(_ctae_extract_field "${status_file}" "Transient Requeue Count")"
+    raw="$(transient_retry_field "${status_file}" "retry_count" "0")"
     raw="$(echo "${raw}" | tr -d '[:space:]')"
     if [[ "${raw}" =~ ^[0-9]+$ ]]; then
         echo "${raw}"
@@ -244,6 +262,8 @@ _ctae_bug_file() {
     local timestamp
     timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
     local bug_file="${bugs_dir}/BUG-overwatch-transient-${task_id}-${timestamp}.md"
+    local _cap
+    _cap="$(transient_retry_limit)"
 
     mkdir -p "${bugs_dir}" 2>/dev/null || {
         echo "check-transient-api-error: cannot create bugs dir: ${bugs_dir}" >&2
@@ -270,8 +290,9 @@ ${reason}
 
 ## Description
 OVERWATCH detected a transient API error pattern in the task log but the
-auto-requeue ceiling (2) has been reached, or the task has a worktree carrying
-commits that must not be auto-pruned. Manual intervention required.
+auto-requeue ceiling (${_cap}, from the durable ## Transient Retry record)
+has been reached, or the task has a worktree carrying commits
+that must not be auto-pruned. Manual intervention required.
 EOF
 
     echo "${bug_file}"
@@ -286,13 +307,19 @@ EOF
 #
 # Actions:
 #   1. Backup status.md
-#   2. Update State -> BACKLOG, increment Transient Requeue Count, add TRANSIENT label
-#   3. Log the action
+#   2. Update the durable ## Transient Retry record (retry_count, retry_limit,
+#      reason_code, provider, last_error) via transient_retry_write — the
+#      SAME record and ceiling wake_common.sh's handle_working_after_exit uses
+#      (one record, one ceiling, no independent OVERWATCH counter).
+#   3. Reset State -> BACKLOG, add TRANSIENT label, clear Blockers/Needs Human
+#   4. Log the action
 # ---------------------------------------------------------------------------
 _ctae_do_requeue() {
     local task_id="${_CTAE_TASK_ID}"
     local status_file="${_CTAE_STATUS_FILE}"
     local new_count="${_CTAE_NEW_COUNT}"
+    local retry_limit
+    retry_limit="$(transient_retry_limit)"
 
     # Backup status.md before any change
     local backup_path="none"
@@ -303,7 +330,15 @@ _ctae_do_requeue() {
     }
     backup_path="${bpath}"
 
-    # Use Python to atomically update the status.md
+    # Update the ONE durable retry record first (transient_retry_write is the
+    # shared writer defined in overwatch_protocol.sh; see the module header).
+    if ! transient_retry_write "${status_file}" "transient_api_error" "${new_count}" \
+        "${retry_limit}" "overwatch" "transient signature matched in task log tail"; then
+        echo "check-transient-api-error: transient_retry_write failed for ${status_file}" >&2
+        return 1
+    fi
+
+    # Use Python to atomically update the remaining status.md fields.
     local edit_exit=0
     python3 - "${status_file}" "${new_count}" <<'PY' || edit_exit=$?
 import pathlib, re, sys
@@ -337,21 +372,7 @@ def append_section(text, heading, body):
 # 1. Reset State to BACKLOG
 text, _ = replace_section(text, "State", "BACKLOG")
 
-# 2. Update or insert Transient Requeue Count
-text, replaced = replace_section(text, "Transient Requeue Count", new_count)
-if not replaced:
-    text = append_section(text, "Transient Requeue Count", new_count)
-
-# 3. Update or insert Labels with TRANSIENT
-text, replaced = replace_section(
-    text, "Labels",
-    lambda m=None: (
-        ("TRANSIENT" if not m else
-         m if "TRANSIENT" in m else m + " TRANSIENT")
-    )
-)
-# The lambda trick above won't work in re.subn — do it differently:
-# Re-read the Labels field value to see if TRANSIENT is already there.
+# 2. Update or insert Labels with TRANSIENT
 labels_raw, labels_found = "", False
 label_match = re.search(r'^## Labels\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
 if label_match:
@@ -365,7 +386,7 @@ if labels_found:
 else:
     text = append_section(text, "Labels", "TRANSIENT")
 
-# 4. Clear blockers / needs human
+# 3. Clear blockers / needs human
 text, _ = replace_section(text, "Blockers", "none")
 text, _ = replace_section(text, "Needs Human", "no")
 
@@ -396,7 +417,93 @@ PY
         "${task_id}" \
         "transient-auto-requeued" \
         "${backup_path}" \
-        "Transient API error in log tail; reset to BACKLOG (requeue #${new_count} of 2)" \
+        "Transient API error in log tail; reset to BACKLOG (requeue #${new_count} of ${retry_limit})" \
+    || true
+
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _ctae_do_escalate
+# Inner function invoked when the retry ceiling is reached.
+# Reads: _CTAE_TASK_ID, _CTAE_STATUS_FILE, _CTAE_CURRENT_COUNT, _CTAE_CAP
+# from the environment.
+#
+# Sets Needs Human=yes and narrates Blocked Reason so a ceiling hit detected
+# by OVERWATCH is exactly as consistent as one detected by wake_common.sh's
+# handle_working_after_exit — "at ceiling: BLOCKED + Needs Human=yes,
+# narrated" applies identically regardless of which controller observed the
+# ceiling. The task is NOT requeued (bug-filing already happened in the
+# caller); this only escalates the human-attention flag.
+# ---------------------------------------------------------------------------
+_ctae_do_escalate() {
+    local task_id="${_CTAE_TASK_ID}"
+    local status_file="${_CTAE_STATUS_FILE}"
+    local current_count="${_CTAE_CURRENT_COUNT}"
+    local cap="${_CTAE_CAP}"
+
+    local backup_path="none"
+    local bpath
+    bpath="$(overwatch_backup_file "${status_file}")" || {
+        echo "check-transient-api-error: backup failed for ${status_file}" >&2
+        return 1
+    }
+    backup_path="${bpath}"
+
+    local edit_exit=0
+    python3 - "${status_file}" "${current_count}" "${cap}" <<'PY' || edit_exit=$?
+import pathlib, re, sys
+
+status_path = pathlib.Path(sys.argv[1])
+current_count, cap = sys.argv[2], sys.argv[3]
+
+try:
+    text = status_path.read_text(encoding="utf-8")
+except OSError as e:
+    raise SystemExit(f"Cannot read status file: {e}")
+
+def replace_section(text, heading, new_body):
+    pattern = rf'(^## {re.escape(heading)}\s*\n)(.*?)(\n+##|\Z)'
+    new_text, n = re.subn(
+        pattern,
+        lambda m: m.group(1) + new_body.strip() + "\n" + (m.group(3) if m.group(3) else ''),
+        text,
+        flags=re.S | re.M,
+    )
+    return new_text, n > 0
+
+text, _ = replace_section(text, "Needs Human", "yes")
+text, replaced = replace_section(
+    text, "Blocked Reason",
+    f"Transient API error retry ceiling reached ({current_count}/{cap}, see ## Transient Retry record); human investigation required.",
+)
+if not replaced:
+    if not text.endswith("\n"):
+        text += "\n"
+    text += (
+        "\n## Blocked Reason\n"
+        f"Transient API error retry ceiling reached ({current_count}/{cap}, see ## Transient Retry record); human investigation required.\n"
+    )
+
+text = re.sub(r'\n\n\n+', '\n\n', text)
+
+try:
+    status_path.write_text(text, encoding="utf-8")
+except OSError as e:
+    raise SystemExit(f"Failed to write status file: {e}")
+PY
+
+    if (( edit_exit != 0 )); then
+        echo "check-transient-api-error: needs-human escalation failed for ${task_id}" >&2
+        return 1
+    fi
+
+    overwatch_log_action \
+        "check-transient-api-error" \
+        "${task_id}" \
+        "transient-ceiling-needs-human-escalated" \
+        "${backup_path}" \
+        "Transient retry ceiling ${current_count}/${cap} reached; Needs Human set to yes" \
     || true
 
     return 0
@@ -683,7 +790,15 @@ overwatch_check_transient_api_error() {
 
     echo "check-transient-api-error: scanning BLOCKED tasks for transient API error signatures" >&2
 
+    # The ONE ceiling — resolved once per sweep, shared with
+    # wake_common.sh's handle_working_after_exit via the same
+    # transient_retry_limit() function (overwatch_protocol.sh). Never
+    # hardcode a second ceiling here.
+    local transient_cap
+    transient_cap="$(transient_retry_limit)"
+
     local handled=0
+    local repair_failures=0
     local task_id
 
     while IFS= read -r task_id; do
@@ -715,14 +830,14 @@ overwatch_check_transient_api_error() {
         local new_count=$(( current_count + 1 ))
 
         if (( dry_run == 1 )); then
-            echo "check-transient-api-error: [dry-run] ${task_id}: count=${current_count}; would $(( current_count >= 2 )) && echo 'bug-file' || echo 'requeue'" >&2
-            if (( current_count >= 2 )); then
+            echo "check-transient-api-error: [dry-run] ${task_id}: count=${current_count}, cap=${transient_cap}; would $(( current_count >= transient_cap )) && echo 'bug-file' || echo 'requeue'" >&2
+            if (( current_count >= transient_cap )); then
                 overwatch_log_action \
                     "check-transient-api-error" \
                     "${task_id}" \
                     "dry-run-transient-ceiling-would-bug-file" \
                     "none" \
-                    "Transient count=${current_count} >= 2; dry-run, would bug-file" \
+                    "Transient count=${current_count} >= ${transient_cap}; dry-run, would bug-file" \
                 2>/dev/null || true
             else
                 overwatch_log_action \
@@ -730,7 +845,7 @@ overwatch_check_transient_api_error() {
                     "${task_id}" \
                     "dry-run-transient-would-requeue" \
                     "none" \
-                    "Transient count=${current_count}; dry-run, would requeue (#${new_count})" \
+                    "Transient count=${current_count}; dry-run, would requeue (#${new_count} of ${transient_cap})" \
                 2>/dev/null || true
             fi
             # Still run residue check in dry-run mode
@@ -738,8 +853,11 @@ overwatch_check_transient_api_error() {
             continue
         fi
 
-        # Ceiling check: at most 2 auto-requeues; 3rd occurrence bug-files
-        if (( current_count >= 2 )); then
+        # Ceiling check: at most transient_cap auto-requeues; the occurrence
+        # AT the cap bug-files (exactly-at-cap is never left in
+        # limbo — same "reached, don't retry further" semantics as
+        # handle_working_after_exit's Needs Human=yes branch).
+        if (( current_count >= transient_cap )); then
             echo "check-transient-api-error: ${task_id}: ceiling reached (count=${current_count}); bug-filing" >&2
             local bug_path
             bug_path="$(_ctae_bug_file "${task_id}" \
@@ -758,6 +876,31 @@ overwatch_check_transient_api_error() {
             || true
 
             echo "check-transient-api-error: ${task_id}: bug filed at ${bug_path}" >&2
+
+            # Escalate Needs Human=yes so exactly-at-cap is never
+            # left in limbo — consistent with wake_common.sh's
+            # handle_working_after_exit at the same ceiling.
+            export _CTAE_TASK_ID="${task_id}"
+            export _CTAE_STATUS_FILE="${task_status}"
+            export _CTAE_CURRENT_COUNT="${current_count}"
+            export _CTAE_CAP="${transient_cap}"
+
+            local escalate_exit=0
+            overwatch_halt_first_fix _ctae_do_escalate || escalate_exit=$?
+
+            unset _CTAE_TASK_ID _CTAE_STATUS_FILE _CTAE_CURRENT_COUNT _CTAE_CAP
+
+            if (( escalate_exit == 3 )); then
+                echo "check-transient-api-error: HALT_OVERWATCH guard tripped; aborting" >&2
+                break
+            elif (( escalate_exit == 4 )); then
+                echo "check-transient-api-error: per-repo flock contended; aborting" >&2
+                break
+            elif (( escalate_exit != 0 )); then
+                echo "check-transient-api-error: ${task_id}: needs-human escalation failed (exit ${escalate_exit}); bug remains filed" >&2
+                repair_failures=$(( repair_failures + 1 ))
+            fi
+
             handled=$(( handled + 1 ))
         else
             # Requeue path: invoke via overwatch_halt_first_fix
@@ -778,6 +921,7 @@ overwatch_check_transient_api_error() {
                 break
             elif (( fix_exit != 0 )); then
                 echo "check-transient-api-error: requeue failed for ${task_id} (exit ${fix_exit}); continuing" >&2
+                repair_failures=$(( repair_failures + 1 ))
                 continue
             fi
 
@@ -791,6 +935,15 @@ overwatch_check_transient_api_error() {
     done <<< "${blocked_ids}"
 
     echo "check-transient-api-error: complete; handled ${handled} transient task(s)" >&2
+
+    # A failed repair must never report success from the outer check: if any
+    # requeue or ceiling-escalation attempt failed partway through this sweep,
+    # surface it as a narrated non-zero exit rather than silently returning 0.
+    if (( repair_failures > 0 )); then
+        echo "check-transient-api-error: ${repair_failures} repair failure(s) detected this sweep; a repair was attempted and failed, so this check is exiting non-zero instead of reporting silent success" >&2
+        return 1
+    fi
+
     return 0
 }
 

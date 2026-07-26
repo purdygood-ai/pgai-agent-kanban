@@ -38,6 +38,10 @@ source "${_DELETE_LIB_DIR}/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
 source "${_DELETE_LIB_DIR}/project_paths.sh"
 
+# --- Source the shared Python invocation helper ---
+# shellcheck source=lib/pp_run_ops.sh
+source "${_DELETE_LIB_DIR}/pp_run_ops.sh"
+
 # --- Declare accepted flags for this script ---
 OPERATOR_VALID_FLAGS=(project key force dry-run help)
 
@@ -151,10 +155,10 @@ _DRY_RUN_INTAKE_PY
 fi
 
 # --- Execute the operation via the Python library ---
-# python3 -m pgai_agent_kanban.ops delete_item PROJECT_ROOT KEY [FORCE]
+# pp_run_ops pgai_agent_kanban.ops delete_item PROJECT_ROOT KEY [FORCE]
 # Exit codes: 0 success, 1 error, 2 guard refused, 3 not found, 4 filesystem error.
 _rc=0
-python3 -m pgai_agent_kanban.ops delete_item "${_project_root}" "${_key}" "${_force}" \
+pp_run_ops pgai_agent_kanban.ops delete_item "${_project_root}" "${_key}" "${_force}" \
     || _rc=$?
 
 case "${_rc}" in
