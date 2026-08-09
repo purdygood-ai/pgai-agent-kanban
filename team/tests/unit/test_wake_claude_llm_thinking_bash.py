@@ -230,20 +230,25 @@ def test_wake_claude_provider_contains_thinking_disabled_wiring() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Structural: wake_codex_provider.sh contains the future-mapped comment
+# Structural: wake_codex_provider.sh wires the reasoning-effort override
 # ---------------------------------------------------------------------------
 
 
-def test_wake_codex_provider_contains_future_mapped_comment() -> None:
-    """Structural: wake_codex_provider.sh contains the llm_thinking_enabled comment.
+def test_wake_codex_provider_wires_reasoning_effort_override() -> None:
+    """Structural: wake_codex_provider.sh wires a reasoning-effort control.
 
-    Verifies the one-line comment at the invocation-assembly site referencing
-    llm_thinking_enabled as future-mapped for the Codex lane.
+    The Codex lane previously carried a placeholder comment at the
+    invocation-assembly site marking where "a reasoning switch would wire
+    in" (referencing llm_thinking_enabled as the closest prior-art example).
+    v2.1.0 (CODER-20260728-013) replaced that placeholder with the real
+    wiring: a ``-c model_reasoning_effort=<value>`` config override, wired
+    at the same site. This test verifies the real wiring landed rather than
+    asserting the now-obsolete placeholder comment still exists.
     """
     provider = pathlib.Path("scripts/lib/wake_codex_provider.sh")
     content = provider.read_text(encoding="utf-8")
 
-    assert "llm_thinking_enabled" in content, (
-        f"{provider} does not reference 'llm_thinking_enabled' in any comment. "
-        "The future-mapped comment may be missing from the invocation-assembly site."
+    assert "model_reasoning_effort" in content, (
+        f"{provider} does not reference 'model_reasoning_effort'. "
+        "The reasoning-effort override wiring may be missing."
     )

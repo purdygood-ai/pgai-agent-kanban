@@ -29,31 +29,21 @@ from pgai_agent_kanban.cm.write_rc_state import write_open, write_ship, write_ca
 # ---------------------------------------------------------------------------
 
 
-def test_horizontal_rule_matches_three_dashes() -> None:
-    """_is_horizontal_rule returns True for exactly three dashes."""
-    assert _is_horizontal_rule("---") is True
-
-
-def test_horizontal_rule_matches_many_dashes() -> None:
-    """_is_horizontal_rule returns True for four or more consecutive dashes."""
-    assert _is_horizontal_rule("----") is True
-    assert _is_horizontal_rule("----------") is True
-
-
-def test_horizontal_rule_rejects_two_dashes() -> None:
-    """_is_horizontal_rule returns False for only two dashes."""
-    assert _is_horizontal_rule("--") is False
-
-
-def test_horizontal_rule_rejects_non_dash_characters() -> None:
-    """_is_horizontal_rule returns False when non-dash characters are present."""
-    assert _is_horizontal_rule("---x") is False
-    assert _is_horizontal_rule("abc") is False
-
-
-def test_horizontal_rule_rejects_empty_string() -> None:
-    """_is_horizontal_rule returns False for an empty string."""
-    assert _is_horizontal_rule("") is False
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        pytest.param("---", True, id="matches_three_dashes"),
+        pytest.param("----", True, id="matches_four_dashes"),
+        pytest.param("----------", True, id="matches_many_dashes"),
+        pytest.param("--", False, id="rejects_two_dashes"),
+        pytest.param("---x", False, id="rejects_trailing_non_dash_character"),
+        pytest.param("abc", False, id="rejects_non_dash_characters"),
+        pytest.param("", False, id="rejects_empty_string"),
+    ],
+)
+def test_is_horizontal_rule(value: str, expected: bool) -> None:
+    """_is_horizontal_rule accepts 3+ consecutive dashes and rejects everything else."""
+    assert _is_horizontal_rule(value) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -67,124 +57,95 @@ def test_read_state_field_returns_none_when_file_absent(tmp_path: Path) -> None:
     assert result == "none"
 
 
-def test_read_state_field_returns_none_when_heading_absent(tmp_path: Path) -> None:
-    """read_state_field returns 'none' when the heading is not in the file."""
-    md = tmp_path / "state.md"
-    md.write_text("# Release State\n\n## State\nIDLE\n", encoding="utf-8")
-    result = read_state_field(str(md), "Active RC")
-    assert result == "none"
-
-
-def test_read_state_field_returns_value_for_present_heading(tmp_path: Path) -> None:
-    """read_state_field returns the first non-blank value line after the heading."""
-    md = tmp_path / "state.md"
-    md.write_text(
-        "# Release State\n\n## Active RC\nrc/v0.42.0\n\n## State\nIDLE\n",
-        encoding="utf-8",
-    )
-    result = read_state_field(str(md), "Active RC")
-    assert result == "rc/v0.42.0"
-
-
-def test_read_state_field_skips_blank_lines_before_value(tmp_path: Path) -> None:
-    """read_state_field skips blank lines between the heading and its value."""
-    md = tmp_path / "state.md"
-    md.write_text(
-        "## Target\n\n\nmy-value\n",
-        encoding="utf-8",
-    )
-    result = read_state_field(str(md), "Target")
-    assert result == "my-value"
-
-
-def test_read_state_field_skips_comment_lines_starting_with_hash(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "file_content, heading, expected",
+    [
+        pytest.param(
+            "# Release State\n\n## State\nIDLE\n",
+            "Active RC",
+            "none",
+            id="returns_none_when_heading_absent",
+        ),
+        pytest.param(
+            "# Release State\n\n## Active RC\nrc/v0.42.0\n\n## State\nIDLE\n",
+            "Active RC",
+            "rc/v0.42.0",
+            id="returns_value_for_present_heading",
+        ),
+        pytest.param(
+            "## Target\n\n\nmy-value\n",
+            "Target",
+            "my-value",
+            id="skips_blank_lines_before_value",
+        ),
+        pytest.param(
+            "## Target\n# this is a comment\nactual-value\n",
+            "Target",
+            "actual-value",
+            id="skips_comment_lines_starting_with_hash",
+        ),
+        pytest.param(
+            "## Target\n# only a comment\n# another comment\n",
+            "Target",
+            "none",
+            id="returns_none_when_only_comments_and_no_value",
+        ),
+        pytest.param(
+            # The ## Next Section line starts with '#' so it is skipped, and
+            # 'value' is returned — headings are skipped, not treated as
+            # boundaries (as-is extraction behavior).
+            "## Empty Heading\n## Next Section\nvalue\n",
+            "Empty Heading",
+            "value",
+            id="skips_heading_lines_and_returns_next_non_heading_value",
+        ),
+        pytest.param(
+            "## Active RC\n---\nsome-rc\n",
+            "Active RC",
+            "none",
+            id="treats_horizontal_rule_as_section_boundary",
+        ),
+        pytest.param(
+            "## State\n---\n",
+            "State",
+            "none",
+            id="does_not_return_dashes_as_value",
+        ),
+        pytest.param(
+            "## Field\n  padded value  \n",
+            "Field",
+            "padded value",
+            id="strips_surrounding_whitespace",
+        ),
+        pytest.param(
+            "## Dangling Heading\n",
+            "Dangling Heading",
+            "none",
+            id="returns_none_for_heading_at_eof_with_no_value",
+        ),
+        pytest.param(
+            "## Field\nfirst\nsecond\nthird\n",
+            "Field",
+            "first",
+            id="returns_first_non_blank_value_ignores_subsequent_lines",
+        ),
+    ],
+)
+def test_read_state_field(
+    tmp_path: Path, file_content: str, heading: str, expected: str
 ) -> None:
-    """read_state_field skips lines starting with '#' (comments and headings) and continues scanning."""
+    """read_state_field's value-extraction semantics across boundary, comment,
+    whitespace, and heading-skip cases (survives-as-named-parameterization of
+    the original eleven discrete tests; no case dropped)."""
     md = tmp_path / "state.md"
-    # Comment and heading lines are skipped; scanning continues until a qualifying value
-    md.write_text(
-        "## Target\n# this is a comment\nactual-value\n",
-        encoding="utf-8",
-    )
-    result = read_state_field(str(md), "Target")
-    assert result == "actual-value"
-
-
-def test_read_state_field_returns_none_when_only_comments_and_no_value(
-    tmp_path: Path,
-) -> None:
-    """read_state_field returns 'none' when only comment lines follow the heading (no non-comment value)."""
-    md = tmp_path / "state.md"
-    md.write_text(
-        "## Target\n# only a comment\n# another comment\n",
-        encoding="utf-8",
-    )
-    result = read_state_field(str(md), "Target")
-    assert result == "none"
-
-
-def test_read_state_field_skips_heading_lines_and_returns_next_non_heading_value(
-    tmp_path: Path,
-) -> None:
-    """read_state_field skips ## heading lines (they start with '#') and returns the first non-heading value."""
-    md = tmp_path / "state.md"
-    # The ## Next Section line starts with '#' so it is skipped, and 'value' is returned.
-    # This is the as-is extraction behavior — headings are skipped, not treated as boundaries.
-    md.write_text(
-        "## Empty Heading\n## Next Section\nvalue\n",
-        encoding="utf-8",
-    )
-    result = read_state_field(str(md), "Empty Heading")
-    assert result == "value"
-
-
-def test_read_state_field_treats_horizontal_rule_as_section_boundary(tmp_path: Path) -> None:
-    """read_state_field treats '---' as a section boundary and returns 'none'."""
-    md = tmp_path / "state.md"
-    md.write_text(
-        "## Active RC\n---\nsome-rc\n",
-        encoding="utf-8",
-    )
-    result = read_state_field(str(md), "Active RC")
-    assert result == "none"
-
-
-def test_read_state_field_does_not_return_dashes_as_value(tmp_path: Path) -> None:
-    """read_state_field never returns the '---' rule itself as the field value."""
-    md = tmp_path / "state.md"
-    md.write_text("## State\n---\n", encoding="utf-8")
-    result = read_state_field(str(md), "State")
-    assert result == "none"
-    assert "---" not in result
-
-
-def test_read_state_field_strips_surrounding_whitespace(tmp_path: Path) -> None:
-    """read_state_field strips leading and trailing whitespace from the returned value."""
-    md = tmp_path / "state.md"
-    md.write_text("## Field\n  padded value  \n", encoding="utf-8")
-    result = read_state_field(str(md), "Field")
-    assert result == "padded value"
-
-
-def test_read_state_field_returns_none_for_heading_at_eof_with_no_value(
-    tmp_path: Path,
-) -> None:
-    """read_state_field returns 'none' when the heading is the last line in the file."""
-    md = tmp_path / "state.md"
-    md.write_text("## Dangling Heading\n", encoding="utf-8")
-    result = read_state_field(str(md), "Dangling Heading")
-    assert result == "none"
-
-
-def test_read_state_field_returns_first_non_blank_value_ignores_subsequent_lines(
-    tmp_path: Path,
-) -> None:
-    """read_state_field returns only the first qualifying value, ignoring subsequent lines."""
-    md = tmp_path / "state.md"
-    md.write_text("## Field\nfirst\nsecond\nthird\n", encoding="utf-8")
-    result = read_state_field(str(md), "Field")
-    assert result == "first"
+    md.write_text(file_content, encoding="utf-8")
+    result = read_state_field(str(md), heading)
+    assert result == expected
+    # The horizontal rule itself must never leak through as a field value,
+    # regardless of which case produced "none" (locks the dashes-as-value
+    # regression for every case in this table, not just one).
+    if expected == "none":
+        assert "---" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -241,35 +202,55 @@ def test_write_open_output_ends_with_newline(capsys: pytest.CaptureFixture) -> N
 
 
 # ---------------------------------------------------------------------------
-# write_ship — in-place merge semantics
+# write_ship / write_cancel — shared in-place merge semantics
+#
+# write_ship and write_cancel are structural siblings: both close out a
+# per-RC state file via the same read-modify-write merge, differing only in
+# the terminal outcome string they stamp. Every behavior below is verified
+# for both functions (survives-as-named-parameterization of the original
+# fourteen per-function tests, seven behaviors x two functions; no case
+# dropped).
 # ---------------------------------------------------------------------------
 
+_CLOSE_OUT_FUNCTIONS = [
+    pytest.param(write_ship, "shipped", id="write_ship"),
+    pytest.param(write_cancel, "cancelled", id="write_cancel"),
+]
 
-def test_write_ship_creates_file_when_absent(tmp_path: Path) -> None:
-    """write_ship creates the JSON file when it does not already exist."""
+
+@pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
+def test_close_out_creates_file_when_absent(
+    tmp_path: Path, write_fn, expected_outcome: str
+) -> None:
     state_file = tmp_path / "v0.1.0.json"
-    write_ship(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
+    write_fn(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
     assert state_file.exists()
 
 
-def test_write_ship_sets_outcome_shipped(tmp_path: Path) -> None:
-    """write_ship sets outcome to 'shipped' in the written JSON."""
+@pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
+def test_close_out_sets_outcome(
+    tmp_path: Path, write_fn, expected_outcome: str
+) -> None:
     state_file = tmp_path / "v0.1.0.json"
-    write_ship(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
+    write_fn(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
     payload = json.loads(state_file.read_text())
-    assert payload["outcome"] == "shipped"
+    assert payload["outcome"] == expected_outcome
 
 
-def test_write_ship_sets_closed_at(tmp_path: Path) -> None:
-    """write_ship writes the supplied closed_at timestamp."""
+@pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
+def test_close_out_sets_closed_at(
+    tmp_path: Path, write_fn, expected_outcome: str
+) -> None:
     state_file = tmp_path / "v0.1.0.json"
-    write_ship(str(state_file), "v0.1.0", "2026-06-01T10:30:00Z")
+    write_fn(str(state_file), "v0.1.0", "2026-06-01T10:30:00Z")
     payload = json.loads(state_file.read_text())
     assert payload["closed_at"] == "2026-06-01T10:30:00Z"
 
 
-def test_write_ship_preserves_opened_at_from_existing_file(tmp_path: Path) -> None:
-    """write_ship preserves the existing opened_at value when the file already has it."""
+@pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
+def test_close_out_preserves_opened_at_from_existing_file(
+    tmp_path: Path, write_fn, expected_outcome: str
+) -> None:
     state_file = tmp_path / "v0.1.0.json"
     state_file.write_text(
         json.dumps(
@@ -279,124 +260,48 @@ def test_write_ship_preserves_opened_at_from_existing_file(tmp_path: Path) -> No
         ) + "\n",
         encoding="utf-8",
     )
-    write_ship(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
+    write_fn(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
     payload = json.loads(state_file.read_text())
     assert payload["opened_at"] == "2026-05-01T00:00:00Z"
 
 
-def test_write_ship_does_not_add_opened_at_when_absent_from_existing_file(
-    tmp_path: Path,
+@pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
+def test_close_out_does_not_add_opened_at_when_absent_from_existing_file(
+    tmp_path: Path, write_fn, expected_outcome: str
 ) -> None:
-    """write_ship does not inject opened_at when it is absent from the existing record."""
     state_file = tmp_path / "v0.1.0.json"
     state_file.write_text(
         json.dumps({"rc": "v0.1.0", "outcome": "in_progress"}, indent=2) + "\n",
         encoding="utf-8",
     )
-    write_ship(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
+    write_fn(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
     payload = json.loads(state_file.read_text())
     assert "opened_at" not in payload
 
 
-def test_write_ship_does_not_overwrite_existing_rc(tmp_path: Path) -> None:
-    """write_ship uses setdefault — rc is preserved from the existing file, not overwritten."""
+@pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
+def test_close_out_does_not_overwrite_existing_rc(
+    tmp_path: Path, write_fn, expected_outcome: str
+) -> None:
+    """setdefault semantics — rc is preserved from the existing file, not overwritten."""
     state_file = tmp_path / "v0.1.0.json"
     state_file.write_text(
-        json.dumps({"rc": "v0.1.0"}, indent=2) + "\n",
+        json.dumps({"rc": "v0.1.0-original"}, indent=2) + "\n",
         encoding="utf-8",
     )
-    write_ship(str(state_file), "v-different", "2026-06-01T00:00:00Z")
+    write_fn(str(state_file), "v0.1.0-new", "2026-06-01T00:00:00Z")
     payload = json.loads(state_file.read_text())
-    # rc is preserved because setdefault does not overwrite existing key
-    assert payload["rc"] == "v0.1.0"
+    assert payload["rc"] == "v0.1.0-original"
 
 
-def test_write_ship_recovers_from_corrupt_json(tmp_path: Path) -> None:
-    """write_ship starts from an empty dict when the existing file contains invalid JSON."""
+@pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
+def test_close_out_recovers_from_corrupt_json(
+    tmp_path: Path, write_fn, expected_outcome: str
+) -> None:
     state_file = tmp_path / "v0.1.0.json"
     state_file.write_text("not json at all {{{{", encoding="utf-8")
-    # Should not raise; should recover to a minimal valid record
-    write_ship(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
+    # Should not raise; should recover to a minimal valid record.
+    write_fn(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
     payload = json.loads(state_file.read_text())
-    assert payload["outcome"] == "shipped"
+    assert payload["outcome"] == expected_outcome
     assert payload["rc"] == "v0.1.0"
-
-
-# ---------------------------------------------------------------------------
-# write_cancel — in-place merge semantics
-# ---------------------------------------------------------------------------
-
-
-def test_write_cancel_creates_file_when_absent(tmp_path: Path) -> None:
-    """write_cancel creates the JSON file when it does not already exist."""
-    state_file = tmp_path / "v0.2.0.json"
-    write_cancel(str(state_file), "v0.2.0", "2026-06-02T00:00:00Z")
-    assert state_file.exists()
-
-
-def test_write_cancel_sets_outcome_cancelled(tmp_path: Path) -> None:
-    """write_cancel sets outcome to 'cancelled' in the written JSON."""
-    state_file = tmp_path / "v0.2.0.json"
-    write_cancel(str(state_file), "v0.2.0", "2026-06-02T00:00:00Z")
-    payload = json.loads(state_file.read_text())
-    assert payload["outcome"] == "cancelled"
-
-
-def test_write_cancel_sets_closed_at(tmp_path: Path) -> None:
-    """write_cancel records the supplied closed_at timestamp."""
-    state_file = tmp_path / "v0.2.0.json"
-    write_cancel(str(state_file), "v0.2.0", "2026-06-02T15:00:00Z")
-    payload = json.loads(state_file.read_text())
-    assert payload["closed_at"] == "2026-06-02T15:00:00Z"
-
-
-def test_write_cancel_preserves_opened_at_from_existing_file(tmp_path: Path) -> None:
-    """write_cancel preserves the existing opened_at value."""
-    state_file = tmp_path / "v0.2.0.json"
-    state_file.write_text(
-        json.dumps(
-            {"rc": "v0.2.0", "opened_at": "2026-04-01T00:00:00Z",
-             "closed_at": None, "outcome": "in_progress"},
-            indent=2,
-        ) + "\n",
-        encoding="utf-8",
-    )
-    write_cancel(str(state_file), "v0.2.0", "2026-06-02T00:00:00Z")
-    payload = json.loads(state_file.read_text())
-    assert payload["opened_at"] == "2026-04-01T00:00:00Z"
-
-
-def test_write_cancel_does_not_add_opened_at_when_absent_from_existing_file(
-    tmp_path: Path,
-) -> None:
-    """write_cancel does not inject opened_at when absent from the existing record."""
-    state_file = tmp_path / "v0.2.0.json"
-    state_file.write_text(
-        json.dumps({"rc": "v0.2.0", "outcome": "in_progress"}, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    write_cancel(str(state_file), "v0.2.0", "2026-06-02T00:00:00Z")
-    payload = json.loads(state_file.read_text())
-    assert "opened_at" not in payload
-
-
-def test_write_cancel_recovers_from_corrupt_json(tmp_path: Path) -> None:
-    """write_cancel starts from an empty dict when the existing file has invalid JSON."""
-    state_file = tmp_path / "v0.2.0.json"
-    state_file.write_text("{broken json}", encoding="utf-8")
-    write_cancel(str(state_file), "v0.2.0", "2026-06-02T00:00:00Z")
-    payload = json.loads(state_file.read_text())
-    assert payload["outcome"] == "cancelled"
-    assert payload["rc"] == "v0.2.0"
-
-
-def test_write_cancel_does_not_overwrite_existing_rc(tmp_path: Path) -> None:
-    """write_cancel uses setdefault — rc from the existing file takes precedence."""
-    state_file = tmp_path / "v0.2.0.json"
-    state_file.write_text(
-        json.dumps({"rc": "v0.2.0-original"}, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    write_cancel(str(state_file), "v0.2.0-new", "2026-06-02T00:00:00Z")
-    payload = json.loads(state_file.read_text())
-    assert payload["rc"] == "v0.2.0-original"

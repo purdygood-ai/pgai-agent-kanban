@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import subprocess
 
 import pytest
@@ -369,6 +370,152 @@ git -C "$repo" tag "$release_tag"
         assert created_tag == tag, (
             f"Tag {tag!r} must be created when the gate passes.\n"
             f"Got: {created_tag!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Class 2b: Retrofit (CODER-20260727-019) — full remedy block on the pre-tag
+# VERSION gate.  Classified full-remedy in
+# docs/audits/v1.27.2-gate-remedy-census.md (row 25): the fix is fully
+# computable at detection time (write the expected value, commit, re-run),
+# per docs/coding-standards.md "Gates prescribe, not just diagnose".
+# ---------------------------------------------------------------------------
+
+
+class TestPreTagMismatchGateRemedyBlock:
+    """The Step 13 pre-tag VERSION gate prints Cause(s)/To-fix/Rule, and the
+    printed 'To fix' commands, executed verbatim, clear the gate on re-run."""
+
+    def test_remedy_block_has_cause_to_fix_and_rule(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Failure output contains the three required remedy-block parts
+        (Cause(s), a numbered To-fix command block, and the Rule line) with
+        no angle-bracket placeholders, mirroring the current Step 13 text."""
+        repo = _make_git_repo(tmp_path, "remedy_gate_repo")
+        tag = "v1.24.1"
+        wrong_version = "v0.0.1"
+
+        (repo / "VERSION").write_text(f"{wrong_version}\n", encoding="utf-8")
+        _git_cmd(repo, "add", "VERSION")
+        _git_cmd(repo, "commit", "-m", "Doctored VERSION for remedy-block test")
+
+        gate_script = f"""\
+set -uo pipefail
+REPO_ROOT={str(repo)!r}
+RELEASE_TAG={tag!r}
+_pretag_expected={tag!r}
+
+_pretag_version_on_disk=""
+if [[ -f "$REPO_ROOT/VERSION" ]]; then
+  _pretag_version_on_disk="$(cat "$REPO_ROOT/VERSION" 2>/dev/null || true)"
+fi
+_pretag_version_trimmed="${{_pretag_version_on_disk%$'\\n'}}"
+
+if [[ "$_pretag_version_trimmed" != "$_pretag_expected" ]]; then
+  echo "" >&2
+  echo "[Pre-tag VERSION gate] FAIL — on-disk VERSION does not match the tag about to be created. No tag has been created." >&2
+  echo "" >&2
+  echo "Cause(s):" >&2
+  echo "  - ${{REPO_ROOT}}/VERSION contains '${{_pretag_version_trimmed}}', expected '${{_pretag_expected}}' (release tag ${{RELEASE_TAG}})" >&2
+  echo "" >&2
+  echo "To fix:" >&2
+  echo "  1. printf '%s\\n' '${{_pretag_expected}}' > '${{REPO_ROOT}}/VERSION'" >&2
+  echo "  2. git -C '${{REPO_ROOT}}' add VERSION && git -C '${{REPO_ROOT}}' commit -m 'Fix VERSION for ${{_pretag_expected}}'" >&2
+  echo "  3. Re-run cm-release.sh." >&2
+  echo "" >&2
+  echo "Rule: the committed VERSION file must equal the release tag being cut, or the shipped tag would misreport the version." >&2
+  exit 1
+fi
+
+git -C "$REPO_ROOT" tag "$RELEASE_TAG"
+"""
+        result = run_bash(tmp_path, gate_script)
+
+        assert result.returncode != 0
+        assert "Cause(s):" in result.stderr
+        assert "To fix:" in result.stderr
+        assert "Rule:" in result.stderr
+        assert wrong_version in result.stderr
+        assert tag in result.stderr
+        assert "printf '%s\\n'" in result.stderr
+        # House placeholder law: no angle-bracket placeholder tokens like
+        # "<version>" or "<repo-root>" in the block (the printed ">" above is
+        # a literal shell redirect operator, not a placeholder marker).
+        assert not re.search(r"<[^\s<>]+>", result.stderr), result.stderr
+
+    def test_remedy_commands_clear_the_gate_when_executed_verbatim(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Executing the printed 'To fix' commands verbatim (site-specific
+        values already substituted, exactly as a reader would copy-paste
+        them) clears the gate on re-run and the tag is created."""
+        repo = str(_make_git_repo(tmp_path, "remedy_gate_clears_repo"))
+        tag = "v1.24.2"
+        wrong_version = "v0.0.2"
+
+        pathlib.Path(repo, "VERSION").write_text(f"{wrong_version}\n", encoding="utf-8")
+        _git_cmd(pathlib.Path(repo), "add", "VERSION")
+        _git_cmd(pathlib.Path(repo), "commit", "-m", "Doctored VERSION")
+
+        full_script = f"""\
+set -uo pipefail
+REPO_ROOT={repo!r}
+RELEASE_TAG={tag!r}
+_pretag_expected={tag!r}
+
+_check_and_tag() {{
+  _pretag_version_on_disk=""
+  if [[ -f "$REPO_ROOT/VERSION" ]]; then
+    _pretag_version_on_disk="$(cat "$REPO_ROOT/VERSION" 2>/dev/null || true)"
+  fi
+  _pretag_version_trimmed="${{_pretag_version_on_disk%$'\\n'}}"
+  if [[ "$_pretag_version_trimmed" != "$_pretag_expected" ]]; then
+    return 1
+  fi
+  git -C "$REPO_ROOT" tag "$RELEASE_TAG"
+  return 0
+}}
+
+# First attempt must fail (doctored VERSION still on disk).
+if _check_and_tag; then
+  echo "UNEXPECTED_PASS_ON_FIRST_ATTEMPT"
+  exit 3
+fi
+
+# Execute the printed 'To fix' commands verbatim (site-specific values
+# already substituted — this is exactly what a reader would copy-paste).
+printf '%s\\n' '{tag}' > '{repo}/VERSION'
+git -C '{repo}' add VERSION && git -C '{repo}' commit -m 'Fix VERSION for {tag}'
+
+# Second attempt must now succeed.
+if _check_and_tag; then
+  echo "GATE_CLEARED"
+else
+  echo "GATE_STILL_FAILING"
+  exit 4
+fi
+"""
+        result = run_bash(tmp_path, full_script)
+        assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+        assert "GATE_CLEARED" in result.stdout
+
+        created_tag = _git_cmd(pathlib.Path(repo), "tag", "-l", tag)
+        assert created_tag == tag
+
+    def test_release_sh_source_matches_remedy_text(self) -> None:
+        """Anti-drift guard: the live release.sh must still contain the exact
+        remedy strings this class exercises, so a future edit to Step 13 that
+        changes the wording is caught here rather than only via silent
+        fixture drift between this replica and the real script."""
+        assert _CM_RELEASE_SH.exists(), f"release.sh not found at {_CM_RELEASE_SH}"
+        src = _CM_RELEASE_SH.read_text(encoding="utf-8")
+        assert "[Pre-tag VERSION gate] FAIL" in src
+        assert "Cause(s):" in src
+        assert "To fix:" in src
+        assert (
+            "Rule: the committed VERSION file must equal the release tag being cut"
+            in src
         )
 
 

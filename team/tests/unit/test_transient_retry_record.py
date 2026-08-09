@@ -382,3 +382,83 @@ def test_exactly_at_cap_is_blocked_and_needs_human_no_limbo(tmp_path: pathlib.Pa
     assert _field(status_text, "Needs Human").lower() == "yes", (
         f"Exactly-at-cap must be Needs Human=yes — no limbo state\n{status_text}"
     )
+
+
+# ---------------------------------------------------------------------------
+# (D) Transient signature detection survives a pipe-buffer-exceeding tail
+#     window deterministically (BUG-0038's rapid-fire increment race).
+# ---------------------------------------------------------------------------
+
+
+def _write_transient_log_exceeding_pipe_buffer(tmp_path: pathlib.Path, name: str, signature: str) -> pathlib.Path:
+    """Write an agent log whose last-50-lines tail window is large enough to
+    exceed a Linux pipe's default buffer capacity (65536 bytes), with the
+    transient signature on the FIRST of those 50 lines.
+
+    This deterministically (not load-dependently) reproduces the exact race
+    class behind BUG-0038: `handle_working_after_exit` used to detect the
+    signature via `echo "$_tail_lines" | grep -qiE "$_DETECT_RE"`. Piping
+    into `grep -q` forks a separate writer (echo) whose output grep may not
+    fully drain — `grep -q` exits the instant it finds a match, which here
+    happens on line 1, long before echo has written the remaining ~49
+    padded lines. Under `set -o pipefail` (active in every caller), if echo
+    is still blocked writing into a full pipe buffer when grep's exit closes
+    the read end, echo receives SIGPIPE and the pipeline's reported exit
+    status becomes echo's failure code instead of grep's real (successful)
+    match — so detection silently reports "no signature found" even though
+    the tail plainly contains one. A payload sized past the pipe buffer
+    forces this outcome on every run, independent of system load or
+    scheduling luck (whereas a short payload only races intermittently under
+    contention — see the ~0.8%-under-load figure recorded in the fix commit).
+    """
+    lines = [signature]
+    lines += [f"filler line {i} " + ("padding " * 400) for i in range(49)]
+    log_file = tmp_path / name
+    log_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return log_file
+
+
+def test_transient_signature_detected_when_tail_window_exceeds_pipe_buffer(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A transient signature on the first line of a large (>64KB) tail-50
+    window is detected and increments retry_count, exactly as a short-log
+    signature would. Before the fix, this scenario deterministically failed:
+    the early-match-then-large-remaining-write shape guarantees the pipe
+    write races grep's early exit under `set -o pipefail`, so the pre-fix
+    `echo | grep -q` detection silently reported no match on every run
+    (not just intermittently) and the task fell through to the generic
+    "agent exited without updating state" branch instead of the transient
+    retry path — dropping the retry_count increment entirely.
+    """
+    task_id = "CODER-20260101-013-fixture-d"
+    status_file = _build_status_file(tmp_path, task_id)
+    log_file = tmp_path / "wake.log"
+    header = _script_header(log_file)
+    agent_log = _write_transient_log_exceeding_pipe_buffer(
+        tmp_path, "agent-big.log", "API Error: 503 Service Unavailable"
+    )
+
+    script = header + textwrap.dedent(f"""\
+        export TRANSIENT_RETRY_CAP=4
+        handle_working_after_exit "{task_id}" "{status_file}" "{agent_log}" 1
+    """)
+    result = _run(script)
+    assert result.returncode == 0, f"invocation failed\nstderr={result.stderr}"
+    assert result.stdout.strip().splitlines()[-1] == "BLOCKED", (
+        f"expected final_state BLOCKED on stdout, got: {result.stdout!r}"
+    )
+
+    status_text = _read(status_file)
+    assert _field(status_text, "State") == "BLOCKED", f"State should be BLOCKED\n{status_text}"
+    assert _record_field(status_text, "retry_count") == "1", (
+        f"transient signature on a large tail window must still be detected and "
+        f"increment retry_count to 1 — a dropped detection leaves the durable "
+        f"record at 'none' instead\n{status_text}"
+    )
+    assert _record_field(status_text, "reason_code") == "transient_api_error", (
+        f"reason_code should be recorded once the signature is detected\n{status_text}"
+    )
+    assert _field(status_text, "Needs Human").lower() == "no", (
+        f"first transient failure (retry 1/4) must stay Needs Human=no\n{status_text}"
+    )

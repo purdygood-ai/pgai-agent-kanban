@@ -975,9 +975,39 @@ class TestSkipLogging:
     suffices."
     """
 
+    @pytest.mark.parametrize(
+        "filename, header, expectation_note",
+        [
+            pytest.param(
+                "v0.0.1-skipped-on-semver-path.md",
+                "# v0.0.1: skipped-on-semver-path\n\n"
+                "## Status\nwont-do\n\n"
+                "## Target Version\nv0.0.1\n\n"
+                "## Workflow Type\nrelease\n\n"
+                "## PM Task\nnone\n\n"
+                "## Summary\nTerminal-state item that must emit a skip log.\n",
+                "genuinely malformed item on semver semantics",
+                id="wontdo_item_on_semver_project",
+            ),
+            pytest.param(
+                "v0.0.1-closed-bundle.md",
+                "# v0.0.1: closed-bundle\n\n"
+                "## Status\nwont-do\n\n"
+                "## Target Version\nv0.0.1\n\n"
+                "## Workflow Type\nrelease\n\n"
+                "## PM Task\nnone\n\n"
+                "## Summary\nClosed bundle.\n",
+                "symmetric coverage of the terminal-state skip log on the semver path",
+                id="terminal_state_wontdo_requirements_file_on_semver_project",
+            ),
+        ],
+    )
     def test_wontdo_item_on_semver_project_emits_skip_log(
         self,
         tmp_path: pathlib.Path,
+        filename: str,
+        header: str,
+        expectation_note: str,
     ) -> None:
         """A wont-do item on a semver project emits the named skip log line.
 
@@ -988,10 +1018,11 @@ class TestSkipLogging:
         For the semver path, the skip log fires for terminal-state items:
           discovery: skipping <file>: terminal state 'wont-do'
 
-        This test verifies the 'genuinely malformed item on semver semantics'
-        acceptance item: a wont-do requirements file is a definitive skip case
-        on the semver path.  The log line is emitted by is_terminal() and appears
-        in stderr from the Python PY heredoc.
+        Two independent wont-do requirements files (distinct filenames/content)
+        both exercise the same skip-log contract on the semver path — one
+        verifying the '{expectation_note}' acceptance item. The log line is
+        emitted by is_terminal() and appears in stderr from the Python PY
+        heredoc.
         """
         root = _build_release_project_root(tmp_path)
         project_name = "rel_proj"
@@ -999,16 +1030,8 @@ class TestSkipLogging:
         req_dir.mkdir(parents=True, exist_ok=True)
 
         # A wont-do item: filename passes BUNDLE_RE, item is in terminal state.
-        wontdo_file = req_dir / "v0.0.1-skipped-on-semver-path.md"
-        wontdo_file.write_text(
-            "# v0.0.1: skipped-on-semver-path\n\n"
-            "## Status\nwont-do\n\n"
-            "## Target Version\nv0.0.1\n\n"
-            "## Workflow Type\nrelease\n\n"
-            "## PM Task\nnone\n\n"
-            "## Summary\nTerminal-state item that must emit a skip log.\n",
-            encoding="utf-8",
-        )
+        wontdo_file = req_dir / filename
+        wontdo_file.write_text(header, encoding="utf-8")
 
         script = textwrap.dedent(f"""\
             #!/usr/bin/env bash
@@ -1054,7 +1077,7 @@ class TestSkipLogging:
             for line in result.stdout.strip().splitlines()
             if line.strip() and ":" not in pathlib.Path(line.strip()).name
         ]
-        assert "v0.0.1-skipped-on-semver-path.md" not in plain_names, (
+        assert filename not in plain_names, (
             f"Wont-do file must not appear as eligible; got {plain_names!r}"
         )
 
@@ -1189,76 +1212,4 @@ class TestSkipLogging:
         ]
         assert "v1.0.0-closed-testing-run.md" not in output_names, (
             f"Wont-do file must not appear in eligible list; got {output_names!r}"
-        )
-
-    def test_terminal_state_wontdo_requirements_file_emits_skip_log_on_semver_project(
-        self,
-        tmp_path: pathlib.Path,
-    ) -> None:
-        """A wont-do requirements file on a semver project emits the terminal-state skip log.
-
-        Confirms the skip log fires on the semver path too (symmetric coverage).
-        """
-        root = _build_release_project_root(tmp_path)
-        project_name = "rel_proj"
-        req_dir = root / "projects" / project_name / "requirements"
-        req_dir.mkdir(parents=True, exist_ok=True)
-
-        wontdo_file = req_dir / "v0.0.1-closed-bundle.md"
-        wontdo_file.write_text(
-            "# v0.0.1: closed-bundle\n\n"
-            "## Status\nwont-do\n\n"
-            "## Target Version\nv0.0.1\n\n"
-            "## Workflow Type\nrelease\n\n"
-            "## PM Task\nnone\n\n"
-            "## Summary\nClosed bundle.\n",
-            encoding="utf-8",
-        )
-
-        script = textwrap.dedent(f"""\
-            #!/usr/bin/env bash
-            set -euo pipefail
-            source "{_SCRIPTS_LIB}/ini_parser.sh"
-            source "{_SCRIPTS_LIB}/temp.sh"
-            source "{_SCRIPTS_LIB}/semver.sh"
-            source "{_SCRIPTS_LIB}/project_paths.sh"
-            source "{_SCRIPTS_LIB}/discovery.sh"
-            _disc_list_all_eligible_requirements "{req_dir}" "v0.0.0" "" "" "" "semver"
-        """)
-
-        import os
-        env = dict(os.environ)
-        env["KANBAN_ROOT"] = str(root)
-        env["TEAM_ROOT"] = str(root)
-        env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(root)
-        env["PGAI_PROJECT_NAME"] = project_name
-        env.pop("PGAI_DEV_TREE_PATH", None)
-
-        result = subprocess.run(
-            ["bash", "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            cwd=str(root),
-            timeout=30,
-        )
-        assert result.returncode == 0
-
-        combined = result.stderr + result.stdout
-        assert "discovery: skipping" in combined, (
-            f"Expected 'discovery: skipping' skip log for wont-do file on semver project.\n"
-            f"stderr: {result.stderr}\nstdout: {result.stdout}"
-        )
-        assert "wont-do" in combined.lower() or "terminal" in combined.lower(), (
-            f"Expected 'wont-do' or 'terminal' in skip log reason.\n"
-            f"stderr: {result.stderr}\nstdout: {result.stdout}"
-        )
-        # The wont-do file must not appear in the eligible list.
-        plain_names = [
-            pathlib.Path(line.strip()).name
-            for line in result.stdout.strip().splitlines()
-            if line.strip() and ":" not in pathlib.Path(line.strip()).name
-        ]
-        assert "v0.0.1-closed-bundle.md" not in plain_names, (
-            f"Wont-do file must not appear in eligible list; got {plain_names!r}"
         )

@@ -280,28 +280,18 @@ def test_resolve_logs_dir_uses_env_var(tmp_path: pathlib.Path) -> None:
 # ===========================================================================
 
 
-def test_extract_field_returns_value_after_heading() -> None:
-    """_extract_field returns the first non-blank line after a ## heading."""
-    text = "## Status\nopen\n\n## Other\nfoo\n"
-    assert _extract_field(text, "Status") == "open"
-
-
-def test_extract_field_returns_empty_when_heading_absent() -> None:
-    """_extract_field returns '' when the requested heading is not present."""
-    text = "## Title\nSomething\n"
-    assert _extract_field(text, "Status") == ""
-
-
-def test_extract_field_is_case_insensitive() -> None:
-    """_extract_field matches headings case-insensitively."""
-    text = "## STATUS\nhigh\n"
-    assert _extract_field(text, "status") == "high"
-
-
-def test_extract_field_skips_blank_lines_between_heading_and_value() -> None:
-    """_extract_field skips blank lines before the first content line."""
-    text = "## Severity\n\nmedium\n"
-    assert _extract_field(text, "Severity") == "medium"
+@pytest.mark.parametrize(
+    "text, field, expected",
+    [
+        ("## Status\nopen\n\n## Other\nfoo\n", "Status", "open"),  # value after heading
+        ("## Title\nSomething\n", "Status", ""),  # heading absent
+        ("## STATUS\nhigh\n", "status", "high"),  # case-insensitive heading match
+        ("## Severity\n\nmedium\n", "Severity", "medium"),  # blank lines skipped before value
+    ],
+)
+def test_extract_field(text: str, field: str, expected: str) -> None:
+    """_extract_field returns the first non-blank line after a case-insensitively matched heading."""
+    assert _extract_field(text, field) == expected
 
 
 def test_extract_field_stops_at_next_heading() -> None:
@@ -316,22 +306,17 @@ def test_extract_field_stops_at_next_heading() -> None:
 # ===========================================================================
 
 
-def test_extract_bold_field_handles_colon_inside_markers() -> None:
-    """_extract_bold_field parses **Field:** value format."""
-    text = "**Severity:** high\n"
-    assert _extract_bold_field(text, "Severity") == "high"
-
-
-def test_extract_bold_field_handles_colon_outside_markers() -> None:
-    """_extract_bold_field parses **Field**: value format."""
-    text = "**Severity**: medium\n"
-    assert _extract_bold_field(text, "Severity") == "medium"
-
-
-def test_extract_bold_field_returns_empty_when_field_absent() -> None:
-    """_extract_bold_field returns '' when the field is not found."""
-    text = "## Some other text\n"
-    assert _extract_bold_field(text, "Severity") == ""
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("**Severity:** high\n", "high"),  # colon inside markers: **Field:** value
+        ("**Severity**: medium\n", "medium"),  # colon outside markers: **Field**: value
+        ("## Some other text\n", ""),  # field absent
+    ],
+)
+def test_extract_bold_field(text: str, expected: str) -> None:
+    """_extract_bold_field parses both **Field:** and **Field**: bold-marker forms."""
+    assert _extract_bold_field(text, "Severity") == expected
 
 
 # ===========================================================================
@@ -339,39 +324,21 @@ def test_extract_bold_field_returns_empty_when_field_absent() -> None:
 # ===========================================================================
 
 
-def test_normalize_severity_returns_known_keyword() -> None:
-    """_normalize_severity returns 'high' when the severity is 'high'."""
-    assert _normalize_severity("high") == "high"
-
-
-def test_normalize_severity_lowercases_input() -> None:
-    """_normalize_severity lowercases 'HIGH' to 'high'."""
-    assert _normalize_severity("HIGH") == "high"
-
-
-def test_normalize_severity_strips_markdown_bold() -> None:
-    """_normalize_severity handles **high** markdown bold formatting."""
-    assert _normalize_severity("**high**") == "high"
-
-
-def test_normalize_severity_extracts_first_token_from_verbose_value() -> None:
-    """_normalize_severity extracts 'medium' from 'medium (data completeness issues)'."""
-    assert _normalize_severity("medium (data completeness issues)") == "medium"
-
-
-def test_normalize_severity_returns_unknown_for_empty_input() -> None:
-    """_normalize_severity returns 'unknown' for an empty string."""
-    assert _normalize_severity("") == "unknown"
-
-
-def test_normalize_severity_returns_unknown_for_unrecognized_value() -> None:
-    """_normalize_severity returns 'unknown' for unrecognized values."""
-    assert _normalize_severity("catastrophic") == "unknown"
-
-
-def test_normalize_severity_searches_first_80_chars_for_known_keyword() -> None:
-    """_normalize_severity finds 'low' embedded in a longer value."""
-    assert _normalize_severity("priority: low — some notes here") == "low"
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("high", "high"),  # known keyword returned as-is
+        ("HIGH", "high"),  # lowercased
+        ("**high**", "high"),  # markdown bold stripped
+        ("medium (data completeness issues)", "medium"),  # first token of a verbose value
+        ("", "unknown"),  # empty input
+        ("catastrophic", "unknown"),  # unrecognized value
+        ("priority: low — some notes here", "low"),  # known keyword embedded within first 80 chars
+    ],
+)
+def test_normalize_severity(raw: str, expected: str) -> None:
+    """_normalize_severity extracts a known severity keyword, else returns 'unknown'."""
+    assert _normalize_severity(raw) == expected
 
 
 # ===========================================================================
@@ -505,44 +472,33 @@ def test_safe_read_returns_empty_string_for_missing_file(tmp_path: pathlib.Path)
 # ===========================================================================
 
 
-def test_read_ini_value_returns_value_from_correct_section(tmp_path: pathlib.Path) -> None:
-    """_read_ini_value reads a key from the correct INI section."""
+@pytest.mark.parametrize(
+    "cfg_content, section, key, expected",
+    [
+        (
+            "[project]\ndev_tree_path = /opt/myproject\nname = test\n",
+            "project",
+            "dev_tree_path",
+            "/opt/myproject",
+        ),  # key found in the correct section
+        ("[project]\nname = test\n", "project", "missing_key", ""),  # key absent
+        ("[other]\nfoo = bar\n", "project", "foo", ""),  # section absent
+        (
+            "[project]\nname = test\n[other]\ndev_tree_path = /wrong\n",
+            "project",
+            "dev_tree_path",
+            "",
+        ),  # does not cross section boundary
+    ],
+)
+def test_read_ini_value(
+    tmp_path: pathlib.Path, cfg_content: str, section: str, key: str, expected: str
+) -> None:
+    """_read_ini_value reads a key from the correct INI section, else returns ''."""
     cfg = tmp_path / "project.cfg"
-    cfg.write_text(
-        "[project]\n"
-        "dev_tree_path = /opt/myproject\n"
-        "name = test\n",
-        encoding="utf-8",
-    )
-    val = _read_ini_value(cfg, "project", "dev_tree_path")
-    assert val == "/opt/myproject"
-
-
-def test_read_ini_value_returns_empty_when_key_absent(tmp_path: pathlib.Path) -> None:
-    """_read_ini_value returns '' when the key does not exist in the section."""
-    cfg = tmp_path / "project.cfg"
-    cfg.write_text("[project]\nname = test\n", encoding="utf-8")
-    val = _read_ini_value(cfg, "project", "missing_key")
-    assert val == ""
-
-
-def test_read_ini_value_returns_empty_when_section_absent(tmp_path: pathlib.Path) -> None:
-    """_read_ini_value returns '' when the section does not exist."""
-    cfg = tmp_path / "project.cfg"
-    cfg.write_text("[other]\nfoo = bar\n", encoding="utf-8")
-    val = _read_ini_value(cfg, "project", "foo")
-    assert val == ""
-
-
-def test_read_ini_value_does_not_cross_section_boundary(tmp_path: pathlib.Path) -> None:
-    """_read_ini_value stops reading at the next section boundary."""
-    cfg = tmp_path / "project.cfg"
-    cfg.write_text(
-        "[project]\nname = test\n[other]\ndev_tree_path = /wrong\n",
-        encoding="utf-8",
-    )
-    val = _read_ini_value(cfg, "project", "dev_tree_path")
-    assert val == ""
+    cfg.write_text(cfg_content, encoding="utf-8")
+    val = _read_ini_value(cfg, section, key)
+    assert val == expected
 
 
 # ===========================================================================

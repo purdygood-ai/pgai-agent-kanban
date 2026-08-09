@@ -45,52 +45,45 @@ def _make_task_dirs(tasks_dir: pathlib.Path, *names: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_task_id_sets_agent_field(tmp_path: pathlib.Path) -> None:
-    """kanban_parse_task_id populates _TASK_AGENT from the ID string."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "kanban_parse_task_id CODER-20260518-002-implement-feature && echo $_TASK_AGENT"
-        ),
-    )
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        (
+            "kanban_parse_task_id CODER-20260518-002-implement-feature && echo $_TASK_AGENT",
+            "CODER",
+        ),  # _TASK_AGENT populated
+        (
+            "kanban_parse_task_id CODER-20260518-002-implement-feature && echo $_TASK_DATE",
+            "20260518",
+        ),  # _TASK_DATE populated
+        (
+            "kanban_parse_task_id CODER-20260518-002-implement-feature && echo $_TASK_SEQ",
+            "002",
+        ),  # _TASK_SEQ populated
+        (
+            "kanban_parse_task_id CODER-20260518-002-implement-feature && echo $_TASK_SLUG",
+            "implement-feature",
+        ),  # _TASK_SLUG populated
+        (
+            "kanban_parse_task_id PM-20260628-001-decompose-v0-102-0 && echo $_TASK_SLUG",
+            "decompose-v0-102-0",
+        ),  # multi-word slug including hyphens
+        ("kanban_task_agent WRITER-20260601-005-write-readme", "WRITER"),
+        ("kanban_task_date WRITER-20260601-005-write-readme", "20260601"),
+        ("kanban_task_seq WRITER-20260601-005-write-readme", "005"),
+        ("kanban_task_slug WRITER-20260601-005-write-readme", "write-readme"),
+        (
+            "kanban_task_participant CODER-20260518-001-anything",
+            "claude",
+        ),  # always echoes 'claude' regardless of the ID
+        ("kanban_task_agent invalid-id-here", ""),  # unrecognised ID format
+    ],
+)
+def test_task_id_accessor_behaviors(tmp_path: pathlib.Path, command: str, expected: str) -> None:
+    """kanban_parse_task_id and the kanban_task_* accessors extract agent/date/seq/slug/participant fields."""
+    result = run_bash(tmp_path, _source(command))
     assert result.returncode == 0
-    assert result.stdout.strip() == "CODER"
-
-
-def test_parse_task_id_sets_date_field(tmp_path: pathlib.Path) -> None:
-    """kanban_parse_task_id populates _TASK_DATE from the ID string."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "kanban_parse_task_id CODER-20260518-002-implement-feature && echo $_TASK_DATE"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "20260518"
-
-
-def test_parse_task_id_sets_seq_field(tmp_path: pathlib.Path) -> None:
-    """kanban_parse_task_id populates _TASK_SEQ from the ID string."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "kanban_parse_task_id CODER-20260518-002-implement-feature && echo $_TASK_SEQ"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "002"
-
-
-def test_parse_task_id_sets_slug_field(tmp_path: pathlib.Path) -> None:
-    """kanban_parse_task_id populates _TASK_SLUG from the ID string."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "kanban_parse_task_id CODER-20260518-002-implement-feature && echo $_TASK_SLUG"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "implement-feature"
+    assert result.stdout.strip() == expected
 
 
 def test_parse_task_id_returns_nonzero_for_invalid_id(tmp_path: pathlib.Path) -> None:
@@ -100,83 +93,6 @@ def test_parse_task_id_returns_nonzero_for_invalid_id(tmp_path: pathlib.Path) ->
         _source("kanban_parse_task_id not-a-valid-id"),
     )
     assert result.returncode != 0
-
-
-def test_parse_task_id_handles_multi_word_slug(tmp_path: pathlib.Path) -> None:
-    """kanban_parse_task_id extracts the entire slug including hyphens."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "kanban_parse_task_id PM-20260628-001-decompose-v0-102-0 && echo $_TASK_SLUG"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "decompose-v0-102-0"
-
-
-# ---------------------------------------------------------------------------
-# Accessor functions (kanban_task_agent, _date, _seq, _slug, _participant)
-# ---------------------------------------------------------------------------
-
-
-def test_task_agent_echoes_agent_field(tmp_path: pathlib.Path) -> None:
-    """kanban_task_agent echoes the agent component of the ID."""
-    result = run_bash(
-        tmp_path,
-        _source("kanban_task_agent WRITER-20260601-005-write-readme"),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "WRITER"
-
-
-def test_task_date_echoes_date_field(tmp_path: pathlib.Path) -> None:
-    """kanban_task_date echoes the 8-digit date component."""
-    result = run_bash(
-        tmp_path,
-        _source("kanban_task_date WRITER-20260601-005-write-readme"),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "20260601"
-
-
-def test_task_seq_echoes_sequence_field(tmp_path: pathlib.Path) -> None:
-    """kanban_task_seq echoes the zero-padded sequence number."""
-    result = run_bash(
-        tmp_path,
-        _source("kanban_task_seq WRITER-20260601-005-write-readme"),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "005"
-
-
-def test_task_slug_echoes_slug_field(tmp_path: pathlib.Path) -> None:
-    """kanban_task_slug echoes the kebab-case slug."""
-    result = run_bash(
-        tmp_path,
-        _source("kanban_task_slug WRITER-20260601-005-write-readme"),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "write-readme"
-
-
-def test_task_participant_always_echoes_claude(tmp_path: pathlib.Path) -> None:
-    """kanban_task_participant always echoes 'claude' regardless of the ID."""
-    result = run_bash(
-        tmp_path,
-        _source("kanban_task_participant CODER-20260518-001-anything"),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "claude"
-
-
-def test_task_agent_returns_empty_for_invalid_id(tmp_path: pathlib.Path) -> None:
-    """kanban_task_agent echoes an empty string for an unrecognised ID format."""
-    result = run_bash(
-        tmp_path,
-        _source("kanban_task_agent invalid-id-here"),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == ""
 
 
 # ---------------------------------------------------------------------------
@@ -207,52 +123,49 @@ def test_next_task_seq_returns_001_when_tasks_dir_absent(tmp_path: pathlib.Path)
     assert result.stdout.strip() == "001"
 
 
-def test_next_task_seq_returns_next_after_existing(tmp_path: pathlib.Path) -> None:
-    """kanban_next_task_seq returns max+1 when matching task dirs exist."""
+@pytest.mark.parametrize(
+    "existing_dir_1, existing_dir_2, query_role, query_date, expected",
+    [
+        (
+            "CODER-20260518-001-fix-something",
+            "CODER-20260518-002-add-feature",
+            "CODER",
+            "20260518",
+            "003",
+        ),  # matching role+date -> max+1
+        (
+            "WRITER-20260518-001-docs",
+            "WRITER-20260518-002-more-docs",
+            "CODER",
+            "20260518",
+            "001",
+        ),  # different role ignored
+        (
+            "CODER-20260517-001-yesterday",
+            "CODER-20260517-002-also-yesterday",
+            "CODER",
+            "20260518",
+            "001",
+        ),  # different date ignored
+    ],
+)
+def test_next_task_seq_scoped_to_role_and_date(
+    tmp_path: pathlib.Path,
+    existing_dir_1: str,
+    existing_dir_2: str,
+    query_role: str,
+    query_date: str,
+    expected: str,
+) -> None:
+    """kanban_next_task_seq only counts task dirs matching both the queried role and date."""
     tasks_dir = tmp_path / "tasks"
-    _make_task_dirs(
-        tasks_dir,
-        "CODER-20260518-001-fix-something",
-        "CODER-20260518-002-add-feature",
-    )
+    _make_task_dirs(tasks_dir, existing_dir_1, existing_dir_2)
     result = run_bash(
         tmp_path,
-        _source(f"kanban_next_task_seq '{tasks_dir}' CODER 20260518"),
+        _source(f"kanban_next_task_seq '{tasks_dir}' {query_role} {query_date}"),
     )
     assert result.returncode == 0
-    assert result.stdout.strip() == "003"
-
-
-def test_next_task_seq_ignores_different_role(tmp_path: pathlib.Path) -> None:
-    """kanban_next_task_seq ignores task dirs for a different role."""
-    tasks_dir = tmp_path / "tasks"
-    _make_task_dirs(
-        tasks_dir,
-        "WRITER-20260518-001-docs",
-        "WRITER-20260518-002-more-docs",
-    )
-    result = run_bash(
-        tmp_path,
-        _source(f"kanban_next_task_seq '{tasks_dir}' CODER 20260518"),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "001"
-
-
-def test_next_task_seq_ignores_different_date(tmp_path: pathlib.Path) -> None:
-    """kanban_next_task_seq ignores task dirs for a different date stamp."""
-    tasks_dir = tmp_path / "tasks"
-    _make_task_dirs(
-        tasks_dir,
-        "CODER-20260517-001-yesterday",
-        "CODER-20260517-002-also-yesterday",
-    )
-    result = run_bash(
-        tmp_path,
-        _source(f"kanban_next_task_seq '{tasks_dir}' CODER 20260518"),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "001"
+    assert result.stdout.strip() == expected
 
 
 def test_next_task_seq_zero_pads_to_three_digits(tmp_path: pathlib.Path) -> None:

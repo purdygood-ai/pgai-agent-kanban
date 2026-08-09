@@ -2014,8 +2014,7 @@ def _get_marker_file(
         requirement → PROJECT_ROOT/tasks/queues/pm_backlog.md
 
     The agent for a task is derived from the task folder basename:
-    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-    CODER-20260622-001-slug → coder.
+    AGENT-YYYYMMDD-NNN-slug → agent (lowercased).
 
     Args:
         project_root: Absolute path to the project root directory.

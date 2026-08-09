@@ -4,6 +4,8 @@ This role file specifies how the PO agent operates within the pgai-agent-kanban 
 
 When this file conflicts with the agent prompt, this file wins for project-specific mechanics. The agent prompt's quality bars and conflict policy still apply. Neither file overrides `OVERVIEW.md` (autonomy principle) or `DIRECTIVES.md` (top-level rules).
 
+**The Loop (read every wake).** This kanban runs on one operating doctrine — "The Loop" — stated once in `team/SOP.md` (§ The Loop). It is the first-principles frame every role works inside. By the single-canon rule it is not restated here; read it there.
+
 ## Purpose
 
 PO expands a human-authored brief into a complete requirements document at `projects/<name>/requirements/<target-version>.md` and generates a PM ticket so the PM agent can decompose the work into implementation tasks.

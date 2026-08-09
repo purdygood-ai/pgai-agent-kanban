@@ -88,13 +88,42 @@ require_dev_tree() {
     local _path="${1:-}"
     local _ctx="${2:-kanban.cfg}"
 
+    # Partial remedy (docs/coding-standards.md "Gates prescribe, not just
+    # diagnose", classified in docs/audits/v1.27.2-gate-remedy-census.md):
+    # both branches name the exact config source deterministically, but the
+    # dev-tree path value itself is site-specific (only the operator knows
+    # where their checkout lives) — the fix commands below print a concrete,
+    # filled-in example the reader adapts rather than a bare placeholder.
     if [[ -z "${_path}" ]]; then
         echo "ERROR: dev_tree_path not configured in ${_ctx}. Set it before running." >&2
+        echo "" >&2
+        echo "Cause: neither PGAI_DEV_TREE_PATH nor a [paths] dev_tree_path key in" >&2
+        echo "${_ctx} resolved to a value, and no self-located fallback applied." >&2
+        echo "" >&2
+        echo "To fix (pick one):" >&2
+        echo "  1. export PGAI_DEV_TREE_PATH=/home/rocky/develop/pgai-agent-kanban   # example — use your actual checkout path" >&2
+        echo "  2. printf '[paths]\\ndev_tree_path = /home/rocky/develop/pgai-agent-kanban\\n' >> \"${_ctx}\"   # example — use your actual checkout path" >&2
+        echo "  3. Re-run the command that invoked this gate." >&2
+        echo "" >&2
+        echo "Rule: every gated runner requires a resolvable dev-tree path before it can" >&2
+        echo "locate the test suite it runs." >&2
         exit 1
     fi
 
     if [[ ! -d "${_path}" ]]; then
         echo "ERROR: dev_tree_path '${_path}' does not exist (resolved from ${_ctx})." >&2
+        echo "" >&2
+        echo "Cause: the resolved path '${_path}' (from ${_ctx}) is not a directory —" >&2
+        echo "it was likely moved, renamed, or deleted since it was configured." >&2
+        echo "" >&2
+        echo "To fix:" >&2
+        echo "  1. ls -la \"${_path}\"                          # confirm it is really absent" >&2
+        echo "  2. export PGAI_DEV_TREE_PATH=/home/rocky/develop/pgai-agent-kanban   # example — point at the real checkout" >&2
+        echo "     # or edit [paths] dev_tree_path in ${_ctx} to the real checkout path" >&2
+        echo "  3. Re-run the command that invoked this gate." >&2
+        echo "" >&2
+        echo "Rule: the configured dev-tree path must be a real, existing directory —" >&2
+        echo "a stale path fails loud here instead of silently operating on the wrong tree." >&2
         exit 1
     fi
 

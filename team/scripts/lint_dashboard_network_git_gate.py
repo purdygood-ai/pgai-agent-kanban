@@ -211,16 +211,81 @@ def scan_dashboard_dir(dashboard_dir: Path, *, verbose: bool = False) -> list[Vi
 
 
 # ---------------------------------------------------------------------------
-# Reporting
+# Remedy block (docs/coding-standards.md "Gates prescribe, not just diagnose")
 # ---------------------------------------------------------------------------
 
 
-def _report_violations(violations: list[Violation]) -> None:
-    for v in violations:
-        print(
-            f"FAIL {v.path}:{v.line}: network-capable git verb "
-            f"'{v.verb}' found — {v.snippet!r}"
-        )
+def _build_causes(violations: list[Violation]) -> list[str]:
+    """Return one cause bullet per violation, naming path:line, verb, and snippet."""
+    return [
+        f"{v.path}:{v.line}: network-capable git verb '{v.verb}' found — {v.snippet!r}"
+        for v in violations
+    ]
+
+
+def _build_fix_commands(
+    violations: list[Violation], *, team_dir: Path, lint_script: Path
+) -> list[str]:
+    """Return the numbered, verbatim-runnable fix commands for *violations*.
+
+    Each violation gets one single-line ``sed`` command that comments out
+    the exact offending line by 1-based line number (``s/^/# /``, prepended
+    before any existing indentation) — safe against whatever shell
+    metacharacters the offending line itself contains, since the command
+    targets the line by number, not by matching its text. A commented line
+    is unconditionally treated as non-violating by ``_mask_comment_lines``,
+    so this deterministically clears the gate. It is a stop-gap, not the
+    final fix: the design law here permits no exemption, so the commented
+    call must eventually be replaced with a genuine local-only equivalent —
+    but that replacement's logic is authored code no gate can synthesize.
+
+    The final command re-runs this lint with the exact --team-dir used at
+    detection time, proving the fix cleared the gate.
+    """
+    commands = [f"sed -i '{v.line}s/^/# /' \"{v.path}\"" for v in violations]
+    commands.append(f'python3 "{lint_script}" --team-dir "{team_dir}"')
+    return commands
+
+
+def _format_remedy_block(
+    violations: list[Violation], *, team_dir: Path, lint_script: Path
+) -> str:
+    """Assemble the full three-part remedy block required by
+    docs/coding-standards.md ("Gates prescribe, not just diagnose"): cause(s)
+    with concrete location, a numbered fix block of verbatim-runnable
+    commands ending with the re-lint check, then the one-line rule the gate
+    enforces.
+    """
+    causes = _build_causes(violations)
+    commands = _build_fix_commands(violations, team_dir=team_dir, lint_script=lint_script)
+
+    lines = [
+        f"lint_dashboard_network_git_gate: FAIL — {len(violations)} violation(s)",
+        "",
+        "Cause(s):",
+    ]
+    for cause in causes:
+        lines.append(f"  - {cause}")
+    lines.append("")
+    lines.append("To fix:")
+    for i, command in enumerate(commands, start=1):
+        lines.append(f"  {i}. {command}")
+    lines.append("")
+    lines.append(
+        "Note: this comments out the offending line as a deterministic "
+        "stop-gap that clears the gate immediately. There is no exemption "
+        "mechanism for this gate — replace the commented line with the "
+        "intended local-only equivalent (no network-capable git verb) "
+        "before shipping; a permanently dead network call is not the "
+        "design intent either."
+    )
+    lines.append("")
+    lines.append(
+        "Rule: team/scripts/dashboard/ is local-only — no network-capable "
+        "git verb (ls-remote|fetch|pull|push|clone) may appear anywhere "
+        "under it, with no exemptions, including the git-window scripts."
+    )
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -287,12 +352,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[dashboard-git-gate] Scanning {dashboard_dir} ...")
 
     violations = scan_dashboard_dir(dashboard_dir, verbose=args.verbose)
-    _report_violations(violations)
 
     if violations:
+        lint_script = Path(__file__).resolve()
         print(
-            f"\nlint_dashboard_network_git_gate: {len(violations)} violation(s) found "
-            f"under {dashboard_dir}"
+            "\n"
+            + _format_remedy_block(violations, team_dir=team_dir, lint_script=lint_script),
+            flush=True,
         )
         return 1
 

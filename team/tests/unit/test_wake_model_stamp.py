@@ -332,35 +332,25 @@ def test_sibling_stamp_blocks_are_byte_identical() -> None:
 #     function is defined in wake_common.sh; ordering is correct.
 # ---------------------------------------------------------------------------
 
-def test_stamp_anchor_present_in_claude() -> None:
-    """Structural: the stamp anchor comment is present in claude.sh."""
-    content = _CLAUDE_SH.read_text(encoding="utf-8")
+@pytest.mark.parametrize(
+    "sibling", [_CLAUDE_SH, _CODEX_SH], ids=["claude", "codex"]
+)
+def test_stamp_anchor_present_in_sibling(sibling: pathlib.Path) -> None:
+    """Structural: the stamp anchor comment is present in both wake provider scripts."""
+    content = sibling.read_text(encoding="utf-8")
     assert _STAMP_ANCHOR in content, (
-        f"Stamp anchor not found in {_CLAUDE_SH}.\nExpected: {_STAMP_ANCHOR!r}"
+        f"Stamp anchor not found in {sibling}.\nExpected: {_STAMP_ANCHOR!r}"
     )
 
 
-def test_stamp_anchor_present_in_codex() -> None:
-    """Structural: the stamp anchor comment is present in codex.sh."""
-    content = _CODEX_SH.read_text(encoding="utf-8")
-    assert _STAMP_ANCHOR in content, (
-        f"Stamp anchor not found in {_CODEX_SH}.\nExpected: {_STAMP_ANCHOR!r}"
-    )
-
-
-def test_stamp_call_present_in_claude() -> None:
-    """Structural: stamp_model_field is called in claude.sh."""
-    content = _CLAUDE_SH.read_text(encoding="utf-8")
+@pytest.mark.parametrize(
+    "sibling", [_CLAUDE_SH, _CODEX_SH], ids=["claude", "codex"]
+)
+def test_stamp_call_present_in_sibling(sibling: pathlib.Path) -> None:
+    """Structural: stamp_model_field is called in both wake provider scripts."""
+    content = sibling.read_text(encoding="utf-8")
     assert _STAMP_CALL in content, (
-        f"{_STAMP_CALL!r} call not found in {_CLAUDE_SH}."
-    )
-
-
-def test_stamp_call_present_in_codex() -> None:
-    """Structural: stamp_model_field is called in codex.sh."""
-    content = _CODEX_SH.read_text(encoding="utf-8")
-    assert _STAMP_CALL in content, (
-        f"{_STAMP_CALL!r} call not found in {_CODEX_SH}."
+        f"{_STAMP_CALL!r} call not found in {sibling}."
     )
 
 

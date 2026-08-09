@@ -28,6 +28,9 @@
 #
 # Usage:
 #   ./install.sh                               # interactive install with defaults
+#   ./install.sh v2.1.0                        # install from tag v2.1.0's tree (any tag, any
+#                                               # direction -- see "Version-targeted install"
+#                                               # in --help); no argument = today's behavior
 #   ./install.sh --force                       # overwrite without prompting (clean reinstall)
 #   ./install.sh --dry-run                     # show what would happen, do nothing
 #   ./install.sh --wake-tier large             # install with large tier
@@ -104,9 +107,12 @@ NO_SYSTEM_CRON=false
 ADD_CLAUDE_AGENTS=false
 ADD_CODEX_AGENTS=false
 STAMP_VERSION=""      # non-empty = write verbatim, skip git resolution
+REQUESTED_VERSION=""  # non-empty = optional positional VERSION argument (e.g. "v2.1.0"):
+                       # lay the install down from THAT tag's tree instead of whatever is
+                       # currently checked out. See "Version-targeted install" below.
 _print_install_usage() {
   cat <<EOF
-Usage: ./install.sh [--force] [--dry-run] [--wake-tier small|medium|large]
+Usage: ./install.sh [VERSION] [--force] [--dry-run] [--wake-tier small|medium|large]
 
 Installs pgai-agent-kanban into your home directory and copies
 the subagents into Claude Code's agents directory.
@@ -115,6 +121,30 @@ This is the FRESH-INSTALL path only.  If the install target already exists,
 install.sh refuses with a "use upgrade.sh" message.  Use --force to bypass
 the existence guard for a clean reinstall (e.g., after manually removing the
 target directory).
+
+Version-targeted install:
+  Pass an optional positional VERSION argument to lay down a specific
+  released tag's tree, independent of whichever branch is currently checked
+  out in this repo and independent of any newer tags that may also exist:
+
+    ./install.sh v2.1.0          # lays down tag v2.1.0's tree
+    ./install.sh ai_v2.1.0       # same tag; the internal "ai_" prefix form
+                                  # is tolerated and normalized
+
+  Resolution: the tag must exist in this repo's git history -- if it does
+  not, install.sh fails loud, names the requested version, and lists the
+  nearest available tags.  The resolved tag's tree is materialized into a
+  temporary detached worktree and the ENTIRE install (kanban tree, subagent
+  manifest, templates, the committed VERSION file) is laid down from that
+  clean tree; this repo's own checked-out branch is never touched, and the
+  temporary worktree is removed before install.sh exits (success or
+  failure). Fresh installs are directionless: any existing tag may be
+  targeted, even one older than other tags that also exist -- this is the
+  sanctioned downgrade path (upgrade.sh's forward-only rule does not apply
+  to install.sh).
+
+  Omit VERSION entirely to install from this checkout exactly as before
+  this argument existed (the default, back-compatible path).
 
 Subagent installation:
   The subagents to install are listed in subagents/MANIFEST.txt (one name per
@@ -210,13 +240,19 @@ if argparse_missing "stamp-version"; then
   exit 1
 fi
 
-# Short flags (-h) arrive in ARGPARSE_POSITIONAL; handle them first.
+# Short flags (-h) and the optional positional VERSION argument arrive in
+# ARGPARSE_POSITIONAL; handle them first. At most one non-flag positional is
+# accepted (the VERSION argument); a second one is an error.
 for _pos in "${ARGPARSE_POSITIONAL[@]+"${ARGPARSE_POSITIONAL[@]}"}"; do
   case "$_pos" in
     -h) _print_install_usage; exit 0 ;;
     *)
-      err "Unknown argument: $_pos"
-      exit 1
+      if [[ -n "$REQUESTED_VERSION" ]]; then
+        err "Unknown argument: $_pos"
+        err "(a version argument was already given: '${REQUESTED_VERSION}'; only one is accepted)"
+        exit 1
+      fi
+      REQUESTED_VERSION="$_pos"
       ;;
   esac
 done
@@ -300,6 +336,118 @@ fi
 
 # --- Resolve paths ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ---------------------------------------------------------------------------
+# Version-targeted install: optional positional VERSION argument.
+#
+# When REQUESTED_VERSION is non-empty (operator ran e.g. "./install.sh
+# v2.1.0" or "./install.sh ai_v2.1.0"), resolve it against SCRIPT_DIR's own
+# git tags via the shared team/scripts/lib/version_resolve.sh mechanism
+# (built in the prerequisite ticket), materialize that tag's tree into a
+# throwaway DETACHED worktree, and redirect SCRIPT_DIR to point at that
+# worktree for the REST of this script.  Every "$SCRIPT_DIR" reference below
+# this point (the team/ tree copy loop, subagent manifest and templates,
+# example config templates, and the committed VERSION file read at the
+# bottom of this script) then reads from the resolved TAG's tree rather than
+# whatever branch happens to be checked out here — SCRIPT_DIR's own
+# checked-out branch and HEAD are never touched (materialization uses
+# `git worktree add --detach`), and the temporary worktree is pruned before
+# this script exits on every path (success, error, or interrupt).
+#
+# Fresh installs are directionless: any existing tag may be targeted, even
+# one older than other tags that also exist — this is the sanctioned
+# downgrade path referenced by upgrade.sh's forward-only refusal (that rule
+# belongs to upgrade.sh, which is amending a LIVE install with a real
+# "before" state; install.sh always lays down a complete tree from nothing,
+# so it has no direction to enforce).
+#
+# No argument = REQUESTED_VERSION is empty = this entire block is a no-op,
+# and install.sh behaves exactly as it did before this argument existed.
+# ---------------------------------------------------------------------------
+REPO_SOURCE_DIR="$SCRIPT_DIR"
+if [[ -n "$REQUESTED_VERSION" ]]; then
+  if [[ ! -d "$REPO_SOURCE_DIR/.git" ]]; then
+    err "ERROR: a version argument was given ('${REQUESTED_VERSION}') but '${REPO_SOURCE_DIR}' is not a git checkout (no .git found)."
+    err "Version-targeted install requires a git checkout of the pgai-agent-kanban repo so the requested tag can be resolved."
+    err "Fix: run install.sh from a git clone of the repo, or omit the version argument to install from this tree as-is."
+    exit 1
+  fi
+
+  _INSTALL_VERSION_RESOLVE_LIB="${REPO_SOURCE_DIR}/team/scripts/lib/version_resolve.sh"
+  if [[ ! -f "$_INSTALL_VERSION_RESOLVE_LIB" ]]; then
+    err "ERROR: version_resolve.sh not found: $_INSTALL_VERSION_RESOLVE_LIB"
+    err "This file is required for version-targeted installs and ships with the kanban repo."
+    exit 1
+  fi
+  # shellcheck source=team/scripts/lib/version_resolve.sh
+  source "$_INSTALL_VERSION_RESOLVE_LIB"
+  unset _INSTALL_VERSION_RESOLVE_LIB
+
+  # Resolve the requested version against two candidate tag-name shapes:
+  #   1. bare (no prefix)   — matches a plain "vX.Y.Z" tag, and also matches
+  #                           an "ai_vX.Y.Z"-typed request verbatim (an empty
+  #                           prefix makes normalize/tag_name a no-op, so the
+  #                           request passes through unchanged).
+  #   2. "ai_" prefix       — pgai-agent-kanban's own self-hosting branch
+  #                           prefix (see project.cfg [project] branch_prefix
+  #                           for this project) so a bare "vX.Y.Z" request
+  #                           also resolves against tags that only exist in
+  #                           "ai_vX.Y.Z" form.
+  # This satisfies "both vX.Y.Z and ai_vX.Y.Z input forms are accepted"
+  # without requiring a live project registration to look up branch_prefix
+  # from — none exists yet at fresh-install time.
+  _INSTALL_RESOLVED_TAG=""
+  for _install_tag_prefix in "" "ai_"; do
+    if _INSTALL_RESOLVED_TAG="$(version_resolve_resolve_tag "$REQUESTED_VERSION" "$REPO_SOURCE_DIR" "$_install_tag_prefix" 2>/dev/null)"; then
+      break
+    fi
+    _INSTALL_RESOLVED_TAG=""
+  done
+  unset _install_tag_prefix
+
+  if [[ -z "$_INSTALL_RESOLVED_TAG" ]]; then
+    err "ERROR: requested version '${REQUESTED_VERSION}' was not found in '${REPO_SOURCE_DIR}'."
+    err ""
+    _INSTALL_AVAILABLE_TAGS="$(printf '%s\n%s\n' \
+      "$(version_resolve_list_tags "$REPO_SOURCE_DIR" "")" \
+      "$(version_resolve_list_tags "$REPO_SOURCE_DIR" "ai_")" | sort -V -u)"
+    if [[ -n "$(printf '%s' "$_INSTALL_AVAILABLE_TAGS" | tr -d '[:space:]')" ]]; then
+      err "Available tags in this checkout:"
+      while IFS= read -r _install_tag_line; do
+        [[ -n "$_install_tag_line" ]] && err "  ${_install_tag_line}"
+      done <<< "$_INSTALL_AVAILABLE_TAGS"
+    else
+      err "No tags matching this project's tag shape were found in '${REPO_SOURCE_DIR}'."
+    fi
+    err ""
+    err "To fix: pass an existing released tag (see the list above), or omit the"
+    err "version argument entirely to install from this checkout as-is."
+    unset _INSTALL_AVAILABLE_TAGS _install_tag_line
+    exit 1
+  fi
+
+  info "Version-targeted install: '${REQUESTED_VERSION}' resolved to tag '${_INSTALL_RESOLVED_TAG}'"
+
+  _INSTALL_CLEAN_SRC="$(version_resolve_materialize "$REPO_SOURCE_DIR" "$_INSTALL_RESOLVED_TAG")"
+  if [[ -z "$_INSTALL_CLEAN_SRC" ]]; then
+    err "ERROR: failed to materialize tag '${_INSTALL_RESOLVED_TAG}' into a clean worktree."
+    exit 1
+  fi
+
+  # Guarantee the temporary worktree is pruned on every exit path (success,
+  # error, or interrupt). install.sh installs no other EXIT trap (only the
+  # ERR trap set at the top of this file), so this is a plain, non-chained
+  # trap registration.
+  trap "version_resolve_prune '${REPO_SOURCE_DIR}' '${_INSTALL_CLEAN_SRC}' >/dev/null 2>&1 || true" EXIT
+
+  info "Version-targeted install: laying down from clean checkout: $_INSTALL_CLEAN_SRC"
+  info "Operator's checked-out branch in $REPO_SOURCE_DIR is untouched (detached worktree)."
+
+  # Redirect SCRIPT_DIR: every "$SCRIPT_DIR" reference for the rest of this
+  # script now reads from the resolved tag's tree instead of REPO_SOURCE_DIR.
+  SCRIPT_DIR="$_INSTALL_CLEAN_SRC"
+  unset _INSTALL_RESOLVED_TAG _INSTALL_CLEAN_SRC
+fi
 
 # ---------------------------------------------------------------------------
 # Path policy: resolve install location.
@@ -558,11 +706,12 @@ fi
 info "Installing kanban tree to $KANBAN_ROOT..."
 
 # Copy each item from team/ into the kanban root.
-# NOTE: team/release-state.md was removed in v0.21.7 (PRIORITY-0001 schema redesign).
-# Runtime release state lives exclusively at:
+# NOTE: a top-level team/release-state.md file is no longer part of the
+# installed tree; release state moved to a per-project schema. Runtime
+# release state lives exclusively at:
 #   $KANBAN_ROOT/projects/<name>/release-state.md
 # That file tracks only in-flight RC state; Last Released is derived from git tags.
-for item in README.md DIRECTIVES.md OVERVIEW.md SOP.md roles scripts pm-agent workflows pgai_agent_kanban halt_after templates demos; do
+for item in README.md DIRECTIVES.md OVERVIEW.md SOP.md roles scripts pm-agent workflows pgai_agent_kanban halt_after templates demos config; do
   src="$SCRIPT_DIR/team/$item"
   dst="$KANBAN_ROOT/$item"
 
@@ -873,7 +1022,7 @@ info ""
 # loop above (not duplicated per-provider).
 #
 # Provider list source (in priority order):
-#   1. kanban.cfg [providers] available — INI config (when PRIORITY-0038 has shipped)
+#   1. kanban.cfg [providers] available — INI config, when present on this install
 #   2. Hardcoded fallback: "claude codex"
 #
 # Per-provider behavior:
@@ -936,7 +1085,7 @@ if [[ -f "$_SUBAGENT_INI_PARSER_LIB" ]] && [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; t
   _subagent_providers="$(read_ini "$KANBAN_ROOT/kanban.cfg" providers available "")"
 fi
 if [[ -z "$_subagent_providers" ]]; then
-  # TODO(PRIORITY-0038): Replace this hardcoded fallback with INI lookup once
+  # TODO: Replace this hardcoded fallback with INI lookup once
   # kanban.cfg [providers] available is consistently present in all installs.
   _subagent_providers="claude codex"
 fi

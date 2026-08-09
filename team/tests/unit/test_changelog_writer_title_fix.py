@@ -470,10 +470,19 @@ class TestBareKiIdJoinInBugsResolved:
         # The bare placeholder 'resolved' must not appear alone without the title.
         # (We allow 'resolved' as part of the affects/fixed-in clause, but not as
         # the only content for the bug entry.)
+        # The substituted line keeps the "- " bullet marker of the concise
+        # placeholder it replaces (BUG-0024), so match on the KI id
+        # appearing after an optional leading list marker rather than
+        # requiring it at column 0.
         fixed_lines = [ln.strip() for ln in fixed_body.splitlines() if ln.strip()]
-        ki_lines = [ln for ln in fixed_lines if ln.startswith("KI-1.0.0.1")]
+        ki_lines = [
+            ln for ln in fixed_lines if ln.lstrip("-* ").startswith("KI-1.0.0.1")
+        ]
         assert len(ki_lines) >= 1, "KI-1.0.0.1 line not found in Fixed body"
         ki_line = ki_lines[0]
+        assert ki_line.startswith("- "), (
+            f"Joined KI line lost its list bullet marker (BUG-0024): {ki_line!r}"
+        )
         assert "Widget crashes on startup" in ki_line, (
             f"Joined KI line does not carry title: {ki_line!r}"
         )
@@ -637,76 +646,88 @@ class TestByteStabilityRegressionCleanSymptoms:
 
 
 class TestSanitizeSymptomForTitle:
-    """Unit tests for _sanitize_symptom_for_title covering the five strip cases."""
+    """Unit tests for _sanitize_symptom_for_title covering the strip cases.
 
-    def test_simple_prose_symptom_passes_through_unchanged(self) -> None:
-        """A simple single-sentence symptom with no diagnostic markers is unchanged."""
-        s = "Widget crashes on startup."
-        assert _sanitize_symptom_for_title(s) == s
+    Table-driven: every case feeds one raw string through the same function
+    and checks the result against forbidden/required substrings, so the
+    original eight discrete tests survive as one parametrized case set
+    (survives-as-named-parameterization; no case dropped).
+    """
 
-    def test_triple_backtick_fence_block_stripped(self) -> None:
-        """Content between triple-backtick fences is stripped."""
-        raw = "Prose before.\n```\nerror content here\n```\nProse after."
+    @pytest.mark.parametrize(
+        "raw, must_contain, must_not_contain",
+        [
+            pytest.param(
+                "Widget crashes on startup.",
+                ["Widget crashes on startup."],
+                [],
+                id="simple_prose_symptom_passes_through_unchanged",
+            ),
+            pytest.param(
+                "Prose before.\n```\nerror content here\n```\nProse after.",
+                [],
+                ["```", "error content here"],
+                id="triple_backtick_fence_block_stripped",
+            ),
+            pytest.param(
+                "```\nFAILED test_something - AssertionError: expected x\n```\nProse title.",
+                [],
+                ["FAILED", "AssertionError"],
+                id="failed_line_stripped",
+            ),
+            pytest.param(
+                "```\n$ run-tests.sh\n$ grep FAILED log\n```\nProse title.",
+                [],
+                ["$ "],
+                id="dollar_command_prompt_line_stripped",
+            ),
+            pytest.param(
+                textwrap.dedent("""\
+                    ```
+                    error output here
+                    ```
+                    The changelog generator emits a stray fence into Fixed entries.
+                    More detail about the bug follows here.
+                    """),
+                ["The changelog generator emits"],
+                ["```"],
+                id="prose_first_sentence_extracted_after_fence_strip",
+            ),
+            pytest.param("", [], [], id="empty_input_returns_empty_string"),
+            pytest.param(
+                "```\nonly code here\n```",
+                [],
+                ["```", "only code here"],
+                id="fence_only_symptom_returns_empty_or_fallback",
+            ),
+            pytest.param(
+                textwrap.dedent("""\
+                    First fence:
+                    ```
+                    block one
+                    ```
+                    Middle prose sentence.
+                    ```
+                    block two
+                    ```
+                    Final prose.
+                    """),
+                [],
+                ["```", "block one", "block two"],
+                id="multiple_fence_blocks_all_stripped",
+            ),
+        ],
+    )
+    def test_sanitize_symptom_for_title(
+        self, raw: str, must_contain: list[str], must_not_contain: list[str]
+    ) -> None:
         result = _sanitize_symptom_for_title(raw)
-        assert "```" not in result, f"Triple-backtick in result: {result!r}"
-        assert "error content here" not in result, f"Fence content in result: {result!r}"
-
-    def test_failed_line_stripped(self) -> None:
-        """Lines starting with FAILED are stripped."""
-        raw = "```\nFAILED test_something - AssertionError: expected x\n```\nProse title."
-        result = _sanitize_symptom_for_title(raw)
-        assert "FAILED" not in result, f"FAILED in result: {result!r}"
-        assert "AssertionError" not in result, f"AssertionError in result: {result!r}"
-
-    def test_dollar_command_prompt_line_stripped(self) -> None:
-        """Lines starting with '$ ' (shell prompts) are stripped."""
-        raw = "```\n$ run-tests.sh\n$ grep FAILED log\n```\nProse title."
-        result = _sanitize_symptom_for_title(raw)
-        assert "$ " not in result, f"'$ ' in result: {result!r}"
-
-    def test_prose_first_sentence_extracted_after_fence_strip(self) -> None:
-        """After stripping a leading fence block, the first prose sentence is extracted."""
-        raw = textwrap.dedent("""\
-            ```
-            error output here
-            ```
-            The changelog generator emits a stray fence into Fixed entries.
-            More detail about the bug follows here.
-            """)
-        result = _sanitize_symptom_for_title(raw)
-        assert "The changelog generator emits" in result, f"Prose not in result: {result!r}"
-        assert "```" not in result
-
-    def test_empty_input_returns_empty_string(self) -> None:
-        """Empty input returns an empty string without error."""
-        assert _sanitize_symptom_for_title("") == ""
-
-    def test_fence_only_symptom_returns_empty_or_fallback(self) -> None:
-        """A symptom consisting entirely of a code fence block returns empty or fallback."""
-        raw = "```\nonly code here\n```"
-        result = _sanitize_symptom_for_title(raw)
-        # No fence markers remain
-        assert "```" not in result
-        # No code-fence content remains
-        assert "only code here" not in result
-
-    def test_multiple_fence_blocks_all_stripped(self) -> None:
-        """Multiple fence blocks in the symptom are all stripped."""
-        raw = textwrap.dedent("""\
-            First fence:
-            ```
-            block one
-            ```
-            Middle prose sentence.
-            ```
-            block two
-            ```
-            Final prose.
-            """)
-        result = _sanitize_symptom_for_title(raw)
-        assert "```" not in result
-        assert "block one" not in result
-        assert "block two" not in result
+        if raw == "":
+            assert result == ""
+        for fragment in must_contain:
+            assert fragment in result, f"Expected {fragment!r} in result: {result!r}"
+        for fragment in must_not_contain:
+            assert fragment not in result, f"Unexpected {fragment!r} in result: {result!r}"
 
 
 # ===========================================================================
@@ -715,33 +736,41 @@ class TestSanitizeSymptomForTitle:
 
 
 class TestExtractKiIdFromLine:
-    """Unit tests for _extract_ki_id_from_line."""
+    """Unit tests for _extract_ki_id_from_line.
 
-    def test_bullet_with_em_dash_separator_extracted(self) -> None:
-        """'- KI-1.0.0.1 — resolved' extracts KI-1.0.0.1."""
-        assert _extract_ki_id_from_line("- KI-1.0.0.1 — resolved") == "KI-1.0.0.1"
+    Table-driven: every case is a single line -> extracted-id assertion
+    against the same function (survives-as-named-parameterization of the
+    original six one-liner tests; no case dropped).
+    """
 
-    def test_star_bullet_extracted(self) -> None:
-        """'* KI-1.0.0.2 — text' extracts KI-1.0.0.2."""
-        assert _extract_ki_id_from_line("* KI-1.0.0.2 — text") == "KI-1.0.0.2"
-
-    def test_bare_ki_id_without_separator_extracted(self) -> None:
-        """'- KI-1.0.0.3' (no separator) extracts KI-1.0.0.3."""
-        # The pattern requires some separator or trailing space; this tests bare form
-        # after the list marker is consumed.
-        line = "KI-1.0.0.3 — resolved"
-        result = _extract_ki_id_from_line(line)
-        assert result == "KI-1.0.0.3", f"Expected KI-1.0.0.3, got {result!r}"
-
-    def test_ki_id_mid_sentence_not_extracted(self) -> None:
-        """A KI ID embedded mid-sentence is not extracted."""
-        line = "This refers to KI-1.0.0.1 for context"
-        assert _extract_ki_id_from_line(line) == ""
-
-    def test_bug_id_line_not_extracted_as_ki(self) -> None:
-        """A BUG-NNNN line does not match as a KI ID."""
-        assert _extract_ki_id_from_line("- BUG-0001 — symptom") == ""
-
-    def test_plain_prose_not_extracted(self) -> None:
-        """A plain prose line returns empty string."""
-        assert _extract_ki_id_from_line("All five known issues resolved.") == ""
+    @pytest.mark.parametrize(
+        "line, expected",
+        [
+            pytest.param(
+                "- KI-1.0.0.1 — resolved",
+                "KI-1.0.0.1",
+                id="bullet_with_em_dash_separator_extracted",
+            ),
+            pytest.param(
+                "* KI-1.0.0.2 — text", "KI-1.0.0.2", id="star_bullet_extracted"
+            ),
+            pytest.param(
+                "KI-1.0.0.3 — resolved",
+                "KI-1.0.0.3",
+                id="bare_ki_id_without_separator_extracted",
+            ),
+            pytest.param(
+                "This refers to KI-1.0.0.1 for context",
+                "",
+                id="ki_id_mid_sentence_not_extracted",
+            ),
+            pytest.param(
+                "- BUG-0001 — symptom", "", id="bug_id_line_not_extracted_as_ki"
+            ),
+            pytest.param(
+                "All five known issues resolved.", "", id="plain_prose_not_extracted"
+            ),
+        ],
+    )
+    def test_extract_ki_id_from_line(self, line: str, expected: str) -> None:
+        assert _extract_ki_id_from_line(line) == expected

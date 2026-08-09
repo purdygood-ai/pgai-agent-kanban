@@ -271,25 +271,20 @@ def test_subtree_path_is_absolute(tmp_path: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_scratch_line_adjacent_to_working_dir_override(
-    file_path: pathlib.Path = _CLAUDE_SH,
-) -> None:
+_PROVIDER_SIBLINGS = [_CLAUDE_SH, _CODEX_SH]
+_PROVIDER_IDS = ["claude", "codex"]
+
+
+@pytest.mark.parametrize("sibling", _PROVIDER_SIBLINGS, ids=_PROVIDER_IDS)
+def test_scratch_line_adjacent_to_working_dir_override(sibling: pathlib.Path) -> None:
     """
     The scratch line must appear immediately after ${_prompt_working_dir_override}
-    in the heredoc — verified by static line-order inspection of claude.sh.
+    in the heredoc — verified by static line-order inspection of each sibling.
     """
-    lines = _CLAUDE_SH.read_text(encoding="utf-8").splitlines()
+    lines = sibling.read_text(encoding="utf-8").splitlines()
 
     wd_override_idx = None
     scratch_idx = None
-
-    for i, line in enumerate(lines):
-        if "${_prompt_working_dir_override}" in line and wd_override_idx is None:
-            # We want the one inside the heredoc (the prompt body), not in the
-            # variable assignment block above it.
-            # The heredoc starts with "prompt=$(cat <<EOF" and ends with "EOF".
-            # We look for the occurrence that follows "prompt=$(cat <<EOF".
-            pass
 
     # Two-pass: find the heredoc region, then find order within it.
     in_heredoc = False
@@ -308,51 +303,14 @@ def test_scratch_line_adjacent_to_working_dir_override(
                 scratch_idx = i
 
     assert wd_override_idx is not None, (
-        f"${'{_prompt_working_dir_override}'} not found inside the prompt heredoc in {_CLAUDE_SH}."
+        f"${'{_prompt_working_dir_override}'} not found inside the prompt heredoc in {sibling}."
     )
     assert scratch_idx is not None, (
-        f"Scratch line not found inside the prompt heredoc in {_CLAUDE_SH}."
+        f"Scratch line not found inside the prompt heredoc in {sibling}."
     )
     assert scratch_idx == wd_override_idx + 1, (
         f"Scratch line (line {scratch_idx + 1}) is not immediately after "
-        f"${'{_prompt_working_dir_override}'} (line {wd_override_idx + 1}) in {_CLAUDE_SH}.\n"
-        f"Expected scratch line at line {wd_override_idx + 2}."
-    )
-
-
-def test_scratch_line_adjacent_to_working_dir_override_codex() -> None:
-    """
-    Same positional check for codex.sh.
-    """
-    lines = _CODEX_SH.read_text(encoding="utf-8").splitlines()
-
-    wd_override_idx = None
-    scratch_idx = None
-
-    in_heredoc = False
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("prompt=$(cat <<EOF"):
-            in_heredoc = True
-            continue
-        if in_heredoc and stripped == "EOF":
-            in_heredoc = False
-            continue
-        if in_heredoc:
-            if "${_prompt_working_dir_override}" in line and wd_override_idx is None:
-                wd_override_idx = i
-            if "Scratch/diagnostic output goes under" in line and scratch_idx is None:
-                scratch_idx = i
-
-    assert wd_override_idx is not None, (
-        f"${'{_prompt_working_dir_override}'} not found inside the prompt heredoc in {_CODEX_SH}."
-    )
-    assert scratch_idx is not None, (
-        f"Scratch line not found inside the prompt heredoc in {_CODEX_SH}."
-    )
-    assert scratch_idx == wd_override_idx + 1, (
-        f"Scratch line (line {scratch_idx + 1}) is not immediately after "
-        f"${'{_prompt_working_dir_override}'} (line {wd_override_idx + 1}) in {_CODEX_SH}.\n"
+        f"${'{_prompt_working_dir_override}'} (line {wd_override_idx + 1}) in {sibling}.\n"
         f"Expected scratch line at line {wd_override_idx + 2}."
     )
 
@@ -362,26 +320,15 @@ def test_scratch_line_adjacent_to_working_dir_override_codex() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_scratch_line_text_matches_brief_claude() -> None:
+@pytest.mark.parametrize("sibling", _PROVIDER_SIBLINGS, ids=_PROVIDER_IDS)
+def test_scratch_line_text_matches_brief(sibling: pathlib.Path) -> None:
     """
-    The scratch line in claude.sh must contain the exact wording from the
+    The scratch line in each sibling must contain the exact wording from the
     brief (with the bash variable reference as the path placeholder).
     """
-    content = _CLAUDE_SH.read_text(encoding="utf-8")
+    content = sibling.read_text(encoding="utf-8")
     assert _SCRATCH_LINE_TEMPLATE in content, (
-        f"claude.sh does not contain the exact scratch line from the brief.\n"
-        f"Expected:\n  {_SCRATCH_LINE_TEMPLATE}\n"
-        f"(with ${'{_project_temp_subtree}'} as the path placeholder)"
-    )
-
-
-def test_scratch_line_text_matches_brief_codex() -> None:
-    """
-    Same text-fidelity check for codex.sh.
-    """
-    content = _CODEX_SH.read_text(encoding="utf-8")
-    assert _SCRATCH_LINE_TEMPLATE in content, (
-        f"codex.sh does not contain the exact scratch line from the brief.\n"
+        f"{sibling} does not contain the exact scratch line from the brief.\n"
         f"Expected:\n  {_SCRATCH_LINE_TEMPLATE}\n"
         f"(with ${'{_project_temp_subtree}'} as the path placeholder)"
     )
@@ -392,49 +339,27 @@ def test_scratch_line_text_matches_brief_codex() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_pre_dispatch_litter_marker_still_present_claude() -> None:
+@pytest.mark.parametrize("sibling", _PROVIDER_SIBLINGS, ids=_PROVIDER_IDS)
+def test_pre_dispatch_litter_marker_still_present(sibling: pathlib.Path) -> None:
     """
     The pre-dispatch /tmp litter snapshot marker must still be present
-    in claude.sh (regression guard — this task must not disturb prior work).
+    in each sibling (regression guard — this task must not disturb prior work).
     """
-    content = _CLAUDE_SH.read_text(encoding="utf-8")
+    content = sibling.read_text(encoding="utf-8")
     assert _PRE_DISPATCH_MARKER in content, (
-        f"Pre-dispatch litter marker '{_PRE_DISPATCH_MARKER}' missing from {_CLAUDE_SH}. "
+        f"Pre-dispatch litter marker '{_PRE_DISPATCH_MARKER}' missing from {sibling}. "
         "This task may have inadvertently removed prior work."
     )
 
 
-def test_post_session_litter_marker_still_present_claude() -> None:
+@pytest.mark.parametrize("sibling", _PROVIDER_SIBLINGS, ids=_PROVIDER_IDS)
+def test_post_session_litter_marker_still_present(sibling: pathlib.Path) -> None:
     """
     The post-session /tmp litter check marker must still be present
-    in claude.sh (regression guard).
+    in each sibling (regression guard).
     """
-    content = _CLAUDE_SH.read_text(encoding="utf-8")
+    content = sibling.read_text(encoding="utf-8")
     assert _POST_SESSION_MARKER in content, (
-        f"Post-session litter marker '{_POST_SESSION_MARKER}' missing from {_CLAUDE_SH}. "
-        "This task may have inadvertently removed prior work."
-    )
-
-
-def test_pre_dispatch_litter_marker_still_present_codex() -> None:
-    """
-    The pre-dispatch /tmp litter snapshot marker must still be present
-    in codex.sh (regression guard).
-    """
-    content = _CODEX_SH.read_text(encoding="utf-8")
-    assert _PRE_DISPATCH_MARKER in content, (
-        f"Pre-dispatch litter marker '{_PRE_DISPATCH_MARKER}' missing from {_CODEX_SH}. "
-        "This task may have inadvertently removed prior work."
-    )
-
-
-def test_post_session_litter_marker_still_present_codex() -> None:
-    """
-    The post-session /tmp litter check marker must still be present
-    in codex.sh (regression guard).
-    """
-    content = _CODEX_SH.read_text(encoding="utf-8")
-    assert _POST_SESSION_MARKER in content, (
-        f"Post-session litter marker '{_POST_SESSION_MARKER}' missing from {_CODEX_SH}. "
+        f"Post-session litter marker '{_POST_SESSION_MARKER}' missing from {sibling}. "
         "This task may have inadvertently removed prior work."
     )

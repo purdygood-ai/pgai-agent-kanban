@@ -45,54 +45,24 @@ from pgai_agent_kanban.halt_after.drain import (
 # ---------------------------------------------------------------------------
 
 
-def test_parse_token_empty_string_defaults_to_rc() -> None:
-    """parse_token returns 'rc' for an empty content string."""
-    assert parse_token("") == "rc"
-
-
-def test_parse_token_whitespace_only_defaults_to_rc() -> None:
-    """parse_token returns 'rc' for content that is only whitespace."""
-    assert parse_token("   \n\t  ") == "rc"
-
-
-def test_parse_token_normalizes_uppercase_to_lowercase() -> None:
-    """parse_token lowercases 'RC' to 'rc'."""
-    assert parse_token("RC\n") == "rc"
-
-
-def test_parse_token_strips_surrounding_whitespace() -> None:
-    """parse_token strips leading and trailing whitespace before classifying."""
-    assert parse_token("  coder  \n") == "coder"
-
-
-def test_parse_token_returns_pm_token() -> None:
-    """parse_token returns 'pm' for 'pm' content."""
-    assert parse_token("pm") == "pm"
-
-
-def test_parse_token_returns_coder_token() -> None:
-    """parse_token returns 'coder' for 'coder' content."""
-    assert parse_token("coder") == "coder"
-
-
-def test_parse_token_returns_writer_token() -> None:
-    """parse_token returns 'writer' for 'writer' content."""
-    assert parse_token("writer") == "writer"
-
-
-def test_parse_token_returns_tester_token() -> None:
-    """parse_token returns 'tester' for 'tester' content."""
-    assert parse_token("tester") == "tester"
-
-
-def test_parse_token_returns_cm_token() -> None:
-    """parse_token returns 'cm' for 'cm' content."""
-    assert parse_token("cm") == "cm"
-
-
-def test_parse_token_returns_versioned_rc_token() -> None:
-    """parse_token returns 'rc:v0.40.0' for versioned rc content."""
-    assert parse_token("rc:v0.40.0") == "rc:v0.40.0"
+@pytest.mark.parametrize(
+    "content, expected",
+    [
+        ("", "rc"),  # empty content defaults to 'rc'
+        ("   \n\t  ", "rc"),  # whitespace-only content defaults to 'rc'
+        ("RC\n", "rc"),  # uppercase normalized to lowercase
+        ("  coder  \n", "coder"),  # surrounding whitespace stripped
+        ("pm", "pm"),
+        ("coder", "coder"),
+        ("writer", "writer"),
+        ("tester", "tester"),
+        ("cm", "cm"),
+        ("rc:v0.40.0", "rc:v0.40.0"),  # versioned rc token
+    ],
+)
+def test_parse_token_returns_supported_token(content: str, expected: str) -> None:
+    """parse_token classifies supported content into its normalized token."""
+    assert parse_token(content) == expected
 
 
 def test_parse_token_handles_versioned_rc_with_uppercase_rc_prefix() -> None:
@@ -102,19 +72,17 @@ def test_parse_token_handles_versioned_rc_with_uppercase_rc_prefix() -> None:
     assert result.startswith("rc:")
 
 
-def test_parse_token_returns_none_for_unknown_token() -> None:
+@pytest.mark.parametrize(
+    "content",
+    [
+        "deploy",  # not in the supported set
+        "stop-everything",  # arbitrary unrecognized text
+        "coder2",  # partial match on a supported token
+    ],
+)
+def test_parse_token_returns_none_for_unrecognized_content(content: str) -> None:
     """parse_token returns None for tokens not in the supported set."""
-    assert parse_token("deploy") is None
-
-
-def test_parse_token_returns_none_for_arbitrary_text() -> None:
-    """parse_token returns None for arbitrary unrecognized text."""
-    assert parse_token("stop-everything") is None
-
-
-def test_parse_token_returns_none_for_partial_match() -> None:
-    """parse_token returns None for 'coder2' (not in supported set)."""
-    assert parse_token("coder2") is None
+    assert parse_token(content) is None
 
 
 # ---------------------------------------------------------------------------
@@ -122,22 +90,18 @@ def test_parse_token_returns_none_for_partial_match() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_event_drained_note_for_bare_rc() -> None:
-    """_event_drained_note returns the 'Active RC cleared' note for bare 'rc'."""
-    note = _event_drained_note("rc")
-    assert "Active RC cleared" in note
-
-
-def test_event_drained_note_for_versioned_rc() -> None:
-    """_event_drained_note includes the version for versioned rc tokens."""
-    note = _event_drained_note("rc:v0.42.0")
-    assert "v0.42.0" in note
-
-
-def test_event_drained_note_for_coder() -> None:
-    """_event_drained_note mentions 'CODER tasks' for the coder event."""
-    note = _event_drained_note("coder")
-    assert "CODER" in note
+@pytest.mark.parametrize(
+    "token, expected_substring",
+    [
+        ("rc", "Active RC cleared"),  # bare 'rc' -> 'Active RC cleared' note
+        ("rc:v0.42.0", "v0.42.0"),  # versioned rc token includes the version
+        ("coder", "CODER"),  # coder event mentions 'CODER tasks'
+    ],
+)
+def test_event_drained_note(token: str, expected_substring: str) -> None:
+    """_event_drained_note describes the resolved drain condition per token."""
+    note = _event_drained_note(token)
+    assert expected_substring in note
 
 
 def test_build_audit_entry_contains_halt_event_heading() -> None:
@@ -262,26 +226,20 @@ def _write_task_status(
     )
 
 
-def test_has_working_role_returns_true_when_working_task_exists(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "task_state, written_role, queried_role, expected",
+    [
+        ("WORKING", "CODER", "coder", True),  # WORKING task for the role exists
+        ("DONE", "CODER", "coder", False),  # no WORKING task for the role
+        ("WORKING", "coder", "CODER", True),  # role match is case-insensitive
+    ],
+)
+def test_has_working_role(
+    tmp_path: Path, task_state: str, written_role: str, queried_role: str, expected: bool
 ) -> None:
-    """_has_working_role returns True when a task with State=WORKING and the given role exists."""
-    _write_task_status(tmp_path / "tasks", "CODER-001", "WORKING", "CODER")
-    assert _has_working_role(tmp_path, "coder") is True
-
-
-def test_has_working_role_returns_false_when_no_working_task_exists(
-    tmp_path: Path,
-) -> None:
-    """_has_working_role returns False when no WORKING task for the role exists."""
-    _write_task_status(tmp_path / "tasks", "CODER-001", "DONE", "CODER")
-    assert _has_working_role(tmp_path, "coder") is False
-
-
-def test_has_working_role_is_case_insensitive(tmp_path: Path) -> None:
-    """_has_working_role matches role names case-insensitively."""
-    _write_task_status(tmp_path / "tasks", "CODER-001", "WORKING", "coder")
-    assert _has_working_role(tmp_path, "CODER") is True
+    """_has_working_role detects a WORKING task for the role, case-insensitively."""
+    _write_task_status(tmp_path / "tasks", "CODER-001", task_state, written_role)
+    assert _has_working_role(tmp_path, queried_role) is expected
 
 
 def test_has_working_role_returns_false_when_tasks_dir_absent(
@@ -310,28 +268,18 @@ def test_has_pending_role_returns_false_when_all_tasks_done(tmp_path: Path) -> N
     assert _has_pending_role(tmp_path, "coder") is False
 
 
-def test_has_in_flight_pm_returns_true_when_pm_task_is_working(
-    tmp_path: Path,
-) -> None:
-    """_has_in_flight_pm returns True when a PM task is in WORKING state."""
-    _write_task_status(tmp_path / "tasks", "PM-001", "WORKING", "PM")
-    assert _has_in_flight_pm(tmp_path) is True
-
-
-def test_has_in_flight_pm_returns_true_when_pm_task_is_backlog(
-    tmp_path: Path,
-) -> None:
-    """_has_in_flight_pm returns True when a PM task is in BACKLOG state."""
-    _write_task_status(tmp_path / "tasks", "PM-001", "BACKLOG", "PM")
-    assert _has_in_flight_pm(tmp_path) is True
-
-
-def test_has_in_flight_pm_returns_false_when_no_pm_tasks_in_flight(
-    tmp_path: Path,
-) -> None:
-    """_has_in_flight_pm returns False when all PM tasks are in terminal states."""
-    _write_task_status(tmp_path / "tasks", "PM-001", "DONE", "PM")
-    assert _has_in_flight_pm(tmp_path) is False
+@pytest.mark.parametrize(
+    "pm_task_state, expected",
+    [
+        ("WORKING", True),
+        ("BACKLOG", True),
+        ("DONE", False),  # terminal state -> not in flight
+    ],
+)
+def test_has_in_flight_pm(tmp_path: Path, pm_task_state: str, expected: bool) -> None:
+    """_has_in_flight_pm is True while a PM task is WORKING or BACKLOG, False once terminal."""
+    _write_task_status(tmp_path / "tasks", "PM-001", pm_task_state, "PM")
+    assert _has_in_flight_pm(tmp_path) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -364,37 +312,23 @@ def test_check_drain_versioned_rc_returns_false_when_not_yet_released(
     assert result is False
 
 
-def test_check_drain_versioned_rc_returns_true_when_released_ge_captured(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "captured_token, last_released, expected",
+    [
+        ("rc:v1.0.0", "v1.0.0", True),  # released == captured
+        ("rc:v1.0.0", "v1.1.0", True),  # released exceeds captured
+        ("rc:v1.1.0", "v1.0.0", False),  # released below captured
+    ],
+)
+def test_check_drain_versioned_rc(
+    tmp_path: Path, captured_token: str, last_released: str, expected: bool
 ) -> None:
-    """check_drain returns True for rc:v1.0.0 when Last Released is v1.0.0."""
+    """check_drain for a versioned rc token compares Last Released against the captured version with >=."""
     root = _make_project_root_with_release_state(
-        tmp_path, active_rc="none", last_released="v1.0.0"
+        tmp_path, active_rc="none", last_released=last_released
     )
-    result = check_drain("rc:v1.0.0", root)
-    assert result is True
-
-
-def test_check_drain_versioned_rc_returns_true_when_released_exceeds_captured(
-    tmp_path: Path,
-) -> None:
-    """check_drain returns True for rc:v1.0.0 when Last Released is v1.1.0 (higher)."""
-    root = _make_project_root_with_release_state(
-        tmp_path, active_rc="none", last_released="v1.1.0"
-    )
-    result = check_drain("rc:v1.0.0", root)
-    assert result is True
-
-
-def test_check_drain_versioned_rc_returns_false_when_released_below_captured(
-    tmp_path: Path,
-) -> None:
-    """check_drain returns False for rc:v1.1.0 when Last Released is v1.0.0 (lower)."""
-    root = _make_project_root_with_release_state(
-        tmp_path, active_rc="none", last_released="v1.0.0"
-    )
-    result = check_drain("rc:v1.1.0", root)
-    assert result is False
+    result = check_drain(captured_token, root)
+    assert result is expected
 
 
 def test_check_drain_bare_rc_promotes_immediately_when_no_active_rc(
@@ -424,46 +358,32 @@ def test_check_drain_bare_rc_rewrites_halt_after_when_active_rc_present(
     assert "v0.55.0" in content
 
 
-def test_check_drain_coder_returns_true_when_no_pending_or_working_tasks(
+@pytest.mark.parametrize(
+    "seed_task_id, seed_state, seed_role, token, expected",
+    [
+        # DONE CODER task should not block the 'coder' drain
+        ("CODER-001", "DONE", "CODER", "coder", True),
+        # a WORKING CODER task blocks the 'coder' drain
+        ("CODER-001", "WORKING", "CODER", "coder", False),
+        # no CODER tasks at all, but PM is BACKLOG (may still materialize CODER tasks)
+        ("PM-001", "BACKLOG", "PM", "coder", False),
+        # DONE PM task should not block the 'pm' drain
+        ("PM-001", "DONE", "PM", "pm", True),
+    ],
+)
+def test_check_drain_role_token(
     tmp_path: Path,
+    seed_task_id: str,
+    seed_state: str,
+    seed_role: str,
+    token: str,
+    expected: bool,
 ) -> None:
-    """check_drain returns True for 'coder' when no CODER tasks are pending or working."""
+    """check_drain for a role token (coder/pm) reflects whether the role has in-flight work."""
     root = _make_project_root_with_release_state(tmp_path)
-    # Add a DONE CODER task — should not block drain
-    _write_task_status(root / "tasks", "CODER-001", "DONE", "CODER")
-    result = check_drain("coder", root)
-    assert result is True
-
-
-def test_check_drain_coder_returns_false_when_working_coder_task_exists(
-    tmp_path: Path,
-) -> None:
-    """check_drain returns False for 'coder' when a CODER task is WORKING."""
-    root = _make_project_root_with_release_state(tmp_path)
-    _write_task_status(root / "tasks", "CODER-001", "WORKING", "CODER")
-    result = check_drain("coder", root)
-    assert result is False
-
-
-def test_check_drain_coder_returns_false_when_pm_task_in_flight(
-    tmp_path: Path,
-) -> None:
-    """check_drain returns False for 'coder' when a PM task is still in flight."""
-    root = _make_project_root_with_release_state(tmp_path)
-    # No CODER tasks at all, but PM is BACKLOG (may materialize CODER tasks)
-    _write_task_status(root / "tasks", "PM-001", "BACKLOG", "PM")
-    result = check_drain("coder", root)
-    assert result is False
-
-
-def test_check_drain_pm_returns_true_when_no_pm_tasks_pending(
-    tmp_path: Path,
-) -> None:
-    """check_drain returns True for 'pm' when no PM tasks are pending or working."""
-    root = _make_project_root_with_release_state(tmp_path)
-    _write_task_status(root / "tasks", "PM-001", "DONE", "PM")
-    result = check_drain("pm", root)
-    assert result is True
+    _write_task_status(root / "tasks", seed_task_id, seed_state, seed_role)
+    result = check_drain(token, root)
+    assert result is expected
 
 
 def test_check_drain_raises_value_error_for_unsupported_token(

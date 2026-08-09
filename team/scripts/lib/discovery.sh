@@ -1525,11 +1525,12 @@ PY
         fi
         # Line 3 — recovery hint with example rename, chosen based on filename prefix.
         # Constraints: use the reason/pattern already stored; do not re-derive it.
-        # Note: PRIORITY and BUG share the same date-optional pattern family
-        # (^{PREFIX}-[0-9]{4,}-.+\.md$); the PRIORITY branch is intentionally
-        # absent here — a dateless PRIORITY is valid and does not need renaming.
+        # Note: PRIORITY and BUG share the same date-optional-after-the-number
+        # pattern family (^{PREFIX}-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$);
+        # the PRIORITY branch is intentionally absent here — a dateless PRIORITY
+        # is valid and does not need renaming.
         if [[ "$filename" == BUG-* ]]; then
-            log "  Recovery: rename file to match pattern ^BUG-[0-9]{4,}-.+\\.md\$, e.g."
+            log "  Recovery: rename file to match pattern ^BUG-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\\.md\$, e.g."
             local _stem="${filename%.md}"
             local _num _slug _example_name
             _num="$(echo "$_stem" | sed 's/^BUG-\([0-9]*\)-.*/\1/')"
@@ -1576,10 +1577,15 @@ PY
 
 # _disc_find_unhandled_items <dir> <backlog_cache> <id_prefix> [state_dir] [project_name]
 # Find items in <dir> that:
-#   1. Match the canonical filename pattern for the given id_prefix
-#      BUG-    -> ^BUG-[0-9]{4,}-.+\.md$      (date-optional; sibling of PRIORITY-)
-#      PRIORITY- -> ^PRIORITY-[0-9]{4,}-.+\.md$  (date-optional; sibling of BUG-)
+#   1. Match the canonical filename pattern for the given id_prefix,
+#      sourced from pgai_agent_kanban.lib.ledger_filename_contract:
+#      BUG-      -> ^BUG-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$
+#      PRIORITY- -> ^PRIORITY-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$
 #                  OR (TESTER Path C) ^v[0-9]+\.[0-9]+\.[0-9]+-bugfix-\S+\.md$
+#      The numeric field is exactly 4 digits; an 8-digit date segment is
+#      permitted only immediately AFTER the number (historical compatibility).
+#      BUG- and PRIORITY- must stay in sync — both consumers import the same
+#      module, so tightening one tightens the other automatically.
 #   2. Are NOT marked [x] in the cache file
 #   3. Have ## Status: open in their header
 # Outputs newline-separated absolute paths on stdout.
@@ -1587,8 +1593,11 @@ PY
 # .md files in the directory that do NOT match the canonical pattern (and are
 # not README.md and not inside templates/) produce a rejection message on
 # stderr ONLY — never on stdout.  This ensures that rejection log output
-# cannot contaminate the validated-items list returned to the caller.
-# Rejection format: ERROR: rejecting <filename>: <reason> (expected pattern: <expected>)
+# cannot contaminate the validated-items list returned to the caller.  For
+# BUG-/PRIORITY- prefixes the rejection message is a prescriptive remedy
+# naming the specific defect (date-first, under-padded, or other malformation)
+# and the next free number — refuse-and-prescribe, never auto-rename.
+# Rejection format: ERROR: rejecting <filename>: <reason>
 #
 # When the optional [state_dir] argument is supplied, each rejected file is
 # passed to _disc_maybe_quarantine, which increments a per-file counter and
@@ -1620,6 +1629,12 @@ _disc_find_unhandled_items() {
         rejected_tmp="$(pgai_mktemp disc_rejected)"
     fi
 
+    # Self-locate team/ relative to this script ("each tree finds itself" —
+    # never require an externally-passed TEAM_ROOT).  Used to
+    # import the single-source ledger_filename_contract module below.
+    local _disc_fui_team_root
+    _disc_fui_team_root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." 2>/dev/null && pwd)" || _disc_fui_team_root=""
+
     # stdout  → validated item paths (captured by caller via $())
     # stderr  → rejection log messages (operator-visible; never captured as content)
     # $rejected_tmp (when set) → one "<basename>\t<reason>" line per rejected file
@@ -1629,13 +1644,14 @@ _disc_find_unhandled_items() {
     # are suppressed from stdout so the caller never sees them.  The settle
     # guard fires only when state_dir is set and a fresh settle file exists.
     local _py_validated_paths=""
-    _py_validated_paths="$(python3 - "$dir" "$cache_file" "$id_prefix" "${rejected_tmp:-}" <<'PY'
+    _py_validated_paths="$(python3 - "$dir" "$cache_file" "$id_prefix" "${rejected_tmp:-}" "${_disc_fui_team_root}" <<'PY'
 import os, re, sys, pathlib
 
 dir_path = pathlib.Path(sys.argv[1])
 cache_file = pathlib.Path(sys.argv[2])
 id_prefix = sys.argv[3]  # e.g. "BUG-" or "PRIORITY-"
 rejected_tmp = sys.argv[4] if len(sys.argv) > 4 else ""  # path to rejected-basenames file
+_team_root = sys.argv[5] if len(sys.argv) > 5 else ""  # team/ dir, for ledger_filename_contract import
 
 # TESTER Path C filenames produced in priority/: v<X.Y.Z>-bugfix-<slug>.md
 # This regex is accepted in addition to PRIORITY- when id_prefix == "PRIORITY-".
@@ -1665,20 +1681,45 @@ if cache_file.is_file():
             if m2:
                 bundled.add(m2.group(1))
 
-# Canonical filename patterns per id_prefix.
-# BUG- and PRIORITY- are siblings: both use the date-optional form
-#   ^{PREFIX}-[0-9]{4,}-.+\.md$
-# They must stay in sync — if you tighten one, tighten the other.
+# Canonical filename patterns per id_prefix, sourced from the single-source
+# ledger_filename_contract module.  BUG- and PRIORITY- are
+# siblings: both use the exact-4-digit, date-optional-AFTER-the-number form
+#   ^{PREFIX}-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$
 # PRIORITY- additionally accepts (TESTER Path C) ^v[0-9]+\.[0-9]+\.[0-9]+-bugfix-\S+\.md$
-# All other prefixes fall back to the historical loose pattern.
-if id_prefix.upper() == "BUG-":
-    canonical_re = re.compile(r'^BUG-[0-9]{4,}-.+\.md$', re.IGNORECASE)
-    expected_pattern = "BUG-NNNN-<slug>.md"
-    path_c_re_active = None
-elif id_prefix.upper() == "PRIORITY-":
-    canonical_re = re.compile(r'^PRIORITY-[0-9]{4,}-.+\.md$', re.IGNORECASE)
-    expected_pattern = "PRIORITY-NNNN-<slug>.md"
-    path_c_re_active = PATH_C_RE  # also accept TESTER Path C names in priority/
+# All other prefixes fall back to the historical loose pattern (no production
+# caller passes anything other than "BUG-" / "PRIORITY-" today).
+_LEDGER_PREFIXES = {"BUG-", "PRIORITY-"}
+
+_ledger_filename_re = None
+_ledger_build_remedy = None
+if _team_root:
+    sys.path.insert(0, _team_root)
+try:
+    from pgai_agent_kanban.lib.ledger_filename_contract import (
+        ledger_filename_re as _ledger_filename_re,
+        build_remedy as _ledger_build_remedy,
+    )
+except ImportError as _e:
+    print(
+        f"WARNING: _disc_find_unhandled_items: could not import "
+        f"ledger_filename_contract ({_e}); falling back to inline pattern "
+        f"and a generic rejection message",
+        file=sys.stderr,
+    )
+
+if id_prefix.upper() in _LEDGER_PREFIXES:
+    expected_pattern = f"{id_prefix.upper()}NNNN-<slug>.md"
+    path_c_re_active = PATH_C_RE if id_prefix.upper() == "PRIORITY-" else None
+    if _ledger_filename_re is not None:
+        canonical_re = _ledger_filename_re(id_prefix)
+    else:
+        # Fallback definition when the package is not importable (e.g. test
+        # environments without a full install).  Kept byte-identical to
+        # ledger_filename_contract.py's canonical pattern.
+        canonical_re = re.compile(
+            rf'^{re.escape(id_prefix.upper())}[0-9]{{4}}(?:-[0-9]{{8}})?-[a-z0-9][a-z0-9-]*\.md$',
+            re.IGNORECASE,
+        )
 else:
     canonical_re = re.compile(rf'^{re.escape(id_prefix)}\d{{4,}}-.+\.md$', re.IGNORECASE)
     expected_pattern = f"{id_prefix}NNNN-<slug>.md"
@@ -1716,7 +1757,13 @@ for entry in sorted(dir_path.iterdir()):
         # Emit rejection to stderr ONLY.
         # Never print to stdout — stdout is the validated-items stream consumed
         # by the caller as bundle content.
-        rejection_reason = f"malformed filename (expected pattern: {expected_pattern})"
+        # Prescriptive refusal: name the specific defect (date-first vs
+        # under-padded vs other) and the next free number.  Refuse-and-
+        # prescribe, never auto-rename.
+        if id_prefix.upper() in _LEDGER_PREFIXES and _ledger_build_remedy is not None:
+            rejection_reason = _ledger_build_remedy(entry.name, id_prefix, dir_path)
+        else:
+            rejection_reason = f"malformed filename (expected pattern: {expected_pattern})"
         print(
             f"ERROR: rejecting {entry.name}: {rejection_reason}",
             file=sys.stderr,

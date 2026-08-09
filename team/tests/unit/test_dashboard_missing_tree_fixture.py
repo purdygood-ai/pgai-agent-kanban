@@ -146,163 +146,66 @@ def test_git_window_scripts_render_clear_error_for_missing_tree(
 
 # ---------------------------------------------------------------------------
 # RENDER-PATH scripts — must degrade to a safe sentinel, never crash
+#
+# Each entry below is (script_name, args_builder). args_builder takes the
+# fixture and returns the script's argv (excluding "bash <script>" itself,
+# which _run prepends). column-render.sh's requirements-column invocation is
+# included here because its requirements column calls
+# pp_last_released_version per registered project unconditionally (census
+# site A8) — exercised even though this fixture project has zero
+# requirement files.
 # ---------------------------------------------------------------------------
 
-
-@pytest.mark.parametrize("dev_tree_mode", _MISSING_TREE_MODES)
-def test_data_sh_degrades_to_sentinel_for_missing_tree(
-    tmp_path: pathlib.Path, dev_tree_mode: str
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode=dev_tree_mode)
-    stub_bin = tmp_path / "stub-bin"
-    log_file = tmp_path / "network-calls.log"
-    env_overrides = install_git_network_stub(stub_bin, log_file)
-
-    result = _run(
+_RENDER_PATH_SCRIPTS = [
+    (
         "data.sh",
-        ["--project", fixture.project_name, "--kanban-root", str(fixture.kanban_root)],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    _assert_clean_degrade(result, label=f"data.sh [{dev_tree_mode}]")
-    assert "LAST_RELEASED=none" in result.stdout or "LAST_RELEASED=v0.0.0" in result.stdout, (
-        f"data.sh [{dev_tree_mode}]: expected LAST_RELEASED to degrade to a "
-        f"safe sentinel; got: {result.stdout!r}"
-    )
-    assert not log_file.exists(), (
-        f"data.sh [{dev_tree_mode}]: zero network calls expected on a "
-        f"missing/invalid tree."
-    )
-
-
-@pytest.mark.parametrize("dev_tree_mode", _MISSING_TREE_MODES)
-def test_show_header_sh_degrades_to_sentinel_for_missing_tree(
-    tmp_path: pathlib.Path, dev_tree_mode: str
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode=dev_tree_mode)
-    stub_bin = tmp_path / "stub-bin"
-    log_file = tmp_path / "network-calls.log"
-    env_overrides = install_git_network_stub(stub_bin, log_file)
-
-    result = _run(
+        lambda f: ["--project", f.project_name, "--kanban-root", str(f.kanban_root)],
+    ),
+    (
         "show-header.sh",
-        [
-            "--kanban-root",
-            str(fixture.kanban_root),
-            "--project",
-            fixture.project_name,
-        ],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    _assert_clean_degrade(result, label=f"show-header.sh [{dev_tree_mode}]")
-    assert not log_file.exists(), (
-        f"show-header.sh [{dev_tree_mode}]: zero network calls expected on a "
-        f"missing/invalid tree."
-    )
-
-
-@pytest.mark.parametrize("dev_tree_mode", _MISSING_TREE_MODES)
-def test_show_multi_sh_degrades_to_sentinel_for_missing_tree(
-    tmp_path: pathlib.Path, dev_tree_mode: str
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode=dev_tree_mode)
-    stub_bin = tmp_path / "stub-bin"
-    log_file = tmp_path / "network-calls.log"
-    env_overrides = install_git_network_stub(stub_bin, log_file)
-
-    result = _run(
+        lambda f: ["--kanban-root", str(f.kanban_root), "--project", f.project_name],
+    ),
+    (
         "show-multi.sh",
-        ["--kanban-root", str(fixture.kanban_root), "--mode", "header"],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    _assert_clean_degrade(result, label=f"show-multi.sh [{dev_tree_mode}]")
-    assert not log_file.exists(), (
-        f"show-multi.sh [{dev_tree_mode}]: zero network calls expected on a "
-        f"missing/invalid tree."
-    )
-
-
-@pytest.mark.parametrize("dev_tree_mode", _MISSING_TREE_MODES)
-def test_metadata_sh_degrades_to_sentinel_for_missing_tree(
-    tmp_path: pathlib.Path, dev_tree_mode: str
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode=dev_tree_mode)
-    stub_bin = tmp_path / "stub-bin"
-    log_file = tmp_path / "network-calls.log"
-    env_overrides = install_git_network_stub(stub_bin, log_file)
-
-    result = _run(
+        lambda f: ["--kanban-root", str(f.kanban_root), "--mode", "header"],
+    ),
+    (
         "metadata.sh",
-        ["--kanban-root", str(fixture.kanban_root)],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    _assert_clean_degrade(result, label=f"metadata.sh [{dev_tree_mode}]")
-    assert not log_file.exists(), (
-        f"metadata.sh [{dev_tree_mode}]: zero network calls expected on a "
-        f"missing/invalid tree."
-    )
-
-
-@pytest.mark.parametrize("dev_tree_mode", _MISSING_TREE_MODES)
-def test_attention_sh_degrades_gracefully_for_missing_tree(
-    tmp_path: pathlib.Path, dev_tree_mode: str
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode=dev_tree_mode)
-    stub_bin = tmp_path / "stub-bin"
-    log_file = tmp_path / "network-calls.log"
-    env_overrides = install_git_network_stub(stub_bin, log_file)
-
-    result = _run(
+        lambda f: ["--kanban-root", str(f.kanban_root)],
+    ),
+    (
         "attention.sh",
-        ["--kanban-root", str(fixture.kanban_root)],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    _assert_clean_degrade(result, label=f"attention.sh [{dev_tree_mode}]")
-    assert not log_file.exists(), (
-        f"attention.sh [{dev_tree_mode}]: zero network calls expected on a "
-        f"missing/invalid tree."
-    )
-
-
-@pytest.mark.parametrize("dev_tree_mode", _MISSING_TREE_MODES)
-def test_status_bottom_sh_degrades_gracefully_for_missing_tree(
-    tmp_path: pathlib.Path, dev_tree_mode: str
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode=dev_tree_mode)
-    stub_bin = tmp_path / "stub-bin"
-    log_file = tmp_path / "network-calls.log"
-    env_overrides = install_git_network_stub(stub_bin, log_file)
-
-    result = _run(
+        lambda f: ["--kanban-root", str(f.kanban_root)],
+    ),
+    (
         "status-bottom.sh",
-        [str(fixture.kanban_root), fixture.project_name],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    _assert_clean_degrade(result, label=f"status-bottom.sh [{dev_tree_mode}]")
-    assert not log_file.exists(), (
-        f"status-bottom.sh [{dev_tree_mode}]: zero network calls expected on "
-        f"a missing/invalid tree."
-    )
+        lambda f: [str(f.kanban_root), f.project_name],
+    ),
+    (
+        "column-render.sh",
+        lambda f: [
+            "input", "none", "none",
+            "--label", "REQUIREMENTS",
+            "--kanban-root", str(f.kanban_root),
+            "--all-projects",
+        ],
+    ),
+]
+_RENDER_PATH_SCRIPT_IDS = [name for name, _ in _RENDER_PATH_SCRIPTS]
 
 
 @pytest.mark.parametrize("dev_tree_mode", _MISSING_TREE_MODES)
-def test_column_render_sh_requirements_degrades_gracefully_for_missing_tree(
-    tmp_path: pathlib.Path, dev_tree_mode: str
+@pytest.mark.parametrize(
+    "script_name, build_args", _RENDER_PATH_SCRIPTS, ids=_RENDER_PATH_SCRIPT_IDS
+)
+def test_render_path_script_degrades_gracefully_for_missing_tree(
+    tmp_path: pathlib.Path, script_name: str, build_args, dev_tree_mode: str
 ) -> None:
-    """column-render.sh's requirements column calls pp_last_released_version
-    per registered project unconditionally (census site A8) — exercise it
-    even though this fixture project has zero requirement files.
+    """Every render-path script (data.sh, show-header.sh, show-multi.sh,
+    metadata.sh, attention.sh, status-bottom.sh, column-render.sh) degrades
+    cleanly — exit 0, no crash markers, zero network calls — across every
+    missing/invalid dev-tree mode.  data.sh additionally degrades
+    LAST_RELEASED to a safe sentinel rather than surfacing a raw error.
     """
     fixture = build_dashboard_project_root(tmp_path, dev_tree_mode=dev_tree_mode)
     stub_bin = tmp_path / "stub-bin"
@@ -310,23 +213,24 @@ def test_column_render_sh_requirements_degrades_gracefully_for_missing_tree(
     env_overrides = install_git_network_stub(stub_bin, log_file)
 
     result = _run(
-        "column-render.sh",
-        [
-            "input",
-            "none",
-            "none",
-            "--label",
-            "REQUIREMENTS",
-            "--kanban-root",
-            str(fixture.kanban_root),
-            "--all-projects",
-        ],
+        script_name,
+        build_args(fixture),
         kanban_root=fixture.kanban_root,
         env_overrides=env_overrides,
     )
 
-    _assert_clean_degrade(result, label=f"column-render.sh [{dev_tree_mode}]")
+    label = f"{script_name} [{dev_tree_mode}]"
+    _assert_clean_degrade(result, label=label)
     assert not log_file.exists(), (
-        f"column-render.sh [{dev_tree_mode}]: zero network calls expected on "
-        f"a missing/invalid tree."
+        f"{label}: zero network calls expected even on a missing/invalid "
+        f"tree, but the network-call log was created: "
+        f"{log_file.read_text(encoding='utf-8') if log_file.exists() else ''}"
     )
+    if script_name == "data.sh":
+        assert (
+            "LAST_RELEASED=none" in result.stdout
+            or "LAST_RELEASED=v0.0.0" in result.stdout
+        ), (
+            f"{label}: expected LAST_RELEASED to degrade to a safe sentinel; "
+            f"got: {result.stdout!r}"
+        )

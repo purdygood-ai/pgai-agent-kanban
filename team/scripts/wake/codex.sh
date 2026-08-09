@@ -507,6 +507,35 @@ process_one_task() {
     model_source="subagent default for ${SUBAGENT}"
   fi
 
+  # --- Reasoning-Effort Resolution ---
+  # Resolution order (mirrors the Model Selection block above; SOP.md
+  # "Model Override Mechanism" tier discipline, narration-source parity):
+  #   1. PGAI_<ROLE>_EFFORT env — populated by config_loader.sh's load_config
+  #      from [providers] llm_effort cfg or an operator-exported env var
+  #   2. Neither set — absent (selected_effort empty; no model_reasoning_effort
+  #      override passed, byte-identical to today).
+  # resolve_role_effort() re-derives both value and winning source in one call
+  # (config_loader.sh already exported PGAI_<ROLE>_EFFORT during load_config;
+  # calling it again here is how the wake lane recovers the narration source,
+  # exactly as documented in config_loader.sh's per-role export loop).
+  local selected_effort effort_source _effort_resolved _effort_resolve_exit
+  set +e
+  _effort_resolved="$(resolve_role_effort "${AGENT}")"
+  _effort_resolve_exit=$?
+  set -e
+  if [[ $_effort_resolve_exit -ne 0 ]]; then
+    log "ERROR: task ${task_id}: invalid reasoning-effort configuration for role '${AGENT}' — see stderr above"
+    set_state "$task_status" "BLOCKED"
+    set_block "$task_status" "Blockers" "Invalid reasoning-effort configuration for role '${AGENT}'. Check [providers] llm_effort in kanban.cfg or PGAI_${agent_upper}_EFFORT."
+    set_block "$task_status" "Needs Human" "yes"
+    normalize_status_file "$task_status"
+    mark_backlog "$task_id" "B"
+    LAST_TASK_FINAL_STATE="BLOCKED"
+    return 0
+  fi
+  selected_effort="${_effort_resolved%%|*}"
+  effort_source="${_effort_resolved#*|}"
+
   current_state="$(get_state "$task_status")"
   case "$current_state" in
     BACKLOG|WAITING|WORKING|BLOCKED|DONE|WONT-DO) ;;
@@ -1215,6 +1244,8 @@ This trace is for human prompt-engineering analysis, not for orchestration. It d
         "$prompt" \
         "${selected_model:-}" \
         "${model_source:-}" \
+        "${selected_effort:-}" \
+        "${effort_source:-}" \
         "$task_id" \
         "$task_artifact_dir" \
         "$LOG_FILE" \
@@ -1283,6 +1314,8 @@ This trace is for human prompt-engineering analysis, not for orchestration. It d
       "$prompt" \
       "${selected_model:-}" \
       "${model_source:-}" \
+      "${selected_effort:-}" \
+      "${effort_source:-}" \
       "$task_id" \
       "$task_artifact_dir" \
       "$LOG_FILE" \
@@ -1439,6 +1472,29 @@ PY_POL
     final_state="$(handle_working_after_exit "$task_id" "$task_status" "$LOG_FILE" "$agent_exit")"
   fi
 
+  # --- CODER/WRITER completion gate ---
+  # Runs BEFORE the DONE transition is accepted anywhere below (mark_backlog,
+  # the on-BLOCK overwatch trigger, training-corpus copy, worktree teardown).
+  # Delegates to coder_writer_completion_gate in wake_common.sh, which verifies
+  # the feature branch is merged into the task's source (RC) branch and the
+  # task worktree is clean, mechanically rather than trusting the agent's own
+  # done-claim. No-op for non-CODER/WRITER subagents and for any final_state
+  # other than DONE. _completion_gate_refused distinguishes "this gate just
+  # downgraded DONE to BLOCKED" from any other BLOCKED path, so the worktree
+  # teardown step below can retain evidence for operator inspection without
+  # changing retention behavior for pre-existing BLOCKED reasons.
+  local _completion_gate_refused=false
+  if [[ "$final_state" == "DONE" ]]; then
+    local _gate_state
+    _gate_state="$(coder_writer_completion_gate \
+      "$task_id" "$task_status" "$SUBAGENT" \
+      "${_task_feature_branch:-}" "${_task_source_branch:-}" "${_task_worktree_path:-}")"
+    if [[ "$_gate_state" != "$final_state" ]]; then
+      _completion_gate_refused=true
+    fi
+    final_state="$_gate_state"
+  fi
+
   case "$final_state" in
     BLOCKED)
       mark_backlog "$task_id" "B"
@@ -1531,7 +1587,11 @@ PY_POL
   # teardown_task_worktree is idempotent; safe to call when no worktree was
   # created (variable empty) or when it was already removed.
   #
-  # CODER/WRITER: teardown on all exit paths (DONE, BLOCKED, WONT-DO).
+  # CODER/WRITER: teardown on all exit paths (DONE, BLOCKED, WONT-DO), except
+  # when the completion gate just refused this DONE-claim — that
+  # BLOCKED is retained like TESTER's, below, so an operator can inspect the
+  # dirty paths or the merge state before the worktree (a --force removal)
+  # would otherwise discard them.
   #
   # TESTER: teardown only on DONE/WONT-DO.  On BLOCKED, retain the worktree
   # per the worktree.sh retention policy so the operator can inspect partial
@@ -1541,6 +1601,8 @@ PY_POL
   if [[ -n "${_task_worktree_path:-}" ]]; then
     if [[ "$SUBAGENT" == "tester" && "$final_state" == "BLOCKED" ]]; then
       log "task ${task_id}: tester worktree retained for operator inspection (BLOCKED path: ${_task_worktree_path})"
+    elif [[ "${_completion_gate_refused:-false}" == "true" ]]; then
+      log "task ${task_id}: completion-gate worktree retained for operator inspection (BLOCKED path: ${_task_worktree_path})"
     else
       teardown_task_worktree "$task_id" "${_canonical_dev_tree_path}" || true
       log "task ${task_id}: worktree torn down (final_state=${final_state})"
@@ -1649,6 +1711,25 @@ run_project_chain() {
   # The gate lives in wake_common.sh (_check_project_dev_tree) so both wake
   # scripts use identical logic (sibling discipline).
   if ! _check_project_dev_tree "$project_name"; then
+    exec {_project_lock_fd}>&-
+    return 0
+  fi
+
+  # --- v2.0.0 autonomous block-resolution stage (overwatch only) ---
+  # run_overwatch_resolution_stage is a no-op for every AGENT other than
+  # overwatch; see team/scripts/lib/wake_common.sh for the full contract.
+  run_overwatch_resolution_stage "$project_name"
+
+  # --- Per-project HALT gate, deferred for overwatch ---
+  # wake_common_run's iteration loop lets an overwatch firing through its
+  # per-project HALT fast-exit specifically so the call above could classify
+  # the HALT file and narrate its own decline. That classification has now
+  # happened (or the stage no-op'd for a non-ship-policy, non-operator
+  # absence — see resolution_stage.py). A halted project still gets no
+  # further task processing on this firing, exactly as the fast-exit already
+  # guarantees for every other agent.
+  if [[ "$AGENT" == "overwatch" ]] && pp_project_halted "$project_name" 2>/dev/null; then
+    log "project ${project_name}: per-project HALT present, resolution stage evaluated, skipping task processing"
     exec {_project_lock_fd}>&-
     return 0
   fi

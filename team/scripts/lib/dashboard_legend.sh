@@ -9,7 +9,8 @@
 #
 #   1. PROJECT color — the small tag at the left edge of each row. Fixed per
 #      project; sourced from the optional third field of projects.cfg
-#      (name:priority[:display_color]) and falls back to PGAI_DEFAULT_PALETTE.
+#      (name:priority[:display_color]) and falls back to the default palette
+#      read from team/config/default_palette.txt (PGAI_DEFAULT_PALETTE).
 #   2. STATUS color — the color of the entry text itself. Dynamic; reflects
 #      the row's lifecycle state (open / running / done / blocked).
 #
@@ -34,11 +35,13 @@
 #
 # Color sources
 # -------------
-# - Project palette and per-project color resolution come from
-#   team/scripts/lib/projects_cfg.sh — specifically the PGAI_DEFAULT_PALETTE
-#   array and projects_cfg_color() function. This file does NOT duplicate
-#   the palette; callers source projects_cfg.sh first, then iterate the
-#   registered projects to fill in the PROJECT half of the legend.
+# - The canonical palette definition lives in team/config/default_palette.txt.
+#   Per-project color resolution comes from team/scripts/lib/projects_cfg.sh
+#   — specifically the PGAI_DEFAULT_PALETTE array (built by reading that
+#   definition file at source time) and the projects_cfg_color() function.
+#   This file does NOT duplicate the palette; callers source projects_cfg.sh
+#   first, then iterate the registered projects to fill in the PROJECT half
+#   of the legend.
 # - Status-to-ANSI mapping lives in dashboard-column-render.sh
 #   (status_to_color() helper). The renderer paints the status keywords in
 #   the legend with the same function so legend and grid never disagree.

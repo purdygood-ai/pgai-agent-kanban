@@ -308,9 +308,8 @@ done
 unset _MAX_TASK_SEC
 
 # ---------------------------------------------------------------------------
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-# Quarantined files (CODER-20260528-024): list files in each project's
-# rejected/ directory with type, filename, reason, and retry count.
+# Quarantined files: list files in each project's rejected/ directory with
+# type, filename, reason, and retry count.
 # Section is suppressed entirely when no files are quarantined.
 # ---------------------------------------------------------------------------
 python3 "$_SCAN_ATTENTION_PY" \

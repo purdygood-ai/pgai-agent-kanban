@@ -1,0 +1,78 @@
+# resolution-matrix.yaml — OVERWATCH's autonomous block-resolution matrix
+# (v2.0.0 Goal 1: "The resolution matrix").
+#
+# Config-declared, operator-extensible. This file is the shipped default —
+# loaded by pgai_agent_kanban.overwatch.resolution_matrix.load_matrix() when
+# no operator override exists at $PGAI_AGENT_KANBAN_ROOT_PATH/resolution-matrix.yaml
+# (see that function's docstring for the full search order).
+#
+# Row shape — every row is a mapping with exactly these seven keys, six
+# facts plus the prescribed resolution:
+#
+#   trigger_class                — string. The only value the shipped
+#                                   extraction layer currently produces that
+#                                   is eligible for resolution is
+#                                   "ship-policy-halt" (a HALT file whose
+#                                   header identifies CM as the creator, per
+#                                   the "# HALT created by CM at ..." format
+#                                   in team/roles/CM.md's HALT procedure).
+#                                   Other observed values are "operator-halt"
+#                                   (a HALT file without that header — an
+#                                   operator-placed HALT is inviolate) and
+#                                   "unknown" (no HALT file, or unreadable).
+#   findings_all_filed            — bool. True only when every TESTER
+#                                   finding in the block's report carries a
+#                                   non-empty "Filed As" value (Path C).
+#   shipped_or_tagged             — bool. True when the blocked RC's
+#                                   release-state JSON records outcome
+#                                   "shipped", OR a git tag for the target
+#                                   version exists. False means nothing
+#                                   published — a cancel is fully reversible.
+#   approval_gate_present         — bool. True when a HUMAN-APPROVE-<version>-*
+#                                   task exists in the project's task graph
+#                                   for the blocked RC.
+#   operator_commits_in_lineage   — bool. True when the RC branch's
+#                                   first-parent history (since it diverged
+#                                   from its base branch) contains any
+#                                   non-merge commit — i.e. something landed
+#                                   directly on the RC branch outside the
+#                                   feature-branch-and---no-ff-merge
+#                                   convention every CODER/WRITER task
+#                                   follows. A non-merge commit on that
+#                                   mainline is the deterministic signal of
+#                                   a hand-placed (operator) commit.
+#   attempts_below_ceiling        — bool. True when the bundle family's
+#                                   attempt count (see
+#                                   pgai_agent_kanban.cm.bundle_family) is
+#                                   strictly less than the effective
+#                                   [release] max_rc_retries ceiling
+#                                   (project.cfg override, else kanban.cfg
+#                                   default — see pp_max_rc_retries() in
+#                                   team/scripts/lib/project_paths.sh).
+#   resolution                    — string. The action name OVERWATCH's
+#                                   execution stage (a separate follow-on
+#                                   task) is authorized to perform when this
+#                                   row matches. Must never be the literal
+#                                   string "HALT-hard" — that value is
+#                                   reserved as the matcher's no-match
+#                                   sentinel, never a prescribed action.
+#
+# Rows are evaluated top-to-bottom; the first exact match on all six facts
+# wins (same "evaluate top to bottom, first match wins" convention as CM's
+# ship-policy decision matrix in team/roles/CM.md). Any block whose facts do
+# not exactly match a row — including a fact this file has never seen
+# before — resolves to HALT-hard: fail-closed, never a default action.
+#
+# Operator extensibility: add new rows below, or replace this whole file at
+# $PGAI_AGENT_KANBAN_ROOT_PATH/resolution-matrix.yaml to override the shipped
+# defaults entirely without editing the dev tree. The shipped v2.0.0 default
+# is exactly the one CANCEL-AND-REBUNDLE row below — no other rows ship.
+
+rows:
+  - trigger_class: ship-policy-halt
+    findings_all_filed: true
+    shipped_or_tagged: false
+    approval_gate_present: false
+    operator_commits_in_lineage: false
+    attempts_below_ceiling: true
+    resolution: CANCEL-AND-REBUNDLE

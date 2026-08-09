@@ -61,82 +61,41 @@ def _dev_tree_root() -> pathlib.Path:
 # ---------------------------------------------------------------------------
 
 
-def test_config_empty_text_returns_empty_list() -> None:
-    """parse_config returns [] for empty input."""
-    assert parse_config("") == []
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("", []),  # empty input
+        ("\n\n\n", []),  # blank lines skipped
+        ("# just a comment\n", []),  # comment lines skipped
+        ("5 /usr/bin/echo hello\n", [(5, "/usr/bin/echo hello")]),  # single valid job
+        ("  10 /usr/bin/date\n", [(10, "/usr/bin/date")]),  # leading whitespace stripped
+        ("15\t/usr/bin/date\n", [(15, "/usr/bin/date")]),  # tab-separated minute/command
+        ("0 /bin/true\n", [(0, "/bin/true")]),  # minute lower boundary
+        ("59 /bin/true\n", [(59, "/bin/true")]),  # minute upper boundary
+    ],
+)
+def test_config_parses_valid_or_empty_input(text: str, expected: list) -> None:
+    """parse_config extracts (minute, command) tuples, skipping blank/comment lines."""
+    assert parse_config(text) == expected
 
 
-def test_config_blank_lines_skipped() -> None:
-    """parse_config ignores blank lines."""
-    assert parse_config("\n\n\n") == []
-
-
-def test_config_comment_lines_skipped() -> None:
-    """parse_config ignores lines whose first non-whitespace char is '#'."""
-    assert parse_config("# just a comment\n") == []
-
-
-def test_config_single_valid_job() -> None:
-    """parse_config extracts a (minute, command) tuple from a valid line."""
-    result = parse_config("5 /usr/bin/echo hello\n")
-    assert result == [(5, "/usr/bin/echo hello")]
-
-
-def test_config_leading_whitespace_before_minute_is_stripped() -> None:
-    """parse_config handles leading whitespace on a line."""
-    result = parse_config("  10 /usr/bin/date\n")
-    assert result == [(10, "/usr/bin/date")]
-
-
-def test_config_tab_separated_minute_and_command() -> None:
-    """parse_config splits on any whitespace — tabs work the same as spaces."""
-    result = parse_config("15\t/usr/bin/date\n")
-    assert result == [(15, "/usr/bin/date")]
-
-
-def test_config_minute_zero_is_valid() -> None:
-    """parse_config accepts minute=0 (lower boundary)."""
-    result = parse_config("0 /bin/true\n")
-    assert result == [(0, "/bin/true")]
-
-
-def test_config_minute_59_is_valid() -> None:
-    """parse_config accepts minute=59 (upper boundary)."""
-    result = parse_config("59 /bin/true\n")
-    assert result == [(59, "/bin/true")]
-
-
-def test_config_minute_60_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
-    """parse_config rejects minute=60 (out of range) and logs an error."""
-    result = parse_config("60 /bin/true\n")
+@pytest.mark.parametrize(
+    "text, expected_error_substring",
+    [
+        ("60 /bin/true\n", "out of range"),  # minute out of range (too high)
+        ("-1 /bin/true\n", "out of range"),  # negative minute, rejected by range check
+        ("*/5 /bin/true\n", "parse error"),  # non-integer minute field
+        ("5\n", "empty command"),  # minute only, no command
+    ],
+)
+def test_config_rejects_invalid_line(
+    capsys: pytest.CaptureFixture[str], text: str, expected_error_substring: str
+) -> None:
+    """parse_config rejects malformed lines (bad minute or missing command) and logs an error."""
+    result = parse_config(text)
     assert result == []
     captured = capsys.readouterr()
-    assert "out of range" in captured.err
-
-
-def test_config_negative_minute_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
-    """parse_config rejects negative minute values."""
-    result = parse_config("-1 /bin/true\n")
-    # -1 parses as int but is rejected by the range check.
-    assert result == []
-    captured = capsys.readouterr()
-    assert "out of range" in captured.err
-
-
-def test_config_non_integer_minute_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
-    """parse_config rejects a non-integer minute field and logs a parse error."""
-    result = parse_config("*/5 /bin/true\n")
-    assert result == []
-    captured = capsys.readouterr()
-    assert "parse error" in captured.err
-
-
-def test_config_empty_command_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
-    """parse_config rejects a line with no command (minute only)."""
-    result = parse_config("5\n")
-    assert result == []
-    captured = capsys.readouterr()
-    assert "empty command" in captured.err
+    assert expected_error_substring in captured.err
 
 
 def test_config_command_with_shell_metacharacters() -> None:
@@ -200,19 +159,17 @@ def test_config_source_name_used_in_error_messages(
 # ---------------------------------------------------------------------------
 
 
-def test_env_empty_text_returns_empty_dict() -> None:
-    """parse_env returns {} for empty input."""
-    assert parse_env("") == {}
-
-
-def test_env_comment_lines_skipped() -> None:
-    """parse_env ignores lines starting with '#'."""
-    assert parse_env("# ANTHROPIC_API_KEY=secret\n") == {}
-
-
-def test_env_blank_lines_skipped() -> None:
-    """parse_env ignores blank lines."""
-    assert parse_env("\n\n") == {}
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",  # empty input
+        "# ANTHROPIC_API_KEY=secret\n",  # comment line
+        "\n\n",  # blank lines
+    ],
+)
+def test_env_returns_empty_dict_for_no_assignments(text: str) -> None:
+    """parse_env returns {} for empty input, comment-only, or blank-only text."""
+    assert parse_env(text) == {}
 
 
 def test_env_bare_assignment_form() -> None:
@@ -227,16 +184,32 @@ def test_env_export_prefix_form() -> None:
     assert result == {"FOO": "bar"}
 
 
-def test_env_double_quoted_value_stripped() -> None:
-    """parse_env strips matching outer double quotes from values."""
-    result = parse_env('export MY_VAR="hello world"\n')
-    assert result["MY_VAR"] == "hello world"
-
-
-def test_env_single_quoted_value_stripped() -> None:
-    """parse_env strips matching outer single quotes from values."""
-    result = parse_env("export MY_VAR='hello world'\n")
-    assert result["MY_VAR"] == "hello world"
+@pytest.mark.parametrize(
+    "text, key, expected_value",
+    [
+        ('export MY_VAR="hello world"\n', "MY_VAR", "hello world"),  # double quotes stripped
+        ("export MY_VAR='hello world'\n", "MY_VAR", "hello world"),  # single quotes stripped
+        (
+            "export PGAI_AGENT_KANBAN_ROOT_PATH=/home/<operator>/pgai_agent_kanban\n",
+            "PGAI_AGENT_KANBAN_ROOT_PATH",
+            "/home/<operator>/pgai_agent_kanban",
+        ),  # plain path value, unaltered
+        (
+            "export PGAI_CODER_MODEL_2=claude-3\n",
+            "PGAI_CODER_MODEL_2",
+            "claude-3",
+        ),  # underscores and digits in name
+        (
+            "export TOKEN=abc=def==ghi\n",
+            "TOKEN",
+            "abc=def==ghi",
+        ),  # '=' inside the value field preserved
+    ],
+)
+def test_env_value_extraction(text: str, key: str, expected_value: str) -> None:
+    """parse_env extracts values verbatim (after quote-stripping) for a variety of value shapes."""
+    result = parse_env(text)
+    assert result[key] == expected_value
 
 
 def test_env_unmatched_quotes_left_as_is() -> None:
@@ -253,12 +226,6 @@ def test_env_multiple_variables_returned() -> None:
     assert result == {"FOO": "1", "BAR": "2", "BAZ": "three"}
 
 
-def test_env_plain_path_value() -> None:
-    """parse_env stores a path-style value without alteration."""
-    result = parse_env("export PGAI_AGENT_KANBAN_ROOT_PATH=/home/<operator>/pgai_agent_kanban\n")
-    assert result["PGAI_AGENT_KANBAN_ROOT_PATH"] == "/home/<operator>/pgai_agent_kanban"
-
-
 def test_env_malformed_line_skipped() -> None:
     """parse_env silently skips lines that do not match NAME=VALUE."""
     result = parse_env("NOT_AN_ASSIGNMENT\nexport VALID=yes\n")
@@ -266,24 +233,11 @@ def test_env_malformed_line_skipped() -> None:
     assert "NOT_AN_ASSIGNMENT" not in result
 
 
-def test_env_underscore_and_digits_in_name() -> None:
-    """parse_env accepts variable names with underscores and digits."""
-    result = parse_env("export PGAI_CODER_MODEL_2=claude-3\n")
-    assert result["PGAI_CODER_MODEL_2"] == "claude-3"
-
-
 def test_env_empty_value_is_stored() -> None:
     """parse_env stores an empty string when the value is absent after '='."""
     result = parse_env("export EMPTY_VAR=\n")
     assert "EMPTY_VAR" in result
     assert result["EMPTY_VAR"] == ""
-
-
-def test_env_value_with_equals_sign_preserved() -> None:
-    """parse_env preserves '=' characters inside the value field."""
-    result = parse_env("export TOKEN=abc=def==ghi\n")
-    # The split is on the first '=' only via regex; everything after belongs to value.
-    assert result["TOKEN"] == "abc=def==ghi"
 
 
 # ---------------------------------------------------------------------------
@@ -310,63 +264,29 @@ def _tier_template_path(tier: str) -> pathlib.Path:
     return _templates_install_dir() / f"pseudocron-{tier}.cfg.example"
 
 
-def test_small_tier_template_exists() -> None:
-    """pseudocron-small.cfg.example exists at team/templates/install/."""
-    assert _tier_template_path("small").exists(), (
-        f"Missing small tier template at: {_tier_template_path('small')}"
+@pytest.mark.parametrize("tier", ["small", "medium", "large"])
+def test_tier_template_exists(tier: str) -> None:
+    """Each pseudocron-<tier>.cfg.example exists at team/templates/install/."""
+    assert _tier_template_path(tier).exists(), (
+        f"Missing {tier} tier template at: {_tier_template_path(tier)}"
     )
 
 
-def test_medium_tier_template_exists() -> None:
-    """pseudocron-medium.cfg.example exists at team/templates/install/."""
-    assert _tier_template_path("medium").exists(), (
-        f"Missing medium tier template at: {_tier_template_path('medium')}"
-    )
-
-
-def test_large_tier_template_exists() -> None:
-    """pseudocron-large.cfg.example exists at team/templates/install/."""
-    assert _tier_template_path("large").exists(), (
-        f"Missing large tier template at: {_tier_template_path('large')}"
-    )
-
-
-def test_small_tier_template_parses_to_jobs() -> None:
-    """pseudocron-small.cfg.example parses to at least one valid job.
+@pytest.mark.parametrize("tier", ["small", "medium", "large"])
+def test_tier_template_parses_to_jobs(tier: str) -> None:
+    """Each pseudocron-<tier>.cfg.example parses to at least one valid job.
 
     Uses parse_config() to confirm the template content is valid pseudocron
     format and that ROOT-RELATIVE command strings parse without error.
     """
-    text = _tier_template_path("small").read_text(encoding="utf-8")
-    jobs = parse_config(text, source="pseudocron-small.cfg.example")
+    text = _tier_template_path(tier).read_text(encoding="utf-8")
+    jobs = parse_config(text, source=f"pseudocron-{tier}.cfg.example")
     assert len(jobs) >= 1, (
-        "Small tier template parsed to zero jobs; template may be empty or malformed."
+        f"{tier.capitalize()} tier template parsed to zero jobs; template may be empty or malformed."
     )
     # All minute values must be valid (0-59 range is enforced by parse_config).
     for minute, _cmd in jobs:
-        assert 0 <= minute <= 59, f"Minute {minute} out of range in small template"
-
-
-def test_medium_tier_template_parses_to_jobs() -> None:
-    """pseudocron-medium.cfg.example parses to at least one valid job."""
-    text = _tier_template_path("medium").read_text(encoding="utf-8")
-    jobs = parse_config(text, source="pseudocron-medium.cfg.example")
-    assert len(jobs) >= 1, (
-        "Medium tier template parsed to zero jobs; template may be empty or malformed."
-    )
-    for minute, _cmd in jobs:
-        assert 0 <= minute <= 59, f"Minute {minute} out of range in medium template"
-
-
-def test_large_tier_template_parses_to_jobs() -> None:
-    """pseudocron-large.cfg.example parses to at least one valid job."""
-    text = _tier_template_path("large").read_text(encoding="utf-8")
-    jobs = parse_config(text, source="pseudocron-large.cfg.example")
-    assert len(jobs) >= 1, (
-        "Large tier template parsed to zero jobs; template may be empty or malformed."
-    )
-    for minute, _cmd in jobs:
-        assert 0 <= minute <= 59, f"Minute {minute} out of range in large template"
+        assert 0 <= minute <= 59, f"Minute {minute} out of range in {tier} template"
 
 
 def test_no_tier_template_contains_kanban_root_placeholder() -> None:

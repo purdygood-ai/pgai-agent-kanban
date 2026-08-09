@@ -962,6 +962,201 @@ def _resolve_branch_prefix(team_root):
     return raw
 
 
+# ---------------------------------------------------------------------------
+# Branch normalization — model-composed branch string trust-boundary guard.
+#
+# PM's plan JSON carries model-composed branch strings (per-task
+# 'source_branch' for release/testing-only work tasks; the plan-level
+# 'parent_branch' for feature-mode). The prompt context legitimately shows
+# the configured prefix on two namespaces at once — branches
+# (<prefix>rc/<version>, <prefix>main) and internal version tags
+# (<prefix>v<version>) — and a reduced-capability model can conflate them,
+# emitting a doubled-prefix corruption such as "ai_rc/ai_v1.2.3" instead of
+# "ai_rc/v1.2.3". The materializer already knows the canonical branch (it
+# computes it from project.cfg's branch_prefix, the same pp_prefix_branch
+# semantics the release flow uses) so it treats the plan-supplied string as
+# advisory: known-safe spellings normalize (silently when byte-identical to
+# canonical, narrated once when not), and anything else fails loud —
+# BEFORE any task folder is written — naming given vs expected.
+# ---------------------------------------------------------------------------
+
+
+def _normalize_rc_branch_value(given, prefix, target_version):
+    """Normalize *given* against the canonical release RC branch.
+
+    canonical = "<prefix>rc/<vX.Y.Z>" — computed exactly the way
+    determine_source_branch() computes it (same prefix, same "rc/<version>"
+    shape), so a value that passes this guard and a value computed later by
+    determine_source_branch() can never disagree.
+
+    Accepted spellings that normalize to canonical:
+      - the canonical form itself (byte-identical — not a "change")
+      - the unprefixed form "rc/<version>"
+      - the bare version "<version>" (e.g. "v9.9.9")
+      - the known model-authored corruption class
+        "<prefix>rc/<prefix><version>" — the branch-namespace prefix bleeding
+        into the tag-shaped version segment (inner prefix stripped to normalize)
+
+    Returns (canonical, changed): changed is False only when given == canonical
+    byte-for-byte (the golden path — zero narration). Returns (None, None)
+    when *given* matches none of the accepted spellings — an irreconcilable
+    value the caller must fail loud on.
+    """
+    given = (given or "").strip()
+    if not given or given.lower() == "none":
+        return None, None
+    tv = (target_version or "").strip()
+    v = tv if tv.startswith("v") else f"v{tv}"
+    canonical = f"{prefix}rc/{v}"
+    if given == canonical:
+        return canonical, False
+    accepted = {f"rc/{v}", v}
+    if prefix:
+        accepted.add(f"{prefix}rc/{prefix}{v}")
+    if given in accepted:
+        return canonical, True
+    return None, None
+
+
+def _normalize_mainline_branch_value(given, prefix):
+    """Normalize *given* against the canonical mainline branch.
+
+    canonical = "<prefix>main" — computed with the same prefix helper the
+    release flow uses (pp_prefix_branch "main").
+
+    Accepted spellings that normalize to canonical:
+      - the canonical form itself (byte-identical — not a "change")
+      - the unprefixed form "main"
+      - the doubled-prefix corruption "<prefix><prefix>main"
+
+    Returns (canonical, changed) on success (changed False only when given ==
+    canonical byte-for-byte); returns (None, None) when *given* is
+    irreconcilable with the canonical mainline.
+    """
+    given = (given or "").strip()
+    if not given or given.lower() == "none":
+        return None, None
+    canonical = f"{prefix}main"
+    if given == canonical:
+        return canonical, False
+    accepted = {"main"}
+    if prefix:
+        accepted.add(f"{prefix}{prefix}main")
+    if given in accepted:
+        return canonical, True
+    return None, None
+
+
+def _validate_and_normalize_release_source_branches(tasks, team_root, target_version):
+    """Fail-closed guard: verify and normalize release-mode 'source_branch'.
+
+    For every task carrying an explicit, non-empty, non-'none' source_branch
+    (the PM-model-composed value), normalize it against the canonical RC
+    branch computed from project.cfg's branch_prefix and *target_version*
+    (see _normalize_rc_branch_value). Known-safe spellings normalize with a
+    one-line narration printed to stderr when the value actually changed; the
+    canonical spelling itself narrates nothing (golden path — flagship-lane
+    plans that already emit the correct name produce zero narration).
+
+    A value that does not normalize to the canonical RC branch is
+    irreconcilable: the guard collects every offending task, prints given vs
+    expected for each, and calls sys.exit(1) BEFORE any task folder is
+    written — no partial materialization.
+
+    Called BEFORE inject_cm_bookends() in main(), so *tasks* here is exactly
+    the PM-authored work-task list; no CM/TESTER/HUMAN-APPROVE bookend is
+    present yet to worry about (they are injected afterward with
+    source_branch='none', which determine_source_branch() resolves on its
+    own later regardless of this guard).
+
+    No-op when target_version is 'none'/empty — there is no RC branch to
+    validate against yet. This mirrors determine_source_branch()'s own
+    fallback to "main" for that same edge case (a release plan materialized
+    without a target_version).
+    """
+    tv = (target_version or "").strip()
+    if not tv or tv.lower() == "none":
+        return
+    prefix = _resolve_branch_prefix(team_root)
+    v = tv if tv.startswith("v") else f"v{tv}"
+    canonical = f"{prefix}rc/{v}"
+
+    errors = []
+    narrations = []
+    for task in tasks:
+        # Defense in depth: CM-open is excluded from the RC-branch override in
+        # determine_source_branch() (it creates the RC, so it sources from main)
+        # — excluded here for the same reason, in case this guard is ever called
+        # after bookend injection instead of before.
+        cm_op = (task.get("cm_operation") or "").strip().lower()
+        if cm_op == "open-rc":
+            continue
+        given = (task.get("source_branch") or "").strip()
+        if not given or given.lower() == "none":
+            continue
+        resolved, changed = _normalize_rc_branch_value(given, prefix, tv)
+        task_label = task.get("task_id") or task.get("slug") or "<unknown>"
+        if resolved is None:
+            errors.append(
+                f"  task {task_label!r}: source_branch does not resolve to the "
+                f"release RC branch — given: {given!r}, expected: {canonical!r}"
+            )
+        elif changed:
+            narrations.append(
+                f"task {task_label!r}: normalized source_branch {given!r} -> {resolved!r}"
+            )
+
+    for line in narrations:
+        print(f"[pm-materialize] BRANCH NORMALIZATION: {line}", file=sys.stderr)
+
+    if errors:
+        print(
+            "[pm-materialize] ERROR: fail-closed branch guard triggered — one or "
+            "more task(s) carry a source_branch that does not resolve to the "
+            f"canonical release RC branch {canonical!r} for target_version {tv!r}:\n"
+            + "\n".join(errors) + "\n"
+            "No task folders have been written.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _validate_and_normalize_parent_branch(parent_branch, team_root):
+    """Fail-closed guard: verify and normalize feature-mode 'parent_branch'.
+
+    Normalizes *parent_branch* (the plan-level, potentially model-composed
+    value the feature workflow's create-shared-branch task sources from)
+    against the canonical mainline branch computed from project.cfg's
+    branch_prefix (see _normalize_mainline_branch_value). Mirrors
+    _validate_and_normalize_release_source_branches: known-safe spellings
+    normalize (narrated only when the value actually changed); an
+    irreconcilable value fails loud with sys.exit(1) BEFORE any task folder
+    is written.
+
+    Returns the normalized (canonical) branch string on success. Never
+    returns on failure — the process exits.
+    """
+    prefix = _resolve_branch_prefix(team_root)
+    resolved, changed = _normalize_mainline_branch_value(parent_branch, prefix)
+    canonical = f"{prefix}main"
+    if resolved is None:
+        print(
+            "[pm-materialize] ERROR: fail-closed branch guard triggered — "
+            f"feature workflow parent_branch does not resolve to the configured "
+            f"mainline — given: {parent_branch!r}, expected: {canonical!r}. "
+            "No task folders have been written.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if changed:
+        print(
+            f"[pm-materialize] BRANCH NORMALIZATION: normalized parent_branch "
+            f"{parent_branch!r} -> {resolved!r}",
+            file=sys.stderr,
+        )
+    return resolved
+
+
 def determine_source_branch(task, team_root, workflow_type=None, target_version=None):
     """Determine source branch with this precedence.
 
@@ -1131,8 +1326,9 @@ def _validate_source_ref_for_worktree_roles(
     and the missing field, then calls ``sys.exit(1)``.
 
     This guard fires **before** any task folders are created, so a failure
-    leaves no half-materialized output — consistent with the BUG-0055
-    receipt-rule inheritance named in BUG-0059.
+    leaves no half-materialized output — consistent with the fail-closed,
+    all-or-nothing receipt-rule inheritance the materializer applies
+    elsewhere.
 
     The guard is bypassed for release workflows: ``determine_source_branch``
     in ``create_task_folder`` always resolves ``rc/<target_version>`` for
@@ -4054,6 +4250,269 @@ def ensure_default_workspace(team_root, project_name, tasks):
             task["working_directory"] = str(default_workspace)
 
 
+# ---------------------------------------------------------------------------
+# Intra-materialization dedupe guard
+# ---------------------------------------------------------------------------
+#
+# A context-degraded or wobbling model can re-emit tasks it already produced
+# within the SAME plan JSON (continuation after a near-cutoff, degraded
+# instruction-following, tool-state amnesia).  The duplicates receive fresh
+# sequential task IDs from assign_task_ids() and, without this guard, would
+# be written as live sibling tasks alongside the originals — most visibly as
+# a second TESTER-verify task or a second CM-open-rc/CM-release pair, since
+# those are the tail of the standard emission order and the highest-frequency
+# patterns in the prompt.
+#
+# This pass runs on the fully-assembled `ordered_tasks` list (synthetic
+# bookends + work tasks, after topological ordering and prerequisite
+# resolution) BEFORE any task folder is written.  It is scoped to a SINGLE
+# materialization: it only compares tasks against each other within this one
+# call, never against tasks on disk from a prior decompose (that remains
+# Approach B's job via `existing_role_slugs` / `collect_existing_role_slugs`).
+
+
+def _normalize_dedup_key(value: str) -> str:
+    """Normalize a slug/title into a comparable dedupe key.
+
+    Lowercases, then collapses any run of non-alphanumeric characters
+    (whitespace, punctuation, mixed hyphen/underscore usage) into a single
+    hyphen and strips leading/trailing hyphens. This makes trivial
+    formatting differences — extra whitespace, underscores instead of
+    hyphens, mixed case — collapse to the same key, so a near-duplicate
+    slug/title is still recognized as a duplicate.
+
+    Parameters
+    ----------
+    value:
+        The raw slug or title string. ``None`` or empty produces ``""``.
+    """
+    if not value:
+        return ""
+    normalized = re.sub(r"[^a-z0-9]+", "-", str(value).strip().lower())
+    return normalized.strip("-")
+
+
+def _closer_purpose_key(task: dict, emit_cm_bookends: bool = True):
+    """Return the chain-closer purpose bucket for *task*, or ``None``.
+
+    The three release-lifecycle chain closers — TESTER-verify, CM open-rc,
+    CM release — each have at most one legitimate instance per
+    materialization, regardless of the slug the emitting task happens to
+    carry. A task falls into a purpose bucket by role, plus (for CM tasks)
+    ``cm_operation`` when present or a slug/title keyword match as a
+    fallback.
+
+    ``cm_operation`` is a materializer-internal field set only by the
+    synthetic bookend injectors (`inject_cm_bookends`); it is not part of
+    the documented plan-JSON task schema, so a model-emitted duplicate CM
+    task will not carry it. The slug/title keyword fallback is what lets
+    this guard catch that case: a CM-role task whose normalized slug/title
+    contains both "open" and "rc" tokens is treated as an open-rc duplicate;
+    one containing a "release" token is treated as a release duplicate.
+    Other CM-role tasks (e.g. a document workflow's ``open_doc``/``finalize``
+    steps) do not match either pattern and fall through to the generic
+    worker-dedup path instead, so this purpose bucket does not produce false
+    positives against non-release CM operations.
+
+    The TESTER-verify bucket only applies to workflows shaped by CM
+    release-lifecycle bookends (``emit_cm_bookends=True`` — release, and any
+    custom plugin declaring ``git_mode=rw`` + ``finalize`` in
+    ``{tag, publish}``). Those workflows have exactly one legitimate
+    TESTER-verify closer, so any additional TESTER task — regardless of its
+    slug — is presumptively a wobble-duplicate from the same context-degraded
+    re-emission this guard targets. Workflows without
+    CM bookends (testing-only, feature, document) do not have a single
+    TESTER-closer concept: they may legitimately emit more than one
+    distinct-purpose TESTER task in the same materialization (a plan
+    work-ticket plus an injected ``verify-and-report`` companion, or several
+    independent verification-phase tickets). For those workflows a TESTER
+    task is not treated as a chain-closer purpose at all — it falls through
+    to the generic ``_worker_dedup_key`` path below, so two TESTER tasks with
+    genuinely distinct (slug-normalized) identity both survive while a
+    same-slug re-emission still collapses.
+
+    Parameters
+    ----------
+    task:
+        A task dict from ``ordered_tasks``. Expected to already carry
+        ``role`` and (for synthetic tasks) ``cm_operation``.
+    emit_cm_bookends:
+        Whether this materialization's workflow shape emits CM
+        release-lifecycle bookends (see ``_workflow_requires_cm_bookends``).
+        Defaults to ``True`` for backward compatibility with callers that
+        do not carry workflow-shape context (e.g. isolated unit tests
+        against a release-shaped fixture).
+
+    Returns
+    -------
+    str or None
+        One of ``"tester-verify"``, ``"cm-open-rc"``, ``"cm-release"``, or
+        ``None`` when the task is not a recognized chain-closer purpose.
+    """
+    role = (task.get("role") or "").strip().upper()
+
+    if role == "TESTER" and not task.get("_doc_review"):
+        return "tester-verify" if emit_cm_bookends else None
+
+    if role == "CM":
+        cm_op = (task.get("cm_operation") or "").strip().lower()
+        if cm_op == "open-rc":
+            return "cm-open-rc"
+        if cm_op == "release":
+            return "cm-release"
+
+        normalized = _normalize_dedup_key(task.get("slug") or task.get("title") or "")
+        tokens = set(normalized.split("-")) if normalized else set()
+        if "release" in tokens:
+            return "cm-release"
+        if "open" in tokens and "rc" in tokens:
+            return "cm-open-rc"
+
+    return None
+
+
+def _worker_dedup_key(task: dict) -> tuple:
+    """Return the (role, normalized-identity) dedupe key for a non-closer task.
+
+    Identity is the task's normalized slug; when the slug is empty, the
+    normalized title is used as a fallback so a duplicate with a missing
+    slug but an identical title is still caught.
+
+    Parameters
+    ----------
+    task:
+        A task dict from ``ordered_tasks``.
+    """
+    role = (task.get("role") or "").strip().upper()
+    identity = _normalize_dedup_key(task.get("slug") or "")
+    if not identity:
+        identity = _normalize_dedup_key(task.get("title") or "")
+    return (role, identity)
+
+
+def dedupe_materialization_tasks(tasks: list, emit_cm_bookends: bool = True) -> tuple:
+    """Fail-closed dedupe pass: drop duplicate tasks before any folder is written.
+
+    Groups *tasks* (the fully-assembled, ordered task list for THIS
+    materialization only) by identity, using two identity schemes:
+
+      1. Chain-closer purpose (see ``_closer_purpose_key``): at most one
+         TESTER-verify, one CM open-rc, and one CM release task survive.
+         Within a purpose group, the materializer-injected synthetic bookend
+         (``_synthetic=True``) always wins when one is present — a
+         model-emitted task claiming the same purpose is presumptively the
+         wobble-duplicate regardless of where it happens to fall in emission
+         order (synthetic bookends are assembled at fixed positions —
+         CM-open first, CM-release last — while a model-emitted look-alike
+         can land anywhere among the ordered work tasks). When no synthetic
+         entry exists in the group (a workflow with no bookend for that
+         purpose, or bookend injection disabled), the first-emitted task
+         wins. The TESTER-verify purpose bucket only exists when
+         *emit_cm_bookends* is True (see ``_closer_purpose_key``); otherwise
+         TESTER tasks fall through to the generic worker identity scheme
+         below so distinct-purpose TESTER tasks (e.g. a testing-only
+         workflow's plan ticket plus its injected ``verify-and-report``
+         companion) both survive.
+      2. Generic worker identity (see ``_worker_dedup_key``): two tasks with
+         the same role and the same (or slug-normalized-identical) slug/title
+         are near-duplicates; the first-emitted one wins.
+
+    Every task NOT selected as its group's winner is skipped and narrated;
+    every winner is kept. Kept tasks are returned in their original relative
+    order from *tasks*.
+
+    Tasks that are skipped may have been depended on by other (kept) tasks
+    via ``prerequisite_ids`` (populated earlier by ``resolve_prerequisites``
+    or by the synthetic-task injectors). Every reference to a skipped task's
+    ``task_id`` in a kept task's ``prerequisite_ids`` is rewritten to point
+    at the surviving task with the same identity, so the dependency graph
+    stays consistent after duplicates are removed. Duplicate prerequisite
+    IDs introduced by this rewrite are collapsed while preserving order.
+
+    On the golden path (no duplicate emissions) every group has exactly one
+    member, every task is kept, no rewrite occurs, and the returned list is
+    identical to the input list — this guard is a strict no-op when the
+    model behaves.
+
+    Parameters
+    ----------
+    tasks:
+        The fully assembled ``ordered_tasks`` list (synthetic bookends and
+        work tasks), each already carrying a ``task_id``.
+    emit_cm_bookends:
+        Whether this materialization's workflow shape emits CM
+        release-lifecycle bookends. Passed straight through to
+        ``_closer_purpose_key`` for every task. Defaults to ``True`` for
+        backward compatibility with callers that predate purpose-bucket
+        deduplication (release-shaped fixtures where a single TESTER-verify
+        closer is always correct).
+
+    Returns
+    -------
+    tuple[list, list, int]
+        ``(kept_tasks, narration_lines, dedup_count)`` — the surviving task
+        list in original order, one narration string per skipped task in the
+        format ``"dedupe: skipped duplicate <key-slug> (matches
+        <existing-key>)"``, and the total count of skipped tasks.
+    """
+    closer_groups: dict = {}   # purpose_key -> [task, ...] in emission order
+    worker_groups: dict = {}   # (role, identity) -> [task, ...] in emission order
+
+    for task in tasks:
+        purpose_key = _closer_purpose_key(task, emit_cm_bookends)
+        if purpose_key is not None:
+            closer_groups.setdefault(purpose_key, []).append(task)
+        else:
+            worker_groups.setdefault(_worker_dedup_key(task), []).append(task)
+
+    skip_ids = set()   # id(task) for python-object-identity skip lookup
+    id_remap: dict = {}  # skipped task_id -> surviving (winner) task_id
+    narrations: list = []
+
+    def _record_group(group: list, winner) -> None:
+        for task in group:
+            if task is winner:
+                continue
+            dup_slug = task.get("slug") or task.get("task_id") or "?"
+            existing_key = winner.get("task_id") or winner.get("slug") or "?"
+            narrations.append(
+                f"dedupe: skipped duplicate {dup_slug} (matches {existing_key})"
+            )
+            skip_ids.add(id(task))
+            dup_id = task.get("task_id")
+            if dup_id:
+                id_remap[dup_id] = winner.get("task_id")
+
+    for group in closer_groups.values():
+        if len(group) == 1:
+            continue
+        synthetic_entries = [t for t in group if t.get("_synthetic")]
+        winner = synthetic_entries[0] if synthetic_entries else group[0]
+        _record_group(group, winner)
+
+    for group in worker_groups.values():
+        if len(group) == 1:
+            continue
+        winner = group[0]
+        _record_group(group, winner)
+
+    kept_tasks = [task for task in tasks if id(task) not in skip_ids]
+
+    if id_remap:
+        for task in kept_tasks:
+            prereqs = task.get("prerequisite_ids") or []
+            if not prereqs:
+                continue
+            rewritten: list = []
+            for pid in prereqs:
+                mapped = id_remap.get(pid, pid)
+                if mapped not in rewritten:
+                    rewritten.append(mapped)
+            task["prerequisite_ids"] = rewritten
+
+    return kept_tasks, narrations, len(narrations)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Materialize a task plan into kanban folders")
     parser.add_argument("plan_file", help="Path to plan JSON from pm subagent")
@@ -4485,6 +4944,18 @@ def main():
                 file=sys.stderr,
             )
 
+    # Step 2c: branch normalization / verification guard.
+    # PM's per-task source_branch (release workflow) and plan-level
+    # parent_branch (feature workflow) are model-composed strings — treat them
+    # as advisory, normalize known-safe spellings against the canonical branch
+    # the materializer itself computes, and fail loud on anything else.
+    # Runs BEFORE bookend/create-shared-branch injection and BEFORE any task
+    # folder is written, so a rejection leaves no partial materialization.
+    if workflow_type == "release":
+        _validate_and_normalize_release_source_branches(tasks, team_root, target_version)
+    elif workflow_type == "feature":
+        parent_branch = _validate_and_normalize_parent_branch(parent_branch, team_root)
+
     # Step 3: inject bookend / prefix tasks based on workflow_type.
     #
     # release workflow: CM bookend injection is UNCONDITIONAL — every release
@@ -4501,6 +4972,17 @@ def main():
     #   Dispatches to inject_document_workflow_tasks() using the workflow
     #   definition loaded from workflows/document/pipeline.yaml (the superset
     #   pipeline with when: gating for short-form vs long-form).
+    #
+    # _emit_cm_bookends default: document and feature workflows never emit
+    # CM bookends (see comments above), so the default False is correct for
+    # both without any further computation. Only the release-shaped else
+    # branch below recomputes it from the plugin's declared capabilities.
+    # Threaded into dedupe_materialization_tasks() below so the TESTER
+    # closer-bucket collapse (at most one TESTER-verify per materialization)
+    # applies only to workflows with a single legitimate TESTER closer;
+    # workflows without CM bookends (testing-only, feature, document) may
+    # legitimately emit more than one distinct-purpose TESTER task.
+    _emit_cm_bookends = False
     if workflow_type == "document":
         # Read sections from the plan — empty list → short-form, non-empty → long-form.
         _doc_sections = plan.get("sections") or []
@@ -4804,6 +5286,36 @@ def main():
         # release: CM-open, work tasks, TESTER, HUMAN-APPROVE, CM-release
         ordered_tasks = cm_open_tasks + ordered_features + tester_tasks + human_approve_tasks + cm_release_tasks
 
+    # Step 3b: fail-closed dedupe pass — runs BEFORE any task folder is written,
+    # scoped to THIS single materialization (one project + target_version, since
+    # a single materializer invocation never spans more than one of either).
+    # Catches a wobbling/context-degraded PM subagent that re-emits tasks it
+    # already produced in the same plan JSON: a second TESTER-verify
+    # task, a second CM open-rc or CM release task, or a near-duplicate worker
+    # task with the same role and (slug-normalized) identity as one already
+    # kept. Cross-decompose collision detection (Approach B, existing_role_slugs
+    # further below) is unaffected — this pass only compares tasks against each
+    # other within ordered_tasks, never against tasks already on disk.
+    #
+    # emit_cm_bookends is threaded through so the TESTER-verify chain-closer
+    # bucket (at most one TESTER task per materialization) only applies to
+    # workflows with a single legitimate TESTER closer (release-shaped, CM
+    # bookends). Workflows without CM bookends (testing-only, feature,
+    # document) route TESTER tasks through the generic (role, slug)
+    # worker-dedup path instead, so distinct-purpose TESTER tasks survive
+    # while same-slug re-emissions still collapse.
+    _pre_dedupe_count = len(ordered_tasks)
+    ordered_tasks, _dedupe_narrations, _dedupe_count = dedupe_materialization_tasks(
+        ordered_tasks, emit_cm_bookends=_emit_cm_bookends
+    )
+    for _dedupe_line in _dedupe_narrations:
+        print(f"[pm-materialize] {_dedupe_line}", file=sys.stderr)
+    print(
+        f"[pm-materialize] Dedupe: {_dedupe_count} duplicate task(s) skipped "
+        f"({_pre_dedupe_count} emitted -> {len(ordered_tasks)} kept) in this materialization.",
+        file=sys.stderr,
+    )
+
     # Step 4a: default-fill plan-level source_branch onto every ticket that lacks one.
     # This ensures tickets emitted by PM without an explicit source_branch (including
     # synthetic TESTER tasks created with "source_branch": "none") inherit the plan's
@@ -4921,6 +5433,7 @@ def main():
 
     print(f"\n[pm-materialize] === DONE ===", file=sys.stderr)
     print(f"[pm-materialize] Tasks created: {len(created_tasks)}", file=sys.stderr)
+    print(f"[pm-materialize] Duplicate tasks skipped (dedupe): {_dedupe_count}", file=sys.stderr)
     for i, task in enumerate(created_tasks, 1):
         print(f"[pm-materialize]   {i}. {task['task_id']}", file=sys.stderr)
 

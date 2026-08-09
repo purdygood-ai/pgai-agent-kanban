@@ -4,6 +4,8 @@ This role file specifies how the TESTER agent operates within the pgai-agent-kan
 
 When this file conflicts with the agent prompt, this file wins for project-specific mechanics. The agent prompt's quality bars and conflict policy still apply. Neither file overrides `OVERVIEW.md` (autonomy principle) or `DIRECTIVES.md` (top-level rules).
 
+**The Loop (read every wake).** This kanban runs on one operating doctrine — "The Loop" — stated once in `team/SOP.md` (§ The Loop). It is the first-principles frame every role works inside. By the single-canon rule it is not restated here; read it there.
+
 ## Purpose
 
 Use the TESTER role to verify that a release candidate branch implements its requirements document correctly. TESTER reads the requirements, inspects what changed on the RC branch, runs acceptance criteria, executes available test scripts, and produces a structured verification report. TESTER recommends PASS, SHIP-WITH-CONCERNS, or SHIP-WITH-SERIOUS-CONCERNS. CM reads the recommendation and applies ship policy.
@@ -381,6 +383,57 @@ Optionally also note the lowest-covered modules.
 
 ---
 
+### 5c. Ingest the quality-class lint findings file (non-blocking)
+
+The gated runners split their pre-flight checks into two classes (see the v2.3.5 requirements, Goal 2, and `team/scripts/lib/gated_runner_lint.sh`). Understanding the split is what makes the findings-file ingestion correct:
+
+- **Breakage class (fatal).** Syntax errors, compile failures, and unresolved first-party import failures. These abort the gated runner with exit 1 *before* pytest — running the suite would produce no meaningful signal. A breakage-class failure therefore surfaces as a non-zero gated-runner exit in Step 5a and is handled there; it never reaches the findings file.
+- **Quality class (never fatal).** Provenance, anti-pattern, orphan-test, help-presence, doc/CHANGELOG/ICD freshness, API-parity, dual-channel-pair, and every other lint. Each finding prints in full, lands in a machine-readable findings file, and the runner CONTINUES to pytest. The suite exit code reflects pytest and breakage-class only — a quality-class finding never moves it.
+
+Because quality-class lint is non-fatal, a **green suite** (`UNIT_EXIT == 0` AND `INTEGRATION_EXIT == 0`) can legitimately coexist with quality-class lint findings. Those findings are not lost: TESTER reads them from the findings file and surfaces them in the report's "Lint Findings (non-blocking)" section (Step 9).
+
+**Findings-file paths.** Each gated runner writes one findings file under the framework temp root:
+
+- Unit:        `${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-unit.json`
+- Integration: `${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-integration.json`
+
+**Findings-file schema** (canonical definition in `team/scripts/lib/gated_runner_lint.sh` — read it when a key is unclear). A JSON object:
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "<ISO 8601 UTC timestamp>",
+  "runner": "run-unit-tests.sh",
+  "findings": [ { "lint": "...", "severity": "quality", "summary": "..." } ]
+}
+```
+
+Every finding carries at minimum `lint` (the check name that produced it) and `severity` (always `quality` in this file — a breakage-class failure aborts the runner before the file is written and so never appears here). Coarse pass/fail-shaped lints add `exit_code` and `detail`; per-instance lints (e.g. the dual-channel pair lint) carry their own keys such as `file`, `line`, `cause`, `remedy`. Treat `lint` and `severity` as the only guaranteed keys and read the rest defensively.
+
+**Absent findings file is not a finding.** If a suite's findings file is missing — no quality-class lint ran, the `lint/` directory was not written, or an older runner produced no file — record `no lint findings file for <suite>` and continue. An absent findings file is NEVER a `bug`, never a `stale-assertion`, and never a `BLOCKED` cause.
+
+Ingest both files, then disposition every finding by the rule below.
+
+#### The cite-an-open-bug-or-file-one rule
+
+Nothing in the findings file is silently ignored, and nothing in it blocks. Every quality-class finding is dispositioned exactly one of two ways — there is no third option:
+
+- **Cites an OPEN bug.** The finding corresponds to a defect already tracked by a bug report in `$PGAI_PROJECT_ROOT/bugs/` whose `## Status` is `open` (or `running` — bundled into an RC but not yet shipped). Record the finding in the "Lint Findings (non-blocking)" section and cite the existing `BUG-NNNN`. Do not file a duplicate.
+- **TESTER files one (Path C).** The finding has no bug tracking it yet. File a new bug via Path C-A (autonomous follow-up filing — non-blocking; see Step 10) and cite the new `BUG-NNNN` in the section. The bug enters the next iteration's bundle and is fixed forward.
+
+Grep `$PGAI_PROJECT_ROOT/bugs/` for an existing open/running bug that already describes the finding before filing a new one; if none matches, file one. Cite an open bug, or file one — that is the whole disposition. Quality-class lint is warn-file-continue end to end.
+
+#### Recommendation and systemic-risk impact (none, on their own)
+
+Quality-class lint findings are a distinct, softer class than the Step-7 finding categories (`bug`, `gap`, `stale-assertion`). They live only in the "Lint Findings (non-blocking)" section and, on their own, do **not** feed the Step 8 recommendation decision tree and do **not** raise `## Systemic Risk`:
+
+- A bug filed *solely* to track a quality-class lint finding does not by itself elevate the recommendation off `PASS`. It is recorded in the Lint Findings section, not counted as a Step-7 `bug` finding for Step 8's "any bug filed" edge case.
+- Lint findings never set `## Systemic Risk` to `medium` or `high`. Systemic-risk height comes only from real defect findings (failing suites, regressions, destructive-path faults).
+
+The consequence, by construction: **green suites + only quality-class lint findings → recommendation `PASS` → CM ships `FUNCTIONAL`** (findings listed, bugs filed). A finding that reflects a genuine defect — not merely a lint signal — is categorized in Step 7 as a `bug`/`gap`/`stale-assertion` and follows the normal decision tree; do not launder a real defect into the non-blocking lint section to avoid elevating the recommendation.
+
+---
+
 ### 6. Run the verification methodology
 
 Work through these substeps in order. Skip none. Record findings as you go.
@@ -665,7 +718,7 @@ If any checklist item is unchecked, the recommendation cannot be PASS. Use the d
 **Edge cases (apply first):**
 
 - **Zero bugs, zero gaps** (all findings are `pass` or `pass-with-caveat`) AND both gated runners exited 0 → `PASS`. A clean release.
-- **Any bug filed during verification** (any finding is `bug`, `gap`, or `stale-assertion`, including a gated-runner failure) → at minimum `SHIP-WITH-CONCERNS`. Any filed bug elevates the recommendation from PASS.
+- **Any bug filed during verification** (any finding is `bug`, `gap`, or `stale-assertion`, including a gated-runner failure) → at minimum `SHIP-WITH-CONCERNS`. Any filed bug elevates the recommendation from PASS. **Exception:** a bug filed solely to track a quality-class lint finding (recorded in the "Lint Findings (non-blocking)" section per Step 5c) does NOT elevate the recommendation — lint findings are non-blocking and keep the recommendation at `PASS` when the suites are green and no Step-7 defect finding exists.
 
 **Decision tree (apply in order):**
 
@@ -700,6 +753,7 @@ Write `artifacts/report.md` with:
   - **Systemic Risk** — `low` / `medium` / `high`
   - **Filed As** — the bug or priority ID (Path C filing — autonomous follow-up filing, non-blocking)
   - For any `stale-assertion` finding, also include the evidence required by Step 7 (test path, failing assertion, production code change, RC commit/task ID).
+- **Lint Findings (non-blocking)** — the quality-class lint findings ingested from the gated runners' findings files in Step 5c. Use a `## Lint Findings (non-blocking)` header. List every finding with its `lint` name, one-line `summary`, and the bug it cites (an existing `open`/`running` `BUG-NNNN`, or a newly filed Path C `BUG-NNNN`). Every finding here cites an OPEN bug or one TESTER filed — nothing silently ignored, nothing blocking. If both findings files were empty or absent, write `None.` (and, if a file was absent, `no lint findings file for <suite>`). These findings do not, on their own, change the `## Recommendation` or `## Systemic Risk` fields.
 - **Autonomous criterion** — the four checks from Step 6.12 with YES/NO and any intervention details
 - **Caveats** — anything that doesn't fit elsewhere
 
@@ -726,6 +780,11 @@ low
 <detail...>
 
 ### Finding 2: ...
+
+## Lint Findings (non-blocking)
+
+- `<lint-name>` — <one-line summary> — cites BUG-NNNN (open) / filed BUG-MMMM (Path C)
+- (or `None.` when both findings files were empty or absent)
 ```
 
 Use `team/templates/agent/REPORT-TEMPLATE.md` as the structural template if you're unsure of section ordering.
@@ -766,7 +825,7 @@ Pick exactly one path per gap, using the one-line criterion:
 
 If a gap genuinely sits on the boundary, default to Path C-A. Bugs are cheaper to triage than over-scoped priorities.
 
-**Forbidden:** TESTER must not write files using a `vX.Y.Z-bugfix-*.md` pattern (or any other `v<version>-*.md` shape) into `priority/` or anywhere else. That filename shape is reserved for operator-authored requirements files and is invisible to discovery's strict regex. Framework-authored Path C (autonomous follow-up filing — non-blocking) output uses BUG-NNNN-* or PRIORITY-NNNN-* exclusively (date segment is optional for both).
+**Forbidden:** TESTER must not write files using a `vX.Y.Z-bugfix-*.md` pattern (or any other `v<version>-*.md` shape) into `priority/` or anywhere else. That filename shape is reserved for operator-authored requirements files and is invisible to discovery's strict regex. Framework-authored Path C (autonomous follow-up filing — non-blocking) output uses the single canonical shape `BUG-NNNN-<slug>` or `PRIORITY-NNNN-<slug>` exclusively. (The dated long form `BUG-NNNN-YYYYMMDD-<slug>` / `PRIORITY-NNNN-YYYYMMDD-<slug>` is accepted by the gate only for historical compatibility; never use it for new filings.)
 
 #### Path C-A — file a BUG
 
@@ -783,7 +842,7 @@ Path C-A (filed as BUG — code defect / regression / test failure) covers gaps 
   zero-padded to 4 digits.
 - `<slug>` — short kebab-case description (3 to 5 words).
 
-The filename pattern must match what discovery's regex enforces: case-sensitive `BUG-` prefix followed by 4 or more digits, then a slug, then `.md`.
+The filename pattern must match what discovery's regex enforces (the shared gate in `team/pgai_agent_kanban/lib/ledger_filename_contract.py`): case-sensitive `BUG-` prefix, then exactly 4 digits, then a slug, then `.md` — the single canonical shape `BUG-NNNN-<slug>.md`, matching discovery's `expected_pattern`. The dated long form `BUG-NNNN-YYYYMMDD-<slug>.md` also passes the gate but is historical-only; new filings must use `BUG-NNNN-<slug>.md`.
 
 **Required headers** (in order, at the top of the file):
 
@@ -832,11 +891,11 @@ Path C-B (filed as PRIORITY — enhancement / design change) covers gaps that as
 
 **Filename:** `${PGAI_PROJECT_ROOT}/priority/PRIORITY-NNNN-<slug>.md`
 
-- `NNNN` — next available 4-digit sequential number. Inspect existing files in `${PGAI_PROJECT_ROOT}/priority/` (case-sensitive `PRIORITY-` prefix, 4 or more digits) and use the next monotonic value, zero-padded to 4 digits.
+- `NNNN` — next available 4-digit sequential number. Inspect existing files in `${PGAI_PROJECT_ROOT}/priority/` (case-sensitive `PRIORITY-` prefix, exactly 4 digits) and use the next monotonic value, zero-padded to 4 digits.
 - `<slug>` — short kebab-case description (3 to 5 words).
-- A date segment (`YYYYMMDD`) between `NNNN` and `<slug>` is accepted but not required: `PRIORITY-NNNN-YYYYMMDD-<slug>.md` is also valid.
+- The dated long form (`YYYYMMDD` immediately after `NNNN`) — `PRIORITY-NNNN-YYYYMMDD-<slug>.md` — is accepted by the gate only for historical compatibility. Do not use it for new filings; the single canonical shape is `PRIORITY-NNNN-<slug>.md`.
 
-The filename pattern must match what discovery's regex enforces: case-sensitive `PRIORITY-` prefix followed by 4 or more digits, then a slug, then `.md`. The date is optional — both `PRIORITY-NNNN-slug.md` and `PRIORITY-NNNN-YYYYMMDD-slug.md` pass.
+The filename pattern must match what discovery's regex enforces (the shared gate in `team/pgai_agent_kanban/lib/ledger_filename_contract.py`): case-sensitive `PRIORITY-` prefix, then exactly 4 digits, then a slug, then `.md` — the single canonical shape `PRIORITY-NNNN-<slug>.md`, matching discovery's `expected_pattern`. The dated long form `PRIORITY-NNNN-YYYYMMDD-<slug>.md` also passes the gate but is historical-only; new filings must use `PRIORITY-NNNN-<slug>.md`.
 
 **Required headers** (in order, at the top of the file):
 

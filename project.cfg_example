@@ -159,6 +159,32 @@ max_major = 0
 
 
 # ---------------------------------------------------------------------------
+# [release] — Per-project retry ceiling override (v2.0.0+)
+# ---------------------------------------------------------------------------
+[release]
+
+# max_rc_retries: Per-project override of the kanban-wide [release]
+# max_rc_retries default in kanban.cfg. Caps how many times one bundle
+# family (same cargo set, rebundled under a new patch number) may be
+# auto-resolved via OVERWATCH's cancel-and-rebundle before the block
+# escalates to HALT-hard with the full retry history. Read by
+# pp_max_rc_retries() (team/scripts/lib/project_paths.sh), which checks
+# this key first and falls back to kanban.cfg's default when absent here.
+#
+# REQUIRED EXPLICIT for the self-build project (pgai-agent-kanban):
+# recommend 1 — the kanban auto-recycling its own failed self-modifications
+# is the compounding-error case a tighter ceiling exists to contain.
+# Managed projects are blast-radius-contained and may leave this commented
+# out to inherit the kanban.cfg default (shipped default: 3).
+#
+# Absence here is NOT an error by itself — pp_max_rc_retries() only fails
+# loud when the key is absent from BOTH this file and kanban.cfg.
+#
+# Example (self-build project): max_rc_retries = 1
+# max_rc_retries = 3
+
+
+# ---------------------------------------------------------------------------
 # [hooks] — Optional CM release lifecycle hooks
 # ---------------------------------------------------------------------------
 # Hook scripts are called by cm-release.sh AND ship-rc.sh at three phases:

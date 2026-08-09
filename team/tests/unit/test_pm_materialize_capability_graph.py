@@ -95,20 +95,22 @@ def test_load_workflow_capabilities_testing_only_returns_dict(
     assert caps  # non-empty
 
 
-def test_load_workflow_capabilities_testing_only_git_mode_is_ro(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize(
+    "workflow_type, field, expected",
+    [
+        ("testing-only", "git_mode", "ro"),
+        ("testing-only", "finalize", "report"),
+        ("testing-only", "version_semantics", "label"),
+        ("release", "git_mode", "rw"),
+        ("release", "finalize", "tag"),
+    ],
+)
+def test_load_workflow_capabilities_field(
+    tmp_path: pathlib.Path, workflow_type: str, field: str, expected: str
 ) -> None:
-    """load_workflow_capabilities returns git_mode='ro' for testing-only plugin."""
-    caps = pm.load_workflow_capabilities("testing-only")
-    assert caps.get("git_mode") == "ro"
-
-
-def test_load_workflow_capabilities_testing_only_finalize_is_report(
-    tmp_path: pathlib.Path,
-) -> None:
-    """load_workflow_capabilities returns finalize='report' for testing-only plugin."""
-    caps = pm.load_workflow_capabilities("testing-only")
-    assert caps.get("finalize") == "report"
+    """load_workflow_capabilities returns the expected capability fields per workflow type."""
+    caps = pm.load_workflow_capabilities(workflow_type)
+    assert caps.get(field) == expected
 
 
 def test_load_workflow_capabilities_testing_only_agents_field(
@@ -121,30 +123,6 @@ def test_load_workflow_capabilities_testing_only_agents_field(
     assert "tester" in agents.lower()
     # CM is NOT in the testing-only roster
     assert "cm" not in agents.lower()
-
-
-def test_load_workflow_capabilities_testing_only_version_semantics_is_label(
-    tmp_path: pathlib.Path,
-) -> None:
-    """load_workflow_capabilities returns version_semantics='label' for testing-only."""
-    caps = pm.load_workflow_capabilities("testing-only")
-    assert caps.get("version_semantics") == "label"
-
-
-def test_load_workflow_capabilities_release_git_mode_is_rw(
-    tmp_path: pathlib.Path,
-) -> None:
-    """load_workflow_capabilities returns git_mode='rw' for release plugin."""
-    caps = pm.load_workflow_capabilities("release")
-    assert caps.get("git_mode") == "rw"
-
-
-def test_load_workflow_capabilities_release_finalize_is_tag(
-    tmp_path: pathlib.Path,
-) -> None:
-    """load_workflow_capabilities returns finalize='tag' for release plugin."""
-    caps = pm.load_workflow_capabilities("release")
-    assert caps.get("finalize") == "tag"
 
 
 def test_load_workflow_capabilities_release_agents_includes_cm(
@@ -215,44 +193,20 @@ def test_load_workflow_capabilities_missing_section_returns_empty_dict(
 # ===========================================================================
 
 
-def test_requires_cm_bookends_true_for_release_caps(
-    tmp_path: pathlib.Path,
-) -> None:
-    """_workflow_requires_cm_bookends returns True for git_mode=rw + finalize=tag."""
-    caps = {"git_mode": "rw", "finalize": "tag", "agents": "pm,coder,tester,cm"}
-    assert pm._workflow_requires_cm_bookends(caps) is True
-
-
-def test_requires_cm_bookends_true_for_publish_finalize(
-    tmp_path: pathlib.Path,
-) -> None:
-    """_workflow_requires_cm_bookends returns True for git_mode=rw + finalize=publish."""
-    caps = {"git_mode": "rw", "finalize": "publish", "agents": "pm,writer,tester,cm"}
-    assert pm._workflow_requires_cm_bookends(caps) is True
-
-
-def test_requires_cm_bookends_false_for_testing_only_caps(
-    tmp_path: pathlib.Path,
-) -> None:
-    """_workflow_requires_cm_bookends returns False for git_mode=ro + finalize=report."""
-    caps = {"git_mode": "ro", "finalize": "report", "agents": "pm,tester"}
-    assert pm._workflow_requires_cm_bookends(caps) is False
-
-
-def test_requires_cm_bookends_false_for_ro_with_tag_finalize(
-    tmp_path: pathlib.Path,
-) -> None:
-    """_workflow_requires_cm_bookends returns False when git_mode=ro even with finalize=tag."""
-    caps = {"git_mode": "ro", "finalize": "tag", "agents": "pm,cm"}
-    assert pm._workflow_requires_cm_bookends(caps) is False
-
-
-def test_requires_cm_bookends_false_for_rw_with_report_finalize(
-    tmp_path: pathlib.Path,
-) -> None:
-    """_workflow_requires_cm_bookends returns False when finalize=report even with git_mode=rw."""
-    caps = {"git_mode": "rw", "finalize": "report", "agents": "pm,tester"}
-    assert pm._workflow_requires_cm_bookends(caps) is False
+@pytest.mark.parametrize(
+    "git_mode, finalize, agents, expected",
+    [
+        ("rw", "tag", "pm,coder,tester,cm", True),  # rw + tag
+        ("rw", "publish", "pm,writer,tester,cm", True),  # rw + publish
+        ("ro", "report", "pm,tester", False),  # ro + report (testing-only shape)
+        ("ro", "tag", "pm,cm", False),  # ro overrides finalize=tag
+        ("rw", "report", "pm,tester", False),  # finalize=report overrides git_mode=rw
+    ],
+)
+def test_requires_cm_bookends(git_mode: str, finalize: str, agents: str, expected: bool) -> None:
+    """_workflow_requires_cm_bookends is True only for git_mode=rw with a tag/publish finalize."""
+    caps = {"git_mode": git_mode, "finalize": finalize, "agents": agents}
+    assert pm._workflow_requires_cm_bookends(caps) is expected
 
 
 def test_requires_cm_bookends_true_for_empty_caps_fallback(

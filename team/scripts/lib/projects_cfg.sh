@@ -21,7 +21,9 @@
 #
 # Public API
 # ----------
-#   PGAI_DEFAULT_PALETTE            — read-only array of 8 default colors
+#   PGAI_DEFAULT_PALETTE            — read-only array of 8 default colors,
+#                                     built at source time from
+#                                     team/config/default_palette.txt
 #   projects_cfg_color  <name>      — echo display_color for <name>;
 #                                     falls back to next deterministic palette
 #                                     entry when the color field is absent
@@ -50,21 +52,42 @@
 
 # ---------------------------------------------------------------------------
 # PGAI_DEFAULT_PALETTE — eight visually distinct project colors.
-# Order: blue, teal, coral, amber, pink, purple, green, gray.
-# This array is the single source of truth for the default palette —
-# do not duplicate it elsewhere.
+#
+# The canonical definition lives in team/config/default_palette.txt — this
+# is NOT a hand-transcribed copy. This array is built by reading that file
+# at source time, below, so the file is the single source of truth for the
+# default palette; do not hand-transcribe its values elsewhere. Sourcing
+# this library fails loud (naming the file path, never a silent empty or
+# partial palette) if the definition file is missing or malformed.
 # ---------------------------------------------------------------------------
-PGAI_DEFAULT_PALETTE=(
-    "#378ADD" # blue   (~210°)
-    "#D85A30" # coral  (~15°)    ← jump across to warm
-    "#639922" # green  (~90°)    ← jump to green
-    "#D4537E" # pink   (~340°)   ← jump to magenta
-    "#1D9E75" # teal   (~165°)   ← jump to cyan-green
-    "#BA7517" # amber  (~40°)    ← jump to gold
-    "#7F77DD" # purple (~245°)   ← jump to violet
-    "#888780" # gray            (last resort)
-)
+_projects_cfg_palette_file="$(dirname "${BASH_SOURCE[0]}")/../../config/default_palette.txt"
+
+if [[ ! -f "$_projects_cfg_palette_file" ]]; then
+    echo "projects_cfg.sh: FATAL: canonical palette definition file not found: '${_projects_cfg_palette_file}' — cannot build PGAI_DEFAULT_PALETTE" >&2
+    unset _projects_cfg_palette_file
+    return 1 2>/dev/null || exit 1
+fi
+
+# Parse rule (must match team/config/default_palette.txt's own documented
+# rule): a line is a data line only when its first whitespace-delimited
+# token matches ^#[0-9A-Fa-f]{6}$. Every other line (header prose, blank
+# lines, per-entry hue comments that don't start with a hex token) is
+# skipped. Order is preserved as read from the file.
+PGAI_DEFAULT_PALETTE=()
+while IFS= read -r _pcf_line || [[ -n "$_pcf_line" ]]; do
+    read -r _pcf_hex _pcf_rest <<< "$_pcf_line"
+    [[ "$_pcf_hex" =~ ^#[0-9A-Fa-f]{6}$ ]] || continue
+    PGAI_DEFAULT_PALETTE+=("$_pcf_hex")
+done < "$_projects_cfg_palette_file"
+
+if [[ "${#PGAI_DEFAULT_PALETTE[@]}" -eq 0 ]]; then
+    echo "projects_cfg.sh: FATAL: canonical palette definition file is malformed (no valid #RRGGBB entries found): '${_projects_cfg_palette_file}'" >&2
+    unset _projects_cfg_palette_file _pcf_line _pcf_hex _pcf_rest
+    return 1 2>/dev/null || exit 1
+fi
+
 readonly PGAI_DEFAULT_PALETTE
+unset _projects_cfg_palette_file _pcf_line _pcf_hex _pcf_rest
 
 # ---------------------------------------------------------------------------
 # _projects_cfg_validate_color <color>

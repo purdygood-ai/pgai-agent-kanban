@@ -595,69 +595,59 @@ class TestCreateProjectDevTreeAndGitRepoFlags:
     command line.
     """
 
-    def test_dev_tree_and_git_repo_flags_write_values_verbatim(
-        self, tmp_path: pathlib.Path
+    @pytest.mark.parametrize(
+        "dev_tree_flag, git_repo_flag, dir_name, project_name",
+        [
+            pytest.param(
+                "--dev-tree", "--git-repo",
+                "some-dev-tree", "flags-verbatim-test",
+                id="canonical_spellings",
+            ),
+            pytest.param(
+                "--dev-tree-path", "--git-repo-url",
+                "aliased-dev-tree", "flags-alias-test",
+                id="documented_aliases",
+            ),
+        ],
+    )
+    def test_dev_tree_and_git_repo_flag_spellings_write_values_verbatim(
+        self,
+        tmp_path: pathlib.Path,
+        dev_tree_flag: str,
+        git_repo_flag: str,
+        dir_name: str,
+        project_name: str,
     ) -> None:
-        """--dev-tree and --git-repo values land verbatim in project.cfg.
+        """Each documented --dev-tree/--git-repo flag spelling writes project.cfg verbatim.
 
-        No transformation or normalization is expected -- the operator's exact
-        string shows up in the generated file.
+        BUG-0101 named all four spellings (--dev-tree/--dev-tree-path and
+        --git-repo/--git-repo-url) as required; both the canonical flags and
+        their documented aliases must write the operator's exact string into
+        the same project.cfg fields, with no transformation or normalization.
         """
         root = _build_minimal_kanban_root(tmp_path)
-        dev_tree = tmp_path / "some-dev-tree"
+        dev_tree = tmp_path / dir_name
         dev_tree.mkdir()
+        git_repo_url = f"git@example.com:org/{project_name}.git"
 
         result = _run_create_project(
             root,
-            "flags-verbatim-test",
+            project_name,
             workflow_type="release",
             extra_args=[
-                "--dev-tree", str(dev_tree),
-                "--git-repo", "git@example.com:org/flags-verbatim-test.git",
+                dev_tree_flag, str(dev_tree),
+                git_repo_flag, git_repo_url,
             ],
         )
         assert result.returncode == 0, (
             f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        cfg_text = _read_project_cfg(root, "flags-verbatim-test")
+        cfg_text = _read_project_cfg(root, project_name)
         assert f"dev_tree_path = {dev_tree}" in cfg_text, (
             f"Expected dev_tree_path = {dev_tree} in project.cfg.\ncfg content:\n{cfg_text}"
         )
-        assert "git_repo_url = git@example.com:org/flags-verbatim-test.git" in cfg_text, (
-            f"Expected git_repo_url to carry the supplied URL verbatim.\ncfg content:\n{cfg_text}"
-        )
-
-    def test_dev_tree_path_and_git_repo_url_aliases_write_the_same_fields(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """--dev-tree-path and --git-repo-url (the documented aliases) also work.
-
-        BUG-0101 named all four spellings as required; the alias forms must
-        write into the same project.cfg fields as their canonical counterparts.
-        """
-        root = _build_minimal_kanban_root(tmp_path)
-        dev_tree = tmp_path / "aliased-dev-tree"
-        dev_tree.mkdir()
-
-        result = _run_create_project(
-            root,
-            "flags-alias-test",
-            workflow_type="release",
-            extra_args=[
-                "--dev-tree-path", str(dev_tree),
-                "--git-repo-url", "git@example.com:org/flags-alias-test.git",
-            ],
-        )
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-
-        cfg_text = _read_project_cfg(root, "flags-alias-test")
-        assert f"dev_tree_path = {dev_tree}" in cfg_text, (
-            f"Expected dev_tree_path = {dev_tree} in project.cfg.\ncfg content:\n{cfg_text}"
-        )
-        assert "git_repo_url = git@example.com:org/flags-alias-test.git" in cfg_text, (
+        assert f"git_repo_url = {git_repo_url}" in cfg_text, (
             f"Expected git_repo_url to carry the supplied URL verbatim.\ncfg content:\n{cfg_text}"
         )
 

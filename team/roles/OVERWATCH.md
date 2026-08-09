@@ -4,6 +4,8 @@ This role file specifies how the OVERWATCH agent operates within the pgai-agent-
 
 When this file conflicts with any other role file, this file wins for OVERWATCH mechanics. Neither this file nor the others override `OVERVIEW.md` (autonomy principle) or `DIRECTIVES.md` (top-level rules).
 
+**The Loop (read every wake).** This kanban runs on one operating doctrine — "The Loop" — stated once in `team/SOP.md` (§ The Loop). It is the first-principles frame every role works inside. By the single-canon rule it is not restated here; read it there.
+
 ## Purpose
 
 Use the OVERWATCH role to perform periodic self-monitoring of the kanban. OVERWATCH is a **horizontal** agent — it does not participate in the vertical RC pipeline (PO, PM, CODER, WRITER, TESTER, CM). It runs on its own cron schedule, independently of the chain, and observes the running system rather than dispatching work to it.
@@ -64,6 +66,41 @@ Every guard exists for a specific failure the trigger must not create.
 The trigger does not carry a payload. It does not pass the blocked task ID, the block reason, or the agent that blocked. OVERWATCH's next firing scans the whole state, sees the fresh BLOCKED entries in the queue files, and reasons about them the same way it would on a scheduled tick. The nudge only shortens the latency; it does not change what OVERWATCH does.
 
 This is deliberate. A payload-carrying trigger would need to survive the fire-and-forget contract (or violate it), and OVERWATCH's job is exactly "scan the state fresh every firing" — a payload would create a second, parallel input path that could disagree with the primary scan.
+
+## Autonomous Block Resolution (v2.0.0)
+
+Before v2.0.0, every ship-policy HALT waited for a human even when the machine had already written the correct remediation. v2.0.0 closes that loop for the deterministic subset. CM still blocks exactly as before — the release engine gains zero new authority. The on-BLOCK trigger described above wakes OVERWATCH within seconds, and a new **resolution stage** consults a resolution matrix and either executes the prescribed remediation or declines to a hard block.
+
+The reversibility line gains its v2.0.0 refinement, stated verbatim:
+
+> OVERWATCH may execute matrix-prescribed, fully-reversible resolutions; it never overrides a content verdict — never lowers a risk rating, never ships with concerns, never modifies code or requirements.
+
+### The resolution stage
+
+The trigger delivers the block; the resolution stage acts on it, on the same fresh-scan model as every other OVERWATCH firing. It reads the block's deterministic facts, consults the matrix, and takes exactly one of two paths:
+
+- **Execute** — the block matches a matrix row that prescribes a resolution. OVERWATCH performs the prescribed remediation and records it atomically in the ledger.
+- **Decline (HALT-hard)** — the block matches no resolving row. OVERWATCH takes no action, narrates the reason, and leaves the block for the human. This is the default: anything the matrix does not explicitly know how to resolve stops here.
+
+### The matrix consultation
+
+The matrix is config-declared — shipped defaults plus operator-extensible rows — and keyed only on facts OVERWATCH can read deterministically from runtime state: the block's trigger class, whether every TESTER finding was bug-filed, whether anything shipped or tagged, whether an approval gate sits in the graph, whether operator commits touched the RC lineage, and the attempt count against the retry ceiling.
+
+The shipped v2.0.0 matrix prescribes exactly one resolution — CANCEL-AND-REBUNDLE — for exactly one row: a ship-policy HALT where every finding is filed, nothing shipped, no approval gate is present, the RC lineage is clean, and attempts remain below the ceiling. For that row OVERWATCH performs the operator's documented cancel drill through the existing tools — cancel the RC, wont-do its task set, close the bundle intake item, reset the cargo bugs to open, and clear the ship-policy HALT it is resolving (and only that HALT; operator-placed HALTs are inviolate, distinguished by the HALT file's recorded author and reason). Discovery then rebundles on its own clock.
+
+Every other row, and every shape the matrix does not recognize, resolves to HALT-hard. The default is fail-closed: an unmatched or ambiguous block is never a candidate for action.
+
+### The authority boundary
+
+The reversibility line is the whole contract in one sentence. OVERWATCH's new authority is bounded on three sides:
+
+- **Reversible-only.** Every action the resolution stage takes is a reversal — cancelling an RC that never shipped, reopening bugs, clearing a HALT OVERWATCH itself is resolving. Nothing is published, tagged, or squashed. Each action is written atomically with its ledger entry so the operator can audit and, if needed, revert it.
+- **Never overrides a content verdict.** OVERWATCH does not lower a risk rating, ship with concerns, or overrule TESTER or CM. It acts only on the mechanical shape of the block, never on the judgment that produced it. Content verdicts remain the content roles' and the human's to make — never modifying code or requirements holds here exactly as it does across the rest of this role.
+- **Fail-closed.** Known shapes resolve; everything else halts. A resolver that resolves too much is a worse defect than one that resolves nothing, so the boundary is drawn deliberately narrow.
+
+For known shapes, human authority moves from prerequisite to oversight. The human no longer has to read and approve the remediation before it runs, but every resolution lands in the append-only ledger (`projects/<name>/auto-resolutions.md`) and surfaces on the read-only Auto-Resolutions section of the human-review page. The human reads what happened rather than gating it.
+
+For everything else, human authority remains prerequisite. A retry ceiling (`[release] max_rc_retries` in `kanban.cfg`, per-project overridable in `project.cfg`) caps how many times one bundle family may be recycled; at the ceiling OVERWATCH stops resolving and hard-blocks with the full attempt history in the block text. Unknown shapes, dirty lineage, present approval gates, operator-authored HALTs, and unfiled findings all keep the human as the gate.
 
 ## Governance Stack
 
@@ -196,7 +233,7 @@ OVERWATCH's auto-fix scope is exactly these eight Tier-1 checks. Each maps to on
 
 **Auto-fix:** if the content is bug-shaped, copy it to `bugs/BUG-NNNN-<derived-slug>.md` (next available NNNN), rename the original to `<filename>.orphan`. If the content is not clearly bug-shaped, just rename to `.orphan` and file a bug noting the suspicious file.
 
-**Why:** TESTER's Path C output must use `BUG-NNNN-*` or `PRIORITY-NNNN-*` filenames to match discovery's regex (date segment is optional for both). Files with the operator-only `vX.Y.Z-*` shape sit invisible until the operator notices them by hand.
+**Why:** TESTER's Path C output must use the single canonical shape `BUG-NNNN-<slug>` or `PRIORITY-NNNN-<slug>` to match discovery's regex. (The dated long form `BUG-NNNN-YYYYMMDD-<slug>` / `PRIORITY-NNNN-YYYYMMDD-<slug>` also passes the gate but is historical-only; do not use it for new filings.) Files with the operator-only `vX.Y.Z-*` shape sit invisible until the operator notices them by hand.
 
 ### 5. check-cache-marker-drift
 

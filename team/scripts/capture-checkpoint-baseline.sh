@@ -8,8 +8,9 @@
 #   docs/operator-checkpoints/v1-1-1/document-workflow-checkpoint.md
 #   docs/operator-checkpoints/v1-1-1/custom-workflow-walkthrough.md
 #
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-# Referenced by: PRIORITY-0001-e2e-managed-project-checkpoint-v1-1-0.md
+# Supplies the machine-checkable evidence (git tags, artifact listing, task
+# graph) that a managed-project checkpoint audit compares pre-port to
+# post-port.
 #
 # Run this script on a pre-port baseline checkout (e.g., v1.0.0) and then on
 # the post-port live install (v1.1.0+) to produce comparable metadata that

@@ -28,6 +28,8 @@ import os
 import pathlib
 import stat
 
+import pytest
+
 from tests.unit.shell_harness import run_bash
 
 _INI_PARSER = "scripts/lib/ini_parser.sh"
@@ -60,58 +62,47 @@ def _resolve(
 
 
 # ---------------------------------------------------------------------------
-# 1. Absent kanban.cfg -> "docker" default
+# 1, 2, 4. Every successful-resolution shape: absent cfg, absent [docker]
+# section, blank docker_exe value (all fall back to "docker"), and a
+# configured value present on PATH (returned as-is).
 # ---------------------------------------------------------------------------
 
 
-def test_absent_kanban_cfg_resolves_to_docker(tmp_path: pathlib.Path) -> None:
-    """No kanban.cfg on disk resolves to the "docker" default when it is on PATH."""
-    kanban_root = tmp_path / "root_absent"
+@pytest.mark.parametrize(
+    "cfg_content, fake_binary_name, expected",
+    [
+        pytest.param(None, "docker", "docker", id="absent_kanban_cfg_falls_back_to_docker"),
+        pytest.param(
+            "[providers]\nactive = claude\n", "docker", "docker",
+            id="absent_docker_section_falls_back_to_docker",
+        ),
+        pytest.param(
+            "[docker]\ndocker_exe = \n", "docker", "docker",
+            id="blank_docker_exe_value_falls_back_to_docker",
+        ),
+        pytest.param(
+            "[docker]\ndocker_exe = podman\n", "podman", "podman",
+            id="configured_value_used_as_is_when_present_on_path",
+        ),
+    ],
+)
+def test_resolve_docker_exe_succeeds(
+    tmp_path: pathlib.Path, cfg_content: str | None, fake_binary_name: str, expected: str
+) -> None:
+    """resolve_docker_exe returns the configured engine name when it is
+    present on PATH, falling back to "docker" when unconfigured, unsectioned,
+    or blank."""
+    kanban_root = tmp_path / "root"
     kanban_root.mkdir()
-    fake_bin = tmp_path / "fakebin_absent"
-    _make_fake_binary(fake_bin, "docker")
+    if cfg_content is not None:
+        (kanban_root / "kanban.cfg").write_text(cfg_content, encoding="utf-8")
+    fake_bin = tmp_path / "fakebin"
+    _make_fake_binary(fake_bin, fake_binary_name)
 
     result = _resolve(tmp_path, kanban_root, fake_bin_dir=fake_bin)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "docker"
-
-
-def test_absent_docker_section_resolves_to_docker(tmp_path: pathlib.Path) -> None:
-    """kanban.cfg with no [docker] section at all resolves to "docker"."""
-    kanban_root = tmp_path / "root_no_section"
-    kanban_root.mkdir()
-    (kanban_root / "kanban.cfg").write_text(
-        "[providers]\nactive = claude\n", encoding="utf-8"
-    )
-    fake_bin = tmp_path / "fakebin_no_section"
-    _make_fake_binary(fake_bin, "docker")
-
-    result = _resolve(tmp_path, kanban_root, fake_bin_dir=fake_bin)
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "docker"
-
-
-# ---------------------------------------------------------------------------
-# 2. Configured value present and valid -> used as-is
-# ---------------------------------------------------------------------------
-
-
-def test_configured_podman_used_when_present_on_path(tmp_path: pathlib.Path) -> None:
-    """A configured docker_exe = podman is returned when podman resolves on PATH."""
-    kanban_root = tmp_path / "root_podman"
-    kanban_root.mkdir()
-    (kanban_root / "kanban.cfg").write_text(
-        "[docker]\ndocker_exe = podman\n", encoding="utf-8"
-    )
-    fake_bin = tmp_path / "fakebin_podman"
-    _make_fake_binary(fake_bin, "podman")
-
-    result = _resolve(tmp_path, kanban_root, fake_bin_dir=fake_bin)
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "podman"
+    assert result.stdout.strip() == expected
 
 
 # ---------------------------------------------------------------------------
@@ -136,27 +127,6 @@ def test_configured_invalid_binary_fails_loud(tmp_path: pathlib.Path) -> None:
     assert result.stdout.strip() == ""
     assert "docker_exe" in result.stderr
     assert "nonexistent-container-engine-xyz" in result.stderr
-
-
-# ---------------------------------------------------------------------------
-# 4. Blank configured value -> falls back to "docker" default
-# ---------------------------------------------------------------------------
-
-
-def test_blank_docker_exe_value_falls_back_to_docker(tmp_path: pathlib.Path) -> None:
-    """docker_exe present but blank behaves the same as an absent key."""
-    kanban_root = tmp_path / "root_blank"
-    kanban_root.mkdir()
-    (kanban_root / "kanban.cfg").write_text(
-        "[docker]\ndocker_exe = \n", encoding="utf-8"
-    )
-    fake_bin = tmp_path / "fakebin_blank"
-    _make_fake_binary(fake_bin, "docker")
-
-    result = _resolve(tmp_path, kanban_root, fake_bin_dir=fake_bin)
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "docker"
 
 
 # ---------------------------------------------------------------------------

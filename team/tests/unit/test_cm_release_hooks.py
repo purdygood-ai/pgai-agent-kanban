@@ -15,6 +15,11 @@ Covers:
   (e) Non-executable in-repo hook → loud error naming the path and chmod fix;
       does NOT silently skip.
   (f) Existing kanban-side hook behavior is preserved (regression lock).
+  (g) RC-branch-aware resolution: when an rc_branch is supplied, tier (c)
+      in-repo hooks and tier (a)-relative cfg hooks resolve from that branch's
+      git tree rather than the dev tree's current checkout, retiring the
+      dev-tree-parking workaround. Omitting rc_branch preserves the legacy
+      filesystem-based resolution exercised by (a)-(f) above.
 
 All tests use the shell_harness.run_bash pattern with synthetic temp directories.
 No live kanban root is touched.
@@ -22,8 +27,10 @@ No live kanban root is touched.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import stat
+import subprocess
 
 import pytest
 
@@ -238,64 +245,62 @@ def test_precedence_inrepo_wins_when_cfg_and_kanban_absent(tmp_path: pathlib.Pat
     assert str(inrepo_hook) in result.stdout
 
 
-def test_resolver_func_sets_source_label_cfg(tmp_path: pathlib.Path) -> None:
-    """projects_resolve_release_hook_path sets _PGAI_HOOK_LAST_SOURCE=cfg."""
-    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "proj-a")
+def _plant_cfg_hook(dev_tree: pathlib.Path, project_dir: pathlib.Path, project_name: str) -> None:
     cfg_hook = dev_tree / "my-hook.sh"
     _write_hook(cfg_hook)
     cfg_text = (
         "[project]\n"
-        f"project_name = proj-a\n"
+        f"project_name = {project_name}\n"
         f"dev_tree_path = {dev_tree}\n"
         "[hooks]\n"
         f"cm_release_pre_squash_hook = my-hook.sh\n"
     )
     (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
 
-    result = _run_resolver_func(tmp_path, kanban_root, "proj-a")
-    assert result.returncode == 0
-    lines = result.stdout.splitlines()
-    src_line = next((l for l in lines if l.startswith("SOURCE:")), "")
-    assert "cfg" in src_line
 
-
-def test_resolver_func_sets_source_label_kanban_side(tmp_path: pathlib.Path) -> None:
-    """projects_resolve_release_hook_path sets _PGAI_HOOK_LAST_SOURCE=kanban-side."""
-    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "proj-b")
+def _plant_kanban_side_hook(dev_tree: pathlib.Path, project_dir: pathlib.Path, project_name: str) -> None:
     kanban_hook = project_dir / "hooks" / "cm-release-pre-squash.sh"
     _write_hook(kanban_hook)
 
-    result = _run_resolver_func(tmp_path, kanban_root, "proj-b")
-    assert result.returncode == 0
-    lines = result.stdout.splitlines()
-    src_line = next((l for l in lines if l.startswith("SOURCE:")), "")
-    assert "kanban-side" in src_line
 
-
-def test_resolver_func_sets_source_label_inrepo(tmp_path: pathlib.Path) -> None:
-    """projects_resolve_release_hook_path sets _PGAI_HOOK_LAST_SOURCE=in-repo."""
-    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "proj-c")
+def _plant_inrepo_hook(dev_tree: pathlib.Path, project_dir: pathlib.Path, project_name: str) -> None:
     inrepo_hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-squash.sh"
     _write_hook(inrepo_hook)
 
-    result = _run_resolver_func(tmp_path, kanban_root, "proj-c")
+
+def _plant_no_hook(dev_tree: pathlib.Path, project_dir: pathlib.Path, project_name: str) -> None:
+    pass
+
+
+@pytest.mark.parametrize(
+    "project_name, plant_hook, expected_source",
+    [
+        pytest.param("proj-a", _plant_cfg_hook, "cfg", id="cfg"),
+        pytest.param("proj-b", _plant_kanban_side_hook, "kanban-side", id="kanban_side"),
+        pytest.param("proj-c", _plant_inrepo_hook, "in-repo", id="inrepo"),
+        pytest.param("proj-d", _plant_no_hook, "", id="no_hook"),
+    ],
+)
+def test_resolver_func_sets_source_label(
+    tmp_path: pathlib.Path, project_name: str, plant_hook, expected_source: str
+) -> None:
+    """projects_resolve_release_hook_path sets _PGAI_HOOK_LAST_SOURCE to the
+    matching tier label (or empty when no hook is found at any tier).
+    Survives-as-named-parameterization of the original four discrete tests;
+    no case dropped."""
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, project_name)
+    plant_hook(dev_tree, project_dir, project_name)
+
+    result = _run_resolver_func(tmp_path, kanban_root, project_name)
     assert result.returncode == 0
     lines = result.stdout.splitlines()
-    src_line = next((l for l in lines if l.startswith("SOURCE:")), "")
-    assert "in-repo" in src_line
-
-
-def test_resolver_func_empty_source_when_no_hook(tmp_path: pathlib.Path) -> None:
-    """projects_resolve_release_hook_path sets _PGAI_HOOK_LAST_SOURCE='' when no hook found."""
-    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "proj-d")
-
-    result = _run_resolver_func(tmp_path, kanban_root, "proj-d")
-    assert result.returncode == 0
-    lines = result.stdout.splitlines()
-    path_line = next((l for l in lines if l.startswith("PATH:")), "PATH:MISSING")
     src_line = next((l for l in lines if l.startswith("SOURCE:")), "SOURCE:MISSING")
-    assert path_line == "PATH:"
-    assert src_line == "SOURCE:"
+    if expected_source:
+        assert expected_source in src_line
+    else:
+        path_line = next((l for l in lines if l.startswith("PATH:")), "PATH:MISSING")
+        assert path_line == "PATH:"
+        assert src_line == "SOURCE:"
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +577,227 @@ def test_nonexecutable_inrepo_hook_not_silently_skipped(tmp_path: pathlib.Path) 
 
 
 # ---------------------------------------------------------------------------
+# (e2) Retrofit (CODER-20260727-019): full three-part remedy block for the
+# non-executable-hook failure — docs/coding-standards.md "Gates prescribe,
+# not just diagnose", classified full-remedy for the pre-tag hook gate in
+# docs/audits/v1.27.2-gate-remedy-census.md (row 24's deterministic
+# sub-case). Covers the filesystem in-repo tier and the RC-branch-aware
+# tiers, plus the CM_HOOK_NONEXEC_PATH / CM_HOOK_NONEXEC_FIX_CMD globals a
+# caller (release.sh) reads to build a placeholder-free HALT message.
+# ---------------------------------------------------------------------------
+
+
+def _run_resolve_with_remedy_globals(
+    tmp_path: pathlib.Path,
+    kanban_root: pathlib.Path,
+    project_name: str,
+    project_hooks_dir: pathlib.Path,
+    dev_tree_path: pathlib.Path,
+    phase: str = "pre-squash",
+    rc_branch: str = "",
+) -> object:
+    """Like _run_resolve, but also echoes CM_HOOK_NONEXEC_PATH and
+    CM_HOOK_NONEXEC_FIX_CMD so tests can assert on the remedy globals."""
+    rc_branch_arg = f" {rc_branch!r}" if rc_branch else ""
+    script = (
+        f"{_CM_HALT_STUB}\n"
+        f"{_SOURCE_PREAMBLE}\n"
+        f"_rc=0\n"
+        f"cm_resolve_and_enforce_hook {project_name!r} {phase!r} "
+        f"{str(project_hooks_dir)!r} {str(dev_tree_path)!r}{rc_branch_arg} || _rc=$?\n"
+        f"echo \"RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH\"\n"
+        f"echo \"NONEXEC_PATH:$CM_HOOK_NONEXEC_PATH\"\n"
+        f"echo \"NONEXEC_FIX_CMD:$CM_HOOK_NONEXEC_FIX_CMD\"\n"
+        f"exit $_rc\n"
+    )
+    return run_bash(
+        tmp_path,
+        script,
+        extra_env={"KANBAN_ROOT": str(kanban_root)},
+    )
+
+
+def test_nonexecutable_inrepo_hook_prints_full_remedy_block(tmp_path: pathlib.Path) -> None:
+    """Non-executable in-repo hook prints Cause(s)/To-fix/Rule, per docs/coding-standards.md."""
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "noexec-remedy1")
+    inrepo_hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-tag.sh"
+    _write_hook(inrepo_hook, executable=False)
+
+    result = _run_resolve(
+        tmp_path, kanban_root, "noexec-remedy1", project_dir / "hooks", dev_tree, phase="pre-tag"
+    )
+    combined = result.stdout + result.stderr
+    assert "Cause(s):" in combined
+    assert "To fix:" in combined
+    assert "Rule:" in combined
+    assert f"1. chmod +x {inrepo_hook}" in combined
+
+
+def test_nonexecutable_inrepo_hook_sets_remedy_globals(tmp_path: pathlib.Path) -> None:
+    """CM_HOOK_NONEXEC_PATH / CM_HOOK_NONEXEC_FIX_CMD are set to derived, verbatim values."""
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "noexec-remedy2")
+    inrepo_hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-tag.sh"
+    _write_hook(inrepo_hook, executable=False)
+
+    result = _run_resolve_with_remedy_globals(
+        tmp_path, kanban_root, "noexec-remedy2", project_dir / "hooks", dev_tree, phase="pre-tag"
+    )
+    lines = result.stdout.splitlines()
+    nonexec_path = next(l for l in lines if l.startswith("NONEXEC_PATH:")).removeprefix("NONEXEC_PATH:")
+    nonexec_fix = next(l for l in lines if l.startswith("NONEXEC_FIX_CMD:")).removeprefix("NONEXEC_FIX_CMD:")
+    assert nonexec_path == str(inrepo_hook)
+    assert nonexec_fix == f"chmod +x {inrepo_hook}"
+    # No angle-bracket placeholders in the derived fix command (house placeholder law).
+    assert "<" not in nonexec_fix and ">" not in nonexec_fix
+
+
+def test_remedy_globals_reset_to_empty_on_successful_call(tmp_path: pathlib.Path) -> None:
+    """A successful (executable) hook resolution resets the remedy globals to empty,
+    so a caller never reads a stale value from a prior failed call in the same shell."""
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "noexec-remedy3")
+    good_hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-tag.sh"
+    _write_hook(good_hook, executable=True)
+
+    result = _run_resolve_with_remedy_globals(
+        tmp_path, kanban_root, "noexec-remedy3", project_dir / "hooks", dev_tree, phase="pre-tag"
+    )
+    assert result.returncode == 0
+    lines = result.stdout.splitlines()
+    nonexec_path = next(l for l in lines if l.startswith("NONEXEC_PATH:")).removeprefix("NONEXEC_PATH:")
+    nonexec_fix = next(l for l in lines if l.startswith("NONEXEC_FIX_CMD:")).removeprefix("NONEXEC_FIX_CMD:")
+    assert nonexec_path == ""
+    assert nonexec_fix == ""
+
+
+def test_nonexecutable_inrepo_hook_remedy_command_clears_the_gate(tmp_path: pathlib.Path) -> None:
+    """Executing the printed CM_HOOK_NONEXEC_FIX_CMD verbatim clears the gate on re-run."""
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "noexec-remedy4")
+    inrepo_hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-tag.sh"
+    _write_hook(inrepo_hook, executable=False)
+
+    # First call: must fail with the fix command captured.
+    first = _run_resolve_with_remedy_globals(
+        tmp_path, kanban_root, "noexec-remedy4", project_dir / "hooks", dev_tree, phase="pre-tag"
+    )
+    assert first.returncode == 1
+    fix_cmd = next(
+        l for l in first.stdout.splitlines() if l.startswith("NONEXEC_FIX_CMD:")
+    ).removeprefix("NONEXEC_FIX_CMD:")
+    assert fix_cmd == f"chmod +x {inrepo_hook}"
+
+    # Execute the printed fix command verbatim through a real shell.
+    exec_result = run_bash(tmp_path, fix_cmd)
+    assert exec_result.returncode == 0, f"Fix command failed: {exec_result.stderr}"
+
+    # Re-run: must now succeed (source: in-repo, resolves to the now-executable hook).
+    second = _run_resolve(
+        tmp_path, kanban_root, "noexec-remedy4", project_dir / "hooks", dev_tree, phase="pre-tag"
+    )
+    assert second.returncode == 0, f"Gate still fails after applying the fix: {second.stdout} {second.stderr}"
+    assert "source: in-repo" in second.stdout
+
+
+def test_rc_branch_aware_nonexecutable_hook_prints_full_remedy_block(
+    tmp_path: pathlib.Path,
+) -> None:
+    """RC-branch-aware non-executable hook (git-mode check) prints the same
+    three-part remedy shape, naming the RC branch and the git update-index fix."""
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "rcaware-remedy")
+    _make_git_dev_tree(dev_tree)
+
+    _git(dev_tree, "checkout", "-b", "rc/v9.9.5")
+    hook_rel = ".pgai/hooks/cm-release-pre-tag.sh"
+    hook_path = dev_tree / hook_rel
+    _write_hook(hook_path, executable=False)
+    hook_path.chmod(0o644)
+    _git(dev_tree, "add", hook_rel)
+    _git(dev_tree, "commit", "-m", "add non-executable rc pre-tag hook")
+    _git(dev_tree, "checkout", "main")
+
+    result = _run_resolve_with_remedy_globals(
+        tmp_path, kanban_root, "rcaware-remedy", project_dir / "hooks", dev_tree,
+        phase="pre-tag", rc_branch="rc/v9.9.5",
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode == 1
+    assert "Cause(s):" in combined
+    assert "To fix:" in combined
+    assert "Rule:" in combined
+    assert "git update-index --chmod=+x" in combined
+    nonexec_path = next(
+        l for l in result.stdout.splitlines() if l.startswith("NONEXEC_PATH:")
+    ).removeprefix("NONEXEC_PATH:")
+    assert nonexec_path == f"{hook_rel} (on rc/v9.9.5)"
+
+
+# ---------------------------------------------------------------------------
+# (e3) release.sh's pre-tag call site: HALT reason is placeholder-free
+#
+# release.sh's own cm_halt call (Step 12c) is not a library function, so it
+# cannot be sourced in isolation the way cm_resolve_and_enforce_hook can.
+# Instead, this test extracts the exact call-site block verbatim from the
+# live release.sh text (between the pre-tag cm_resolve_and_enforce_hook
+# invocation and its closing brace) and executes it against a real
+# non-executable hook, proving the HALT reason release.sh builds from
+# CM_HOOK_NONEXEC_PATH / CM_HOOK_NONEXEC_FIX_CMD carries the derived literal
+# values rather than the pre-retrofit "(path shown above)" placeholder.
+# ---------------------------------------------------------------------------
+
+_RELEASE_SH = "scripts/cm/release.sh"
+
+
+def _extract_pretag_call_site() -> str:
+    """Extract the pre-tag cm_resolve_and_enforce_hook || { cm_halt ... }
+    block verbatim from the live release.sh text."""
+    text = pathlib.Path(_RELEASE_SH).read_text(encoding="utf-8")
+    lines = text.splitlines()
+    start = next(
+        i
+        for i, l in enumerate(lines)
+        if l.startswith('cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-tag"')
+    )
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == "}")
+    return "\n".join(lines[start : end + 1])
+
+
+def test_release_sh_pretag_call_site_halt_reason_has_no_placeholder(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The real release.sh pre-tag call site's HALT reason is placeholder-free.
+
+    Regression lock for the pre-retrofit text: 'Fix with: chmod +x (path
+    shown above)' — a reference to prior output rather than a derived literal.
+    """
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "release-callsite")
+    inrepo_hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-tag.sh"
+    _write_hook(inrepo_hook, executable=False)
+
+    call_site = _extract_pretag_call_site()
+    script = (
+        f"{_CM_HALT_STUB}\n"
+        f"{_SOURCE_PREAMBLE}\n"
+        f"PROJECT_NAME='release-callsite'\n"
+        f"PROJECT_HOOKS_DIR={str(project_dir / 'hooks')!r}\n"
+        f"REPO_ROOT={str(dev_tree)!r}\n"
+        f"RC_BRANCH=''\n"
+        f"CM_RESOLVED_HOOK_PATH=''\n"
+        f"_rc=0\n"
+        f"( {call_site} ) || _rc=$?\n"
+        f"exit $_rc\n"
+    )
+    result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(kanban_root)})
+
+    assert result.returncode == 2, (
+        f"Expected the cm_halt stub to fire (rc=2); got {result.returncode}.\n"
+        f"stdout={result.stdout}\nstderr={result.stderr}"
+    )
+    combined = result.stdout + result.stderr
+    assert "(path shown above)" not in combined
+    assert str(inrepo_hook) in combined
+    assert f"chmod +x {inrepo_hook}" in combined
+
+
+# ---------------------------------------------------------------------------
 # (f) Existing kanban-side hook behavior regression lock
 # ---------------------------------------------------------------------------
 
@@ -720,3 +946,232 @@ def test_different_hooks_per_phase(tmp_path: pathlib.Path) -> None:
         assert result.returncode == 0, f"Phase {phase_name!r}: rc={result.returncode}"
         assert "source: in-repo" in result.stdout
         assert f"cm-release-{phase_name}.sh" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# (g) RC-branch-aware resolution
+# ---------------------------------------------------------------------------
+
+
+def _git(dev_tree: pathlib.Path, *args: str) -> None:
+    """Run a git command in *dev_tree*, raising on failure."""
+    subprocess.run(
+        ["git", "-C", str(dev_tree)] + list(args),
+        capture_output=True, check=True,
+    )
+
+
+def _make_git_dev_tree(dev_tree: pathlib.Path) -> None:
+    """Turn *dev_tree* into a minimal git repo with one commit on main."""
+    _git(dev_tree, "init", "--initial-branch=main")
+    _git(dev_tree, "config", "--local", "user.email", "test@pgai.local")
+    _git(dev_tree, "config", "--local", "user.name", "PGAI Test")
+    (dev_tree / "README.md").write_text("# rc-branch-aware test repo\n", encoding="utf-8")
+    _git(dev_tree, "add", "README.md")
+    _git(dev_tree, "commit", "-m", "Initial commit")
+
+
+def test_rc_branch_aware_in_repo_hook_resolves_from_ref_not_checkout(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Tier (c) resolves from the RC branch's git tree, not the current checkout.
+
+    The dev tree is left checked out on 'main' (which has NO in-repo hook at
+    all); the RC branch carries an executable in-repo hook. Passing the RC
+    branch name as the 5th argument must resolve and materialize that hook's
+    content even though it is absent from the currently checked-out tree —
+    this is the fix for the operator workaround of manually parking the dev
+    tree on the RC branch before every release.
+    """
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "rcaware-proj")
+    _make_git_dev_tree(dev_tree)
+
+    _git(dev_tree, "checkout", "-b", "rc/v9.9.9")
+    hook_rel = ".pgai/hooks/cm-release-pre-squash.sh"
+    hook_content = "#!/usr/bin/env bash\necho on-rc-branch\n"
+    _write_hook(dev_tree / hook_rel, content=hook_content)
+    _git(dev_tree, "add", hook_rel)
+    _git(dev_tree, "commit", "-m", "add rc pre-squash hook")
+    _git(dev_tree, "checkout", "main")
+
+    # Sanity: the checked-out working tree (main) does NOT have the hook file.
+    assert not (dev_tree / hook_rel).exists()
+
+    script = (
+        f"{_CM_HALT_STUB}\n"
+        f"{_SOURCE_PREAMBLE}\n"
+        f"_rc=0\n"
+        f"cm_resolve_and_enforce_hook 'rcaware-proj' 'pre-squash' "
+        f"{str(project_dir / 'hooks')!r} {str(dev_tree)!r} 'rc/v9.9.9' || _rc=$?\n"
+        f"echo \"RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH\"\n"
+        f"echo \"IS_TEMP:$CM_RESOLVED_HOOK_IS_TEMP\"\n"
+        f"exit $_rc\n"
+    )
+    result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(kanban_root)})
+
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert "source: in-repo (rc/v9.9.9)" in result.stdout
+    assert "IS_TEMP:1" in result.stdout
+
+    resolved_line = [
+        l for l in result.stdout.splitlines() if l.startswith("RESOLVED_PATH:")
+    ][0]
+    resolved_path = pathlib.Path(resolved_line.split(":", 1)[1])
+    assert resolved_path.exists(), "materialized hook file must exist on disk"
+    assert resolved_path.read_text(encoding="utf-8") == hook_content
+    assert os.access(resolved_path, os.X_OK), "materialized hook file must be executable"
+
+
+def test_rc_branch_aware_non_executable_hook_on_ref_is_rejected(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A hook committed with mode 644 on the RC branch is rejected, not silently skipped.
+
+    Mirrors the existing filesystem-based non-executable check (tier (c) with
+    no rc_branch), but the source of truth is now the git blob's recorded
+    mode rather than the working tree's permission bits.
+    """
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "rcaware-noexec")
+    _make_git_dev_tree(dev_tree)
+
+    _git(dev_tree, "checkout", "-b", "rc/v9.9.8")
+    hook_rel = ".pgai/hooks/cm-release-pre-tag.sh"
+    hook_path = dev_tree / hook_rel
+    _write_hook(hook_path, executable=False)
+    # git records the mode from the working tree's permission bits at add time;
+    # ensure it is non-executable (644) before staging.
+    hook_path.chmod(0o644)
+    _git(dev_tree, "add", hook_rel)
+    _git(dev_tree, "commit", "-m", "add non-executable rc pre-tag hook")
+    _git(dev_tree, "checkout", "main")
+
+    script = (
+        f"{_CM_HALT_STUB}\n"
+        f"{_SOURCE_PREAMBLE}\n"
+        f"_rc=0\n"
+        f"cm_resolve_and_enforce_hook 'rcaware-noexec' 'pre-tag' "
+        f"{str(project_dir / 'hooks')!r} {str(dev_tree)!r} 'rc/v9.9.8' || _rc=$?\n"
+        f"exit $_rc\n"
+    )
+    result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(kanban_root)})
+
+    assert result.returncode == 1, (
+        f"Expected rc=1 for a non-executable in-repo hook on the RC branch.\n"
+        f"stdout={result.stdout}\nstderr={result.stderr}"
+    )
+    assert "not executable" in result.stderr
+    assert "git update-index --chmod=+x" in result.stderr
+
+
+def test_rc_branch_aware_cfg_relative_path_resolves_from_ref(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Tier (a) with a relative cfg path resolves from the RC branch's git tree.
+
+    The cfg-declared relative path is absent from the checked-out working
+    tree (main) but present (and executable) on the RC branch.
+    """
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "rcaware-cfg")
+    _make_git_dev_tree(dev_tree)
+
+    cfg_text = (
+        "[project]\n"
+        "project_name = rcaware-cfg\n"
+        f"dev_tree_path = {dev_tree}\n"
+        "[hooks]\n"
+        "cm_release_post_tag_hook = scripts/notify.sh\n"
+    )
+    (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
+
+    _git(dev_tree, "checkout", "-b", "rc/v9.9.7")
+    hook_rel = "scripts/notify.sh"
+    hook_content = "#!/usr/bin/env bash\necho notified\n"
+    _write_hook(dev_tree / hook_rel, content=hook_content)
+    _git(dev_tree, "add", hook_rel)
+    _git(dev_tree, "commit", "-m", "add cfg-declared relative hook")
+    _git(dev_tree, "checkout", "main")
+
+    assert not (dev_tree / hook_rel).exists()
+
+    script = (
+        f"{_CM_HALT_STUB}\n"
+        f"{_SOURCE_PREAMBLE}\n"
+        f"_rc=0\n"
+        f"cm_resolve_and_enforce_hook 'rcaware-cfg' 'post-tag' "
+        f"{str(project_dir / 'hooks')!r} {str(dev_tree)!r} 'rc/v9.9.7' || _rc=$?\n"
+        f"echo \"RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH\"\n"
+        f"exit $_rc\n"
+    )
+    result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(kanban_root)})
+
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert "source: cfg (rc/v9.9.7)" in result.stdout
+    resolved_line = [
+        l for l in result.stdout.splitlines() if l.startswith("RESOLVED_PATH:")
+    ][0]
+    resolved_path = pathlib.Path(resolved_line.split(":", 1)[1])
+    assert resolved_path.read_text(encoding="utf-8") == hook_content
+
+
+def test_rc_branch_absent_falls_back_to_legacy_filesystem_resolution(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Omitting rc_branch preserves the legacy filesystem-based resolution.
+
+    Locks the backward-compatibility contract for callers (e.g. ship-rc.sh
+    call sites left unmigrated) that do not supply a 5th argument: tier (c)
+    must still resolve against the dev tree's current checkout exactly as it
+    did before RC-branch-aware resolution was introduced.
+    """
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "rcaware-legacy")
+    inrepo_hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-squash.sh"
+    _write_hook(inrepo_hook)
+
+    # No 5th argument — identical call shape to _run_resolve's legacy callers.
+    result = _run_resolve(tmp_path, kanban_root, "rcaware-legacy", project_dir / "hooks", dev_tree)
+    assert result.returncode == 0
+    assert "source: in-repo" in result.stdout
+    # No branch-qualifier suffix in legacy mode.
+    assert "source: in-repo (" not in result.stdout
+
+
+def test_rc_branch_aware_missing_path_falls_through_to_next_tier(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A cfg-declared relative path absent from the RC branch's tree is treated as unconfigured at tier (a), falling through to tier (b).
+
+    Confirms the resolver does not error or silently succeed with an empty
+    path when the RC branch simply never introduced the cfg-declared file —
+    it correctly falls through to the next tier, exactly like a filesystem
+    miss would in the legacy path.
+    """
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "rcaware-fallthrough")
+    _make_git_dev_tree(dev_tree)
+
+    cfg_text = (
+        "[project]\n"
+        "project_name = rcaware-fallthrough\n"
+        f"dev_tree_path = {dev_tree}\n"
+        "[hooks]\n"
+        "cm_release_pre_squash_hook = scripts/does-not-exist.sh\n"
+    )
+    (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
+
+    _git(dev_tree, "checkout", "-b", "rc/v9.9.6")
+    # Tier (b): kanban-side hook present, so the fall-through has somewhere to land.
+    kanban_hook = project_dir / "hooks" / "cm-release-pre-squash.sh"
+    _write_hook(kanban_hook)
+    _git(dev_tree, "checkout", "main")
+
+    script = (
+        f"{_CM_HALT_STUB}\n"
+        f"{_SOURCE_PREAMBLE}\n"
+        f"_rc=0\n"
+        f"cm_resolve_and_enforce_hook 'rcaware-fallthrough' 'pre-squash' "
+        f"{str(project_dir / 'hooks')!r} {str(dev_tree)!r} 'rc/v9.9.6' || _rc=$?\n"
+        f"exit $_rc\n"
+    )
+    result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(kanban_root)})
+
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert "source: kanban-side" in result.stdout

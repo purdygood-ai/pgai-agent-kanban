@@ -1,31 +1,20 @@
-# pgai-agent-kanban — Roadmap
+# Roadmap
 
-The platform is feature-complete for its core promise: requirements
-in, verified releases out, with a tmux dashboard, a REST API, and
-containerized deployment. Development now favors stability and
-operator experience over new capability. This roadmap lists the
-directions actively held open — deliberately short, deliberately
-unversioned. Specifics are decided at the requirements layer when
-work begins.
+**Current public release: v2.4.0** — the resilient-autonomy era: the
+Loop doctrine and blocking-site census, quality findings as tickets
+instead of stops, dual-channel errors, autonomous block resolution,
+the REST control plane (ICD 1.3.0) with the browser operator surface,
+pluggable workflow types, and version-targeted forward-only
+deployment.
 
-## TLS for the operator REST API — via reverse proxy
+## Next — field-driven
 
-The API serves loopback HTTP by design. Sites that need HTTPS put a
-reverse proxy in front (Caddy is the recommended zero-config choice:
-automatic certificates, two-line Caddyfile). TLS termination is the
-deployment's responsibility, not the framework's — native TLS in the
-API server is not currently planned. A worked Caddy example ships in
-the operator docs.
-
-## OVERWATCH: from observer to block-resolver
-
-Today the observer sweeps, heals reversible mechanics, and wakes on
-any block. The direction: advisory block briefings first (the human
-arrives to a prepared decision), then autonomous resolution of
-known-shape release blocks — matrix-prescribed, fully reversible,
-retry-capped, ledger-recorded, surfaced beside Approvals. Human
-authority moves from prerequisite to oversight for the
-deterministic subset, and remains prerequisite for everything else.
+The near roadmap is written by operation, not speculation: fixes and
+polish land as patch releases when real use surfaces them. Candidate
+directions, in no committed order: one-command acquisition from the
+public repo (curl-able release listing and install-from-repo
+wrappers), deeper workflow-type authoring guides, and
+operator-experience polish from field reports.
 
 ## Additional providers — on demonstrated need
 

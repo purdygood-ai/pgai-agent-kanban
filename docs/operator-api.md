@@ -1,7 +1,7 @@
 # Operator REST API
 
 > **Status: Experimental** — full automated coverage; contract published
-> (ICD 1.1.0); operator field-testing in progress; surfaces may be
+> (ICD 1.3.0); operator field-testing in progress; surfaces may be
 > refined.
 >
 > The API is production-supported in the sense that it is exercised on
@@ -427,6 +427,7 @@ and the error codes noted per row otherwise.
 | `GET /traces` | none | `project`, `agent`, `limit` (int, default 50, hard cap 2000) | JSON array of trace index entries, newest-first — `[{id, project, agent, task_key, timestamp, path_basename}, …]`. `id` is an opaque server-minted token (the trace file stem). `timestamp` is ISO-8601 UTC derived from the filename prefix. Unknown `project` or `agent` values return an empty array (not an error). | `422` when `project` or `agent` contains a traversal sequence, when `agent` is not in the fixed role set, or when `limit` is not a positive integer. |
 | `GET /traces/{id}` | `id` (path) | — | Standard envelope. `stdout` is the trace file's markdown body; `exit_code == 0`. | `404` `{"detail":{"error":"trace not found","id":"<id>"}}` when `{id}` is not present in the server's own enumeration. Traversal-shaped or fabricated ids also resolve to 404 — a path component inside `{id}` is never interpreted as filesystem navigation. |
 | `GET /approvals` | none | `project` | JSON array of pending HUMAN-APPROVE gate records, one per task, sorted by project name then task ID — `[{task_id, project, state, rc, target_version, age, review, review_cmds, approve_cmd, reject_cmd}, ...]`. Empty array `[]` when no gates are pending. `state` is `WAITING` or `BACKLOG`; `target_version` is an alias for `rc` (both are included for consumers that prefer one or the other). `approve_cmd` and `reject_cmd` are the verbatim shell commands the operator would copy-paste. `review` is the task's `## Goal` lines joined with ` \| `. `review_cmds` is an ordered array of verbatim inspect-before-deciding commands (see field notes below). Absent `?project=` aggregates across ALL registered projects (no default project). Added in ICD 1.1.0: the `review_cmds` field. | `422` `{"detail":"Unknown project '<name>'. No such project directory found."}` when `?project=` names a project that is not registered. An empty array is **never** substituted for the unknown-project error. |
+| `GET /auto-resolutions` | none | `project` | JSON array of OVERWATCH auto-resolution ledger records (v2.0.0 Goal 6), newest-first within each project, projects ordered alphabetically — `[{project, rc, attempt_from, attempt_to, ceiling, attempt_display, decision, outcome, trigger, findings, evidence_paths, ledger_path, entry_id, family_key, timestamp}, ...]`. Empty array `[]` when no autonomous resolutions have ever run (the good news). `attempt_display` is `"N/M"` (`attempt_from` over the project's configured retry ceiling); `ceiling` renders `"?"` when the ceiling config cannot be resolved (a read-only display degrades gracefully rather than raising). `outcome` is a backfilled terminal state (e.g. `"SHIPPED attempt 2"`) or the literal `"pending"`. `evidence_paths` plus `ledger_path`/`entry_id` are the drilldown to the TESTER report and the ledger entry — the browser Auto-Resolutions tab's list-plus-drilldown pattern. Read-only: no approve/reject/mutate affordance in the response. Absent `?project=` aggregates across ALL registered projects (no default project). Added in ICD 1.3.0. | `422` `{"detail":"Unknown project '<name>'. No such project directory found."}` when `?project=` names a project that is not registered. An empty array is **never** substituted for the unknown-project error. |
 
 **`GET /logs/{kind}` — kinds and their required params.** The `{kind}`
 path segment selects a fixed row of the server-side confinement table;
@@ -596,6 +597,116 @@ curl -sS "http://127.0.0.1:8300/approvals?project=pgai-agent-kanban" | jq
 
 # Clean system — returns []
 curl -sS http://127.0.0.1:8300/approvals
+# []
+```
+
+#### `GET /auto-resolutions` — OVERWATCH auto-resolution ledger
+
+`GET /auto-resolutions` is the structured read behind the human-review
+tmux window's Auto-Resolutions section and the browser UI's
+Auto-Resolutions tab (v2.0.0 Goal 6: "the surface"). The browser tab is
+the tmux surface's sibling — both read the same append-only ledger
+(`projects/<name>/auto-resolutions.md`, written by
+`pgai_agent_kanban.overwatch.ledger`) through one implementation
+(`collect_auto_resolutions` in `dashboard/scan_auto_resolutions.py`), so
+the JSON body and the tmux pane are guaranteed to agree on which
+resolution events exist.
+
+This endpoint is **read-only**: it never writes to the ledger and the
+response carries no approve/reject/mutate affordance — the surface
+informs the operator, it never acts on their behalf.
+
+**URL and parameters.** The path is `GET /auto-resolutions`. The only
+query parameter is `project`, and it is optional. Absent `?project=`,
+the endpoint aggregates ledger entries across ALL registered projects —
+the same "no default project" rule the rest of the read layer follows.
+When `?project=<name>` is supplied and `<name>` names a registered
+project, results are filtered to that project.
+
+**Response shape.** The body is a JSON array (not the standard
+envelope), one object per ledger entry, newest-first within each
+project (projects ordered alphabetically):
+
+```json
+[
+  {
+    "project": "pgai-agent-kanban",
+    "rc": "v2.0.1",
+    "attempt_from": 1,
+    "attempt_to": 2,
+    "ceiling": "3",
+    "attempt_display": "1/3",
+    "decision": "CANCEL-AND-REBUNDLE",
+    "outcome": "pending",
+    "trigger": "ship-policy-halt",
+    "findings": ["BUG-0041-foo.md"],
+    "evidence_paths": [
+      "projects/pgai-agent-kanban/tasks/CM-20260718-001/artifacts/report.md"
+    ],
+    "ledger_path": "projects/pgai-agent-kanban/auto-resolutions.md",
+    "entry_id": "entry-3f9a2b1c0d4e",
+    "family_key": "bug-0041,bug-0042",
+    "timestamp": "2026-07-27T18:03:00Z"
+  }
+]
+```
+
+Field notes:
+
+- `attempt_display` is the display string `"N/M"` — `attempt_from` (the
+  attempt count at which the block occurred) over `ceiling` (the
+  project's configured `max_rc_retries`). `ceiling` renders `"?"` when
+  the retry-ceiling config cannot be resolved for that project (missing
+  `kanban.cfg`/`project.cfg` `[release] max_rc_retries`); a read-only
+  display degrades gracefully rather than raising the resolver's
+  fail-loud `CeilingConfigError`.
+- `outcome` is the backfilled terminal state (e.g. `"SHIPPED attempt 2"`
+  or `"CEILING-BLOCKED"`) once the bundle family reaches a terminal
+  state, or the literal string `"pending"` while it has not.
+- `decision` is the resolution matrix row matched (e.g.
+  `"CANCEL-AND-REBUNDLE"`).
+- `findings` is the list of bug-report identifiers the resolution acted
+  on. `family_key` is the bundle-family key used for retry-counter
+  keying, or `null` when absent.
+- `evidence_paths` plus `ledger_path`/`entry_id` together form the
+  **drilldown pair** the Auto-Resolutions tab renders: `evidence_paths`
+  points at the underlying reports (TESTER report, ship-policy HALT
+  file, release-state file, ...) — the ledger is the index, not the
+  record, so evidence paths are never duplicated content.
+  `ledger_path`/`entry_id` link back to the ledger entry itself. This is
+  the same list-plus-drilldown pattern the Approvals tab uses
+  (`review_cmds` for Approvals; `evidence_paths` + `ledger_path`/
+  `entry_id` for Auto-Resolutions).
+
+**Empty state.** A clean system with no ledger entries returns `[]`
+with HTTP 200 — the good news, per requirements v2.0.0 Goal 6.
+
+**Unknown project.** `?project=<name>` where `<name>` is not a
+registered project returns `422`, using the same error shape as `GET
+/approvals`:
+
+```json
+{"detail": "Unknown project 'does-not-exist'. No such project directory found."}
+```
+
+An empty array is **never** substituted for the unknown-project error.
+
+**Standard read-layer conventions.** Same conventions as `GET
+/approvals`: loopback bind only, opaque server-minted ids (`entry_id`),
+`422`-before-any-filesystem-scan on an unknown project, and no
+shell-out — the handler reads the ledger and config files directly.
+
+**curl example.**
+
+```bash
+# All auto-resolution events across every project
+curl -sS http://127.0.0.1:8300/auto-resolutions | jq
+
+# Narrow to one project
+curl -sS "http://127.0.0.1:8300/auto-resolutions?project=pgai-agent-kanban" | jq
+
+# Clean system — returns []
+curl -sS http://127.0.0.1:8300/auto-resolutions
 # []
 ```
 
@@ -1221,6 +1332,8 @@ when each baseline was published.
 |---|---|---|
 | 1.0.0 | supported | v1.16.0 |
 | 1.1.0 | supported | v1.19.0 |
+| 1.2.0 | supported | v1.23.0 |
+| 1.3.0 | supported | v2.0.0 |
 
 Column meanings:
 

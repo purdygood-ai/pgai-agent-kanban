@@ -12,15 +12,22 @@ embedded in the cm shell scripts:
 The JSON payload behavior is preserved byte-for-byte — do NOT change key names,
 sort_keys, indent, or trailing-newline handling without filing a separate task.
 
+write_open_with_attempt is a newer sibling of write_open, adding the
+retry-counter tracking keys (attempt, family_key, cargo) computed by
+pgai_agent_kanban.cm.bundle_family. It does not replace write_open — both
+exist so any caller not opted into family tracking is unaffected.
+
 Usage (CLI):
     python3 write_rc_state.py open <rc> <opened_at>
+    python3 write_rc_state.py open-with-attempt <rc> <opened_at> <attempt> <family_key> <cargo_json>
     python3 write_rc_state.py ship <path> <rc> <closed_at>
     python3 write_rc_state.py cancel <path> <rc> <closed_at>
     python3 write_rc_state.py archive-cancelled <path> <rc> <closed_at>
 
 Usage (import):
-    from pgai_agent_kanban.cm.write_rc_state import write_open, write_ship, write_cancel, archive_cancelled
+    from pgai_agent_kanban.cm.write_rc_state import write_open, write_open_with_attempt, write_ship, write_cancel, archive_cancelled
     write_open("v1.8.0", "2026-07-07T12:00:00Z")
+    write_open_with_attempt("v2.0.1", "2026-07-27T12:00:00Z", 2, "family-abc123", ["BUG-NNNN-foo.md"])
     write_ship("/path/to/v1.8.0.json", "v1.8.0", "2026-07-07T13:00:00Z")
     write_cancel("/path/to/v1.8.0.json", "v1.8.0", "2026-07-07T13:00:00Z")
     archive_cancelled("/path/to/v1.8.0.json", "v1.8.0", "2026-07-07T13:00:00Z")
@@ -53,6 +60,55 @@ def write_open(rc: str, opened_at: str) -> None:
         'opened_at': opened_at,
         'closed_at': None,
         'outcome': 'in_progress',
+    }
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+
+
+def write_open_with_attempt(
+    rc: str,
+    opened_at: str,
+    attempt: int,
+    family_key,
+    cargo,
+) -> None:
+    """Write a fresh per-RC release-state JSON, including the v2.0.0
+    retry-counter fields, to stdout.
+
+    Produces the same base shape as write_open() (rc, opened_at, closed_at,
+    outcome) plus three additional keys carried forward by write_cancel /
+    write_ship's setdefault-and-preserve merge (both functions only
+    overwrite closed_at and outcome, so these three keys survive a later
+    cancel or ship untouched):
+
+      - attempt:     the retry attempt number within the bundle family (see
+                     pgai_agent_kanban.cm.bundle_family.compute_bundle_family)
+      - family_key:  the family identity string, or None when the RC has no
+                     trackable cargo (e.g. operator-authored requirements
+                     with no `## Bundled Items` section)
+      - cargo:       the sorted, de-duplicated list of bundled-item
+                     basenames that make up the family (empty list when
+                     family_key is None)
+
+    write_open() itself is intentionally untouched — its docstring's
+    "do NOT change key names or output format" contract still holds for
+    existing callers. This is the function team/scripts/cm/open-rc.sh calls
+    once it has computed the family/attempt facts via bundle_family.py.
+
+    Args:
+        rc:         The RC version string (e.g. "v2.0.1").
+        opened_at:  ISO8601 UTC timestamp string.
+        attempt:    The attempt number within the bundle family (>= 1).
+        family_key: The family identity string, or None.
+        cargo:      Sorted list of bundled-item basenames, or [].
+    """
+    payload = {
+        'rc': rc,
+        'opened_at': opened_at,
+        'closed_at': None,
+        'outcome': 'in_progress',
+        'attempt': attempt,
+        'family_key': family_key,
+        'cargo': cargo,
     }
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + '\n')
 
@@ -261,6 +317,37 @@ def main() -> None:
         help="ISO8601 UTC timestamp string (e.g. '2026-07-07T12:00:00Z').",
     )
 
+    # open-with-attempt subcommand (adds the bundle-family retry counter)
+    p_open_attempt = subparsers.add_parser(
+        'open-with-attempt',
+        help=(
+            "Write a fresh per-RC release-state JSON to stdout, including "
+            "the bundle-family attempt counter. Redirect stdout to the "
+            "target file (as open-rc.sh does)."
+        ),
+    )
+    p_open_attempt.add_argument(
+        'rc',
+        help="The RC version string (e.g. 'v2.0.1').",
+    )
+    p_open_attempt.add_argument(
+        'opened_at',
+        help="ISO8601 UTC timestamp string (e.g. '2026-07-07T12:00:00Z').",
+    )
+    p_open_attempt.add_argument(
+        'attempt',
+        type=int,
+        help="Attempt number within the bundle family (>= 1).",
+    )
+    p_open_attempt.add_argument(
+        'family_key',
+        help="Family identity string, or the literal 'none' when the RC has no trackable cargo.",
+    )
+    p_open_attempt.add_argument(
+        'cargo_json',
+        help="JSON-encoded list of bundled-item basenames (e.g. '[\"BUG-0001-foo.md\"]').",
+    )
+
     # ship subcommand
     p_ship = subparsers.add_parser(
         'ship',
@@ -328,6 +415,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == 'open':
         write_open(args.rc, args.opened_at)
+    elif args.command == 'open-with-attempt':
+        family_key = None if args.family_key == 'none' else args.family_key
+        cargo = json.loads(args.cargo_json)
+        write_open_with_attempt(args.rc, args.opened_at, args.attempt, family_key, cargo)
     elif args.command == 'ship':
         write_ship(args.path, args.rc, args.closed_at)
     elif args.command == 'cancel':

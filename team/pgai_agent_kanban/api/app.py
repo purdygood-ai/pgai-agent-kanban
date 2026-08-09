@@ -16,6 +16,7 @@ wired with:
   - GET /rejected        — quarantined intake inventory (list-rejected.sh).
   - GET /projects        — registered project list (projects.cfg direct read).
   - GET /projects/{name} — project metadata card (config, release state, queue counts).
+  - GET /projects/{project}/tasks/{key}/readme — a task's README.md bytes (show-readme.sh).
   - GET /board           — unified kanban board aggregation (all eight columns).
   - GET /logs/{kind}     — tail a named log file (wake, cm, agent, debug, overwatch, api-server).
   - GET /traces          — training-trace index (newest-first, optional project/agent/limit filters).

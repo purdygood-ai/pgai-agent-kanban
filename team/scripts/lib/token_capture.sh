@@ -96,6 +96,18 @@
 # writes the old schema (with model, input_tokens, etc.) so legacy environments
 # do not crash and historical files remain readable.
 #
+# Optional "effort" field: when a caller passes a non-empty effort value to
+# token_capture_merge_into_task_artifacts (the reasoning-effort in force for
+# the invocation, e.g. "high"), it is written as a top-level "effort" key
+# alongside provider/agent/model metadata — in both the new and legacy
+# schemas, and in the captured:false failure-record shape. The key is
+# entirely OMITTED (not null, not "") when no invocation for a task ever
+# supplies an effort value, so tokens.json remains byte-identical to
+# pre-effort output for every caller that does not pass one. When one
+# invocation for a task supplies effort and a later invocation for the same
+# task omits it, the previously recorded value is preserved rather than
+# cleared.
+#
 # -------------------------------------------------------------------------
 # FUNCTIONS
 # -------------------------------------------------------------------------
@@ -421,7 +433,7 @@ PY
 # ---------------------------------------------------------------------------
 # token_capture_merge_into_task_artifacts
 #         <usage_record_json> <task_artifact_dir>
-#         <model> <provider> <agent> <elapsed_seconds> [<rc_version>]
+#         <model> <provider> <agent> <elapsed_seconds> [<rc_version>] [<effort>]
 #
 # Merges a per-invocation usage record into <task_artifact_dir>/tokens.json.
 #
@@ -458,6 +470,19 @@ PY
 #                             Written to tokens.json as the rc_version field.
 #                             When omitted, existing file's rc_version is preserved;
 #                             a new file gets rc_version="none".
+#   $8  effort              — (optional) the reasoning-effort value in force for this
+#                             invocation (e.g. "high"), as resolved by
+#                             config_loader.sh's resolve_role_effort(). Written to
+#                             tokens.json as the top-level effort field, alongside
+#                             provider/agent/model metadata.
+#                             When omitted (empty string, the default): if an
+#                             existing tokens.json already carries an effort field
+#                             (set by a prior invocation for this task), that value
+#                             is preserved; otherwise NO effort key is written at
+#                             all — this is what keeps tokens.json byte-identical
+#                             to pre-effort output when no caller ever supplies a
+#                             value. Unlike rc_version, there is no "none" default;
+#                             the field is either a real value or entirely absent.
 #
 # Returns 0 always. Errors emit a single warning line and do not propagate.
 # ---------------------------------------------------------------------------
@@ -469,6 +494,7 @@ token_capture_merge_into_task_artifacts() {
     local agent="${5:-unknown}"
     local elapsed_seconds="${6:-0}"
     local rc_version="${7:-}"
+    local effort="${8:-}"
 
     if [[ -z "$task_artifact_dir" ]]; then
         echo "token_capture.sh: WARNING: token_capture_merge_into_task_artifacts: task_artifact_dir is empty — skipping" >&2
@@ -487,12 +513,12 @@ token_capture_merge_into_task_artifacts() {
     if command -v jq >/dev/null 2>&1; then
         _token_capture_merge_jq \
             "$usage_record_json" "$tokens_json" \
-            "$model" "$provider" "$agent" "$elapsed_seconds" "$rc_version" \
+            "$model" "$provider" "$agent" "$elapsed_seconds" "$rc_version" "$effort" \
             || echo "token_capture.sh: WARNING: jq merge failed — skipping token capture" >&2
     else
         _token_capture_merge_python \
             "$usage_record_json" "$tokens_json" \
-            "$model" "$provider" "$agent" "$elapsed_seconds" "$rc_version" \
+            "$model" "$provider" "$agent" "$elapsed_seconds" "$rc_version" "$effort" \
             || echo "token_capture.sh: WARNING: python3 merge failed — skipping token capture" >&2
     fi
 
@@ -511,6 +537,7 @@ _token_capture_merge_jq() {
     local agent="$5"
     local elapsed_seconds="$6"
     local rc_version="${7:-}"
+    local effort="${8:-}"
 
     local now
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -529,6 +556,7 @@ _token_capture_merge_jq() {
             --arg now "$now" \
             --arg rc_version "$effective_rc_version_f" \
             --arg reason "$failure_reason" \
+            --arg effort "$effort" \
             --argjson elapsed "$elapsed_seconds" \
             '{
               captured:        false,
@@ -541,7 +569,8 @@ _token_capture_merge_jq() {
               timestamp:       $now,
               total_cost_usd:  0,
               model_usage:     {}
-            }' > "$tokens_json" 2>/dev/null || return 1
+            }
+            + (if ($effort != "") then {effort: $effort} else {} end)' > "$tokens_json" 2>/dev/null || return 1
         return 0
     fi
 
@@ -580,6 +609,7 @@ _token_capture_merge_jq() {
                 --arg agent "$agent" \
                 --arg now "$now" \
                 --arg new_rc_version "$effective_rc_version" \
+                --arg new_effort "$effort" \
                 --argjson new_cost "$new_cost" \
                 --argjson new_model_usage "$new_model_usage" \
                 --argjson new_elapsed "$elapsed_seconds" \
@@ -609,6 +639,10 @@ _token_capture_merge_jq() {
                   total_cost_usd:  (($e.total_cost_usd // 0) + $new_cost),
                   model_usage:     merge_model_usage(($e.model_usage // {}); $new_model_usage)
                 }
+                | . + (
+                    (if ($new_effort != "") then $new_effort else ($e.effort // "") end) as $eff
+                    | if ($eff != "") then {effort: $eff} else {} end
+                  )
                 ' 2>/dev/null)" || return 1
             printf '%s\n' "$merged" > "$tokens_json" || return 1
         else
@@ -619,6 +653,7 @@ _token_capture_merge_jq() {
                 --arg agent "$agent" \
                 --arg now "$now" \
                 --arg new_rc_version "$effective_rc_version" \
+                --arg new_effort "$effort" \
                 --argjson new_cost "$new_cost" \
                 --argjson new_model_usage "$new_model_usage" \
                 --argjson new_elapsed "$elapsed_seconds" \
@@ -631,7 +666,8 @@ _token_capture_merge_jq() {
                   timestamp:       $now,
                   total_cost_usd:  $new_cost,
                   model_usage:     $new_model_usage
-                }' 2>/dev/null)" || return 1
+                }
+                + (if ($new_effort != "") then {effort: $new_effort} else {} end)' 2>/dev/null)" || return 1
             printf '%s\n' "$merged" > "$tokens_json" || return 1
         fi
     else
@@ -651,6 +687,7 @@ _token_capture_merge_jq() {
                 --arg agent "$agent" \
                 --arg now "$now" \
                 --arg new_rc_version "${rc_version:-none}" \
+                --arg new_effort "$effort" \
                 --argjson new_input "$new_input" \
                 --argjson new_output "$new_output" \
                 --argjson new_cache_creation "$new_cache_creation" \
@@ -672,6 +709,10 @@ _token_capture_merge_jq() {
                   elapsed_seconds:              (($e.elapsed_seconds               // 0) + $new_elapsed),
                   timestamp:                    $now
                 }
+                | . + (
+                    (if ($new_effort != "") then $new_effort else ($e.effort // "") end) as $eff
+                    | if ($eff != "") then {effort: $eff} else {} end
+                  )
                 ' 2>/dev/null)" || return 1
             printf '%s\n' "$merged" > "$tokens_json" || return 1
         else
@@ -682,6 +723,7 @@ _token_capture_merge_jq() {
                 --arg agent "$agent" \
                 --arg now "$now" \
                 --arg new_rc_version "${rc_version:-none}" \
+                --arg new_effort "$effort" \
                 --argjson new_input "$new_input" \
                 --argjson new_output "$new_output" \
                 --argjson new_cache_creation "$new_cache_creation" \
@@ -699,7 +741,8 @@ _token_capture_merge_jq() {
                   invocations:                  1,
                   elapsed_seconds:              $new_elapsed,
                   timestamp:                    $now
-                }' > "$tokens_json" 2>/dev/null || return 1
+                }
+                + (if ($new_effort != "") then {effort: $new_effort} else {} end)' > "$tokens_json" 2>/dev/null || return 1
         fi
     fi
 
@@ -718,10 +761,11 @@ _token_capture_merge_python() {
     local agent="$5"
     local elapsed_seconds="$6"
     local rc_version="${7:-}"
+    local effort="${8:-}"
 
     python3 - \
         "$usage_json" "$tokens_json" \
-        "$model" "$provider" "$agent" "$elapsed_seconds" "${rc_version:-none}" <<'PY'
+        "$model" "$provider" "$agent" "$elapsed_seconds" "${rc_version:-none}" "$effort" <<'PY'
 import json, sys, pathlib, datetime
 
 usage_json_str   = sys.argv[1]
@@ -734,6 +778,10 @@ rc_version       = sys.argv[7] if len(sys.argv) > 7 else 'none'
 # Treat empty string as "none" (caller may pass empty when no RC is active)
 if not rc_version:
     rc_version = 'none'
+# effort: the reasoning-effort value in force, or '' when no caller has ever
+# supplied one. Unlike rc_version there is no "none" default — an empty
+# string here means "omit the effort key entirely" (see effective_effort below).
+effort = sys.argv[8] if len(sys.argv) > 8 else ''
 
 # Parse the per-invocation usage record
 try:
@@ -759,6 +807,8 @@ if new.get('captured') is False:
         'total_cost_usd':  0,
         'model_usage':     {},
     }
+    if effort:
+        merged_failure['effort'] = effort
     try:
         tokens_json_path.write_text(json.dumps(merged_failure, indent=2) + '\n', encoding='utf-8')
     except OSError as e:
@@ -831,6 +881,13 @@ if has_new_schema:
         'total_cost_usd':  merged_cost,
         'model_usage':     merged_mu,
     }
+    # effort: use passed arg when non-empty; otherwise carry forward the
+    # existing file's effort field, if any. Omit the key entirely when
+    # neither this invocation nor any prior one supplied a value — this is
+    # what keeps tokens.json byte-identical to pre-effort output.
+    effective_effort = effort or existing.get('effort', '')
+    if effective_effort:
+        merged['effort'] = effective_effort
 else:
     # ---- LEGACY SCHEMA ----
     # total_cost_usd or model_usage absent — use old capture behavior.
@@ -856,6 +913,10 @@ else:
         'elapsed_seconds':              existing.get('elapsed_seconds',             0) + elapsed_seconds,
         'timestamp':                    now,
     }
+    # effort: same carry-forward-or-omit semantics as the new-schema branch above.
+    effective_effort = effort or existing.get('effort', '')
+    if effective_effort:
+        merged['effort'] = effective_effort
 
 try:
     tokens_json_path.write_text(json.dumps(merged, indent=2) + '\n', encoding='utf-8')

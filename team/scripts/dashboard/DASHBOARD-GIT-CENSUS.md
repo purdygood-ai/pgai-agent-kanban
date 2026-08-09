@@ -9,9 +9,8 @@ BUG-0112 ("The ENTIRE dashboard is local-only").
 
 **Task:** CODER-20260726-003-dashboard-census-local-only
 **Date:** 2026-07-26
-**Related:** BUG-0112-dashboard-render-performs-network-git.md,
-CODER-20260726-002-discovery-git-local-only-flag (prerequisite; added the
-`PGAI_GIT_LOCAL_ONLY` guard to `discovery.sh`'s `_disc_git_tag_exists`)
+**Related:** CODER-20260726-002-discovery-git-local-only-flag (prerequisite;
+added the `PGAI_GIT_LOCAL_ONLY` guard to `discovery.sh`'s `_disc_git_tag_exists`)
 
 **Scope note:** this ticket converts every non-`4:git`-window site. The
 `4:git` window itself (`git-status.sh`, `git-recent-tags.sh`) is classified
@@ -208,9 +207,9 @@ window of its own; sourced by `data.sh`, `show-header.sh`,
 
 `get_kanban_version`'s Tier 3 branch performed an UNCONDITIONAL
 `git -C "$repo_root" fetch origin --tags --quiet` before calling
-`get_latest_released_tag` — this is the network call BUG-0112 explicitly
-names ("lib/version.sh no longer performs the `git fetch origin --tags`
-network call on the render path").
+`get_latest_released_tag` — this is the network call ("lib/version.sh
+no longer performs the `git fetch origin --tags` network call on the
+render path").
 
 **Fix:** the fetch line is REMOVED, not flag-gated — this library is
 dashboard-render-only (never sourced by agent/wake-context code), so
@@ -289,9 +288,7 @@ branches — unconfigured, missing directory, not a git repository — now
 render this string family).
 
 **Classification:** 4:GIT-WINDOW. No network-related code change was
-needed (this script was already local-only); the missing-tree message
-wording was aligned with BUG-0112's documented string in the follow-up
-ticket.
+needed (this script was already local-only).
 
 #### B2. `team/scripts/dashboard/git-recent-tags.sh`
 
@@ -304,9 +301,7 @@ network-capable hits**. Same local-only `git -C "$dev_tree" tag --list`
 wording: `"git tree not available: <path>"` (same treatment as B1).
 
 **Classification:** 4:GIT-WINDOW. No network-related code change was
-needed (this script was already local-only); the missing-tree message
-wording was aligned with BUG-0112's documented string in the follow-up
-ticket.
+needed (this script was already local-only).
 
 ---
 
@@ -343,7 +338,7 @@ SUPPRESSION-WITH-NARRATION via a labeled sentinel value (`v0.0.0`,
 `unknown`, `none`) rather than a dedicated "git tree not available: X"
 banner per site. This was a deliberate choice to avoid rewriting eight
 render functions' existing, already-tested fallback plumbing beyond what
-BUG-0112 requires (remove the network call). Every rendered sentinel is
+was require (remove the network call). Every rendered sentinel is
 self-evidently a placeholder to an operator reading the pane (e.g.
 "Last Released: none", "v0.0.0", "vunknown"), satisfies the acceptance
 criterion ("clear error render OR suppression with narration — never
@@ -361,7 +356,7 @@ All verification commands were run inside the task worktree,
 `/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260726-003-dashboard-census-local-only`,
 with a `git` PATH-shadowing stub script that logs any invocation of
 `fetch`/`ls-remote`/`pull`/`push`/`clone` before delegating to the real
-`git` binary (network-stub fixture, per BUG-0112 Acceptance #2).
+`git` binary (network-stub fixture).
 
 1. **`bash -n` on every modified file** — all 9 files pass with exit 0.
 

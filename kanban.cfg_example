@@ -162,6 +162,26 @@ ai_auth_mode = oauth
 # provider lanes as they mature. Default: true.
 llm_thinking_enabled = true
 
+# llm_effort — global reasoning-effort level passed to the provider CLI on
+# every role invocation. Resolved exactly like the per-role model override
+# mechanism: an operator-exported PGAI_<ROLE>_EFFORT env var takes
+# precedence over this cfg value for that role (env wins, cfg is the base).
+# Absent (commented out, as below) means no effort flag is passed and the
+# provider's own default applies — byte-identical to today's behavior.
+#
+# Vendor defaults differ: Anthropic Claude defaults to "high" effort;
+# OpenAI's Codex models default to "medium". Set this explicitly when
+# comparing providers head-to-head so the comparison starts from the same
+# effort level rather than each vendor's own default.
+#
+# Supported values vary by model — not every model on every provider
+# accepts every level below. Consult the target model's documentation
+# before setting a value outside the common low/medium/high range.
+# Valid: minimal, low, medium, high, xhigh, max (validated at load; an
+#        unrecognized value fails loud naming this key)
+# Default: absent (no effort resolved; provider default applies)
+# llm_effort = medium
+
 
 # ---------------------------------------------------------------------------
 # [docker] — container-engine selection for the container-shell launcher
@@ -260,8 +280,8 @@ max_project_seconds = 14400
 # Default: 30
 kill_grace_seconds = 30
 
-# Single ceiling for the durable ## Transient Retry status.md record
-# (BUG-0107). When a task is left in WORKING after a transient provider error
+# Single ceiling for the durable ## Transient Retry status.md record.
+# When a task is left in WORKING after a transient provider error
 # (5xx, overloaded, rate-limit, 429, 503, 529), wake_common.sh's
 # handle_working_after_exit blocks the task and increments this record's
 # retry_count. While retry_count is below this cap the task is left with
@@ -342,6 +362,31 @@ trivial_log_bytes = 1700
 # this are always preserved, even if below the byte threshold.
 # Default: 6
 trivial_log_hours = 6
+
+
+# ---------------------------------------------------------------------------
+# [release] — release-engine retry ceiling (v2.0.0+)
+# ---------------------------------------------------------------------------
+# Consumed by pp_max_rc_retries() (team/scripts/lib/project_paths.sh), the
+# reader OVERWATCH's resolution matcher and ceiling terminal path use to cap
+# how many times one bundle family (same cargo set, rebundled under a new
+# patch number) may be auto-resolved via cancel-and-rebundle before the
+# block escalates to HALT-hard with the full retry history.
+[release]
+
+# Kanban-wide default retry ceiling. Per-project override lives in each
+# project's project.cfg under the same [release] section — see
+# project.cfg_example. The self-build project (pgai-agent-kanban) MUST set
+# an explicit override (recommended: 1) rather than inherit this default:
+# the kanban auto-recycling its own failed self-modifications is the
+# compounding-error case that a tighter ceiling exists to contain; managed
+# projects are blast-radius-contained and can safely use the shipped default.
+#
+# The reader fails loud (non-zero, narrated) rather than silently assuming
+# this default when the key is absent from BOTH kanban.cfg and the
+# resolving project's project.cfg — see pp_max_rc_retries() docstring.
+# Default: 3
+max_rc_retries = 3
 
 
 # ---------------------------------------------------------------------------

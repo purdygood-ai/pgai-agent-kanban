@@ -74,6 +74,12 @@
 #   pp_strip_prefix_from_tag [name] <tag> — strips prefix from tag; returns bare semver
 #   pp_repo_lock_path [name]  — path to the per-project repo flock file; single
 #                               source of truth shared by wake dispatch and OVERWATCH
+#   pp_max_rc_retries [name]  — effective RC-retry ceiling: project.cfg
+#                               [release] max_rc_retries override when present,
+#                               else kanban.cfg [release] max_rc_retries default.
+#                               FAILS LOUD (non-zero, stderr message) when the
+#                               key is absent from both sources — no silent
+#                               fallback, unlike the other pp_max_* ceilings.
 
 # ---------------------------------------------------------------------------
 # Source the INI parser (read_ini) once when this library is loaded.
@@ -714,6 +720,87 @@ pp_max_priorities_per_run() {
     fi
 
     echo "$raw"
+}
+
+# ---------------------------------------------------------------------------
+# pp_max_rc_retries [name]
+# Echoes the effective RC-retry ceiling for the named project: the
+# per-project override from project.cfg [release] max_rc_retries when
+# present, otherwise the kanban-wide default from $KANBAN_ROOT/kanban.cfg
+# [release] max_rc_retries.
+#
+# This is "the ceiling": OVERWATCH's resolution matcher compares an RC's
+# attempt count against this value; at or above the ceiling a block routes
+# to HALT-hard with the full retry history instead of a further
+# cancel-and-rebundle attempt.
+#
+# Unlike pp_max_minor / pp_max_major / pp_max_patch / pp_max_priorities_per_run
+# (which return an empty string meaning "no constraint" when unset), this
+# ceiling has no safe empty meaning — the resolver needs a concrete integer
+# to compare an attempt count against. So absence in BOTH project.cfg and
+# kanban.cfg is NOT treated as "unlimited retries"; it fails loud instead:
+# prints an error naming the key and both file paths checked, and returns
+# non-zero. Callers must not substitute a hardcoded fallback on a non-zero
+# return — that would silently reintroduce the exact "assume a default
+# when a value is required" behavior Goal 4 forbids.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+#
+# Source (checked in this order):
+#   1. project.cfg [release] max_rc_retries  (or bare key in legacy PROJECT.cfg)
+#   2. kanban.cfg  [release] max_rc_retries  (kanban root, shipped default 3)
+#
+# Validation: must be a non-negative integer in whichever source supplies it.
+# An invalid (non-integer) value is also a fail-loud non-zero return, naming
+# the offending file and value — never silently coerced or ignored.
+#
+# Example:
+#   pp_max_rc_retries "pgai-agent-kanban"   # -> 1  (explicit self-build override)
+#   pp_max_rc_retries "some-other-project"  # -> 3  (falls through to kanban.cfg default)
+# ---------------------------------------------------------------------------
+pp_max_rc_retries() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || return 1
+
+    local kroot
+    kroot="$(_pp_kanban_root)" || return 1
+    local kanban_cfg="${kroot}/kanban.cfg"
+
+    local project_root cfg_file
+    project_root="${kroot}/projects/${name}"
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    # Tier 1: project.cfg override.
+    local project_raw=""
+    if [[ -n "$cfg_file" ]]; then
+        project_raw="$(_pp_read_cfg_key "$cfg_file" release max_rc_retries "")"
+    fi
+    if [[ -n "$project_raw" ]]; then
+        if ! [[ "$project_raw" =~ ^[0-9]+$ ]]; then
+            echo "project_paths.sh: pp_max_rc_retries: invalid value '${project_raw}' for project '${name}' in ${cfg_file} [release] max_rc_retries (expected non-negative integer)" >&2
+            return 1
+        fi
+        echo "$project_raw"
+        return 0
+    fi
+
+    # Tier 2: kanban.cfg default.
+    local kanban_raw
+    kanban_raw="$(read_ini "$kanban_cfg" release max_rc_retries "")"
+    if [[ -n "$kanban_raw" ]]; then
+        if ! [[ "$kanban_raw" =~ ^[0-9]+$ ]]; then
+            echo "project_paths.sh: pp_max_rc_retries: invalid value '${kanban_raw}' in ${kanban_cfg} [release] max_rc_retries (expected non-negative integer)" >&2
+            return 1
+        fi
+        echo "$kanban_raw"
+        return 0
+    fi
+
+    # Fail loud: no source supplied a value. Never assume a default here —
+    # a silent fallback is exactly the behavior Goal 4 forbids for a
+    # required-at-resolve-time ceiling.
+    echo "project_paths.sh: pp_max_rc_retries: max_rc_retries is required but absent for project '${name}'. Checked ${cfg_file:-<no project.cfg found for ${name}>} [release] max_rc_retries and ${kanban_cfg} [release] max_rc_retries — set one of them." >&2
+    return 1
 }
 
 # ---------------------------------------------------------------------------

@@ -509,8 +509,22 @@ _suite_cmd() {
                     [[ "$VERBOSE" == "true" ]] && echo "  PASS: ${cmd_text}"
                     file_pass=$((file_pass + 1))
                 else
+                    # Non-deterministic (exempt): a non-zero exit can arise from a
+                    # stale command, a missing skip annotation, or absent external
+                    # state — the correct resolution is not computable at
+                    # detection. Per docs/coding-standards.md "The
+                    # non-deterministic exemption", this is exempt from a numbered
+                    # fix-command block but never exempt from naming the next
+                    # diagnostic step.
                     echo "  FAIL (exit ${exit_code}): ${cmd_text}"
                     echo "    in: ${rel_path}"
+                    echo "    Cause: this fenced command exited ${exit_code} when executed verbatim from ${DOC_ROOT}."
+                    echo "    Next diagnostic step: re-run it directly to see its full output:"
+                    echo "      (cd \"${DOC_ROOT}\" && ${cmd_text})"
+                    echo "    If it legitimately requires unavailable external state (a running service, an"
+                    echo "    interactive editor, credentials), mark it non-executable with one of the three"
+                    echo "    doc-lint skip mechanisms documented in this script's --help output, rather than"
+                    echo "    leaving the doc fixture failing."
                     file_fail=$((file_fail + 1))
                     any_fail=true
                 fi
@@ -525,6 +539,10 @@ _suite_cmd() {
     echo "=== cmd-pass summary: files=${total_files} pass=${total_pass} skip=${total_skip} fail=${total_fail} ==="
     if [[ "$any_fail" == "true" ]]; then
         echo "=== doc-lint.sh: FAILURES DETECTED — see above ==="
+        echo ""
+        echo "Rule: every fenced bash/sh command in the audited doc surface must execute"
+        echo "successfully as documented, or be explicitly marked non-executable via a"
+        echo "doc-lint skip/docker annotation (see --help)."
         return 1
     fi
     return 0
@@ -560,9 +578,21 @@ _suite_links() {
             if [[ -e "$resolved" ]]; then
                 total_pass=$((total_pass + 1))
             else
+                # Partial: the gate can name the exact cause and location and
+                # locate the offending line deterministically, but the corrected
+                # target is genuinely free-form (only the author knows the
+                # intended destination) — per docs/coding-standards.md, print a
+                # concrete, filled-in example rather than a bare placeholder.
                 echo "  DEAD LINK: ${link}"
                 echo "    in: ${rel_path}"
                 echo "    resolved to: ${resolved}"
+                echo "    Cause: ${rel_path} links to '${link}', which resolves to a path that does not exist."
+                echo "    To fix:"
+                echo "      1. grep -n -F '${link}' \"${filepath}\""
+                echo "      2. Edit the line found above so the link target points at the correct existing"
+                echo "         file (it currently resolves to '${resolved}', which is absent)."
+                echo "      3. ${BASH_SOURCE[0]} --suite links --doc-root \"${DOC_ROOT}\""
+                echo "    Rule: every relative Markdown link in the audited doc surface must resolve to an existing file."
                 total_fail=$((total_fail + 1))
                 any_fail=true
             fi
@@ -600,8 +630,20 @@ _suite_fossil_greps() {
             hits=$(grep -nE "$pattern" "$filepath" 2>/dev/null || true)
             if [[ -n "$hits" ]]; then
                 echo "  FOSSIL HIT: pattern=${pattern}  file=${rel_path}"
+                # Partial: the gate names the exact file:line and matched
+                # pattern deterministically, but the surrounding rewrite that
+                # removes the residue is author content — print a filled-in
+                # example command block ending in the re-check, per
+                # docs/coding-standards.md.
                 echo "$hits" | while IFS= read -r hit_line; do
+                    hit_lineno="${hit_line%%:*}"
                     echo "    ${hit_line}"
+                    echo "    Cause: ${rel_path}:${hit_lineno} matches the forbidden internal-residue pattern '${pattern}'."
+                    echo "    To fix:"
+                    echo "      1. sed -n '${hit_lineno}p' \"${filepath}\""
+                    echo "      2. Remove or rewrite that line in ${rel_path} so it no longer matches '${pattern}'."
+                    echo "      3. ${BASH_SOURCE[0]} --suite fossil-greps --doc-root \"${DOC_ROOT}\""
+                    echo "    Rule: none of the known internal-residue patterns (FOSSIL_PATTERNS in ${BASH_SOURCE[0]}) may appear in the audited doc surface."
                 done
                 total_fail=$((total_fail + 1))
                 any_fail=true
@@ -637,7 +679,18 @@ _suite_feature_greps() {
             fi
         done
         if [[ "$found" == "false" ]]; then
+            # Partial (must-find gate): the gate names the missing token
+            # deterministically, but authoring the documentation section that
+            # introduces it is free-form content only a human can write — print
+            # a filled-in example of where/how to add it, per
+            # docs/coding-standards.md.
             echo "  FEATURE MISSING: pattern=${pattern} not found in any audited doc"
+            echo "    Cause: no file in the audited doc surface contains a case-insensitive match for '${pattern}'."
+            echo "    To fix:"
+            echo "      1. grep -rniE '${pattern}' \"${DOC_ROOT}\"   # confirm it is truly undocumented, not just outside the audited surface"
+            echo "      2. Add a section documenting '${pattern}' to one of the audited docs (e.g. README.md or HOW_TO.md)."
+            echo "      3. ${BASH_SOURCE[0]} --suite feature-greps --doc-root \"${DOC_ROOT}\""
+            echo "    Rule: every required feature token in FEATURE_PATTERNS (${BASH_SOURCE[0]}) must be documented somewhere in the audited doc surface."
             total_fail=$((total_fail + 1))
             any_fail=true
         fi

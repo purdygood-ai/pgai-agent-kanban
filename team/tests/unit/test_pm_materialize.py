@@ -206,22 +206,23 @@ def test_inject_cm_bookends_cm_release_depends_on_tester() -> None:
     assert tester["task_id"] in cm_release["prerequisite_ids"]
 
 
-def test_inject_cm_bookends_human_approve_injected_when_required() -> None:
-    """inject_cm_bookends injects a HUMAN-APPROVE task when human_approval_required='required'."""
+@pytest.mark.parametrize(
+    "human_approval_required, expected_human_task_count",
+    [
+        ("required", 1),  # HUMAN-APPROVE task injected
+        ("auto", 0),  # no HUMAN-APPROVE task
+        ("invalid-value", 0),  # unrecognized value defaults to 'auto' (no HUMAN gate)
+    ],
+)
+def test_inject_cm_bookends_human_approve_count(
+    human_approval_required: str, expected_human_task_count: int
+) -> None:
+    """inject_cm_bookends injects a HUMAN-APPROVE task only when human_approval_required='required'."""
     tasks = _stamp_ids(_make_tasks(1))
     pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE",
-                          human_approval_required="required")
+                          human_approval_required=human_approval_required)
     human_tasks = [t for t in tasks if t.get("role") == "HUMAN"]
-    assert len(human_tasks) == 1
-
-
-def test_inject_cm_bookends_no_human_approve_for_auto() -> None:
-    """inject_cm_bookends skips HUMAN-APPROVE when human_approval_required='auto'."""
-    tasks = _stamp_ids(_make_tasks(1))
-    pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE",
-                          human_approval_required="auto")
-    human_tasks = [t for t in tasks if t.get("role") == "HUMAN"]
-    assert len(human_tasks) == 0
+    assert len(human_tasks) == expected_human_task_count
 
 
 def test_inject_cm_bookends_no_tester_when_test_not_required() -> None:
@@ -245,15 +246,6 @@ def test_inject_cm_bookends_returns_empty_for_empty_version() -> None:
     tasks = _stamp_ids(_make_tasks(1))
     result = pm.inject_cm_bookends(tasks, "", "20260101", 100, "CLAUDE")
     assert result == []
-
-
-def test_inject_cm_bookends_invalid_human_approval_defaults_to_auto() -> None:
-    """inject_cm_bookends treats unrecognized human_approval_required as 'auto' (no HUMAN gate)."""
-    tasks = _stamp_ids(_make_tasks(1))
-    pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE",
-                          human_approval_required="invalid-value")
-    human_tasks = [t for t in tasks if t.get("role") == "HUMAN"]
-    assert len(human_tasks) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -758,24 +750,18 @@ def test_assign_task_ids_sets_feature_branch_none_when_no_git_repo(
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_workspace_value_returns_none_for_none_input() -> None:
-    """normalize_workspace_value returns 'none' when the input is Python None."""
-    assert pm.normalize_workspace_value(None) == "none"
-
-
-def test_normalize_workspace_value_returns_none_for_empty_string() -> None:
-    """normalize_workspace_value returns 'none' for an empty string."""
-    assert pm.normalize_workspace_value("") == "none"
-
-
-def test_normalize_workspace_value_passes_through_real_path() -> None:
-    """normalize_workspace_value returns the path as-is when non-empty."""
-    assert pm.normalize_workspace_value("/opt/project") == "/opt/project"
-
-
-def test_normalize_workspace_value_strips_surrounding_whitespace() -> None:
-    """normalize_workspace_value strips leading and trailing whitespace."""
-    assert pm.normalize_workspace_value("  /opt/project  ") == "/opt/project"
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, "none"),  # Python None -> 'none'
+        ("", "none"),  # empty string -> 'none'
+        ("/opt/project", "/opt/project"),  # real path passes through as-is
+        ("  /opt/project  ", "/opt/project"),  # surrounding whitespace stripped
+    ],
+)
+def test_normalize_workspace_value(raw, expected: str) -> None:
+    """normalize_workspace_value passes through real paths, normalizing empty/None to 'none'."""
+    assert pm.normalize_workspace_value(raw) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -783,19 +769,18 @@ def test_normalize_workspace_value_strips_surrounding_whitespace() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_validate_model_override_accepts_alias_opus() -> None:
-    """validate_model_override accepts the 'opus' alias."""
-    assert pm.validate_model_override("opus") == "opus"
-
-
-def test_validate_model_override_accepts_alias_sonnet() -> None:
-    """validate_model_override accepts the 'sonnet' alias."""
-    assert pm.validate_model_override("sonnet") == "sonnet"
-
-
-def test_validate_model_override_accepts_alias_haiku() -> None:
-    """validate_model_override accepts the 'haiku' alias."""
-    assert pm.validate_model_override("haiku") == "haiku"
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("opus", "opus"),
+        ("sonnet", "sonnet"),
+        ("haiku", "haiku"),
+        ("none", "none"),  # literal string 'none'
+    ],
+)
+def test_validate_model_override_accepts_alias(raw: str, expected: str) -> None:
+    """validate_model_override accepts the known model-alias shortnames and the literal 'none'."""
+    assert pm.validate_model_override(raw) == expected
 
 
 def test_validate_model_override_accepts_full_model_id() -> None:
@@ -808,11 +793,6 @@ def test_validate_model_override_returns_none_for_empty_input() -> None:
     """validate_model_override returns 'none' when the input is empty or None."""
     assert pm.validate_model_override("") == "none"
     assert pm.validate_model_override(None) == "none"
-
-
-def test_validate_model_override_returns_none_for_literal_none() -> None:
-    """validate_model_override returns 'none' for the literal string 'none'."""
-    assert pm.validate_model_override("none") == "none"
 
 
 def test_validate_model_override_passes_through_unrecognized_value() -> None:
@@ -926,34 +906,22 @@ def test_is_human_task_returns_false_for_coder_role() -> None:
     assert pm.is_human_task(task) is False
 
 
-def test_get_queue_path_returns_human_backlog_for_human_task(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize(
+    "role, assigned_agent, expected_backlog_filename",
+    [
+        ("HUMAN", "HUMAN", "human_backlog.md"),  # HUMAN-role gate tasks
+        ("CODER", "CODER", "coder_backlog.md"),  # role and assigned_agent agree
+        ("CODER", "writer", "writer_backlog.md"),  # assigned_agent overrides role
+    ],
+)
+def test_get_queue_path(
+    tmp_path: pathlib.Path, role: str, assigned_agent: str, expected_backlog_filename: str
 ) -> None:
-    """get_queue_path routes HUMAN-role gate tasks to human_backlog.md."""
-    task = {"role": "HUMAN", "assigned_agent": "HUMAN"}
+    """get_queue_path routes tasks to the backlog matching assigned_agent (falling back to role)."""
+    task = {"role": role, "assigned_agent": assigned_agent}
     result = pm.get_queue_path(task, str(tmp_path))
     assert result is not None
-    assert "human_backlog.md" in str(result)
-
-
-def test_get_queue_path_returns_coder_backlog_for_coder_task(
-    tmp_path: pathlib.Path,
-) -> None:
-    """get_queue_path returns the coder_backlog.md path for CODER tasks."""
-    task = {"role": "CODER", "assigned_agent": "CODER"}
-    result = pm.get_queue_path(task, str(tmp_path))
-    assert result is not None
-    assert "coder_backlog.md" in str(result)
-
-
-def test_get_queue_path_uses_assigned_agent_over_role(
-    tmp_path: pathlib.Path,
-) -> None:
-    """get_queue_path routes by assigned_agent when it overrides role."""
-    task = {"role": "CODER", "assigned_agent": "writer"}
-    result = pm.get_queue_path(task, str(tmp_path))
-    assert result is not None
-    assert "writer_backlog.md" in str(result)
+    assert expected_backlog_filename in str(result)
 
 
 def test_update_backlog_writes_human_task_to_human_backlog(

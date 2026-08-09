@@ -420,7 +420,9 @@ RC_BRANCH_CREATED=1
 # --- Write per-RC release-state JSON ---
 # Written after successful RC branch creation so it is only present when
 # the branch actually exists. Overwritten on recovery re-runs (idempotent).
-# Schema: { "rc", "opened_at", "closed_at", "outcome" }
+# Schema: { "rc", "opened_at", "closed_at", "outcome", "attempt", "family_key", "cargo" }
+# attempt/family_key/cargo are the retry-counter fields — see
+# pgai_agent_kanban/cm/bundle_family.py for how they are computed.
 # All timestamps are ISO8601 UTC (date -u +%Y-%m-%dT%H:%M:%SZ).
 RC_STATE_DIR="$(pp_project_root "$PROJECT_NAME")/release-state"
 RC_STATE_JSON="${RC_STATE_DIR}/${VERSION}.json"
@@ -453,8 +455,25 @@ PY
   fi
 fi
 
-python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" open "$VERSION" "$OPENED_AT_UTC" > "$RC_STATE_JSON"
-echo "  Per-RC release-state JSON written: $RC_STATE_JSON"
+# --- Compute bundle family + retry attempt (the retry counter) ---
+# Locates the requirements bundle for $VERSION (same glob CM.md documents for
+# the Step 16b promotion / release-notes generator: <version>-*.md under
+# requirements/) and derives a family key from its sorted cargo set (bundled
+# item basenames). Family identity survives cancel -> rebundle: the same
+# cargo set coming back under a new patch number is attempt N+1, not a fresh
+# attempt 1. A bundle with no ## Bundled Items (or no bundle at all, e.g. an
+# operator-authored requirements doc) has no family to track and always
+# starts at attempt 1 — the "happy path never exceeds 1" case.
+REQUIREMENTS_DIR="$(pp_requirements_dir "$PROJECT_NAME")"
+BUNDLE_FAMILY_JSON="$(python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/bundle_family.py" compute \
+  "$REQUIREMENTS_DIR" "$VERSION" "$RC_STATE_DIR")"
+RC_ATTEMPT="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["attempt"])' "$BUNDLE_FAMILY_JSON")"
+RC_FAMILY_KEY="$(python3 -c 'import json,sys; v=json.loads(sys.argv[1])["family_key"]; print(v if v is not None else "none")' "$BUNDLE_FAMILY_JSON")"
+RC_CARGO_JSON="$(python3 -c 'import json,sys; print(json.dumps(json.loads(sys.argv[1])["cargo"]))' "$BUNDLE_FAMILY_JSON")"
+
+python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" open-with-attempt \
+  "$VERSION" "$OPENED_AT_UTC" "$RC_ATTEMPT" "$RC_FAMILY_KEY" "$RC_CARGO_JSON" > "$RC_STATE_JSON"
+echo "  Per-RC release-state JSON written: $RC_STATE_JSON (attempt ${RC_ATTEMPT}, family ${RC_FAMILY_KEY})"
 
 # Push rc branch to origin (gated by push_to_remote flag)
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then

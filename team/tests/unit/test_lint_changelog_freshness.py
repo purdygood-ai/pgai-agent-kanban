@@ -440,6 +440,187 @@ class TestChangelogFreshnessBehavioralNegative:
 
 
 # ---------------------------------------------------------------------------
+# Remedy-block tests (PRIORITY-0001-gates-prescribe-remedies, motivating case)
+# ---------------------------------------------------------------------------
+
+# A numbered fix-command line, e.g. "  1. PYTHONPATH=... python3 -m ...".
+_NUMBERED_COMMAND_RE = re.compile(r"^\s*(\d+)\.\s+(.+)$", re.MULTILINE)
+
+# An unresolved angle-bracket placeholder such as "<name>" or "<repo-root>".
+# The house placeholder law (docs/coding-standards.md) forbids these in the
+# printed fix commands — every site-specific value must already be derived
+# and substituted by the time the remedy block is printed.
+_ANGLE_BRACKET_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][\w -]*>")
+
+
+class TestChangelogFreshnessRemedyBlock:
+    """The remedy block: cause(s), numbered verbatim commands, re-lint, rule.
+
+    Exercises PRIORITY-0001-gates-prescribe-remedies' motivating case end to
+    end: force a stale-CHANGELOG failure, assert the remedy block contains
+    every required part (concrete cause, a numbered fix block ending in the
+    re-lint check, and the one-line enforced rule), assert the printed
+    commands carry no angle-bracket placeholders, and then actually execute
+    the printed commands verbatim to prove they clear the gate — a stranger
+    reading only the gate's failure output, with no other guidance, must be
+    able to fix it.
+    """
+
+    def _force_stale_changelog(self, tmp_path: pathlib.Path) -> pathlib.Path:
+        """Return a scratch CHANGELOG.md path that is guaranteed stale.
+
+        Copies the real committed CHANGELOG.md and appends a marker line so
+        the byte-compare in check_freshness() is guaranteed to fail, without
+        depending on any particular live-environment drift state.
+
+        Args:
+            tmp_path: pytest-provided temp directory to write the scratch file under.
+
+        Returns:
+            Path to the scratch, guaranteed-stale CHANGELOG.md copy.
+        """
+        original_bytes = _CHANGELOG_ARTIFACT.read_bytes()
+        mutated = original_bytes + b"\n# FORCED-STALE-FOR-REMEDY-BLOCK-TEST\n"
+        scratch = tmp_path / "remedy_block_stale_changelog.md"
+        scratch.write_bytes(mutated)
+        return scratch
+
+    def test_remedy_block_contains_all_required_parts(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Forcing a stale-CHANGELOG failure prints the full three-part remedy block.
+
+        Asserts, per docs/coding-standards.md "Gates prescribe, not just
+        diagnose":
+          1. Cause(s) with a concrete location (the "Cause(s):" section,
+             naming the actual scratch changelog_path).
+          2. A numbered fix block of at least two verbatim-runnable commands,
+             ending with the re-lint verification command (the lint script's
+             own path, invoked with --changelog/--bugs-dir).
+          3. The one-line enforced rule.
+          4. No angle-bracket placeholders anywhere in the output — every
+             site-specific value (repo_root, bugs_dir, changelog_path) is
+             already substituted with its derived actual value.
+        """
+        _skip_if_bugs_dir_missing()
+        _skip_if_published_missing()
+
+        scratch = self._force_stale_changelog(tmp_path)
+
+        result = _lint.check_freshness(
+            changelog_path=scratch,
+            bugs_dir=_REAL_BUGS_DIR,
+        )
+        assert result is False, "Forced-stale scratch CHANGELOG did not fail the gate."
+
+        err = capsys.readouterr().err
+
+        assert "Cause(s):" in err, (
+            f"Remedy block missing the 'Cause(s):' section.\nstderr: {err!r}"
+        )
+        assert str(scratch) in err, (
+            "Remedy block does not name the actual stale changelog_path.\n"
+            f"stderr: {err!r}"
+        )
+
+        assert "To fix:" in err, (
+            f"Remedy block missing the 'To fix:' numbered fix block.\nstderr: {err!r}"
+        )
+        commands = _NUMBERED_COMMAND_RE.findall(err)
+        assert len(commands) >= 2, (
+            "Remedy block's numbered fix block has fewer than 2 commands "
+            "(expected at least: regenerate, then re-lint).\n"
+            f"Parsed commands: {commands!r}\nstderr: {err!r}"
+        )
+        # The re-lint verification command must be the last numbered command
+        # and must invoke the lint script itself.
+        last_command_text = commands[-1][1]
+        assert "lint_changelog_freshness.py" in last_command_text, (
+            "Last numbered command is not the re-lint verification command "
+            "(expected it to invoke lint_changelog_freshness.py).\n"
+            f"Last command: {last_command_text!r}\nstderr: {err!r}"
+        )
+        assert str(scratch) in last_command_text, (
+            "Re-lint command does not carry the actual scratch changelog_path.\n"
+            f"Last command: {last_command_text!r}"
+        )
+
+        assert (
+            "the writer owns CHANGELOG.md; hand-edits re-trip this gate" in err
+        ), (
+            "Remedy block missing the one-line enforced rule.\n"
+            f"stderr: {err!r}"
+        )
+
+        placeholder_hits = _ANGLE_BRACKET_PLACEHOLDER_RE.findall(err)
+        assert placeholder_hits == [], (
+            "Remedy block contains unresolved angle-bracket placeholder(s), "
+            "violating the house placeholder law.\n"
+            f"Placeholders found: {placeholder_hits!r}\nstderr: {err!r}"
+        )
+
+    def test_remedy_block_commands_clear_the_gate(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Executing the remedy block's printed commands verbatim clears the gate.
+
+        This is acceptance criterion 2 of PRIORITY-0001 (the motivating case,
+        end to end): a stale CHANGELOG fixture is recovered using ONLY the
+        gate's printed output — no external guidance. The test parses the
+        exact numbered command strings out of the captured stderr (not a
+        hand-reconstructed equivalent) and runs them through a real shell, so
+        it proves the literal printed text is runnable, not just that the
+        underlying mechanism works.
+        """
+        _skip_if_bugs_dir_missing()
+        _skip_if_published_missing()
+
+        scratch = self._force_stale_changelog(tmp_path)
+
+        result = _lint.check_freshness(
+            changelog_path=scratch,
+            bugs_dir=_REAL_BUGS_DIR,
+        )
+        assert result is False, "Forced-stale scratch CHANGELOG did not fail the gate."
+
+        err = capsys.readouterr().err
+        commands = _NUMBERED_COMMAND_RE.findall(err)
+        assert len(commands) >= 2, (
+            f"Expected at least 2 numbered commands in the remedy block.\n"
+            f"stderr: {err!r}"
+        )
+
+        # Run every printed command in order, verbatim, through a shell (the
+        # regenerate command uses '>' redirection and a leading env-var
+        # assignment, both shell syntax).
+        for _, command_text in commands:
+            proc = subprocess.run(
+                command_text,
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, (
+                f"Printed remedy command exited non-zero: {command_text!r}\n"
+                f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
+            )
+
+        # The last command IS the re-lint verification command and already
+        # asserted returncode == 0 above — that alone proves the gate is
+        # clear.  Confirm independently via a direct check_freshness() call
+        # against the now-regenerated scratch file for belt-and-braces.
+        recheck = _lint.check_freshness(
+            changelog_path=scratch,
+            bugs_dir=_REAL_BUGS_DIR,
+        )
+        assert recheck is True, (
+            "check_freshness() still returns False against the scratch changelog_path "
+            "after running every printed remedy command verbatim.\n"
+            f"Commands run: {[c[1] for c in commands]!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # CLI behavioural tests (argparse from birth)
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,16 @@
+########## UNIT ##########
+  pgai_agent_kanban/cm/write_rc_state.py: missing_lines=32 resolved_by_shift=32 unresolved_lines=[] | missing_branches=11 unresolved_branches=[] -> CLEAN
+  pgai_agent_kanban/dashboard/scan_attention.py: missing_lines=130 resolved_by_shift=130 unresolved_lines=[] | missing_branches=121 unresolved_branches=[] -> CLEAN
+  pgai_agent_kanban/ops/write.py: missing_lines=26 resolved_by_shift=26 unresolved_lines=[] | missing_branches=14 unresolved_branches=[] -> CLEAN
+  pm-agent/pm_materialize.py: missing_lines=263 resolved_by_shift=263 unresolved_lines=[] | missing_branches=233 unresolved_branches=[] -> CLEAN
+  scripts/lib/metrics_aggregator.py: missing_lines=1 resolved_by_shift=1 unresolved_lines=[] | missing_branches=1 unresolved_branches=[] -> CLEAN
+  scripts/lib/metrics_csv_writer.py: missing_lines=35 resolved_by_shift=35 unresolved_lines=[] | missing_branches=13 unresolved_branches=[] -> CLEAN
+########## INTEGRATION ##########
+  pgai_agent_kanban/cm/write_rc_state.py: missing_lines=19 resolved_by_shift=19 unresolved_lines=[] | missing_branches=4 unresolved_branches=[] -> CLEAN
+  pgai_agent_kanban/dashboard/scan_attention.py: missing_lines=0 resolved_by_shift=0 unresolved_lines=[] | missing_branches=0 unresolved_branches=[] -> CLEAN
+  pgai_agent_kanban/ops/write.py: missing_lines=21 resolved_by_shift=21 unresolved_lines=[] | missing_branches=13 unresolved_branches=[] -> CLEAN
+  pm-agent/pm_materialize.py: missing_lines=0 resolved_by_shift=0 unresolved_lines=[] | missing_branches=0 unresolved_branches=[] -> CLEAN
+  scripts/lib/metrics_aggregator.py: missing_lines=0 resolved_by_shift=0 unresolved_lines=[] | missing_branches=0 unresolved_branches=[] -> CLEAN
+  scripts/lib/metrics_csv_writer.py: missing_lines=0 resolved_by_shift=0 unresolved_lines=[] | missing_branches=0 unresolved_branches=[] -> CLEAN
+
+RESULT: All apparent per-file covered-line/branch-set diffs between baseline and final are fully explained by line-number shift from the provenance-sweep comment edits. Zero unresolved hits. No real coverage regression exists.

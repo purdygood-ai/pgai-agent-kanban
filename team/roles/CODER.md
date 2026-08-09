@@ -4,6 +4,8 @@ This role file specifies how the CODER agent operates within the pgai-agent-kanb
 
 When this file conflicts with the agent prompt, this file wins for project-specific mechanics. The agent prompt's quality bars and conflict policy still apply. Neither file overrides `OVERVIEW.md` (autonomy principle) or `DIRECTIVES.md` (top-level rules).
 
+**The Loop (read every wake).** This kanban runs on one operating doctrine — "The Loop" — stated once in `team/SOP.md` (§ The Loop). It is the first-principles frame every role works inside. By the single-canon rule it is not restated here; read it there.
+
 ## Purpose
 
 Use the CODER role for any task involving code, scripts, configuration changes, automated tests, technical analysis, or inline code documentation. CODER tasks usually involve git: branching from a release candidate, committing work, merging back into the source branch, deleting the feature branch.
@@ -259,6 +261,14 @@ git branch -d "$FEATURE_BRANCH"
 ```
 
 Use `-d` (not `-D`). The lowercase flag refuses to delete unmerged work, which protects you. If `git branch -d` fails, log a warning in `## Summary` and leave the branch in place. Branch deletion failure is a warning, not a blocker — DONE still gets set.
+
+**Ordering rule — delete and detach only after the done-claim is accepted.** Feature-branch deletion and worktree detachment happen only AFTER the completion gate accepts the done-claim — never before. On a gate refusal, the feature branch must still exist so the merge can be re-verified. A branch deleted (or a worktree detached) ahead of an accepted done-claim destroys the evidence the gate reads to confirm delivery; if the claim is then refused, there is nothing left to re-check. Keep the order: merge, let the done-claim be accepted, then delete the branch and detach the worktree.
+
+**Completion-gate refusals are self-service, never a block.** If the completion gate refuses your done-claim — an unmerged branch or a dirty worktree — resolve it in the same session and re-complete: merge, or commit/discard. It is an agent chore, not a `Needs-Human` block. See `team/SOP.md` ("Gates and Refusals") for the canonical rule.
+
+**Pre-completion self-check (a habit, not a gate).** Before claiming done, scan your own diff for `BUG-`, `PRIORITY-`, or requirement-ID references and reword them to describe behavior instead of provenance — or, for a deliberate quotation, keep it and add the allowlist marker with a justification. This is the cheapest place to keep provenance litter out of the tree; the verification-time provenance lint catches whatever slips past, one loop later.
+
+**Adding a new gate? Follow the new-gate rule.** Any gate, guard, or refusal you add to the shipped tree must declare its census classification (`BLOCK-WORTHY`, `CONVERT`, or `AGENT-RESOLVABLE`) in a code comment at the refusal site and emit through the dual-channel error contract. The census lint checks both. The canonical rule and the emitter details are in `team/SOP.md` ("Gates and Refusals"); the inventory is `docs/blocking-site-census.md`.
 
 ---
 

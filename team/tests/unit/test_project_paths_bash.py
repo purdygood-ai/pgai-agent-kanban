@@ -122,44 +122,23 @@ def test_project_root_uses_pgai_project_name_env(tmp_path: pathlib.Path) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_tasks_dir_echoes_tasks_subpath(tmp_path: pathlib.Path) -> None:
-    """pp_tasks_dir echoes <project_root>/tasks."""
-    result = _run(tmp_path, "pp_tasks_dir alpha", tmp_path)
+@pytest.mark.parametrize(
+    "func, expected_suffix",
+    [
+        ("pp_tasks_dir", "projects/alpha/tasks"),
+        ("pp_requirements_dir", "projects/alpha/requirements"),
+        ("pp_bugs_dir", "projects/alpha/bugs"),
+        ("pp_priority_dir", "projects/alpha/priority"),
+        ("pp_release_state", "projects/alpha/release-state.md"),
+    ],
+)
+def test_project_paths_helper_echoes_subpath(
+    tmp_path: pathlib.Path, func: str, expected_suffix: str
+) -> None:
+    """Each pp_*_dir/pp_release_state helper echoes <project_root>/<subpath> for the given project."""
+    result = _run(tmp_path, f"{func} alpha", tmp_path)
     assert result.returncode == 0
-    assert result.stdout.strip().endswith("projects/alpha/tasks")
-
-
-def test_requirements_dir_echoes_requirements_subpath(tmp_path: pathlib.Path) -> None:
-    """pp_requirements_dir echoes <project_root>/requirements."""
-    result = _run(tmp_path, "pp_requirements_dir alpha", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip().endswith("projects/alpha/requirements")
-
-
-def test_bugs_dir_echoes_bugs_subpath(tmp_path: pathlib.Path) -> None:
-    """pp_bugs_dir echoes <project_root>/bugs."""
-    result = _run(tmp_path, "pp_bugs_dir alpha", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip().endswith("projects/alpha/bugs")
-
-
-def test_priority_dir_echoes_priority_subpath(tmp_path: pathlib.Path) -> None:
-    """pp_priority_dir echoes <project_root>/priority."""
-    result = _run(tmp_path, "pp_priority_dir alpha", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip().endswith("projects/alpha/priority")
-
-
-# ---------------------------------------------------------------------------
-# pp_release_state
-# ---------------------------------------------------------------------------
-
-
-def test_release_state_echoes_release_state_md_path(tmp_path: pathlib.Path) -> None:
-    """pp_release_state echoes <project_root>/release-state.md."""
-    result = _run(tmp_path, "pp_release_state alpha", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip().endswith("projects/alpha/release-state.md")
+    assert result.stdout.strip().endswith(expected_suffix)
 
 
 # ---------------------------------------------------------------------------
@@ -215,56 +194,24 @@ def test_validate_branch_prefix_accepts_empty_string(tmp_path: pathlib.Path) -> 
     assert result.stdout.strip() == "ok"
 
 
-def test_validate_branch_prefix_accepts_alphanumeric_with_underscore(
-    tmp_path: pathlib.Path,
-) -> None:
-    """validate_branch_prefix accepts letters, digits, underscore, and hyphen."""
+@pytest.mark.parametrize(
+    "prefix, expected",
+    [
+        ("ai_", "ok"),  # letters, digits, underscore
+        ("team-", "ok"),  # hyphen
+        ("my prefix", "fail"),  # space
+        ("feat/", "fail"),  # slash
+        ("v1.0", "fail"),  # dot
+    ],
+)
+def test_validate_branch_prefix_charset(tmp_path: pathlib.Path, prefix: str, expected: str) -> None:
+    """validate_branch_prefix accepts alphanumeric/underscore/hyphen, rejects space/slash/dot."""
     result = run_bash(
         tmp_path,
-        f"source {_LIB} && validate_branch_prefix 'ai_' && echo ok || echo fail",
+        f"source {_LIB} && validate_branch_prefix '{prefix}' && echo ok || echo fail",
     )
     assert result.returncode == 0
-    assert result.stdout.strip() == "ok"
-
-
-def test_validate_branch_prefix_accepts_hyphen(tmp_path: pathlib.Path) -> None:
-    """validate_branch_prefix accepts a prefix containing a hyphen."""
-    result = run_bash(
-        tmp_path,
-        f"source {_LIB} && validate_branch_prefix 'team-' && echo ok || echo fail",
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "ok"
-
-
-def test_validate_branch_prefix_rejects_space(tmp_path: pathlib.Path) -> None:
-    """validate_branch_prefix rejects a prefix containing a space."""
-    result = run_bash(
-        tmp_path,
-        f"source {_LIB} && validate_branch_prefix 'my prefix' && echo ok || echo fail",
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "fail"
-
-
-def test_validate_branch_prefix_rejects_slash(tmp_path: pathlib.Path) -> None:
-    """validate_branch_prefix rejects a prefix containing a slash."""
-    result = run_bash(
-        tmp_path,
-        f"source {_LIB} && validate_branch_prefix 'feat/' && echo ok || echo fail",
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "fail"
-
-
-def test_validate_branch_prefix_rejects_dot(tmp_path: pathlib.Path) -> None:
-    """validate_branch_prefix rejects a prefix containing a dot."""
-    result = run_bash(
-        tmp_path,
-        f"source {_LIB} && validate_branch_prefix 'v1.0' && echo ok || echo fail",
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "fail"
+    assert result.stdout.strip() == expected
 
 
 # ---------------------------------------------------------------------------
@@ -272,112 +219,131 @@ def test_validate_branch_prefix_rejects_dot(tmp_path: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_push_to_remote_defaults_to_true_when_key_absent(tmp_path: pathlib.Path) -> None:
-    """pp_push_to_remote echoes 'true' when project.cfg lacks push_to_remote."""
+@pytest.mark.parametrize(
+    "func, cfg_body, expected",
+    [
+        # pp_push_to_remote — [project] push_to_remote
+        ("pp_push_to_remote", "[project]\nproject_name=myproj\n", "true"),  # absent -> default true
+        (
+            "pp_push_to_remote",
+            "[project]\nproject_name=myproj\npush_to_remote=false\n",
+            "false",
+        ),
+        (
+            "pp_push_to_remote",
+            "[project]\nproject_name=myproj\npush_to_remote=true\n",
+            "true",
+        ),
+        # pp_verbose_mode — [debug] verbose_mode
+        ("pp_verbose_mode", "[project]\nproject_name=myproj\n", "false"),  # absent -> default false
+        (
+            "pp_verbose_mode",
+            "[project]\nproject_name=myproj\n\n[debug]\nverbose_mode=true\n",
+            "true",
+        ),
+        # pp_verbose_agents — [debug] verbose_agents
+        (
+            "pp_verbose_agents",
+            "[project]\nproject_name=myproj\n",
+            "pm,coder,writer,tester,cm",
+        ),  # absent -> default agent list
+        (
+            "pp_verbose_agents",
+            "[project]\nproject_name=myproj\n\n[debug]\nverbose_agents=coder,writer\n",
+            "coder,writer",
+        ),
+        # pp_reasoning_trace — [training] reasoning_trace
+        ("pp_reasoning_trace", "[project]\nproject_name=myproj\n", "false"),  # absent -> default false
+        (
+            "pp_reasoning_trace",
+            "[project]\nproject_name=myproj\n\n[training]\nreasoning_trace=true\n",
+            "true",
+        ),
+    ],
+)
+def test_project_cfg_boolean_or_list_key(
+    tmp_path: pathlib.Path, func: str, cfg_body: str, expected: str
+) -> None:
+    """pp_push_to_remote/pp_verbose_mode/pp_verbose_agents/pp_reasoning_trace read their
+    project.cfg key with the documented default when the key/section is absent."""
+    proj = _make_project(tmp_path, "myproj")
+    (proj / "project.cfg").write_text(cfg_body, encoding="utf-8")
+    result = _run(tmp_path, f"{func} myproj", tmp_path)
+    assert result.returncode == 0
+    assert result.stdout.strip() == expected
+
+
+# ---------------------------------------------------------------------------
+# pp_max_rc_retries — effective RC-retry ceiling: project.cfg [release]
+# max_rc_retries override when present, else kanban.cfg [release]
+# max_rc_retries default; fails loud (non-zero) when both are absent.
+# ---------------------------------------------------------------------------
+
+
+def test_max_rc_retries_present_case_returns_kanban_default(
+    tmp_path: pathlib.Path,
+) -> None:
+    """pp_max_rc_retries returns the kanban.cfg default when no project override exists."""
     proj = _make_project(tmp_path, "myproj")
     (proj / "project.cfg").write_text("[project]\nproject_name=myproj\n", encoding="utf-8")
-    result = _run(tmp_path, "pp_push_to_remote myproj", tmp_path)
+    (tmp_path / "kanban.cfg").write_text("[release]\nmax_rc_retries=3\n", encoding="utf-8")
+    result = _run(tmp_path, "pp_max_rc_retries myproj", tmp_path)
     assert result.returncode == 0
-    assert result.stdout.strip() == "true"
+    assert result.stdout.strip() == "3"
 
 
-def test_push_to_remote_echoes_false_when_configured_false(tmp_path: pathlib.Path) -> None:
-    """pp_push_to_remote echoes 'false' when push_to_remote = false in project.cfg."""
-    proj = _make_project(tmp_path, "myproj")
+def test_max_rc_retries_project_override_case_wins_over_kanban_default(
+    tmp_path: pathlib.Path,
+) -> None:
+    """pp_max_rc_retries returns the project.cfg override, not the kanban.cfg default,
+    when both are present — this is the self-build project's compounding-error
+    containment (kanban.cfg default 3, project override 1)."""
+    proj = _make_project(tmp_path, "pgai-agent-kanban")
     (proj / "project.cfg").write_text(
-        "[project]\nproject_name=myproj\npush_to_remote=false\n",
+        "[project]\nproject_name=pgai-agent-kanban\n\n[release]\nmax_rc_retries=1\n",
         encoding="utf-8",
     )
-    result = _run(tmp_path, "pp_push_to_remote myproj", tmp_path)
+    (tmp_path / "kanban.cfg").write_text("[release]\nmax_rc_retries=3\n", encoding="utf-8")
+    result = _run(tmp_path, "pp_max_rc_retries pgai-agent-kanban", tmp_path)
     assert result.returncode == 0
-    assert result.stdout.strip() == "false"
+    assert result.stdout.strip() == "1"
 
 
-def test_push_to_remote_echoes_true_when_configured_true(tmp_path: pathlib.Path) -> None:
-    """pp_push_to_remote echoes 'true' when push_to_remote = true in project.cfg."""
-    proj = _make_project(tmp_path, "myproj")
-    (proj / "project.cfg").write_text(
-        "[project]\nproject_name=myproj\npush_to_remote=true\n",
-        encoding="utf-8",
-    )
-    result = _run(tmp_path, "pp_push_to_remote myproj", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "true"
-
-
-# ---------------------------------------------------------------------------
-# pp_verbose_mode — reads [debug] verbose_mode from project.cfg
-# ---------------------------------------------------------------------------
-
-
-def test_verbose_mode_defaults_to_false_when_absent(tmp_path: pathlib.Path) -> None:
-    """pp_verbose_mode echoes 'false' when [debug] verbose_mode is absent."""
+def test_max_rc_retries_absent_case_fails_loud(tmp_path: pathlib.Path) -> None:
+    """pp_max_rc_retries exits non-zero with a clear stderr message when the key is
+    absent from both project.cfg and kanban.cfg — never silently assumes a default."""
     proj = _make_project(tmp_path, "myproj")
     (proj / "project.cfg").write_text("[project]\nproject_name=myproj\n", encoding="utf-8")
-    result = _run(tmp_path, "pp_verbose_mode myproj", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "false"
+    (tmp_path / "kanban.cfg").write_text("[wake]\nmax_tasks_per_wake=5\n", encoding="utf-8")
+    result = _run(tmp_path, "pp_max_rc_retries myproj", tmp_path)
+    assert result.returncode != 0
+    assert result.stdout.strip() == ""
+    assert "max_rc_retries" in result.stderr
+    assert "myproj" in result.stderr
 
 
-def test_verbose_mode_echoes_true_when_configured(tmp_path: pathlib.Path) -> None:
-    """pp_verbose_mode echoes 'true' when verbose_mode = true in project.cfg."""
+def test_max_rc_retries_absent_case_fails_loud_when_kanban_cfg_missing(
+    tmp_path: pathlib.Path,
+) -> None:
+    """pp_max_rc_retries fails loud (not empty-string default) when kanban.cfg
+    itself does not exist and no project override is configured."""
+    _make_project(tmp_path, "myproj")
+    result = _run(tmp_path, "pp_max_rc_retries myproj", tmp_path)
+    assert result.returncode != 0
+    assert "max_rc_retries" in result.stderr
+
+
+def test_max_rc_retries_rejects_non_integer_project_override(
+    tmp_path: pathlib.Path,
+) -> None:
+    """pp_max_rc_retries fails loud on a malformed (non-integer) project.cfg override
+    rather than silently coercing or falling through to the kanban.cfg default."""
     proj = _make_project(tmp_path, "myproj")
     (proj / "project.cfg").write_text(
-        "[project]\nproject_name=myproj\n\n[debug]\nverbose_mode=true\n",
+        "[project]\nproject_name=myproj\n\n[release]\nmax_rc_retries=notanumber\n",
         encoding="utf-8",
     )
-    result = _run(tmp_path, "pp_verbose_mode myproj", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "true"
-
-
-# ---------------------------------------------------------------------------
-# pp_verbose_agents — reads [debug] verbose_agents from project.cfg
-# ---------------------------------------------------------------------------
-
-
-def test_verbose_agents_returns_default_when_absent(tmp_path: pathlib.Path) -> None:
-    """pp_verbose_agents echoes the default agent list when key is absent."""
-    proj = _make_project(tmp_path, "myproj")
-    (proj / "project.cfg").write_text("[project]\nproject_name=myproj\n", encoding="utf-8")
-    result = _run(tmp_path, "pp_verbose_agents myproj", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "pm,coder,writer,tester,cm"
-
-
-def test_verbose_agents_returns_configured_list(tmp_path: pathlib.Path) -> None:
-    """pp_verbose_agents echoes the configured agent list from project.cfg."""
-    proj = _make_project(tmp_path, "myproj")
-    (proj / "project.cfg").write_text(
-        "[project]\nproject_name=myproj\n\n[debug]\nverbose_agents=coder,writer\n",
-        encoding="utf-8",
-    )
-    result = _run(tmp_path, "pp_verbose_agents myproj", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "coder,writer"
-
-
-# ---------------------------------------------------------------------------
-# pp_reasoning_trace — reads [training] reasoning_trace from project.cfg
-# ---------------------------------------------------------------------------
-
-
-def test_reasoning_trace_defaults_to_false_when_absent(tmp_path: pathlib.Path) -> None:
-    """pp_reasoning_trace echoes 'false' when [training] reasoning_trace is absent."""
-    proj = _make_project(tmp_path, "myproj")
-    (proj / "project.cfg").write_text("[project]\nproject_name=myproj\n", encoding="utf-8")
-    result = _run(tmp_path, "pp_reasoning_trace myproj", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "false"
-
-
-def test_reasoning_trace_echoes_true_when_configured(tmp_path: pathlib.Path) -> None:
-    """pp_reasoning_trace echoes 'true' when reasoning_trace = true in project.cfg."""
-    proj = _make_project(tmp_path, "myproj")
-    (proj / "project.cfg").write_text(
-        "[project]\nproject_name=myproj\n\n[training]\nreasoning_trace=true\n",
-        encoding="utf-8",
-    )
-    result = _run(tmp_path, "pp_reasoning_trace myproj", tmp_path)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "true"
+    (tmp_path / "kanban.cfg").write_text("[release]\nmax_rc_retries=3\n", encoding="utf-8")
+    result = _run(tmp_path, "pp_max_rc_retries myproj", tmp_path)
+    assert result.returncode != 0
+    assert "invalid value" in result.stderr.lower()

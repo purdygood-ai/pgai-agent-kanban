@@ -98,7 +98,10 @@ while IFS= read -r _proj; do
     [[ -z "$_proj" ]] && continue
     PROJ_NAMES+=("$_proj")
     _color="$(KANBAN_ROOT="$KANBAN_ROOT" projects_cfg_color "$_proj" 2>/dev/null || echo "")"
-    [[ -z "$_color" ]] && _color="#888780"
+    # Canonical gray sentinel: PGAI_DEFAULT_PALETTE (built by projects_cfg.sh,
+    # sourced above, from team/config/default_palette.txt) -- its last entry
+    # is the documented "last resort" gray. Do not hand-transcribe the hex.
+    [[ -z "$_color" ]] && _color="${PGAI_DEFAULT_PALETTE[-1]}"
     PROJ_COLORS+=("$_color")
 done < <(KANBAN_ROOT="$KANBAN_ROOT" projects_cfg_list 2>/dev/null || true)
 
@@ -121,6 +124,29 @@ import os, re, sys
 use_color = sys.argv[1].lower() == "true"
 
 # ---------------------------------------------------------------------------
+# Resolve the pgai_agent_kanban package from the live-install anchor only.
+# The live kanban root (PGAI_AGENT_KANBAN_ROOT_PATH) is the single sys.path
+# candidate -- the dev tree is DATA to the live runtime, never CODE. Mirrors
+# the identical resolution in dashboard-column-render.sh's Python heredoc.
+# ---------------------------------------------------------------------------
+_kanban_root = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "")
+if _kanban_root and _kanban_root not in sys.path:
+    sys.path.insert(0, _kanban_root)
+
+from pgai_agent_kanban.lib.palette import load_default_palette, PaletteFileError  # noqa: E402
+
+# Canonical gray sentinel: sourced from team/config/default_palette.txt via
+# the shared palette loader (its last entry is the documented "last resort"
+# gray). A missing/malformed definition file must not crash this render-path
+# script -- fall back to the literal gray sentinel so a broken/absent dev
+# tree still degrades to a working legend line instead of an unhandled
+# traceback (graceful-degradation contract: dashboards render, never crash).
+try:
+    _GRAY_FALLBACK = load_default_palette()[-1]
+except PaletteFileError:
+    _GRAY_FALLBACK = "#888780"
+
+# ---------------------------------------------------------------------------
 # ANSI helpers
 # ---------------------------------------------------------------------------
 def truecolor(hex_color):
@@ -139,8 +165,10 @@ def truecolor(hex_color):
 RESET = "\033[0m" if use_color else ""
 
 # Status-to-ANSI color mapping (mirrors dashboard-column-render.sh).
-# Using standard ANSI colors as the closest terminal approximation to the
-# specified hex values (#BA7517, #639922, #E24B4A).
+# Status colors are a fixed ANSI-standard convention for lifecycle status,
+# independent of the project-tag palette in team/config/default_palette.txt
+# -- status colors and project-tag colors are two separate color systems
+# that must not be conflated (palette single-sourcing design).
 #
 # "done" and "wont-do" are both terminal-resolved states — green means
 # "settled, no action required". They share the green color arm.
@@ -179,7 +207,7 @@ status_keywords = raw_keywords.split() if raw_keywords else ["open", "running", 
 
 # Pad colors list to match names length
 while len(proj_colors) < len(proj_names):
-    proj_colors.append("#888780")
+    proj_colors.append(_GRAY_FALLBACK)
 
 # ---------------------------------------------------------------------------
 # Build the PROJECT block

@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.12, pytest-8.4.2, pluggy-1.6.0 -- /home/rocky/py3.12/bin/python3
+cachedir: .pytest_cache
+rootdir: /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-013-coverage-gate-final/team
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-7.1.0, web3-6.20.4
+collecting ... collected 5 items
+
+tests/integration/test_rc_lifecycle.py::TestFidelityGate::test_fidelity_gate_halts_when_main_diverges_mid_rc PASSED [ 20%]
+tests/integration/test_cancel_rc_frees_version.py::TestCancelRCFreesVersion::test_reopen_same_version_after_cancel_succeeds PASSED [ 40%]
+pgai_agent_kanban/api/tests/test_cors.py::test_cors_non_loopback_origin_blocked PASSED [ 60%]
+tests/unit/test_changelog_writer.py::TestDisclosureScope::test_bug_affecting_published_version_is_disclosed PASSED [ 80%]
+tests/unit/test_resolution_matrix.py::test_golden_facts_match_cancel_and_rebundle PASSED [100%]
+
+============================== 5 passed in 3.23s ===============================

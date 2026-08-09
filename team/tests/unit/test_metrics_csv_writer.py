@@ -118,15 +118,17 @@ def test_history_columns_contains_all_required_fields() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cache_hit_rate_zero_when_no_tokens() -> None:
-    """_cache_hit_rate returns 0.0 when both inputs are zero."""
-    assert mcw._cache_hit_rate(0, 0) == 0.0
-
-
-def test_cache_hit_rate_correct_formula() -> None:
-    """_cache_hit_rate = cache_read / (input + cache_read) * 100."""
-    # 1000 cache_read, 1000 input -> 50%
-    assert mcw._cache_hit_rate(1000, 1000) == 50.0
+@pytest.mark.parametrize(
+    "input_tokens, cache_read_tokens, expected",
+    [
+        (0, 0, 0.0),  # both inputs zero
+        (1000, 1000, 50.0),  # cache_read / (input + cache_read) * 100
+        (0, 5000, 100.0),  # input is 0 and cache_read is non-zero -> 100%
+    ],
+)
+def test_cache_hit_rate(input_tokens: int, cache_read_tokens: int, expected: float) -> None:
+    """_cache_hit_rate computes cache_read / (input + cache_read) * 100."""
+    assert mcw._cache_hit_rate(input_tokens, cache_read_tokens) == expected
 
 
 def test_cache_hit_rate_rounds_to_one_decimal() -> None:
@@ -134,11 +136,6 @@ def test_cache_hit_rate_rounds_to_one_decimal() -> None:
     # 1 cache_read, 2 input -> 1/3 * 100 = 33.3...
     result = mcw._cache_hit_rate(2, 1)
     assert result == round(1 / 3 * 100, 1)
-
-
-def test_cache_hit_rate_one_hundred_percent_when_all_cached() -> None:
-    """_cache_hit_rate returns 100.0 when input is 0 and cache_read is non-zero."""
-    assert mcw._cache_hit_rate(0, 5000) == 100.0
 
 
 # ---------------------------------------------------------------------------

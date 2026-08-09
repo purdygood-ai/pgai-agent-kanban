@@ -393,7 +393,7 @@ Two consequences worth stating plainly:
 - **No conventional default remains.** The historical `:-$HOME/pgai_agent_kanban` fallback has been deleted from every entry point. The prelude is the guard. Non-standard installs that used to self-mask now surface the misconfiguration through the fail-loud message.
 - **The wake family still self-bootstraps.** Cron-driven wake scripts have always established their own environment via `wake_common.sh`; that path is preserved and either delegates to the prelude or is verified equivalent. Cron behavior does not change.
 
-For the shell-side reference, see `team/scripts/lib/env_bootstrap.sh`. For the Python-side reference, see `pgai_agent_kanban/env.py`. For the historical decision this supersedes, see `projects/pgai-agent-kanban/bugs/BUG-0040-bare-root-env-refs-fail-loud.md`.
+For the shell-side reference, see `team/scripts/lib/env_bootstrap.sh`. For the Python-side reference, see `pgai_agent_kanban/env.py`. (These supersede the earlier convention of bare root-relative env references, which failed loud in cross-tree contexts.)
 
 ## Configuration File System
 
@@ -1942,6 +1942,41 @@ substrate that enables provider switching is the achievement here.
 ### Proxy compatibility: llm_thinking_enabled
 
 Some deployment environments route provider traffic through older HTTP proxies that reject responses carrying extended-thinking (reasoning) blocks; the visible symptom is that every agent invocation fails outright. Set `[providers] llm_thinking_enabled = false` in `kanban.cfg` on such deployments — the framework then passes the provider's thinking-disable flag on each invocation (currently `--thinking disabled` on the Claude lane; the same key maps to the equivalent switch on other provider lanes as they mature). The default is `true` and modern deployments should not change it; leave the key absent for the default behavior.
+
+## Reasoning-Effort Controls
+
+Both first-class providers expose a reasoning-effort knob that trades tokens (and latency) for depth of deliberation. The kanban surfaces it through the standard config pattern: one global cfg key, per-role env overrides that mirror the model mechanism, and an absent-means-default contract. The controls are deliberately simple — there is no per-role/per-provider matrix in cfg and no automatic escalation ladder.
+
+### The global key: `[providers] llm_effort`
+
+`kanban.cfg` `[providers] llm_effort` sets the reasoning effort for every agent invocation. When set, the framework translates the value into each lane's native flag: the Claude lane passes `--effort <value>` and the Codex lane passes `model_reasoning_effort`. The key ships commented out in the example config.
+
+The absent-means-default contract is the important part. When `llm_effort` is unset, empty, or commented out, the framework passes **no effort flag at all** — each provider falls through to its own vendor default, and behavior is byte-identical to a kanban that never knew the key existed. You lose nothing by leaving it alone.
+
+An invalid value fails loud rather than falling back silently: the wake path errors out and names the `llm_effort` key in the message, so a typo surfaces immediately instead of running a whole cycle at the wrong effort. Set the key only to a value the target model actually supports.
+
+### Per-role override: `PGAI_<ROLE>_EFFORT`
+
+Effort is overridable per role through the `PGAI_<ROLE>_EFFORT` environment variable, resolved exactly like `PGAI_<ROLE>_MODEL`: same precedence tier, same narration line naming the winning source. **The env override beats the cfg key.** When `PGAI_WRITER_EFFORT` is set, it wins over `[providers] llm_effort` for the WRITER lane, and the wake narration records which source supplied the value in force.
+
+This is the token-optimization lever. A role whose output does not benefit from deep deliberation — WRITER on a routine doc edit, say — can run at `low` while the rest of the chain stays at the global setting, trimming token spend without a global change. The effort in force is also recorded on the per-task cost line, so effort experiments are readable in the existing cost report (see "Tracking Token Costs").
+
+### Vendor-default asymmetry
+
+The providers do not default to the same effort, and the difference is large enough to matter when you compare them:
+
+| Provider | Vendor default |
+|----------|----------------|
+| Anthropic (Claude) | high |
+| OpenAI (Codex) | medium |
+
+If you are benchmarking one provider against another — cost, latency, or output quality — set `llm_effort` explicitly on both lanes so the comparison is not silently confounded by mismatched defaults. Leaving the key absent means each lane runs at its own vendor default, which is correct for normal operation but not for an apples-to-apples comparison.
+
+Supported effort values vary by model. A value one model accepts may be rejected by another, which is why an invalid value fails loud (above) rather than degrading quietly. Check the target model's documentation for its accepted values before setting the key.
+
+### Deprecation caution: no legacy thinking params
+
+Do **not** attempt to steer reasoning by passing legacy `budget_tokens`-style thinking parameters to current models. That older token-budget interface is deprecated; current models expect the effort control described here. Sending legacy thinking params to a current model is unsupported and will not do what you intend — use `llm_effort` (or `PGAI_<ROLE>_EFFORT`) and let the framework emit the correct flag for each lane.
 
 ## PM Mode Control
 

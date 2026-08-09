@@ -46,6 +46,19 @@ Test cases:
  12. **_PACKAGE_TO_IMPORT_NAMES mapping applied** — PyYAML declared in
      requirements produces 'yaml' in the covered-import set, not 'pyyaml'.
 
+ 13. **Remedy block (PRIORITY-0001-gates-prescribe-remedies)**: forcing a
+     missing-import failure prints the full three-part remedy block required
+     by docs/coding-standards.md ("Gates prescribe, not just diagnose") —
+     cause(s) naming the offending module and file, a numbered fix block of
+     verbatim-runnable commands with no angle-bracket placeholders ending
+     with the re-lint check, and the one-line enforced rule.
+
+ 14. **Remedy commands clear the gate**: the exact numbered commands printed
+     in the remedy block are parsed out of the captured output and executed,
+     verbatim, through a real shell — the appended requirements.txt entry
+     actually covers the import, and the lint re-run against the fixture
+     exits 0.
+
 All tests use pytest's ``tmp_path`` for isolation — no bare /tmp paths,
 no live kanban state mutations.
 """
@@ -53,6 +66,7 @@ no live kanban state mutations.
 from __future__ import annotations
 
 import importlib.util
+import re
 import subprocess
 import sys
 import textwrap
@@ -390,3 +404,161 @@ def test_pyyaml_maps_to_yaml(tmp_path):
     assert "yaml" in covered, (
         f"PyYAML declaration should produce 'yaml' in covered imports, got: {covered}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Remedy-block tests (PRIORITY-0001-gates-prescribe-remedies)
+# ---------------------------------------------------------------------------
+
+# A numbered fix-command line, e.g. "  1. echo \"boto3\" >> \"...\"".
+_NUMBERED_COMMAND_RE = re.compile(r"^\s*(\d+)\.\s+(.+)$", re.MULTILINE)
+
+# An unresolved angle-bracket placeholder such as "<path>" or "<repo-root>".
+# The house placeholder law (docs/coding-standards.md) forbids these in the
+# printed fix commands — every site-specific value must already be derived
+# and substituted by the time the remedy block is printed.
+_ANGLE_BRACKET_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][\w -]*>")
+
+
+class TestImportCompletenessRemedyBlock:
+    """The remedy block: cause(s), numbered verbatim commands, re-lint, rule.
+
+    Exercises PRIORITY-0001-gates-prescribe-remedies' first lint target end
+    to end: force a missing-import failure, assert the remedy block contains
+    every required part, assert the printed commands carry no angle-bracket
+    placeholders, and then actually execute the printed commands verbatim to
+    prove they clear the gate.
+    """
+
+    def _write_missing_import_fixture(self, tmp_path: Path) -> tuple[Path, Path, Path]:
+        """Return (team_dir, repo_root, script_path) for a synthetic tree
+        with one Python file importing a module absent from requirements."""
+        team_dir, repo_root = _make_minimal_tree(
+            tmp_path,
+            requirements_txt="requests>=2.0\n",
+            requirements_test_txt="-r requirements.txt\npytest>=7\n",
+            script_content=textwrap.dedent("""\
+                import requests
+                import boto3
+            """),
+        )
+        script_path = team_dir / "scripts" / "test_script.py"
+        return team_dir, repo_root, script_path
+
+    def test_remedy_block_contains_all_required_parts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Forcing a missing-import failure prints the full three-part remedy
+        block.
+
+        Asserts, per docs/coding-standards.md "Gates prescribe, not just
+        diagnose":
+          1. Cause(s) with a concrete location (module name + source file).
+          2. A numbered fix block of at least two verbatim-runnable
+             commands, ending with the re-lint verification command.
+          3. The one-line enforced rule.
+          4. No angle-bracket placeholders anywhere in the output.
+        """
+        team_dir, repo_root, script_path = self._write_missing_import_fixture(tmp_path)
+
+        result = _lint.main([
+            "--team-dir", str(team_dir),
+            "--repo-root", str(repo_root),
+        ])
+        assert result == 1, "Forced missing-import fixture did not fail the gate."
+
+        out = capsys.readouterr().out
+
+        assert "Cause(s):" in out, (
+            f"Remedy block missing the 'Cause(s):' section.\nstdout: {out!r}"
+        )
+        assert "boto3" in out and str(script_path) in out, (
+            f"Remedy block does not name the missing module and source file.\nstdout: {out!r}"
+        )
+
+        assert "To fix:" in out, (
+            f"Remedy block missing the 'To fix:' numbered fix block.\nstdout: {out!r}"
+        )
+        commands = _NUMBERED_COMMAND_RE.findall(out)
+        assert len(commands) >= 2, (
+            "Remedy block's numbered fix block has fewer than 2 commands "
+            "(expected at least: append to requirements.txt, then re-lint).\n"
+            f"Parsed commands: {commands!r}\nstdout: {out!r}"
+        )
+        last_command_text = commands[-1][1]
+        assert "lint_python_import_completeness.py" in last_command_text, (
+            "Last numbered command is not the re-lint verification command.\n"
+            f"Last command: {last_command_text!r}\nstdout: {out!r}"
+        )
+
+        assert (
+            "must be declared in requirements.txt or requirements-test.txt" in out
+        ), (
+            f"Remedy block missing the one-line enforced rule.\nstdout: {out!r}"
+        )
+
+        placeholder_hits = _ANGLE_BRACKET_PLACEHOLDER_RE.findall(out)
+        assert placeholder_hits == [], (
+            "Remedy block contains unresolved angle-bracket placeholder(s), "
+            "violating the house placeholder law.\n"
+            f"Placeholders found: {placeholder_hits!r}\nstdout: {out!r}"
+        )
+
+    def test_remedy_block_commands_clear_the_gate(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Executing the remedy block's printed commands verbatim clears the
+        gate — the motivating end-to-end proof: a stranger reading only the
+        gate's failure output, with no other guidance, can clear it.
+
+        The test parses the exact numbered command strings out of the
+        captured stdout (not a hand-reconstructed equivalent) and runs them
+        through a real shell, then re-invokes the lint directly to confirm
+        it now exits 0.
+        """
+        team_dir, repo_root, script_path = self._write_missing_import_fixture(tmp_path)
+
+        result = _lint.main([
+            "--team-dir", str(team_dir),
+            "--repo-root", str(repo_root),
+        ])
+        assert result == 1, "Forced missing-import fixture did not fail the gate."
+
+        out = capsys.readouterr().out
+        commands = _NUMBERED_COMMAND_RE.findall(out)
+        assert len(commands) >= 2, (
+            f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
+        )
+
+        for _, command_text in commands:
+            proc = subprocess.run(
+                command_text,
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, (
+                f"Printed remedy command exited non-zero: {command_text!r}\n"
+                f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
+            )
+
+        # The last command IS the re-lint verification command and already
+        # asserted returncode == 0 above. Confirm independently via a direct
+        # main() call for belt-and-braces.
+        recheck = _lint.main([
+            "--team-dir", str(team_dir),
+            "--repo-root", str(repo_root),
+        ])
+        assert recheck == 0, (
+            "lint_python_import_completeness still fails against the fixture "
+            "tree after running every printed remedy command verbatim."
+        )
+
+        # The requirements.txt file must now declare the previously-missing
+        # module — proof the fix is a real declaration, not merely a string
+        # that satisfies the lint's own textual check by coincidence.
+        requirements_text = (repo_root / "requirements.txt").read_text(encoding="utf-8")
+        assert "boto3" in requirements_text, (
+            "requirements.txt does not contain 'boto3' after running the "
+            f"remedy commands.\nrequirements.txt contents: {requirements_text!r}"
+        )

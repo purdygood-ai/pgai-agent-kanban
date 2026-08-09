@@ -185,6 +185,12 @@ _KI_ID_IN_CHANGELOG_RE = re.compile(r"\bKI-(\d+\.\d+\.\d+\.\d+)\b")
 # Example: "## v1.22.5 — 2026-07-14"
 _RELEASE_HEADING_RE = re.compile(r"^## (v\d+\.\d+\.\d+)(?:\s|$)")
 
+# Pattern that captures a full CHANGELOG section heading line, including the
+# trailing Release-Date field (e.g. "## v1.22.5 — 2026-07-14").  Used by the
+# remedy-block cause detector to name Release-Date field placement drift by
+# version rather than reporting an undifferentiated byte mismatch.
+_HEADING_LINE_RE = re.compile(r"^## (v\d+\.\d+\.\d+).*$", re.MULTILINE)
+
 # ---------------------------------------------------------------------------
 # Writer-migration drift categories (an earlier defect enumeration).
 #
@@ -735,6 +741,194 @@ def _is_rc_mode() -> bool:
     return _is_rc_branch(branch)
 
 
+def _extract_heading_lines(text: str) -> dict[str, str]:
+    """Return {version: full heading line text} for every '## vX.Y.Z' heading.
+
+    The captured line includes whatever follows the version (typically the
+    Release-Date field, e.g. "## v1.22.5 — 2026-07-14"), so callers can
+    compare the full line to detect Release-Date field placement drift
+    specifically, not just presence/absence of the section.
+
+    Args:
+        text: CHANGELOG content (checked-in or regenerated) to scan.
+
+    Returns:
+        Dict mapping version string (e.g. "v1.22.5") to its full heading line.
+    """
+    return {m.group(1): m.group(0) for m in _HEADING_LINE_RE.finditer(text)}
+
+
+def _build_causes(
+    changelog_path: pathlib.Path,
+    checked_in_text: str,
+    regenerated_text: str,
+) -> list[str]:
+    """Derive a concrete, location-named list of causes for a stale artifact.
+
+    Compares release-section headings between the checked-in artifact and a
+    fresh regeneration to name Release-Date field placement drift by version
+    (the gate-derivable location a reader needs — see docs/coding-standards.md
+    "Gates prescribe, not just diagnose").  Falls back to a bounded line-level
+    diff summary when no heading-level cause is found (e.g. a change to
+    ### Implemented / ### Fixed / ### Known Issues body content, not the
+    heading itself).
+
+    Args:
+        changelog_path:   Path to the checked-in artifact (used in messages).
+        checked_in_text:  Decoded content of the checked-in artifact.
+        regenerated_text: Decoded content of a fresh regeneration.
+
+    Returns:
+        A non-empty list of one-line cause strings, each naming a concrete
+        location (never a bare "something is stale").
+    """
+    causes: list[str] = []
+    checked_headings = _extract_heading_lines(checked_in_text)
+    regen_headings = _extract_heading_lines(regenerated_text)
+
+    for version in sorted(set(checked_headings) & set(regen_headings)):
+        old_line = checked_headings[version]
+        new_line = regen_headings[version]
+        if old_line != new_line:
+            causes.append(
+                f"{changelog_path}: '## {version}' heading's Release-Date field "
+                f"placement differs — checked-in reads {old_line!r}, a fresh "
+                f"regeneration reads {new_line!r} (derived from "
+                f"release-notes/{version}.md's '**Release Date:**' field)"
+            )
+
+    for version in sorted(set(checked_headings) - set(regen_headings)):
+        causes.append(
+            f"{changelog_path}: '## {version}' section is present in the "
+            "checked-in artifact but a fresh regeneration no longer produces it"
+        )
+    for version in sorted(set(regen_headings) - set(checked_headings)):
+        causes.append(
+            f"{changelog_path}: '## {version}' section is missing — a fresh "
+            f"regeneration derives it from release-notes/{version}.md, but the "
+            "checked-in artifact does not have it"
+        )
+
+    if not causes:
+        # No heading-level divergence — the drift is inside a section body
+        # (### Implemented / ### Fixed / ### Known Issues content). Report a
+        # bounded sample of the actual differing lines so the reader still
+        # gets a concrete location rather than a bare byte-mismatch claim.
+        diff_lines = [
+            line
+            for line in difflib.unified_diff(
+                checked_in_text.splitlines(keepends=False),
+                regenerated_text.splitlines(keepends=False),
+                lineterm="",
+                n=0,
+            )
+            if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+        ]
+        sample = diff_lines[:5]
+        if sample:
+            causes.append(
+                f"{changelog_path} differs from a fresh regeneration; first "
+                f"divergent line(s): {sample}"
+            )
+        else:
+            causes.append(
+                f"{changelog_path} is byte-different from a fresh regeneration "
+                "of the current codebase (content differs with no isolable "
+                "heading-level cause)"
+            )
+
+    return causes
+
+
+def _build_remedy_commands(
+    changelog_path: pathlib.Path, bugs_dir: pathlib.Path
+) -> tuple[str, str]:
+    """Return (regenerate_command, relint_command) as verbatim-runnable strings.
+
+    Both commands are derived entirely from values the gate already resolved
+    at detection time (repo root, the actual changelog_path and bugs_dir it
+    was invoked with) — the house placeholder law: no angle-bracket
+    placeholders, ever.
+
+    The regenerate command invokes changelog_writer directly (the same
+    ``regenerate()`` call _regenerate_to_temp() uses internally), not the
+    ``regenerate-changelog.sh --project <name>`` operator script — that
+    script resolves release-notes/ under the kanban root's per-project
+    metadata folder (``$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/``),
+    which is empty for the kanban-self dev tree; the actual release-notes/
+    and CHANGELOG.md this gate compares live in the dev tree checked out at
+    repo_root. Printing the operator script here would hand the reader a
+    command that fails.
+
+    The invocation is routed through the shared ``pp_run_ops.sh`` helper's
+    direct-exec entry point (``bash pp_run_ops.sh <module> [args...]``)
+    rather than a bare, unwrapped module invocation of the package: a bare
+    invocation is cwd-dependent (team/tests/unit/test_pp_run_ops_sweep.py
+    enforces this project-wide), while pp_run_ops.sh self-locates and
+    composes a correct, cwd-independent PYTHONPATH.
+
+    Args:
+        changelog_path: The actual path the gate compared (site-specific).
+        bugs_dir:       The actual bug ledger directory the gate resolved.
+
+    Returns:
+        Tuple of (regenerate_command, relint_command) shell command strings.
+    """
+    repo_root = _DEV_TREE_ROOT
+    pp_run_ops_script = _TEAM_DIR / "scripts" / "lib" / "pp_run_ops.sh"
+    regen_cmd = (
+        f'bash "{pp_run_ops_script}" pgai_agent_kanban.cm.changelog_writer '
+        f'"{repo_root}" "{bugs_dir}" > "{changelog_path}"'
+    )
+    relint_cmd = (
+        f'python3 "{_THIS_FILE}" --changelog "{changelog_path}" '
+        f'--bugs-dir "{bugs_dir}"'
+    )
+    return regen_cmd, relint_cmd
+
+
+def _format_remedy_block(
+    fail_summary: str,
+    causes: list[str],
+    changelog_path: pathlib.Path,
+    bugs_dir: pathlib.Path,
+    extra_context: list[str] | None = None,
+) -> str:
+    """Assemble the full three-part remedy block required by docs/coding-standards.md.
+
+    Order is fixed: cause(s) with concrete location, a numbered fix block of
+    verbatim-runnable commands ending with the re-lint check, then the
+    one-line rule the gate enforces.
+
+    Args:
+        fail_summary:   One-line statement of what failed (goes on the FAIL line).
+        causes:         Output of _build_causes() (or a manually built list for
+                        the missing-artifact case).
+        changelog_path: The actual changelog path the gate compared.
+        bugs_dir:       The actual bug ledger directory the gate resolved.
+        extra_context:  Optional additional explanatory lines (e.g. RC-mode
+                        tolerance context) inserted after the causes and
+                        before the fix block.
+
+    Returns:
+        The full remedy block as a single string, ready to print to stderr.
+    """
+    regen_cmd, relint_cmd = _build_remedy_commands(changelog_path, bugs_dir)
+    lines = [f"lint_changelog_freshness: FAIL — {fail_summary}", "", "Cause(s):"]
+    for cause in causes:
+        lines.append(f"  - {cause}")
+    if extra_context:
+        lines.append("")
+        lines.extend(extra_context)
+    lines.append("")
+    lines.append("To fix:")
+    lines.append(f"  1. {regen_cmd}")
+    lines.append(f"  2. {relint_cmd}")
+    lines.append("")
+    lines.append("Rule: the writer owns CHANGELOG.md; hand-edits re-trip this gate.")
+    return "\n".join(lines)
+
+
 def check_freshness(
     changelog_path: pathlib.Path = _DEFAULT_CHANGELOG_PATH,
     bugs_dir: pathlib.Path | None = None,
@@ -788,10 +982,12 @@ def check_freshness(
 
     if checked_in is None:
         print(
-            f"lint_changelog_freshness: FAIL — artifact not found at {changelog_path}\n"
-            "Run cm-release or invoke the changelog_writer to regenerate CHANGELOG.md "
-            "and commit the result:\n"
-            "  bash team/scripts/regenerate-changelog.sh --project <name>",
+            _format_remedy_block(
+                fail_summary=f"{changelog_path} not found",
+                causes=[f"{changelog_path} does not exist"],
+                changelog_path=changelog_path,
+                bugs_dir=bugs_dir,
+            ),
             file=sys.stderr,
         )
         return False
@@ -800,10 +996,13 @@ def check_freshness(
         print(f"lint_changelog_freshness: ok — {changelog_path} is fresh.")
         return True
 
+    # A byte mismatch was found. Decode both sides once; both the RC-mode
+    # tolerance check and the remedy-block cause detector need the text form.
+    checked_in_text = checked_in.decode("utf-8", errors="replace")
+    regenerated_text = regenerated.decode("utf-8", errors="replace")
+
     if rc_mode:
         # Interpret the diff in RC-mode tolerance terms.
-        checked_in_text = checked_in.decode("utf-8", errors="replace")
-        regenerated_text = regenerated.decode("utf-8", errors="replace")
         is_tolerable, clause_description = _diff_is_rc_tolerable(
             checked_in_text, regenerated_text
         )
@@ -815,29 +1014,30 @@ def check_freshness(
             return True
 
         print(
-            f"lint_changelog_freshness: FAIL — {changelog_path} is stale.\n"
-            "RC-mode tolerance active, but the diff is not entirely attributable "
-            "to tolerable in-flight-RC changes.\n"
-            "Tolerable categories: new KI additions (Category 1), new-release "
-            "section backed by a release-notes file (Category 2), fenced ## Fixed "
-            "sub-section header removal (Category 3), hyphen-prefix KI-resolved line "
-            "removal (Category 4), embedded triple-backtick code fence removal "
-            "(Category 5).\n"
-            "The checked-in artifact does not match a fresh regeneration from the "
-            "current codebase, and some differences are not in the tolerable set.\n"
-            "Regenerate and commit CHANGELOG.md:\n"
-            "  bash team/scripts/regenerate-changelog.sh --project <name>",
+            _format_remedy_block(
+                fail_summary=f"{changelog_path} is stale",
+                causes=_build_causes(changelog_path, checked_in_text, regenerated_text),
+                changelog_path=changelog_path,
+                bugs_dir=bugs_dir,
+                extra_context=[
+                    "RC-mode tolerance is active on this branch, but the diff above "
+                    "is not entirely attributable to tolerable in-flight-RC changes "
+                    "(new KI additions, a new-release section backed by a "
+                    "release-notes file, or writer-migration drift removals).",
+                ],
+            ),
             file=sys.stderr,
         )
         return False
 
     # Normal mode: strict byte-compare already failed above.
     print(
-        f"lint_changelog_freshness: FAIL — {changelog_path} is stale.\n"
-        "The checked-in artifact does not match a fresh regeneration from the "
-        "current codebase.\n"
-        "Regenerate and commit CHANGELOG.md:\n"
-        "  bash team/scripts/regenerate-changelog.sh --project <name>",
+        _format_remedy_block(
+            fail_summary=f"{changelog_path} is stale",
+            causes=_build_causes(changelog_path, checked_in_text, regenerated_text),
+            changelog_path=changelog_path,
+            bugs_dir=bugs_dir,
+        ),
         file=sys.stderr,
     )
     return False

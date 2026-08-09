@@ -255,8 +255,7 @@ pgai_temp_cleanup_tests() {
     root="$(pgai_temp_dir)"
 
     # Belt-and-suspenders: refuse to operate on dangerous/bare paths.
-    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-    # Mirrors the guards in pgai_temp_cleanup_all (CODER-20260608-012).
+    # Mirrors the same refuse-if-dangerous-root guards used by pgai_temp_cleanup_all.
     if [[ -z "$root" ]]; then
         echo "temp.sh: pgai_temp_cleanup_tests: refusing to clean empty path — pgai_temp_dir returned empty string" >&2
         return 1
@@ -331,10 +330,9 @@ pgai_temp_cleanup_all() {
     local root
     root="$(pgai_temp_dir)"
 
-    # Belt-and-suspenders: refuse to operate on dangerous/bare paths.
-    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-    # Guards added in CODER-20260608-012 to satisfy AC: "refuse to act if
-    # computed root is empty, '/', or '/tmp' bare."
+    # Belt-and-suspenders: refuse to operate on dangerous/bare paths — the
+    # computed root must not be empty, '/', or '/tmp' bare before a
+    # recursive wipe proceeds.
     if [[ -z "$root" ]]; then
         echo "temp.sh: pgai_temp_cleanup_all: refusing to clean empty path — pgai_temp_dir returned empty string" >&2
         return 1
@@ -357,11 +355,9 @@ pgai_temp_cleanup_all() {
         # literal string when the directory is empty.
         [[ -e "$item" ]] || continue
 
-        # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-        # Provider session dir fence (CODER-20260613-016): skip claude-*,
-        # codex-*, gemini-* dirs — they are owned by the provider CLI process,
-        # not by the kanban.  Deleting them while an agent runs destroys live
-        # session state.
+        # Provider session dir fence: skip claude-*, codex-*, gemini-* dirs —
+        # they are owned by the provider CLI process, not by the kanban.
+        # Deleting them while an agent runs destroys live session state.
         _basename="$(basename "$item")"
         if _pgai_temp_is_provider_session_dir "$_basename"; then
             echo "temp.sh: pgai_temp_cleanup_all: skipping provider session dir: $item" >&2

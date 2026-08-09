@@ -106,14 +106,16 @@ def _build_project(
 # ---------------------------------------------------------------------------
 
 
-def test_pending_gate_renders_raised_hand_marker(
+def test_pending_gate_renders_marker_task_id_project_and_version(
     tmp_path: pathlib.Path,
     capsys,
 ) -> None:
-    """Fixture with one pending gate: output contains the raised-hand marker.
-
-    Acceptance criterion: pane output has '✋' (or '!' in no-color mode) marker
-    indicating the needs-human stratum for the approval task.
+    """Fixture with one pending gate: the pane output carries every field of
+    the needs-human row from a single render — the raised-hand marker ('✋'
+    or '!' in no-color mode), the task ID, the project label, and the RC
+    version label.  These four checks previously lived in four separate
+    tests that each rebuilt the identical fixture and rendered once; folded
+    into one test since they assert on the same render's output.
     """
     _build_project(
         tmp_path, "pgai-agent-kanban",
@@ -123,47 +125,8 @@ def test_pending_gate_renders_raised_hand_marker(
     captured = capsys.readouterr()
     # In no-color mode the raised-hand is rendered as '!'
     assert "!" in captured.out or "✋" in captured.out
-
-
-def test_pending_gate_renders_task_id(
-    tmp_path: pathlib.Path,
-    capsys,
-) -> None:
-    """Fixture with one pending gate: task ID appears in the pane output."""
-    _build_project(
-        tmp_path, "pgai-agent-kanban",
-        [("HUMAN-APPROVE-v1.10.0-001", "WAITING", "v1.10.0")],
-    )
-    scan_pending_approvals_attention(str(tmp_path), use_color=False)
-    captured = capsys.readouterr()
     assert "HUMAN-APPROVE-v1.10.0-001" in captured.out
-
-
-def test_pending_gate_renders_project_label(
-    tmp_path: pathlib.Path,
-    capsys,
-) -> None:
-    """Fixture with one pending gate: project label appears in the pane output."""
-    _build_project(
-        tmp_path, "pgai-agent-kanban",
-        [("HUMAN-APPROVE-v1.10.0-001", "WAITING", "v1.10.0")],
-    )
-    scan_pending_approvals_attention(str(tmp_path), use_color=False)
-    captured = capsys.readouterr()
     assert "pgai-agent-kanban" in captured.out
-
-
-def test_pending_gate_renders_release_version(
-    tmp_path: pathlib.Path,
-    capsys,
-) -> None:
-    """Fixture with one pending gate: RC version label appears in the pane output."""
-    _build_project(
-        tmp_path, "pgai-agent-kanban",
-        [("HUMAN-APPROVE-v1.10.0-001", "WAITING", "v1.10.0")],
-    )
-    scan_pending_approvals_attention(str(tmp_path), use_color=False)
-    captured = capsys.readouterr()
     assert "v1.10.0" in captured.out
 
 

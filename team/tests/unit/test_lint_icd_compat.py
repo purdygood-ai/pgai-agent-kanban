@@ -144,11 +144,12 @@ class TestIcdCompatPositive:
     def test_clean_tree_passes(self, capsys: pytest.CaptureFixture[str]) -> None:
         """check_compat() returns True for the committed docs/api/icd.json.
 
-        At this RC (ICD 1.2.0), icd.json was regenerated and icd-v1.2.0.json was
-        frozen as a byte-identical copy.  SUPPORTED lists 1.0.0, 1.1.0, and 1.2.0.
-        The compat gate must pass because icd.json (1.2.0) is an additive superset
-        of icd-v1.0.0.json and icd-v1.1.0.json (no paths or response fields removed;
-        dry_run and warnings fields were added additively).
+        At this RC (ICD 1.3.0), icd.json was regenerated and icd-v1.3.0.json was
+        frozen as a byte-identical copy. SUPPORTED lists 1.0.0, 1.1.0, 1.2.0, and
+        1.3.0. The compat gate must pass because icd.json (1.3.0) is an additive
+        superset of every older baseline (no paths or response fields removed;
+        GET /auto-resolutions was added as a new path alongside the existing
+        GET /approvals).
 
         Args:
             capsys: pytest capture fixture for inspecting stdout/stderr.
@@ -160,8 +161,8 @@ class TestIcdCompatPositive:
         assert result is True, (
             "check_compat() returned False for the committed artifacts.\n"
             f"Captured stderr: {capsys.readouterr().err}\n"
-            "icd.json (1.2.0) must be a compatible superset of icd-v1.0.0.json and "
-            "icd-v1.1.0.json — dry_run and warnings were added additively (no removals)."
+            "icd.json (1.3.0) must be a compatible superset of every older baseline — "
+            "GET /auto-resolutions was added additively (no removals)."
         )
 
     def test_clean_tree_prints_ok_message(
@@ -184,37 +185,37 @@ class TestIcdCompatPositive:
         )
 
     def test_baseline_byte_equality(self) -> None:
-        """docs/api/baselines/icd-v1.2.0.json is byte-identical to docs/api/icd.json.
+        """docs/api/baselines/icd-v1.3.0.json is byte-identical to docs/api/icd.json.
 
-        At this RC (ICD 1.2.0), the freeze is icd-v1.2.0.json.  The task spec
+        At this RC (ICD 1.3.0), the freeze is icd-v1.3.0.json.  The task spec
         requires the frozen baseline to be byte-identical to the current artifact.
-        icd-v1.0.0.json and icd-v1.1.0.json intentionally differ (they are older
-        baselines, not the current version).
+        icd-v1.0.0.json, icd-v1.1.0.json, and icd-v1.2.0.json intentionally differ
+        (they are older baselines, not the current version).
 
         This is a structural check, not a compat check; it verifies the freeze was
         done correctly for this RC's version.
         """
-        baseline = _BASELINES_DIR / "icd-v1.2.0.json"
+        baseline = _BASELINES_DIR / "icd-v1.3.0.json"
         assert baseline.exists(), (
             f"Baseline file does not exist: {baseline}\n"
-            "Run the baseline freeze step to create docs/api/baselines/icd-v1.2.0.json "
+            "Run the baseline freeze step to create docs/api/baselines/icd-v1.3.0.json "
             "as a byte-identical copy of docs/api/icd.json after regeneration."
         )
         current_bytes = _ICD_ARTIFACT.read_bytes()
         baseline_bytes = baseline.read_bytes()
         assert current_bytes == baseline_bytes, (
-            "docs/api/baselines/icd-v1.2.0.json is NOT byte-identical to docs/api/icd.json.\n"
+            "docs/api/baselines/icd-v1.3.0.json is NOT byte-identical to docs/api/icd.json.\n"
             f"Current size: {len(current_bytes)} bytes\n"
             f"Baseline size: {len(baseline_bytes)} bytes\n"
             "The frozen baseline must be an exact copy of the current artifact at this RC."
         )
 
     def test_supported_manifest_contains_all_versions(self) -> None:
-        """docs/api/baselines/SUPPORTED contains '1.0.0', '1.1.0', and '1.2.0'.
+        """docs/api/baselines/SUPPORTED contains '1.0.0', '1.1.0', '1.2.0', and '1.3.0'.
 
-        The ICD minor bump (1.1.0 → 1.2.0) is additive: 1.0.0 and 1.1.0 are
+        The ICD minor bump (1.2.0 → 1.3.0) is additive: 1.0.0, 1.1.0, and 1.2.0 are
         kept in SUPPORTED so the compat gate continues to prove backward compatibility.
-        The 1.2.0 entry reflects the new freeze at this RC.
+        The 1.3.0 entry reflects the new freeze at this RC.
 
         Args: none — reads the committed manifest file.
         """
@@ -237,7 +238,12 @@ class TestIcdCompatPositive:
         assert "1.2.0" in lines, (
             f"SUPPORTED manifest is missing '1.2.0'.\n"
             f"Got: {lines!r}\n"
-            "ICD 1.2.0 must be added to SUPPORTED after the minor bump."
+            "ICD 1.2.0 must remain in SUPPORTED — kept as a prior minor version."
+        )
+        assert "1.3.0" in lines, (
+            f"SUPPORTED manifest is missing '1.3.0'.\n"
+            f"Got: {lines!r}\n"
+            "ICD 1.3.0 must be added to SUPPORTED after the minor bump."
         )
 
 

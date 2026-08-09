@@ -23,7 +23,27 @@
 # exits non-zero before depositing anything.
 #
 # Usage:
-#   upgrade.sh [OPTIONS]
+#   upgrade.sh [VERSION] [OPTIONS]
+#
+# VERSION (optional, forward-only):
+#   A positional git tag to upgrade TO (e.g. "v2.2.0" or "ai_v2.2.0"; the
+#   internal branch-prefix form is tolerated and normalized). When given,
+#   upgrade.sh resolves the tag via the SAME shared team/scripts/lib/
+#   version_resolve.sh mechanism install.sh's version-targeted install uses,
+#   lays the upgrade down from that tag's clean detached-worktree tree, and
+#   enforces a FORWARD-ONLY rule: the resolved target must be STRICTLY NEWER
+#   (semver-aware) than the live install's committed VERSION file, or the
+#   upgrade is refused before anything is deposited.
+#     - Target == installed version: refused; message points to
+#       `install.sh --force` as the repair path for a clean re-lay.
+#     - Target <  installed version: refused; message points to a fresh
+#       install (`install.sh <VERSION>`) as the sanctioned downgrade path —
+#       install.sh lays down everything from scratch and may go backwards.
+#   There is no --force override for direction: --force only controls
+#   per-file overwrite prompts during deposit, never which way time moves.
+#   Omit VERSION to upgrade using whatever the dev tree currently has
+#   checked out, exactly as before this argument existed (the default,
+#   back-compatible path).
 #
 # OPTIONS:
 #   --force                Overwrite changed managed files without prompting.
@@ -182,6 +202,33 @@ warn()  { echo "${C_YELLOW}[upgrade]${C_RESET} $*"; }
 err()   { echo "${C_RED}[upgrade]${C_RESET} $*" >&2; }
 
 # ---------------------------------------------------------------------------
+# _upg_resolve_branch_prefix
+#
+# Echoes the registered project's [project] branch_prefix from projects.cfg
+# / project.cfg (via pp_branch_prefix), or "" when no project is registered,
+# the helper is unavailable, or lookup fails for any reason. Single
+# definition shared by the version-targeted-upgrade tag resolution block and
+# the VERSION_DETAIL git-describe advisory further down, so the two call
+# sites cannot drift on how the prefix is derived.
+# ---------------------------------------------------------------------------
+_upg_resolve_branch_prefix() {
+  local prefix=""
+  if declare -f pp_branch_prefix >/dev/null 2>&1; then
+    local projects_cfg="${KANBAN_ROOT}/projects.cfg"
+    if [[ -f "$projects_cfg" ]]; then
+      local project_name
+      project_name="$(awk \
+        '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1];exit}' \
+        "$projects_cfg" 2>/dev/null || true)"
+      if [[ -n "$project_name" ]]; then
+        prefix="$(KANBAN_ROOT="$KANBAN_ROOT" pp_branch_prefix "$project_name" 2>/dev/null || true)"
+      fi
+    fi
+  fi
+  printf '%s' "$prefix"
+}
+
+# ---------------------------------------------------------------------------
 # PROTECTED SET — single explicit manifest
 #
 # Items listed here are NEVER overwritten during an upgrade.  Any addition
@@ -244,6 +291,9 @@ ADD_CLAUDE_AGENTS=false
 ADD_CODEX_AGENTS=false
 BACKUP_PATH=""
 STAMP_VERSION=""      # non-empty = write verbatim, skip git resolution
+REQUESTED_VERSION=""  # non-empty = optional positional VERSION argument (e.g. "v2.2.0"):
+                       # upgrade TO that tag's tree, forward-only enforced. See
+                       # "Version-targeted upgrade (forward-only)" below.
 
 # ---------------------------------------------------------------------------
 # Cleanup handler — runs on EXIT (success or failure).
@@ -251,6 +301,13 @@ STAMP_VERSION=""      # non-empty = write verbatim, skip git resolution
 # ---------------------------------------------------------------------------
 _cleanup() {
   local exit_code=$?
+  # Version-targeted upgrade: prune the clean-source detached worktree (if
+  # one was materialized) on EVERY exit path — success, failure, or an
+  # early forward-only refusal. version_resolve_prune is idempotent and a
+  # no-op when no worktree was ever created (the no-argument path).
+  if [[ -n "${_UPG_CLEAN_SRC_WORKTREE:-}" ]] && declare -f version_resolve_prune >/dev/null 2>&1; then
+    version_resolve_prune "${_UPG_CLEAN_SRC_REPO:-}" "$_UPG_CLEAN_SRC_WORKTREE" >/dev/null 2>&1 || true
+  fi
   if [[ $exit_code -ne 0 ]]; then
     err "Upgrade failed (exit code $exit_code)."
     if [[ -n "$BACKUP_PATH" && -f "$BACKUP_PATH" ]]; then
@@ -267,7 +324,7 @@ trap '_cleanup' EXIT
 # ---------------------------------------------------------------------------
 _print_usage() {
   cat <<EOF
-Usage: $(basename "$0") [OPTIONS]
+Usage: $(basename "$0") [VERSION] [OPTIONS]
 
 Upgrade an existing pgai-agent-kanban installation.
 
@@ -275,6 +332,40 @@ This is the UPGRADE path only (phase-1 bootstrap).  It validates the dev tree,
 creates a pre-upgrade backup, and hands execution to the dev tree's upgrade.sh
 as phase 2 (the actual upgrade).  If the target is not an existing installation,
 use install.sh instead.
+
+Version-targeted upgrade (forward-only):
+  Pass an optional positional VERSION argument to upgrade TO a specific
+  released tag's tree, instead of whatever the dev tree currently has
+  checked out:
+
+    $(basename "$0") v2.2.0          # upgrade to tag v2.2.0's tree
+    $(basename "$0") ai_v2.2.0       # same tag; the internal "ai_" prefix form
+                                     # is tolerated and normalized
+
+  Resolution: the tag is resolved via the same shared team/scripts/lib/
+  version_resolve.sh mechanism install.sh's version-targeted install uses --
+  if the tag does not exist, upgrade.sh fails loud, names the requested
+  version, and lists the nearest available tags.  On success, the resolved
+  tag's tree is materialized into a temporary detached worktree and the
+  ENTIRE upgrade (kanban tree, subagent manifest, templates, the committed
+  VERSION file) is laid down from that clean tree; the dev tree's own
+  checked-out branch is never touched, and the temporary worktree is removed
+  before upgrade.sh exits (success, failure, or forward-only refusal).
+
+  FORWARD-ONLY RULE: the resolved target must be STRICTLY NEWER (semver-
+  aware comparison against the live install's committed VERSION file) than
+  what is currently installed, or the upgrade is refused before anything is
+  deposited:
+    - Target == installed version: refused. Use \`install.sh --force\` to
+      force a clean re-lay of the currently installed version.
+    - Target <  installed version:  refused. The only sanctioned way to move
+      an installation backwards is a fresh install (\`install.sh <VERSION>\`),
+      which lays down everything from scratch and may go backwards.
+  There is no --force override for direction -- --force only controls
+  per-file overwrite prompts during deposit, never which way time moves.
+
+  Omit VERSION entirely to upgrade using whatever the dev tree currently has
+  checked out (the default, back-compatible path).
 
 OPTIONS:
   --force                 Overwrite changed managed files without prompting.
@@ -303,6 +394,7 @@ EXAMPLES:
   $(basename "$0") --wake-tier none                    # upgrade, skip crontab
   $(basename "$0") --add-claude-agents                 # upgrade and refresh claude wrappers
   $(basename "$0") --no-backup                         # upgrade without backup (advanced)
+  $(basename "$0") v2.2.0                              # forward-only upgrade to tag v2.2.0
 EOF
 }
 
@@ -349,7 +441,13 @@ if argparse_has "help" || argparse_has "h"; then
   _print_usage; exit 0
 fi
 
-# Handle short flags from ARGPARSE_POSITIONAL.
+# Handle short flags and the optional positional VERSION argument from
+# ARGPARSE_POSITIONAL. At most one non-flag positional is accepted (the
+# VERSION argument, forward-only enforced); a second one is an error. This
+# same code path runs for BOTH phase 1 and phase 2 invocations (identical
+# argv is forwarded across the --phase2 re-exec via "$@"), so REQUESTED_VERSION
+# ends up populated consistently in the phase-2 process without any extra
+# thread-through flag.
 for _pos in "${ARGPARSE_POSITIONAL[@]+"${ARGPARSE_POSITIONAL[@]}"}"; do
   case "$_pos" in
     -h) _print_usage; exit 0 ;;
@@ -359,9 +457,13 @@ for _pos in "${ARGPARSE_POSITIONAL[@]+"${ARGPARSE_POSITIONAL[@]}"}"; do
       exit 1
       ;;
     *)
-      err "Unexpected positional argument: $_pos"
-      err "Run '$(basename "$0") --help' for usage."
-      exit 1
+      if [[ -n "$REQUESTED_VERSION" ]]; then
+        err "Unknown argument: $_pos"
+        err "(a version argument was already given: '${REQUESTED_VERSION}'; only one is accepted)"
+        err "Run '$(basename "$0") --help' for usage."
+        exit 1
+      fi
+      REQUESTED_VERSION="$_pos"
       ;;
   esac
 done
@@ -475,6 +577,128 @@ if [[ "$_PHASE2_MODE" == "true" ]]; then
 
   info "Phase 2 running (protocol 1): kanban root = $KANBAN_ROOT"
   info "Dev tree (BASH_SOURCE-relative): $DEV_TREE"
+
+  # -------------------------------------------------------------------------
+  # VERSION-TARGETED UPGRADE (forward-only)
+  #
+  # When REQUESTED_VERSION is non-empty (operator ran e.g. "upgrade.sh
+  # v2.2.0"), resolve it against DEV_TREE's own git tags via the shared
+  # team/scripts/lib/version_resolve.sh mechanism (the same module
+  # install.sh's version-targeted install uses, so the two scripts cannot
+  # drift on tag normalization/resolution/materialization), enforce the
+  # forward-only rule against the live install's committed VERSION file,
+  # and — on success — redirect DEV_TREE to the resolved tag's clean
+  # detached worktree so every "$DEV_TREE" reference for the rest of this
+  # script (the deposit loop, subagent manifest, VERSION stamp, retired-file
+  # manifest, etc.) reads from that tag's tree instead of whatever DEV_TREE
+  # currently has checked out — mirroring install.sh's SCRIPT_DIR redirect.
+  #
+  # Forward-only rule: the resolved target must be STRICTLY newer (semver-
+  # aware, via version_resolve_forward_only_check) than the installed
+  # version, or the upgrade is refused before anything is deposited. There
+  # is no --force override for direction; --force only controls per-file
+  # overwrite prompts during deposit.
+  #
+  # No-argument back-compat: REQUESTED_VERSION empty means this entire
+  # block is a no-op — DEV_TREE keeps pointing at the checked-out dev tree
+  # exactly as it always has, and upgrade.sh behaves byte-identically to
+  # before this argument existed.
+  # -------------------------------------------------------------------------
+  _UPG_TARGET_VERSION=""
+  _UPG_RESOLVED_TAG=""
+  _UPG_INSTALLED_VERSION=""
+  if [[ -n "$REQUESTED_VERSION" ]]; then
+    if [[ ! -e "$DEV_TREE/.git" ]]; then
+      err "ERROR: a version argument was given ('${REQUESTED_VERSION}') but '${DEV_TREE}' is not a git checkout (no .git found)."
+      err "Version-targeted upgrade requires a git checkout of the pgai-agent-kanban repo so the requested tag can be resolved."
+      exit 1
+    fi
+
+    _UPG_VERSION_RESOLVE_LIB="$DEV_TREE/team/scripts/lib/version_resolve.sh"
+    if [[ ! -f "$_UPG_VERSION_RESOLVE_LIB" ]]; then
+      err "ERROR: version_resolve.sh not found: $_UPG_VERSION_RESOLVE_LIB"
+      err "This file is required for version-targeted upgrades and ships with the kanban repo."
+      exit 1
+    fi
+    # shellcheck source=team/scripts/lib/version_resolve.sh
+    source "$_UPG_VERSION_RESOLVE_LIB"
+    unset _UPG_VERSION_RESOLVE_LIB
+
+    _UPG_BRANCH_PREFIX="$(_upg_resolve_branch_prefix)"
+
+    if ! _UPG_RESOLVED_TAG="$(version_resolve_resolve_tag "$REQUESTED_VERSION" "$DEV_TREE" "$_UPG_BRANCH_PREFIX")"; then
+      exit 1
+    fi
+
+    info "Version-targeted upgrade: '${REQUESTED_VERSION}' resolved to tag '${_UPG_RESOLVED_TAG}'"
+
+    _UPG_ORIGINAL_DEV_TREE="$DEV_TREE"
+    _UPG_CLEAN_SRC_WORKTREE="$(version_resolve_materialize "$DEV_TREE" "$_UPG_RESOLVED_TAG")"
+    if [[ -z "$_UPG_CLEAN_SRC_WORKTREE" ]]; then
+      err "ERROR: failed to materialize tag '${_UPG_RESOLVED_TAG}' into a clean worktree."
+      exit 1
+    fi
+    # Read by _cleanup() (registered on the EXIT trap at the top of this
+    # script) so the worktree is pruned on every exit path.
+    _UPG_CLEAN_SRC_REPO="$_UPG_ORIGINAL_DEV_TREE"
+
+    # Target version identity: the resolved tag's OWN committed VERSION file
+    # (the same "committed file IS the identity" rule version_stamp.sh
+    # applies at deposit time). Fall back to the normalized requested string
+    # only if that tag's tree predates the committed-VERSION convention.
+    if [[ -f "$_UPG_CLEAN_SRC_WORKTREE/VERSION" ]]; then
+      _UPG_TARGET_VERSION="$(tr -d '[:space:]' < "$_UPG_CLEAN_SRC_WORKTREE/VERSION")"
+    fi
+    if [[ -z "$_UPG_TARGET_VERSION" ]]; then
+      _UPG_TARGET_VERSION="$(version_resolve_normalize "$REQUESTED_VERSION" "$_UPG_BRANCH_PREFIX")"
+    fi
+
+    # Installed version identity: the LIVE install's own committed VERSION
+    # file. Missing/empty (very old installs predating VERSION tracking)
+    # degrades to v0.0.0 so the comparison below still has a baseline — any
+    # real target will compare newer than v0.0.0.
+    if [[ -f "$KANBAN_ROOT/VERSION" ]]; then
+      _UPG_INSTALLED_VERSION="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION")"
+    fi
+    if [[ -z "$_UPG_INSTALLED_VERSION" ]]; then
+      warn "No installed VERSION file found at $KANBAN_ROOT/VERSION; treating installed version as v0.0.0 for the forward-only comparison."
+      _UPG_INSTALLED_VERSION="v0.0.0"
+    fi
+
+    # ---- Forward-only enforcement (no --force override for direction) ----
+    if semver_eq "$_UPG_TARGET_VERSION" "$_UPG_INSTALLED_VERSION"; then
+      err "ERROR: refusing to re-lay: requested version '${_UPG_TARGET_VERSION}' is ALREADY the installed version '${_UPG_INSTALLED_VERSION}'."
+      err ""
+      err "upgrade.sh's forward-only rule refuses same-version re-lays as well as downgrades."
+      err "To force a clean re-lay of the currently installed version, use install.sh's repair path instead:"
+      err ""
+      err "  ./install.sh --force"
+      err ""
+      err "Nothing has been deposited; your existing installation at ${_UPG_INSTALLED_VERSION} is unchanged."
+      exit 1
+    elif ! version_resolve_forward_only_check "$_UPG_INSTALLED_VERSION" "$_UPG_TARGET_VERSION"; then
+      err "ERROR: refusing to upgrade: requested version '${_UPG_TARGET_VERSION}' is OLDER than the installed version '${_UPG_INSTALLED_VERSION}'."
+      err ""
+      err "upgrade.sh enforces a forward-only rule: it never moves an existing installation backwards in version."
+      err "There is no --force override for direction (--force only controls per-file overwrite prompts)."
+      err "The only sanctioned way to move an installation to an older version is a fresh install, which lays"
+      err "down everything from scratch and may go backwards:"
+      err ""
+      err "  ./install.sh ${REQUESTED_VERSION} --force"
+      err ""
+      err "Nothing has been deposited; your existing installation at ${_UPG_INSTALLED_VERSION} is unchanged."
+      exit 1
+    fi
+
+    info "Forward-only check: ${_UPG_INSTALLED_VERSION} -> ${_UPG_TARGET_VERSION}: OK (target is newer)"
+    info "Laying down from clean checkout: $_UPG_CLEAN_SRC_WORKTREE"
+    info "Dev tree's checked-out branch in $_UPG_ORIGINAL_DEV_TREE is untouched (detached worktree)."
+
+    # Redirect DEV_TREE: every "$DEV_TREE" reference for the rest of this
+    # script now reads from the resolved tag's tree instead of the
+    # checked-out dev tree — see block comment above.
+    DEV_TREE="$_UPG_CLEAN_SRC_WORKTREE"
+  fi
 
   # Fall through to the upgrade body below — tier detection, deposit,
   # scheduler hooks, VERSION stamp, divergence advisory all proceed normally.
@@ -849,7 +1073,7 @@ deposit_item() {
 info ""
 info "Depositing upgraded kanban tree..."
 
-for item in README.md DIRECTIVES.md OVERVIEW.md SOP.md roles scripts pm-agent workflows pgai_agent_kanban halt_after templates demos; do
+for item in README.md DIRECTIVES.md OVERVIEW.md SOP.md roles scripts pm-agent workflows pgai_agent_kanban halt_after templates demos config; do
   src="${DEV_TREE}/team/$item"
   [[ -e "$src" ]] || { warn "Source missing (skipping): team/$item"; continue; }
   deposit_item "$src" "$item" "team/$item"
@@ -1194,25 +1418,17 @@ if [[ -f "$_UPG_STAMP_LIB" ]]; then
 fi
 unset _UPG_STAMP_LIB
 
-if [[ -d "$DEV_TREE/.git" ]]; then
+# -e (exists), not -d (is-a-directory): a version-targeted upgrade redirects
+# DEV_TREE to a detached git worktree (see "VERSION-TARGETED UPGRADE" above),
+# and a worktree's .git is a FILE (a gitdir pointer), not a directory. -e
+# accepts both shapes so VERSION/VERSION_DETAIL are still stamped correctly
+# from a worktree-sourced DEV_TREE; git -C works unchanged against either.
+if [[ -e "$DEV_TREE/.git" ]]; then
   # Resolve branch_prefix for this project so the git-describe --match
-  # pattern uses the project's own tag shape (<prefix>v[0-9]*).
-  # Resolution: read the single registered project's project.cfg via
-  # pp_branch_prefix when the helper is available; default to empty (no
-  # prefix) on any failure so the an earlier defect latest-exclusion is preserved.
-  _UPG_BRANCH_PREFIX=""
-  if declare -f pp_branch_prefix >/dev/null 2>&1; then
-    _projects_cfg="${KANBAN_ROOT}/projects.cfg"
-    if [[ -f "$_projects_cfg" ]]; then
-      _upg_project_name="$(awk \
-        '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1];exit}' \
-        "$_projects_cfg" 2>/dev/null || true)"
-      if [[ -n "$_upg_project_name" ]]; then
-        _UPG_BRANCH_PREFIX="$(KANBAN_ROOT="$KANBAN_ROOT" pp_branch_prefix "$_upg_project_name" 2>/dev/null || true)"
-      fi
-    fi
-    unset _projects_cfg _upg_project_name
-  fi
+  # pattern uses the project's own tag shape (<prefix>v[0-9]*). Shared with
+  # the version-targeted-upgrade resolution block above so the two call
+  # sites cannot drift on how the prefix is derived.
+  _UPG_BRANCH_PREFIX="$(_upg_resolve_branch_prefix)"
 
   if [[ -n "$STAMP_VERSION" ]]; then
     # Operator override: write verbatim via shared helper; skip advisory.
@@ -1315,6 +1531,9 @@ unset _RETIRED_MANIFEST _RETIRED_LINT_SH _RETIRED_TS _ret_line _ret_src _ret_dst
 # ---------------------------------------------------------------------------
 echo ""
 ok "Upgrade complete!"
+if [[ -n "$REQUESTED_VERSION" ]]; then
+  ok "upgraded ${_UPG_INSTALLED_VERSION} -> ${_UPG_TARGET_VERSION} (from tag ${_UPG_RESOLVED_TAG})"
+fi
 echo ""
 echo "${C_BOLD}Summary:${C_RESET}"
 echo "  Kanban root:       $KANBAN_ROOT"
@@ -1322,6 +1541,9 @@ if [[ -n "$BACKUP_PATH" && -f "$BACKUP_PATH" ]]; then
   echo "  Backup tarball:    $BACKUP_PATH  (chmod 600; includes secrets)"
 fi
 echo "  Dev tree:          $DEV_TREE"
+if [[ -n "$REQUESTED_VERSION" ]]; then
+  echo "  Version:           ${_UPG_INSTALLED_VERSION} -> ${_UPG_TARGET_VERSION} (tag ${_UPG_RESOLVED_TAG})"
+fi
 echo "  Wake tier:         ${WAKE_TIER}"
 if [[ "$_RETIRED_COUNT" -gt 0 ]]; then
   echo "  Retired:           ${_RETIRED_COUNT} file(s) -> ${_RETIRED_DEST_LABEL}"

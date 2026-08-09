@@ -213,67 +213,58 @@ def test_scaffold_plugin_wf_functions_still_return_nonzero(
 # ---------------------------------------------------------------------------
 
 
-def test_missing_manifest_returns_nonzero(tmp_path: pathlib.Path) -> None:
-    """wf_load_plugin returns non-zero when workflow.cfg is absent."""
-    workflows_dir = tmp_path / "workflows"
-    plugin_dir = workflows_dir / "no-manifest"
+def _write_manifest_missing_status(workflows_dir: pathlib.Path, type_name: str) -> None:
+    """Write a manifest lacking the [workflow] status field, plus a minimal plugin.sh."""
+    plugin_dir = workflows_dir / type_name
     plugin_dir.mkdir(parents=True)
-    # No workflow.cfg written; no workflow.sh.
-
-    script = textwrap.dedent(f"""\
-        source {_LIB}
-        wf_load_plugin --workflows-dir '{workflows_dir}' 'no-manifest'
-    """)
-    result = run_bash(tmp_path, script)
-    assert result.returncode != 0
-
-
-def test_missing_plugin_sh_returns_nonzero(tmp_path: pathlib.Path) -> None:
-    """wf_load_plugin returns non-zero when workflow.sh is absent despite a valid manifest."""
-    workflows_dir = tmp_path / "workflows"
-    _build_plugin(workflows_dir, "no-plugin-sh", status="ready", include_plugin_sh=False)
-
-    script = textwrap.dedent(f"""\
-        source {_LIB}
-        wf_load_plugin --workflows-dir '{workflows_dir}' 'no-plugin-sh'
-    """)
-    result = run_bash(tmp_path, script)
-    assert result.returncode != 0
-
-
-def test_manifest_missing_status_field_returns_nonzero(tmp_path: pathlib.Path) -> None:
-    """wf_load_plugin returns non-zero when [workflow] status is absent from manifest."""
-    workflows_dir = tmp_path / "workflows"
-    plugin_dir = workflows_dir / "no-status"
-    plugin_dir.mkdir(parents=True)
-
-    # Write manifest without status field.
-    manifest = plugin_dir / "workflow.cfg"
-    manifest.write_text(
-        "[workflow]\nname = no-status\ndescription = missing status\n"
+    (plugin_dir / "workflow.cfg").write_text(
+        f"[workflow]\nname = {type_name}\ndescription = missing status\n"
         "\n[capabilities]\ngit_mode = none\nagents = pm\n",
         encoding="utf-8",
     )
-    # Write minimal plugin.sh.
-    plugin_sh = plugin_dir / "workflow.sh"
-    plugin_sh.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
-
-    script = textwrap.dedent(f"""\
-        source {_LIB}
-        wf_load_plugin --workflows-dir '{workflows_dir}' 'no-status'
-    """)
-    result = run_bash(tmp_path, script)
-    assert result.returncode != 0
+    (plugin_dir / "workflow.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
 
-def test_manifest_invalid_git_mode_returns_nonzero(tmp_path: pathlib.Path) -> None:
-    """wf_load_plugin returns non-zero when [capabilities] git_mode is invalid."""
+def _write_no_manifest_dir(workflows_dir: pathlib.Path, type_name: str) -> None:
+    """Create the plugin directory with neither workflow.cfg nor workflow.sh."""
+    (workflows_dir / type_name).mkdir(parents=True)
+
+
+@pytest.mark.parametrize(
+    "type_name, build_plugin",
+    [
+        pytest.param(
+            "no-manifest", _write_no_manifest_dir,
+            id="missing_manifest",
+        ),
+        pytest.param(
+            "no-plugin-sh",
+            lambda wd, tn: _build_plugin(wd, tn, status="ready", include_plugin_sh=False),
+            id="missing_plugin_sh_despite_valid_manifest",
+        ),
+        pytest.param(
+            "no-status", _write_manifest_missing_status,
+            id="manifest_missing_status_field",
+        ),
+        pytest.param(
+            "bad-git-mode",
+            lambda wd, tn: _build_plugin(wd, tn, status="ready", git_mode="invalid-mode"),
+            id="manifest_invalid_git_mode",
+        ),
+    ],
+)
+def test_malformed_plugin_returns_nonzero(
+    tmp_path: pathlib.Path, type_name: str, build_plugin
+) -> None:
+    """wf_load_plugin returns non-zero for every malformed-plugin shape: an
+    absent manifest, a manifest with no workflow.sh, a manifest missing the
+    status field, or a manifest with an invalid git_mode value."""
     workflows_dir = tmp_path / "workflows"
-    _build_plugin(workflows_dir, "bad-git-mode", status="ready", git_mode="invalid-mode")
+    build_plugin(workflows_dir, type_name)
 
     script = textwrap.dedent(f"""\
         source {_LIB}
-        wf_load_plugin --workflows-dir '{workflows_dir}' 'bad-git-mode'
+        wf_load_plugin --workflows-dir '{workflows_dir}' '{type_name}'
     """)
     result = run_bash(tmp_path, script)
     assert result.returncode != 0

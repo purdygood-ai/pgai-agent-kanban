@@ -13,6 +13,9 @@ Implements every read endpoint defined in the v1.2.0 operator-REST-API requireme
   GET /rejected           → list-rejected.sh [--project <name>]
   GET /projects           → registry read via _projects_cfg_list() (no shell-out)
   GET /dashboard/{pane}   → pane-specific dashboard script (see _PANE_SCRIPTS table)
+  GET /projects/{project}/tasks/{key}/readme
+                          → show-readme.sh --project <name> --key <key>; returns a
+                            task's README.md bytes, byte-identical to the CLI tool.
 
 JSON format contract (?format=json on /metrics and /costs):
   Both JSON branches read the same underlying per-RC data files that the text renderers
@@ -72,6 +75,7 @@ from .adapter import (
 )
 from .dependencies import warn_unknown_query_params
 from .metrics_data import costs_rows_for_scope, metrics_rows_for_project
+from ..dashboard.scan_auto_resolutions import collect_auto_resolutions
 from ..dashboard.scan_human_approvals import collect_pending_approvals
 from ..env import resolve_kanban_root
 
@@ -757,3 +761,222 @@ def get_approvals(
 
     records = collect_pending_approvals(str(live_root), project=project)
     return JSONResponse(content=records, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# GET /auto-resolutions
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/auto-resolutions",
+    summary="OVERWATCH auto-resolution ledger entries",
+    response_description=(
+        "JSON array of auto-resolution ledger records; empty array when no "
+        "autonomous resolutions have ever run. "
+        "Each record includes evidence_paths (TESTER report / HALT file / "
+        "release-state links) and ledger_path + entry_id (the ledger entry "
+        "link) — the drilldown pair the browser Auto-Resolutions tab renders."
+    ),
+)
+def get_auto_resolutions(
+    request: Request,
+    project: Optional[str] = None,
+    warnings: list[str] = Depends(warn_unknown_query_params),
+) -> JSONResponse:
+    """Return OVERWATCH auto-resolution ledger entries as a structured JSON array.
+
+    Reads the append-only auto-resolutions ledger
+    (``projects/<name>/auto-resolutions.md``) directly from the kanban
+    filesystem — no shell-out. One implementation
+    (``collect_auto_resolutions`` in ``dashboard/scan_auto_resolutions.py``)
+    backs both this endpoint and the human-review tmux window's
+    Auto-Resolutions section, so the JSON body and the pane are guaranteed
+    to agree on which resolution events exist.
+
+    This surface is READ-ONLY: it never writes to the ledger and offers no
+    approve/reject/mutate affordance — the surface informs, it never
+    mutates state.
+
+    Query parameters:
+
+    - ``project`` (optional) — project name; when absent, all projects are
+      aggregated (no default project, per house rule — same convention as
+      ``GET /approvals``). When supplied and the project does not exist,
+      returns 422.
+
+    Response body (HTTP 200):
+      ``[{"project": str, "rc": str, "attempt_from": int|null,
+          "attempt_to": int|null, "ceiling": str, "attempt_display": str,
+          "decision": str, "outcome": str, "trigger": str,
+          "findings": list[str], "evidence_paths": list[str],
+          "ledger_path": str, "entry_id": str, "family_key": str|null,
+          "timestamp": str}, ...]``
+
+      ``attempt_display`` is the "N/M" string (``attempt_from`` over the
+      project's configured retry ceiling); ``ceiling`` renders "?" when the
+      retry-ceiling config cannot be resolved for that project (a read-only
+      display degrades gracefully rather than raising — same convention as
+      the tmux renderer). ``outcome`` is the backfilled terminal state
+      (e.g. "SHIPPED attempt 2") or the literal string "pending" while the
+      bundle family has not yet reached a terminal state. ``evidence_paths``
+      and ``ledger_path``/``entry_id`` together form the drilldown to the
+      TESTER report and the ledger entry that the Auto-Resolutions tab
+      renders — the ledger is the index, not the record, so evidence paths
+      point at the underlying reports rather than duplicating their content.
+
+      Records are newest-first within each project; projects are ordered
+      alphabetically (same ordering as the tmux renderer).
+
+      Returns an empty array ``[]`` when no auto-resolutions have ever run.
+
+    HTTP status:
+      200 — success (including empty array).
+      422 — project parameter supplied but project does not exist.
+    """
+    live_root = _live_kanban_root()
+
+    if project is not None:
+        # Validate that the project exists before scanning.
+        if not _is_registered_project(live_root, project):
+            raise HTTPException(
+                status_code=HTTP_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown project '{project}'. No such project directory found.",
+            )
+
+    records = collect_auto_resolutions(str(live_root), project=project)
+    return JSONResponse(content=records, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# GET /projects/{project}/tasks/{key}/readme
+# ---------------------------------------------------------------------------
+
+
+def _has_readme_path_traversal(value: str) -> bool:
+    """Return True when *value* contains a path-traversal sequence.
+
+    Same detection logic the logs/traces routers apply to their own query
+    parameters (see routers/logs.py and routers/traces.py ``_has_traversal``):
+    checks raw and common URL-encoded traversal forms.  Used here to confine
+    the ``project`` and ``key`` PATH parameters on GET
+    ``/projects/{project}/tasks/{key}/readme`` before show-readme.sh is ever
+    invoked — show-readme.sh's own key resolver concatenates the raw key into
+    filesystem paths with no traversal sanitisation of its own, so this
+    handler is the confinement gate for that script.
+    """
+    upper = value.upper()
+    if ".." in value:
+        return True
+    if "/" in value:
+        return True
+    if "\\" in value:
+        return True
+    if "%2F" in upper:
+        return True
+    if "%5C" in upper:
+        return True
+    if "%2E" in upper:
+        return True
+    if "\x00" in value or "%00" in upper:
+        return True
+    return False
+
+
+@router.get(
+    "/projects/{project}/tasks/{key}/readme",
+    summary="Fetch a task's README.md",
+    response_description=(
+        "JSON envelope with exit_code, stdout (README.md content), and stderr "
+        "from show-readme.sh."
+    ),
+)
+def get_task_readme(
+    project: str,
+    key: str,
+    request: Request,
+    warnings: list[str] = Depends(warn_unknown_query_params),
+) -> JSONResponse:
+    """Return a task's README.md content, byte-identical to show-readme.sh.
+
+    Path parameters:
+
+    - ``project`` (required) — project name.
+    - ``key``     (required) — task key.  Prefix resolution is supported,
+                               matching show.sh / show-readme.sh (an
+                               agent+date+seq prefix suffices when it
+                               resolves unambiguously).
+
+    Response envelope (HTTP 200 on success):
+      ``{"exit_code": 0, "stdout": "<README.md content>", "stderr": "", "warnings": [...]}``
+
+    HTTP status:
+
+    - 200 — the key resolved to a task and its README.md was found; ``stdout``
+            carries the file content verbatim (byte-identical to
+            ``show-readme.sh --project <project> --key <key>``).
+    - 404 — no README resource exists at this (project, key): the key is not
+            found, the key resolves to a ledger item (bug/priority/requirement
+            — READMEs are task artifacts only, same refusal show-readme.sh
+            applies), or the task directory has no README.md file.  The body
+            carries ``{"error": "task readme not found", "project", "key",
+            "detail"}`` with show-readme.sh's stderr message in ``detail``.
+    - 422 — ``project`` or ``key`` contains a path-traversal sequence (``..``,
+            ``/``, ``\\\\``, or their URL-encoded forms).  Returned before any
+            subprocess is spawned or any file is opened.
+
+    Security — path confinement:
+
+    show-readme.sh resolves ``key`` via the same resolver used by show.sh,
+    close.sh, and friends; that resolver concatenates the raw key into
+    filesystem paths with no traversal sanitisation of its own.  This handler
+    is therefore the confinement gate: ``project`` and ``key`` are checked for
+    traversal sequences (raw and URL-encoded) BEFORE show-readme.sh is
+    invoked — no user-supplied string is concatenated into a filesystem path
+    by this handler, and a traversal-shaped value in either parameter is
+    rejected before any subprocess is spawned.  This mirrors the discipline
+    the logs and traces routers apply to their own query parameters.
+    """
+    if _has_readme_path_traversal(project) or _has_readme_path_traversal(key):
+        return JSONResponse(
+            content={
+                "error": "invalid path parameter",
+                "detail": (
+                    "project and key must not contain path-traversal "
+                    "sequences ('..', '/', '\\', or their URL-encoded forms)."
+                ),
+                "project": project,
+                "key": key,
+            },
+            status_code=HTTP_UNPROCESSABLE_ENTITY,
+        )
+
+    flags: dict = {"project": project, "key": key}
+    result = shell_out(_script_path(request, "show-readme.sh"), flags)
+
+    if result.exit_code == 0:
+        return JSONResponse(
+            content={
+                "exit_code": 0,
+                "stdout": result.stdout,
+                "stderr": "",
+                "warnings": warnings,
+            },
+            status_code=200,
+        )
+
+    # Any non-zero exit from show-readme.sh means there is no README
+    # resource at this (project, key): exit 3 is "key not found"; exit 1 is
+    # either a ledger-item refusal (key is a bug/priority/requirement, not a
+    # task) or a task with no README.md file.  All three collapse to the read
+    # layer's 404 convention for GET .../readme — none of them is a usage
+    # error, since project and key are both always supplied as path params.
+    return JSONResponse(
+        content={
+            "error": "task readme not found",
+            "project": project,
+            "key": key,
+            "detail": result.stderr.strip(),
+        },
+        status_code=404,
+    )

@@ -18,6 +18,7 @@ Public API
 
 import os
 import re
+import sys
 import warnings
 from pathlib import Path
 
@@ -26,6 +27,10 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 # Matches BUG-NNNN-slug filenames. Excludes BUG-TEMPLATE and README.
+# This is intentionally the loose "looks like a bug file" pattern used to
+# enumerate candidates for the backlog cache — it is NOT the filing-time
+# gate. See _BUG_GATE_RE below for the strict pattern used by the
+# high-water scan.
 _BUG_FILE_RE = re.compile(r'^(BUG-\d{4,}-.+)\.md$', re.IGNORECASE)
 
 # Matches only the numeric prefix of a BUG-NNNN-* file (4 or more digits).
@@ -33,6 +38,51 @@ _BUG_NUM_RE = re.compile(r'^BUG-(\d{4,})-', re.IGNORECASE)
 
 # Lock file pattern written during atomic BUG-ID claims.
 _CLAIM_LOCK_RE = re.compile(r'^\.claim-(\d{4,})\.lock$')
+
+# ---------------------------------------------------------------------------
+# Gate-valid BUG filename pattern, sourced from the single-source
+# ledger_filename_contract module shared with discovery.sh's scan-and-select
+# layer.  Used ONLY by _scan_highest_bug_num to decide which filenames may
+# participate in the high-water scan — a malformed name (date-first,
+# under/over-padded, or any other shape) must never poison the next-number
+# arithmetic.  _BUG_FILE_RE above stays loose on purpose: it drives backlog
+# cache enumeration, a separate concern from filing-time numbering safety.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_ledger_filename_re():
+    """Return ``ledger_filename_re`` from the shared contract module, or ``None``.
+
+    Tries the normal import first (works when the package is already on
+    ``sys.path``, e.g. via an editable install).  Falls back to
+    self-locating ``team/`` relative to this file's own path — "each tree
+    finds itself" (never assume an external caller pre-populated sys.path).
+    """
+    try:
+        from pgai_agent_kanban.lib.ledger_filename_contract import ledger_filename_re
+        return ledger_filename_re
+    except ImportError:
+        pass
+    try:
+        _team_root = str(Path(__file__).resolve().parents[2])  # team/pm-agent/lib -> team/
+        if _team_root not in sys.path:
+            sys.path.insert(0, _team_root)
+        from pgai_agent_kanban.lib.ledger_filename_contract import ledger_filename_re
+        return ledger_filename_re
+    except ImportError:
+        return None
+
+
+_ledger_filename_re = _resolve_ledger_filename_re()
+if _ledger_filename_re is not None:
+    _BUG_GATE_RE = _ledger_filename_re("BUG")
+else:
+    # Fallback definition when the package is not importable (e.g. a test
+    # environment without a full install).  Kept byte-identical to
+    # ledger_filename_contract.py's canonical BUG pattern.
+    _BUG_GATE_RE = re.compile(
+        r'^BUG-[0-9]{4}(?:-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$', re.IGNORECASE
+    )
 
 # Excluded filenames (compared case-insensitively)
 _EXCLUDED_NAMES = {"BUG-TEMPLATE.md", "README.md"}
@@ -380,22 +430,33 @@ def get_unbundled_bugs(bugs_dir: str, bug_backlog_path: str) -> list:
 # ---------------------------------------------------------------------------
 
 def _scan_highest_bug_num(bugs_dir: Path) -> int:
-    """Scan bugs_dir for the highest numeric prefix across BUG-NNNN-*.md files
-    and any active .claim-NNNN.lock files.  Returns 0 if the directory is empty
-    or contains no BUG-* files.
+    """Scan bugs_dir for the highest numeric prefix across GATE-VALID
+    BUG-NNNN-*.md files and any active .claim-NNNN.lock files.  Returns 0 if
+    the directory is empty or contains no BUG-* files.
 
     Both committed bug files and in-flight claim lock files are considered so
     that a concurrent claimer who has locked but not yet written the final file
     is still visible.
+
+    Only filenames matching the strict ledger gate (_BUG_GATE_RE — exactly 4
+    digits, optional date segment immediately AFTER the number) participate
+    in the .md-file half of this scan.  A malformed name such as a
+    date-first ``BUG-20260803-001-*.md`` (e.g.) must never poison the
+    high-water mark by contributing its 8-digit "number": a looser
+    ``\\d{4,}`` prefix match would let ``highest`` jump from a legitimate
+    4-digit value to an 8-digit one and permanently break subsequent
+    numbering.  The 4-digit field is always parsed with ``int()`` (never
+    compared as a string).
     """
     highest = 0
     for entry in bugs_dir.iterdir():
-        # Check BUG-NNNN-*.md files
-        m = _BUG_NUM_RE.match(entry.name)
-        if m:
-            n = int(m.group(1))
-            if n > highest:
-                highest = n
+        # Check BUG-NNNN-*.md files — gate-valid names only.
+        if _BUG_GATE_RE.match(entry.name):
+            m = _BUG_NUM_RE.match(entry.name)
+            if m:
+                n = int(m.group(1))
+                if n > highest:
+                    highest = n
             continue
         # Check .claim-NNNN.lock files (in-flight claims from concurrent callers)
         m2 = _CLAIM_LOCK_RE.match(entry.name)

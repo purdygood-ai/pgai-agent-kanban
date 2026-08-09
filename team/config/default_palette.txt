@@ -1,0 +1,47 @@
+# pgai-agent-kanban — canonical default project palette
+#
+# Single source of truth for the eight default project colors. Both the
+# bash stack (team/scripts/lib/projects_cfg.sh, PGAI_DEFAULT_PALETTE) and
+# the Python stack (team/pgai_agent_kanban/api/routers/board.py and
+# projects.py, _DEFAULT_PALETTE) read this file instead of hand-
+# maintaining their own copy of the array/list. See
+# projects/pgai-agent-kanban/priority/PRIORITY-0004-palette-single-source.md
+# for the drift this file exists to eliminate.
+#
+# Format: one entry per data line, order is significant.
+#   #RRGGBB<whitespace>name<whitespace>hue-comment
+#
+# Parse rule: a line is a DATA line only when its first whitespace-
+# delimited token matches ^#[0-9A-Fa-f]{6}$ (a six-digit hex color).
+# Every other line -- blank, or starting with anything else, including
+# this header block -- is a comment and MUST be ignored by readers. This
+# lets '#' double as both the hex sigil and a natural comment marker
+# without ambiguity: a comment-only line never starts with a valid
+# #RRGGBB token.
+#
+# Reading in bash:
+#   while read -r hex name rest; do
+#       [[ "$hex" =~ ^#[0-9A-Fa-f]{6}$ ]] || continue
+#       # use $hex, $name, $rest (hue comment)
+#   done < team/config/default_palette.txt
+#
+# Reading in Python:
+#   import re
+#   _HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+#   for line in path.read_text().splitlines():
+#       parts = line.split(None, 2)
+#       if not parts or not _HEX_RE.match(parts[0]):
+#           continue
+#       hex_color, name, *hue_comment = parts
+#
+# Do not duplicate this list elsewhere -- consumers read this file; they
+# do not hand-transcribe the array/list.
+
+#378ADD  blue    ~210 degrees
+#D85A30  coral   ~15 degrees
+#8E3FD0  violet  ~272 degrees
+#D9C544  yellow  ~52 degrees
+#1D9E75  teal    ~165 degrees
+#BA7517  amber   ~40 degrees
+#D4537E  pink    ~340 degrees
+#888780  gray    last resort

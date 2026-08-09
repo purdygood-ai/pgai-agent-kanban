@@ -12,10 +12,16 @@
 #   $1  prompt          — the full task prompt string
 #   $2  selected_model  — model alias/ID (empty string = use subagent default)
 #   $3  model_source    — human-readable model source description (for logging)
-#   $4  task_id         — the task ID (for logging and token merge)
-#   $5  task_artifact_dir — artifacts directory path (for tokens.json)
-#   $6  log_file        — path to the per-agent batch log file
-#   $7  subagent        — the subagent role name (coder, writer, etc.)
+#   $4  selected_effort — reasoning-effort value in force (empty string = none
+#                         resolved; no --effort flag is passed and no flag
+#                         narration line is emitted)
+#   $5  effort_source   — human-readable effort source description (for
+#                         logging), mirroring model_source: "PGAI_<ROLE>_EFFORT
+#                         env" or "[providers] llm_effort cfg"
+#   $6  task_id         — the task ID (for logging and token merge)
+#   $7  task_artifact_dir — artifacts directory path (for tokens.json)
+#   $8  log_file        — path to the per-agent batch log file
+#   $9  subagent        — the subagent role name (coder, writer, etc.)
 #
 # On return, PROVIDER_AGENT_EXIT_CODE is set to the CLI exit code.
 #
@@ -85,6 +91,7 @@ provider_model_preflight() {
 
 # ---------------------------------------------------------------------------
 # provider_invoke_agent <prompt> <selected_model> <model_source>
+#                       <selected_effort> <effort_source>
 #                       <task_id> <task_artifact_dir> <log_file> <subagent>
 #
 # Invokes the Claude CLI with the given prompt, captures token usage, and
@@ -96,10 +103,12 @@ provider_invoke_agent() {
   local prompt="$1"
   local selected_model="$2"
   local model_source="$3"
-  local task_id="$4"
-  local task_artifact_dir="$5"
-  local log_file="$6"
-  local subagent="$7"
+  local selected_effort="$4"
+  local effort_source="$5"
+  local task_id="$6"
+  local task_artifact_dir="$7"
+  local log_file="$8"
+  local subagent="$9"
 
   PROVIDER_AGENT_EXIT_CODE=0
 
@@ -111,6 +120,17 @@ provider_invoke_agent() {
     claude_cmd+=(--model "${selected_model}")
   else
     echo "[$(date -Iseconds)] wake(${AGENT}): model: ${model_source}" | tee -a "$log_file"
+  fi
+
+  # --effort flag: appended only when a non-empty reasoning-effort value was
+  # resolved (config_loader.sh's resolve_role_effort — [providers] llm_effort
+  # cfg or PGAI_<ROLE>_EFFORT env). Absent effort appends no flag at all,
+  # preserving today's assembled command byte-identically. Positioned
+  # immediately after --model, consistent with the --model flag's ordering
+  # before -p and the prompt.
+  if [[ -n "${selected_effort:-}" ]]; then
+    echo "[$(date -Iseconds)] wake(${AGENT}): effort: ${selected_effort} (from ${effort_source})" | tee -a "$log_file"
+    claude_cmd+=(--effort "${selected_effort}")
   fi
   # Read llm_thinking_enabled from kanban.cfg via the standard config loader.
   # Absent key or value "true" → do nothing (default-true, back-compat).
@@ -208,6 +228,7 @@ provider_invoke_agent() {
       token_capture_merge_into_task_artifacts \
         "$_tc_usage_record" "$task_artifact_dir" \
         "$_tc_model" "$_tc_provider" "$subagent" "$_tc_elapsed" "$_tc_rc_version" \
+        "${selected_effort:-}" \
         2>>"$log_file" || _tc_merge_exit=$?
     else
       echo "token capture: WARNING: parse_result failed (exit ${_tc_parse_exit}) — no usage captured for ${task_id}" \
@@ -215,6 +236,7 @@ provider_invoke_agent() {
       token_capture_merge_into_task_artifacts \
         "$_tc_usage_record" "$task_artifact_dir" \
         "$_tc_model" "$_tc_provider" "$subagent" "$_tc_elapsed" "$_tc_rc_version" \
+        "${selected_effort:-}" \
         2>>"$log_file" || _tc_merge_exit=$?
     fi
 

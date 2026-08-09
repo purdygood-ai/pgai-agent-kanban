@@ -369,6 +369,7 @@ def _add_tester_task(
     state: str = "DONE",
     recommendation: str = "PASS",
     systemic_risk: str = "low",
+    task_id_suffix: str = "001",
 ) -> pathlib.Path:
     """Add a synthetic TESTER task folder to the project's tasks directory.
 
@@ -384,12 +385,18 @@ def _add_tester_task(
         state:          Task state (e.g. "DONE", "BLOCKED").
         recommendation: TESTER recommendation (e.g. "PASS").
         systemic_risk:  Systemic risk level (e.g. "low", "high").
+        task_id_suffix: The zero-padded sequence segment of the task ID (e.g.
+                         "005", "011"). Lets a test create more than one TESTER
+                         task for the same Release Version with a controlled
+                         lexicographic/creation order — this is how RCs that
+                         are cancelled and re-cut end up with multiple TESTER
+                         attempts (SOP "RC Immutability").
 
     Returns:
         pathlib.Path — the created task directory.
     """
     version_slug = version.replace(".", "-")
-    task_id = f"TESTER-20260101-001-verify-{version_slug}"
+    task_id = f"TESTER-20260101-{task_id_suffix}-verify-{version_slug}"
     tasks_dir = kanban_root / "projects" / project_name / "tasks"
     task_dir = tasks_dir / task_id
     (task_dir / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -1214,10 +1221,13 @@ class TestTesterVerificationGate:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        # A HALT file must have been written.
-        halt_file = kanban_root / "HALT"
+        # A HALT file must have been written, scoped to this project only —
+        # cm-release.sh writes projects/<name>/HALT, never the global
+        # sentinel (see team/tests/integration/test_cm_release_synthetic.py's
+        # TestHaltScopeRecurrence for the regression this scoping fixes).
+        halt_file = kanban_root / "projects" / project_name / "HALT"
         assert halt_file.exists(), (
-            f"HALT file was not created when TESTER was BLOCKED.\n"
+            f"Project-scoped HALT file was not created when TESTER was BLOCKED.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
@@ -1267,6 +1277,153 @@ class TestTesterVerificationGate:
         assert not _git_tag_exists(repo_path, version), (
             f"Release tag '{version}' was created despite high Systemic Risk.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_release_selects_current_tester_task_over_stale_lexicographically_earlier_one(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """When two TESTER tasks exist for the same Release Version, the task
+        reflecting the RC's CURRENT state must be selected — not merely the one
+        whose task ID sorts first lexicographically.
+
+        Regression test for BUG-0025: an RC that is cancelled and re-cut can
+        leave a stale, superseded TESTER task (ended WONT-DO, high risk) behind
+        a task ID that sorts BEFORE the current, correct verification (ended
+        DONE, low risk). cm-release.sh must pick the DONE task and ship
+        KNOWN-BUGS, not silently default-ship FUNCTIONAL off the stale task.
+        """
+        version = "v0.1.0"
+        project_name = "tester_selection_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root_for_rc(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        _simulate_coder_work(repo_path, f"rc/{version}")
+
+        # Stale, superseded TESTER task — task ID sorts BEFORE the current one.
+        _add_tester_task(
+            kanban_root, project_name, version,
+            state="WONT-DO",
+            recommendation="SHIP-WITH-SERIOUS-CONCERNS",
+            systemic_risk="high",
+            task_id_suffix="005",
+        )
+        # Current, correct TESTER task for the re-cut RC — task ID sorts AFTER.
+        _add_tester_task(
+            kanban_root, project_name, version,
+            state="DONE",
+            recommendation="SHIP-WITH-CONCERNS",
+            systemic_risk="low",
+            task_id_suffix="011",
+        )
+
+        result = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result.returncode == 0, (
+            f"cm-release.sh failed when the CURRENT (DONE) TESTER task should have won.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        _tester_task_lines = [
+            line for line in result.stdout.splitlines() if "TESTER task:" in line
+        ]
+        assert _tester_task_lines and "TESTER-20260101-011" in _tester_task_lines[0], (
+            f"Step 4d did not select the current TESTER task (...-011); "
+            f"the stale (...-005) task may have won instead.\nstdout: {result.stdout}"
+        )
+
+        assert _git_tag_exists(repo_path, version), (
+            f"Release tag '{version}' not found despite the current TESTER task being DONE.\n"
+            f"stdout: {result.stdout}"
+        )
+
+        notes_path = repo_path / "release-notes" / f"{version}.md"
+        assert notes_path.exists(), f"release-notes/{version}.md was not created.\nstdout: {result.stdout}"
+        notes_text = notes_path.read_text(encoding="utf-8")
+        assert "KNOWN-BUGS" in notes_text, (
+            "release-notes Status must be KNOWN-BUGS (from the current DONE task's "
+            "SHIP-WITH-CONCERNS recommendation), not FUNCTIONAL from the stale task.\n"
+            f"release-notes contents:\n{notes_text}"
+        )
+        assert "## Status\nFUNCTIONAL" not in notes_text, (
+            "release-notes Status must not be FUNCTIONAL — the stale WONT-DO/high-risk "
+            "task must not have been silently treated as if it did not exist.\n"
+            f"release-notes contents:\n{notes_text}"
+        )
+
+    def test_release_halts_on_tester_task_found_with_unrecognized_state(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A TESTER task that was FOUND but whose State is neither BLOCKED nor
+        DONE (e.g. WONT-DO) must HALT the release, per the ship-policy matrix's
+        '(unrecognized values)' row — never silently default-ship FUNCTIONAL.
+
+        Regression test for BUG-0025's second, independent defect: previously
+        cm_ship_policy() fell through to SHIP-FUNCTIONAL for any tester_state
+        other than exactly "blocked" or "done", which meant a WONT-DO task
+        carrying a high-risk report shipped as if no report existed at all.
+        """
+        version = "v0.1.0"
+        project_name = "tester_unrecognized_state_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root_for_rc(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        _simulate_coder_work(repo_path, f"rc/{version}")
+
+        # Only one TESTER task exists, and its state is neither BLOCKED nor DONE.
+        _add_tester_task(
+            kanban_root, project_name, version,
+            state="WONT-DO",
+            recommendation="SHIP-WITH-SERIOUS-CONCERNS",
+            systemic_risk="high",
+        )
+
+        result = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result.returncode != 0, (
+            "cm-release.sh must exit non-zero when the found TESTER task's state "
+            "is neither BLOCKED nor DONE (unrecognized-values row).\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        assert not _git_tag_exists(repo_path, version), (
+            f"Release tag '{version}' was created despite an unrecognized TESTER state.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        # Project-scoped HALT file — see the sibling test above for why.
+        halt_file = kanban_root / "projects" / project_name / "HALT"
+        assert halt_file.exists(), (
+            f"Project-scoped HALT file was not created for an unrecognized TESTER state.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        halt_text = halt_file.read_text(encoding="utf-8")
+        assert "WONT-DO" in (halt_text + result.stdout), (
+            "The HALT reason must quote the unrecognized TESTER state ('WONT-DO') "
+            f"verbatim so the operator can diagnose it.\nHALT file:\n{halt_text}\n"
+            f"stdout: {result.stdout}"
         )
 
 

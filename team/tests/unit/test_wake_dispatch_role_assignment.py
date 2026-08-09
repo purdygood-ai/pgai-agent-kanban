@@ -262,17 +262,32 @@ def _run_dispatch_assertion(
     return result, calls
 
 
+# ---------------------------------------------------------------------------
+# Level 2 + 2b: both wake providers share one pre-dispatch assertion block
+# (BUG-0110 brought codex.sh to parity with claude.sh), so every scenario is
+# exercised against both siblings via a `source` parametrization rather than
+# duplicating each fixture per provider.
+# ---------------------------------------------------------------------------
+
+_PROVIDER_SOURCES = [_CLAUDE_SH, _CODEX_SH]
+_PROVIDER_IDS = ["claude", "codex"]
+
+
+@pytest.mark.parametrize("source", _PROVIDER_SOURCES, ids=_PROVIDER_IDS)
 def test_assigned_agent_selects_subagent_over_mismatched_role(
-    tmp_path: pathlib.Path,
+    tmp_path: pathlib.Path, source: pathlib.Path
 ) -> None:
     """A task assigned to WRITER with Role=CODER, queued under writer,
-    dispatches to the writer subagent — not coder — with no BLOCKED call.
+    dispatches to the writer subagent — not coder — with no BLOCKED call, on
+    both wake providers.
 
     Assigned Agent, when present and valid, selects the executing subagent;
     Role remains the capability descriptor and need not match it.
     """
     readme = _write_readme(tmp_path, role="CODER", assigned_agent="WRITER")
-    result, calls = _run_dispatch_assertion(tmp_path, readme, queue_agent="writer")
+    result, calls = _run_dispatch_assertion(
+        tmp_path, readme, queue_agent="writer", source=source
+    )
 
     assert result.returncode == 0, result.stderr
     assert "SUBAGENT=[writer]" in result.stdout, result.stdout
@@ -283,152 +298,20 @@ def test_assigned_agent_selects_subagent_over_mismatched_role(
     assert calls == "", f"No BLOCKED-path calls expected; got: {calls!r}"
 
 
+@pytest.mark.parametrize("source", _PROVIDER_SOURCES, ids=_PROVIDER_IDS)
 def test_missing_role_blocks_with_named_reason_and_no_dispatch(
-    tmp_path: pathlib.Path,
+    tmp_path: pathlib.Path, source: pathlib.Path
 ) -> None:
-    """A task with no ## Role section is BLOCKED with a named reason;
-    no subagent is selected and dispatch never proceeds.
-    """
-    readme = _write_readme(tmp_path, role=None, assigned_agent="none")
-    result, calls = _run_dispatch_assertion(tmp_path, readme, queue_agent="coder")
+    """A task with no ## Role section is BLOCKED with a named reason on both
+    wake providers; no subagent is selected and dispatch never proceeds.
 
-    assert result.returncode == 0, result.stderr
-    assert "SUBAGENT=[]" in result.stdout, (
-        f"No subagent should be selected on a blocked dispatch.\n{result.stdout}"
-    )
-    assert "FINAL_STATE=[BLOCKED]" in result.stdout, result.stdout
-    assert "SET_STATE:BLOCKED" in calls, calls
-    assert "SET_BLOCK:Blockers:INVALID_TASK_ASSIGNMENT" in calls, calls
-    assert "SET_BLOCK:Needs Human:yes" in calls, calls
-    assert "MARK_BACKLOG:SYNTH-000-fixture:B" in calls, calls
-
-
-def test_invalid_role_value_blocks_with_named_reason(
-    tmp_path: pathlib.Path,
-) -> None:
-    """A ## Role value that is not one of the six recognized roles blocks
-    dispatch rather than defaulting to coder.
-    """
-    readme = _write_readme(tmp_path, role="NOT-A-REAL-ROLE", assigned_agent="none")
-    result, calls = _run_dispatch_assertion(tmp_path, readme, queue_agent="coder")
-
-    assert result.returncode == 0, result.stderr
-    assert "SUBAGENT=[]" in result.stdout, result.stdout
-    assert "FINAL_STATE=[BLOCKED]" in result.stdout, result.stdout
-    assert "SET_BLOCK:Blockers:INVALID_TASK_ASSIGNMENT" in calls, calls
-
-
-def test_invalid_assigned_agent_value_blocks_dispatch(tmp_path: pathlib.Path) -> None:
-    """A ## Assigned Agent value that names no recognized role blocks
-    dispatch, even though ## Role itself is valid.
-    """
-    readme = _write_readme(tmp_path, role="CODER", assigned_agent="NOT-A-REAL-ROLE")
-    result, calls = _run_dispatch_assertion(tmp_path, readme, queue_agent="coder")
-
-    assert result.returncode == 0, result.stderr
-    assert "SUBAGENT=[]" in result.stdout, result.stdout
-    assert "FINAL_STATE=[BLOCKED]" in result.stdout, result.stdout
-    assert "SET_BLOCK:Blockers:INVALID_TASK_ASSIGNMENT" in calls, calls
-
-
-def test_assigned_agent_mismatched_with_queue_blocks_dispatch(
-    tmp_path: pathlib.Path,
-) -> None:
-    """A valid ## Assigned Agent that does not match the queue the task was
-    pulled from blocks dispatch instead of guessing which agent should run it.
-    """
-    readme = _write_readme(tmp_path, role="CODER", assigned_agent="WRITER")
-    # Task sits in the coder queue but claims Assigned Agent WRITER.
-    result, calls = _run_dispatch_assertion(tmp_path, readme, queue_agent="coder")
-
-    assert result.returncode == 0, result.stderr
-    assert "SUBAGENT=[]" in result.stdout, result.stdout
-    assert "FINAL_STATE=[BLOCKED]" in result.stdout, result.stdout
-    assert "SET_BLOCK:Blockers:INVALID_TASK_ASSIGNMENT" in calls, calls
-
-
-def test_normal_task_dispatches_by_role_with_no_assigned_agent(
-    tmp_path: pathlib.Path,
-) -> None:
-    """A well-formed task with no Assigned Agent dispatches by Role exactly
-    as before — the common case is unaffected by the added assertion.
-    """
-    readme = _write_readme(tmp_path, role="CODER", assigned_agent="none")
-    result, calls = _run_dispatch_assertion(tmp_path, readme, queue_agent="coder")
-
-    assert result.returncode == 0, result.stderr
-    assert "SUBAGENT=[coder]" in result.stdout, result.stdout
-    assert "FINAL_STATE=[]" in result.stdout, result.stdout
-    assert calls == "", f"No BLOCKED-path calls expected for a normal task; got: {calls!r}"
-
-
-@pytest.mark.parametrize(
-    "role,queue_agent,expected_subagent",
-    [
-        ("WRITER", "writer", "writer"),
-        ("CM", "cm", "cm"),
-        ("TESTER", "tester", "tester"),
-        ("PO", "po", "po"),
-        ("PM", "pm", "pm"),
-    ],
-)
-def test_normal_task_dispatches_correct_subagent_for_each_role(
-    tmp_path: pathlib.Path, role: str, queue_agent: str, expected_subagent: str
-) -> None:
-    """Every recognized role dispatches to its matching subagent when queued
-    under its own agent and carrying no Assigned Agent override.
-    """
-    readme = _write_readme(tmp_path, role=role, assigned_agent="none")
-    result, calls = _run_dispatch_assertion(tmp_path, readme, queue_agent=queue_agent)
-
-    assert result.returncode == 0, result.stderr
-    assert f"SUBAGENT=[{expected_subagent}]" in result.stdout, result.stdout
-    assert calls == "", f"No BLOCKED-path calls expected; got: {calls!r}"
-
-
-# ---------------------------------------------------------------------------
-# Level 2b: codex-provider parity (BUG-0110).
-#
-# codex.sh carried the pre-fix Role-only case (including a coder-defaulting
-# fallthrough) after the claude.sh fix landed in v1.26.22 (CODER-20260725-037).
-# These fixtures exercise the identical pre-dispatch assertion block now
-# extracted from codex.sh, proving dispatch-assertion parity between the two
-# providers rather than assuming it from the claude.sh coverage above.
-# ---------------------------------------------------------------------------
-
-
-def test_codex_assigned_agent_selects_subagent_over_mismatched_role(
-    tmp_path: pathlib.Path,
-) -> None:
-    """codex.sh: a task assigned to WRITER with Role=CODER, queued under
-    writer, dispatches to the writer subagent — not coder — with no BLOCKED
-    call. Mirrors the claude.sh fixture of the same name.
-    """
-    readme = _write_readme(tmp_path, role="CODER", assigned_agent="WRITER")
-    result, calls = _run_dispatch_assertion(
-        tmp_path, readme, queue_agent="writer", source=_CODEX_SH
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "SUBAGENT=[writer]" in result.stdout, result.stdout
-    assert "FINAL_STATE=[]" in result.stdout, (
-        f"No BLOCKED transition expected for a matching Assigned Agent.\n{result.stdout}"
-    )
-    assert "SET_STATE:BLOCKED" not in calls, calls
-    assert calls == "", f"No BLOCKED-path calls expected; got: {calls!r}"
-
-
-def test_codex_missing_role_blocks_with_named_reason_and_no_dispatch(
-    tmp_path: pathlib.Path,
-) -> None:
-    """codex.sh: a task with no ## Role section is BLOCKED with a named
-    reason; no subagent is selected and dispatch never proceeds. This is
-    the exact BUG-0110 regression case — codex.sh previously logged
-    "unknown role ...; defaulting to coder" and dispatched as coder instead.
+    "defaulting to coder" must never appear in the call log — this is the
+    exact BUG-0110 regression case, where codex.sh previously logged that
+    fallthrough and dispatched as coder instead of blocking.
     """
     readme = _write_readme(tmp_path, role=None, assigned_agent="none")
     result, calls = _run_dispatch_assertion(
-        tmp_path, readme, queue_agent="coder", source=_CODEX_SH
+        tmp_path, readme, queue_agent="coder", source=source
     )
 
     assert result.returncode == 0, result.stderr
@@ -441,19 +324,20 @@ def test_codex_missing_role_blocks_with_named_reason_and_no_dispatch(
     assert "SET_BLOCK:Needs Human:yes" in calls, calls
     assert "MARK_BACKLOG:SYNTH-000-fixture:B" in calls, calls
     assert "defaulting to coder" not in calls, (
-        f"codex.sh must never fail open to coder; got: {calls!r}"
+        f"wake providers must never fail open to coder; got: {calls!r}"
     )
 
 
-def test_codex_invalid_role_value_blocks_with_named_reason(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize("source", _PROVIDER_SOURCES, ids=_PROVIDER_IDS)
+def test_invalid_role_value_blocks_with_named_reason(
+    tmp_path: pathlib.Path, source: pathlib.Path
 ) -> None:
-    """codex.sh: a ## Role value that is not one of the six recognized
-    roles blocks dispatch rather than defaulting to coder.
+    """A ## Role value that is not one of the six recognized roles blocks
+    dispatch (on both providers) rather than defaulting to coder.
     """
     readme = _write_readme(tmp_path, role="NOT-A-REAL-ROLE", assigned_agent="none")
     result, calls = _run_dispatch_assertion(
-        tmp_path, readme, queue_agent="coder", source=_CODEX_SH
+        tmp_path, readme, queue_agent="coder", source=source
     )
 
     assert result.returncode == 0, result.stderr
@@ -462,15 +346,16 @@ def test_codex_invalid_role_value_blocks_with_named_reason(
     assert "SET_BLOCK:Blockers:INVALID_TASK_ASSIGNMENT" in calls, calls
 
 
-def test_codex_invalid_assigned_agent_value_blocks_dispatch(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize("source", _PROVIDER_SOURCES, ids=_PROVIDER_IDS)
+def test_invalid_assigned_agent_value_blocks_dispatch(
+    tmp_path: pathlib.Path, source: pathlib.Path
 ) -> None:
-    """codex.sh: a ## Assigned Agent value that names no recognized role
-    blocks dispatch, even though ## Role itself is valid.
+    """A ## Assigned Agent value that names no recognized role blocks
+    dispatch (on both providers), even though ## Role itself is valid.
     """
     readme = _write_readme(tmp_path, role="CODER", assigned_agent="NOT-A-REAL-ROLE")
     result, calls = _run_dispatch_assertion(
-        tmp_path, readme, queue_agent="coder", source=_CODEX_SH
+        tmp_path, readme, queue_agent="coder", source=source
     )
 
     assert result.returncode == 0, result.stderr
@@ -479,16 +364,18 @@ def test_codex_invalid_assigned_agent_value_blocks_dispatch(
     assert "SET_BLOCK:Blockers:INVALID_TASK_ASSIGNMENT" in calls, calls
 
 
-def test_codex_assigned_agent_mismatched_with_queue_blocks_dispatch(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize("source", _PROVIDER_SOURCES, ids=_PROVIDER_IDS)
+def test_assigned_agent_mismatched_with_queue_blocks_dispatch(
+    tmp_path: pathlib.Path, source: pathlib.Path
 ) -> None:
-    """codex.sh: a valid ## Assigned Agent that does not match the queue
-    the task was pulled from blocks dispatch instead of guessing which
-    agent should run it.
+    """A valid ## Assigned Agent that does not match the queue the task was
+    pulled from blocks dispatch (on both providers) instead of guessing
+    which agent should run it.
     """
     readme = _write_readme(tmp_path, role="CODER", assigned_agent="WRITER")
+    # Task sits in the coder queue but claims Assigned Agent WRITER.
     result, calls = _run_dispatch_assertion(
-        tmp_path, readme, queue_agent="coder", source=_CODEX_SH
+        tmp_path, readme, queue_agent="coder", source=source
     )
 
     assert result.returncode == 0, result.stderr
@@ -497,17 +384,17 @@ def test_codex_assigned_agent_mismatched_with_queue_blocks_dispatch(
     assert "SET_BLOCK:Blockers:INVALID_TASK_ASSIGNMENT" in calls, calls
 
 
-def test_codex_normal_task_dispatches_by_role_with_no_assigned_agent(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize("source", _PROVIDER_SOURCES, ids=_PROVIDER_IDS)
+def test_normal_task_dispatches_by_role_with_no_assigned_agent(
+    tmp_path: pathlib.Path, source: pathlib.Path
 ) -> None:
-    """codex.sh: a well-formed task with no Assigned Agent dispatches by
-    Role exactly as before — the added assertion does not change behavior
-    for normal, well-formed tasks (acceptance criterion: byte-identical
-    codex dispatch for the common case).
+    """A well-formed task with no Assigned Agent dispatches by Role exactly
+    as before, on both providers — the common case is unaffected by the
+    added assertion.
     """
     readme = _write_readme(tmp_path, role="CODER", assigned_agent="none")
     result, calls = _run_dispatch_assertion(
-        tmp_path, readme, queue_agent="coder", source=_CODEX_SH
+        tmp_path, readme, queue_agent="coder", source=source
     )
 
     assert result.returncode == 0, result.stderr
@@ -516,6 +403,7 @@ def test_codex_normal_task_dispatches_by_role_with_no_assigned_agent(
     assert calls == "", f"No BLOCKED-path calls expected for a normal task; got: {calls!r}"
 
 
+@pytest.mark.parametrize("source", _PROVIDER_SOURCES, ids=_PROVIDER_IDS)
 @pytest.mark.parametrize(
     "role,queue_agent,expected_subagent",
     [
@@ -526,15 +414,16 @@ def test_codex_normal_task_dispatches_by_role_with_no_assigned_agent(
         ("PM", "pm", "pm"),
     ],
 )
-def test_codex_normal_task_dispatches_correct_subagent_for_each_role(
-    tmp_path: pathlib.Path, role: str, queue_agent: str, expected_subagent: str
+def test_normal_task_dispatches_correct_subagent_for_each_role(
+    tmp_path: pathlib.Path, source: pathlib.Path, role: str, queue_agent: str, expected_subagent: str
 ) -> None:
-    """codex.sh: every recognized role dispatches to its matching subagent
-    when queued under its own agent and carrying no Assigned Agent override.
+    """Every recognized role dispatches to its matching subagent (on both
+    providers) when queued under its own agent and carrying no Assigned
+    Agent override.
     """
     readme = _write_readme(tmp_path, role=role, assigned_agent="none")
     result, calls = _run_dispatch_assertion(
-        tmp_path, readme, queue_agent=queue_agent, source=_CODEX_SH
+        tmp_path, readme, queue_agent=queue_agent, source=source
     )
 
     assert result.returncode == 0, result.stderr

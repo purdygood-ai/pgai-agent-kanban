@@ -7,7 +7,7 @@ operator-window insertion has a complete map of what to update.
 
 **Task:** CODER-20260722-009-window-index-census
 **Date:** 2026-07-22
-**Related:** PRIORITY-0009 — operator dashboard window insertion at index 2
+**Related:** operator dashboard window insertion at index 2
 
 ---
 

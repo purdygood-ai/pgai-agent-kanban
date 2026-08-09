@@ -73,10 +73,8 @@ _usage() {
         "  cannot be resolved to a single target (not found or ambiguous)." \
         "" \
         "Example:" \
-        # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-        "  close.sh --project myproject --key BUG-0362 --state superseded \\" \
-        # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-        "           --note 'subsumed by PRIORITY-0099'" \
+        "  close.sh --project myproject --key BUG-NNNN --state superseded \\" \
+        "           --note 'subsumed by PRIORITY-NNNN'" \
         "" \
         "Exit codes:" \
         "  0  Item closed (or --help shown, or --dry-run reported)" \

@@ -157,103 +157,97 @@ def test_create_sh_no_tmux_full_refresh_makes_zero_network_calls(
 
 # ---------------------------------------------------------------------------
 # Render-path / git-window scripts NOT reached by --no-tmux mode
-# (see module docstring SCOPE NOTE)
+# (see module docstring SCOPE NOTE), plus drill-window-style single-project
+# invocations of column-render.sh / data.sh.
+#
+# Each entry is (script_name, args_builder, expected_substring_or_None).
+# args_builder(fixture) returns the script's argv; expected_substring, when
+# not None, is a substring that must appear in stdout (a real-data sanity
+# check that a guard silently swallowing all data would not satisfy).
 # ---------------------------------------------------------------------------
 
+_SINGLE_SCRIPT_CASES = [
+    (
+        "show-header.sh",
+        lambda f: ["--kanban-root", str(f.kanban_root), "--project", f.project_name],
+        "v0.1.0",
+    ),
+    (
+        "metadata.sh",
+        lambda f: ["--kanban-root", str(f.kanban_root)],
+        None,  # checked dynamically below (fixture.project_name)
+    ),
+    (
+        "git-recent-tags.sh",
+        lambda f: ["--kanban-root", str(f.kanban_root), "--project", f.project_name],
+        "v0.1.0",
+    ),
+    (
+        "status-bottom.sh",
+        lambda f: [str(f.kanban_root), f.project_name],
+        None,
+    ),
+    (
+        "show-queues.sh",
+        lambda f: ["--kanban-root", str(f.kanban_root), "--project", f.project_name],
+        None,
+    ),
+    (
+        "column-render.sh",
+        # Drill-N windows invoke column-render.sh in single-project mode (no
+        # --all-projects) — exercise that call shape too, not just the
+        # --all-projects form --no-tmux drives.
+        lambda f: [
+            "input",
+            str(f.kanban_root / "projects" / f.project_name / "requirements"),
+            "none",
+            "--label", "REQUIREMENTS",
+            "--kanban-root", str(f.kanban_root),
+        ],
+        None,
+    ),
+    (
+        "data.sh",
+        lambda f: ["--project", f.project_name, "--kanban-root", str(f.kanban_root)],
+        "LAST_RELEASED=v0.1.0",
+    ),
+]
+_SINGLE_SCRIPT_IDS = [name for name, _, _ in _SINGLE_SCRIPT_CASES]
 
-def test_show_header_sh_makes_zero_network_calls(
-    tmp_path: pathlib.Path, network_stub_env
+
+@pytest.mark.parametrize(
+    "script_name, build_args, expected_substring",
+    _SINGLE_SCRIPT_CASES,
+    ids=_SINGLE_SCRIPT_IDS,
+)
+def test_single_script_invocation_makes_zero_network_calls(
+    tmp_path: pathlib.Path, network_stub_env, script_name: str, build_args, expected_substring,
 ) -> None:
+    """Every render-path / git-window script not reached by --no-tmux mode,
+    plus the drill-window single-project call shapes for column-render.sh
+    and data.sh, exits 0 and makes zero remote git operations.  Where a
+    real committed tag or project name is expected to render, that positive
+    sanity check runs too — a guard that silently swallowed all data would
+    also show zero network calls, which would be a false-positive pass.
+    """
     fixture = build_dashboard_project_root(tmp_path, dev_tree_mode="valid")
     env_overrides, log_file = network_stub_env
 
     result = _run(
-        [
-            "bash",
-            str(_DASHBOARD_DIR / "show-header.sh"),
-            "--kanban-root",
-            str(fixture.kanban_root),
-            "--project",
-            fixture.project_name,
-        ],
+        ["bash", str(_DASHBOARD_DIR / script_name), *build_args(fixture)],
         kanban_root=fixture.kanban_root,
         env_overrides=env_overrides,
     )
 
-    assert result.returncode == 0, result.stderr
-    _assert_no_network_calls(log_file, label="show-header.sh")
-    assert "v0.1.0" in result.stdout, (
-        f"Expected the real tag v0.1.0 to render; got: {result.stdout!r}"
-    )
-
-
-def test_metadata_sh_makes_zero_network_calls(
-    tmp_path: pathlib.Path, network_stub_env
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode="valid")
-    env_overrides, log_file = network_stub_env
-
-    result = _run(
-        [
-            "bash",
-            str(_DASHBOARD_DIR / "metadata.sh"),
-            "--kanban-root",
-            str(fixture.kanban_root),
-        ],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    assert result.returncode == 0, result.stderr
-    _assert_no_network_calls(log_file, label="metadata.sh")
-    assert fixture.project_name in result.stdout
-
-
-def test_git_recent_tags_sh_makes_zero_network_calls(
-    tmp_path: pathlib.Path, network_stub_env
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode="valid")
-    env_overrides, log_file = network_stub_env
-
-    result = _run(
-        [
-            "bash",
-            str(_DASHBOARD_DIR / "git-recent-tags.sh"),
-            "--kanban-root",
-            str(fixture.kanban_root),
-            "--project",
-            fixture.project_name,
-        ],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    assert result.returncode == 0, result.stderr
-    _assert_no_network_calls(log_file, label="git-recent-tags.sh")
-    assert "v0.1.0" in result.stdout, (
-        f"Expected the real tag v0.1.0 to render; got: {result.stdout!r}"
-    )
-
-
-def test_status_bottom_sh_makes_zero_network_calls(
-    tmp_path: pathlib.Path, network_stub_env
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode="valid")
-    env_overrides, log_file = network_stub_env
-
-    result = _run(
-        [
-            "bash",
-            str(_DASHBOARD_DIR / "status-bottom.sh"),
-            str(fixture.kanban_root),
-            fixture.project_name,
-        ],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    assert result.returncode == 0, result.stderr
-    _assert_no_network_calls(log_file, label="status-bottom.sh")
+    assert result.returncode == 0, f"{script_name}: {result.stderr}"
+    _assert_no_network_calls(log_file, label=script_name)
+    if script_name == "metadata.sh":
+        assert fixture.project_name in result.stdout
+    elif expected_substring is not None:
+        assert expected_substring in result.stdout, (
+            f"{script_name}: expected {expected_substring!r} to render; "
+            f"got: {result.stdout!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -287,89 +281,3 @@ def test_data_sh_consumer_windows_make_zero_network_calls(
 
     assert result.returncode == 0, f"{script_name}: {result.stderr}"
     _assert_no_network_calls(log_file, label=script_name)
-
-
-def test_show_queues_sh_makes_zero_network_calls(
-    tmp_path: pathlib.Path, network_stub_env
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode="valid")
-    env_overrides, log_file = network_stub_env
-
-    result = _run(
-        [
-            "bash",
-            str(_DASHBOARD_DIR / "show-queues.sh"),
-            "--kanban-root",
-            str(fixture.kanban_root),
-            "--project",
-            fixture.project_name,
-        ],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    assert result.returncode == 0, result.stderr
-    _assert_no_network_calls(log_file, label="show-queues.sh")
-
-
-# ---------------------------------------------------------------------------
-# Drill-window-style single-project invocations of column-render.sh / data.sh
-# ---------------------------------------------------------------------------
-
-
-def test_column_render_sh_single_project_requirements_makes_zero_network_calls(
-    tmp_path: pathlib.Path, network_stub_env
-) -> None:
-    """Drill-N windows invoke column-render.sh in single-project mode (no
-    --all-projects) — exercise that call shape too, not just the
-    --all-projects form --no-tmux drives.
-    """
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode="valid")
-    env_overrides, log_file = network_stub_env
-    requirements_dir = fixture.kanban_root / "projects" / fixture.project_name / "requirements"
-
-    result = _run(
-        [
-            "bash",
-            str(_DASHBOARD_DIR / "column-render.sh"),
-            "input",
-            str(requirements_dir),
-            "none",
-            "--label",
-            "REQUIREMENTS",
-            "--kanban-root",
-            str(fixture.kanban_root),
-        ],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    assert result.returncode == 0, result.stderr
-    _assert_no_network_calls(log_file, label="column-render.sh (single-project)")
-
-
-def test_data_sh_direct_invocation_makes_zero_network_calls(
-    tmp_path: pathlib.Path, network_stub_env
-) -> None:
-    fixture = build_dashboard_project_root(tmp_path, dev_tree_mode="valid")
-    env_overrides, log_file = network_stub_env
-
-    result = _run(
-        [
-            "bash",
-            str(_DASHBOARD_DIR / "data.sh"),
-            "--project",
-            fixture.project_name,
-            "--kanban-root",
-            str(fixture.kanban_root),
-        ],
-        kanban_root=fixture.kanban_root,
-        env_overrides=env_overrides,
-    )
-
-    assert result.returncode == 0, result.stderr
-    _assert_no_network_calls(log_file, label="data.sh")
-    assert "LAST_RELEASED=v0.1.0" in result.stdout, (
-        f"Expected the real tag v0.1.0 to render via LAST_RELEASED; got: "
-        f"{result.stdout!r}"
-    )

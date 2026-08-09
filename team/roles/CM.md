@@ -4,6 +4,8 @@ This role file specifies how the CM agent operates within the pgai-agent-kanban 
 
 When this file conflicts with the agent prompt, this file wins for project-specific mechanics. The agent prompt's quality bars and conflict policy still apply. Neither file overrides `OVERVIEW.md` (autonomy principle) or `DIRECTIVES.md` (top-level rules).
 
+**The Loop (read every wake).** This kanban runs on one operating doctrine — "The Loop" — stated once in `team/SOP.md` (§ The Loop). It is the first-principles frame every role works inside. By the single-canon rule it is not restated here; read it there.
+
 ## Purpose
 
 CM (Configuration Manager / Release Manager) operates the release pipeline. CM opens release candidate branches from the prefixed main branch, verifies prerequisites, runs the release scripts, writes release notes, and coordinates the mechanics of getting work from "RC complete" to "tagged on main."
@@ -302,6 +304,29 @@ The canonical ship-policy matrix — the release operation's Step 2 applies THIS
 
 The two HALT rows at the bottom are deliberate fail-loud behavior: a missing report when verification was ordered, or a recommendation/state string this table does not recognize (a typo, a truncated report, a parse failure), means CM's inputs cannot be trusted — and shipping on untrusted inputs is the silent-default failure class in the one place it publishes artifacts. Never-block governs found-bugs (they ship, with filings); it does not license shipping on garbage input.
 
+### Quality-class lint findings are non-blocking
+
+Quality-class lint findings — the provenance, anti-pattern, orphan-test, help-presence, doc/CHANGELOG/ICD-freshness, API-parity, dual-channel-pair, and every-other-lint checks that the gated runners now run as warn-file-continue rather than as a hard gate — are non-blocking in the ship policy, end to end. TESTER surfaces them in its report's "Lint Findings (non-blocking)" section, where each finding cites an OPEN bug or is filed by TESTER via Path C. They are already tracked and already flowing to the next iteration when CM reads the report.
+
+Two rules make that concrete in the matrix above:
+
+1. **Lint findings alone never raise `systemic_risk` to `high`, and never match a HALT row.** A report whose only concerns are quality-class lint findings carries `## Systemic Risk: low`. When a report's systemic_risk is `high`, that height comes from a real defect finding (a failing suite, a regression, a destructive-path fault) — never from lint findings on their own. Do not read a populated "Lint Findings (non-blocking)" section as a HALT signal; it is an informational list of filed follow-ups.
+
+2. **Green suites + lint findings → Ship `FUNCTIONAL`.** When both gated runners exited 0 (`UNIT_EXIT == 0` AND `INTEGRATION_EXIT == 0`), TESTER's recommendation is `PASS`, and the only entries in the report are quality-class lint findings (each citing or filing a bug), the release ships `FUNCTIONAL`. The filed bugs are listed for the record; they do NOT downgrade the status to `KNOWN-BUGS`. This is the matrix's `DONE / low-or-medium / PASS → FUNCTIONAL` row, reached with lint findings present — not a new row.
+
+### HALT is reserved for system-breaking states
+
+The default posture is SHIP AND FIX FORWARD. On the TESTER-report dispatch, CM refuses a release (HALT) only when one of these genuinely system-breaking states holds — never for lint findings, known bugs, or imperfect work on their own:
+
+- **Breakage-class suite failure** — a gated runner exited non-zero from a breakage-class pre-flight failure (syntax error, compile failure, unresolved first-party import) or from a pytest failure the report classifies as a real defect. The suite produced no trustworthy pass signal.
+- **Destructive-path failure** — a release-lifecycle or data-path operation failed in a way that damages or corrupts state (squash conflict, fidelity-gate failure, a pre-squash or pre-tag hook failure, a destructive test failure).
+- **Verification unable to run at all** — TESTER state is `BLOCKED` (verification could not complete — infrastructure failure), or a report that was ordered (`Test Required: true`) is missing. CM cannot ship on inputs it could not obtain.
+- **A TESTER-judged defect too severe for the next bugfix iteration to absorb** — the report carries `## Systemic Risk: high`, or a `SHIP-WITH-SERIOUS-CONCERNS` recommendation with any large-fix-effort finding. This is the "the loop is unhealthy" signal, not the "there are known bugs" signal.
+
+Backing a release out entirely remains the exception, reserved for unusable builds. Everything short of these states ships, with bugs filed and flowing forward.
+
+These four categories are the TESTER-report reasons to HALT; they correspond to the enumerated HALT triggers in the "HALT Authority" section below. The mechanical release-failure triggers there (push failure after retries, tag already exists on remote, release-notes status-stamp failure) still stand independently — those are release-machinery faults, orthogonal to the TESTER-report dispatch, and are unaffected by the lint-findings recalibration.
+
 ## HALT Authority
 
 CM has explicit authority to create the `$PGAI_AGENT_KANBAN_ROOT_PATH/HALT` file when it detects conditions indicating systemic issues or mechanical release failures. The HALT file stops the autonomous chain. The operator removes it when the issue is resolved.
@@ -413,7 +438,7 @@ The release-operation Step 2 dispatches on the TESTER state and report fields vi
 | `DONE` + `systemic_risk: low/medium` + `SHIP-WITH-SERIOUS-CONCERNS` + all fix_effort small/medium | Ship NON-FUNCTIONAL with warning. |
 | `DONE` + `systemic_risk: low/medium` + `SHIP-WITH-SERIOUS-CONCERNS` + any fix_effort large | HALT. |
 | No report | Proceed. Default is to ship FUNCTIONAL. |
-| Unrecognized values | Proceed. Default is to ship FUNCTIONAL. |
+| Unrecognized values | HALT. Quote the unrecognized TESTER state verbatim. |
 
 **Default policy: ship unless the matrix says HALT.** Known gaps, bugs, and imperfect work are not reasons to refuse the release. The only refusal cases are those in the HALT rows of the matrix. CM defaults to forward motion in all other cases.
 

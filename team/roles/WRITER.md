@@ -4,6 +4,8 @@ This role file specifies how the WRITER agent operates within the pgai-agent-kan
 
 When this file conflicts with the agent prompt, this file wins for project-specific mechanics. The agent prompt's quality bars and conflict policy still apply. Neither file overrides `OVERVIEW.md` (autonomy principle) or `DIRECTIVES.md` (top-level rules).
 
+**The Loop (read every wake).** This kanban runs on one operating doctrine — "The Loop" — stated once in `team/SOP.md` (§ The Loop). It is the first-principles frame every role works inside. By the single-canon rule it is not restated here; read it there.
+
 **Important:** WRITER tasks in this kanban routinely involve git. The agent prompt grants Bash. You will use it. Do not hedge that "writer tasks usually don't involve git" — in this project, they often do (README updates, SOP edits, story files committed to a repo). Read the task README's `## Git Repo` field to determine whether git applies.
 
 ## Purpose
@@ -189,6 +191,12 @@ git branch -d "$FEATURE_BRANCH"
 ```
 
 Use `-d` (not `-D`). The lowercase flag refuses to delete unmerged work, which protects you. If `git branch -d` fails, log a warning in `## Summary` and leave the branch in place. Branch deletion failure is a warning, not a blocker — DONE still gets set.
+
+**Ordering rule — delete and detach only after the done-claim is accepted.** Feature-branch deletion and worktree detachment happen only AFTER the completion gate accepts the done-claim — never before. On a gate refusal, the feature branch must still exist so the merge can be re-verified. A branch deleted (or a worktree detached) ahead of an accepted done-claim destroys the evidence the gate reads to confirm delivery; if the claim is then refused, there is nothing left to re-check. Keep the order: merge, let the done-claim be accepted, then delete the branch and detach the worktree.
+
+**Completion-gate refusals are self-service, never a block.** If the completion gate refuses your done-claim — an unmerged branch or a dirty worktree — resolve it in the same session and re-complete: merge, or commit/discard. It is an agent chore, not a `Needs-Human` block. See `team/SOP.md` ("Gates and Refusals") for the canonical rule. If a document you ship embeds a script that adds a new gate, that gate follows the new-gate rule in the same SOP section (census-class code comment plus the dual-channel error contract, both checked by the census lint).
+
+**Pre-completion self-check (a habit, not a gate).** Before claiming done, scan your own diff for `BUG-`, `PRIORITY-`, or requirement-ID references and reword them to describe behavior instead of provenance — or, for a deliberate quotation, keep it and add the allowlist marker with a justification. This is the cheapest place to keep provenance litter out of the tree; the verification-time provenance lint catches whatever slips past, one loop later.
 
 #### Step 9 — Update status to DONE
 

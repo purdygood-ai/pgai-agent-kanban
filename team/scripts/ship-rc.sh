@@ -213,6 +213,12 @@ source "$SCRIPT_DIR/lib/projects.sh"
 # shellcheck source=lib/cm_release_hooks.sh
 source "$SCRIPT_DIR/lib/cm_release_hooks.sh"
 
+# --- Source the shared dual-channel error-contract emitter ---
+# cm_halt below speaks both channels through this one primitive: see
+# team/scripts/lib/error_contract.sh for the house shape.
+# shellcheck source=lib/error_contract.sh
+source "$SCRIPT_DIR/lib/error_contract.sh"
+
 # --- Enable strict mode for our own code ---
 set -euo pipefail
 
@@ -282,11 +288,24 @@ PROJECT_HOOKS_DIR="${_CM_PROJECT_ROOT}/hooks"
 # Helper: halt the release with a named reason.
 # Called by cm_resolve_and_enforce_hook when required=true and no hook is found,
 # and by the hook-execution block when a hook fails.
-# Usage: cm_halt <trigger_description> <reason_one_line>
+# Usage: cm_halt <error_key> <message> <remedy>
+#   error_key — stable machine key matching the trigger/gate/check id
+#               documented for the equivalent site in cm-release.sh
+#               (ship-rc.sh is the manual escape hatch for the same
+#               hook-resolution/enforcement lifecycle).
+#   message   — what stopped and why, in a stranger's words.
+#   remedy    — what to do next, verbatim-runnable where possible.
+# Emits the dual-channel error contract (team/scripts/lib/error_contract.sh)
+# to stderr — this is a human-invoked script, so there is no HALT file or
+# release-state.md event to write (those are cm-release.sh's autonomous-chain
+# concerns; ship-rc.sh's failure is visible directly on the operator's terminal).
 cm_halt() {
-  local reason="${2:-$1}"
+  local error_key="$1"
+  local message="${2:-$1}"
+  local remedy="${3:-Re-run ship-rc.sh --project <name> --key <version> after resolving the cause above.}"
   echo "" >&2
-  echo "[ship-rc] HALT: ${reason}" >&2
+  echo "[ship-rc] HALT" >&2
+  pgai_emit_error_contract "$error_key" "$message" "$remedy"
   echo "" >&2
   echo "HALT: ship-rc.sh stopped. The release has NOT been shipped." >&2
   exit 1
@@ -540,8 +559,9 @@ echo "[Step 3b] Running pre-squash hook (if present)..."
 CM_RESOLVED_HOOK_PATH=""
 cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-squash" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" || {
   cm_halt \
-    "Pre-squash in-repo hook is not executable" \
-    "cm-release-pre-squash in-repo hook exists but is not executable. Fix with: chmod +x (path shown above)"
+    "ship-rc.pre-squash-hook-not-executable" \
+    "The cm-release-pre-squash in-repo hook exists but is not executable, so the squash cannot proceed safely." \
+    "chmod +x the in-repo hook path printed above by cm_release_hooks.sh, commit the mode change, then re-run ship-rc.sh."
 }
 _pre_squash_rc=0
 if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
@@ -549,8 +569,9 @@ if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
 fi
 if [[ $_pre_squash_rc -ne 0 ]]; then
   cm_halt \
-    "Pre-squash hook failed (rc=${_pre_squash_rc})" \
-    "cm-release-pre-squash hook exited non-zero (rc=${_pre_squash_rc}) for ${VERSION}. Squash cannot proceed safely."
+    "ship-rc.pre-squash-hook-failed" \
+    "The cm-release-pre-squash hook exited non-zero (rc=${_pre_squash_rc}) for ${VERSION} — the squash cannot proceed safely." \
+    "Inspect the [hook cm-release-pre-squash]-prefixed lines printed above for the hook's own diagnostic output, fix the hook, then re-run ship-rc.sh."
 fi
 
 # --- Step 4: git merge --squash RC_BRANCH ---
@@ -610,8 +631,9 @@ echo "[Step 5b] Running pre-tag hook (if present)..."
 CM_RESOLVED_HOOK_PATH=""
 cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-tag" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" || {
   cm_halt \
-    "Pre-tag in-repo hook is not executable" \
-    "cm-release-pre-tag in-repo hook exists but is not executable. Fix with: chmod +x (path shown above)"
+    "ship-rc.pre-tag-hook-not-executable" \
+    "The cm-release-pre-tag in-repo hook exists but is not executable, so the tag phase cannot run it." \
+    "chmod +x the in-repo hook path printed above by cm_release_hooks.sh, commit the mode change, then re-run ship-rc.sh."
 }
 if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
   _run_release_hook "cm-release-pre-tag" "$CM_RESOLVED_HOOK_PATH"

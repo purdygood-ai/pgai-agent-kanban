@@ -41,11 +41,14 @@
 # DOES NOT TOUCH (explicitly preserved):
 #   main branch             — never checked out, never merged, never pushed
 #   git tags                — no tags are created, moved, or deleted
-#   Last Released fields in release-state.md
-#                           — "Last Released", "Last Released At", and
-#                             "Last Released By Task" are never written; the
-#                             git tag created by cm-release.sh is the canonical
-#                             Last Released record
+#   ## Last Released field in release-state.md
+#                           — read from the file before the rewrite and
+#                             written back byte-for-byte; cancel never
+#                             clears, alters, or computes this value. The
+#                             git tag created by cm-release.sh remains the
+#                             canonical Last Released record (SOP.md
+#                             "Release State File" — the field is monotonic
+#                             and latching; cm-cancel-rc must never clear it).
 #   Task folders            — task status.md files are not modified by this script;
 #                             caller is responsible for marking tasks WONT-DO
 #   Queue files             — coder_backlog.md, cm_backlog.md, etc. are not modified
@@ -77,8 +80,9 @@
 #   7.  Deletes rc/<version> branch from origin (if it exists there)
 #   8.  Deletes rc/<version> branch locally (if it exists)
 #   9.  Resets project-scoped release-state.md: clears Active RC + RC Opened At +
-#       RC Opened By Task. Last Released* fields are NOT touched — the git tag
-#       created by cm-release.sh is the canonical Last Released record.
+#       RC Opened By Task. The ## Last Released field is read before the rewrite
+#       and carried forward unchanged — the git tag created by cm-release.sh
+#       remains the canonical Last Released record.
 #  10.  Prints success message and exits 0
 #
 # release-state.md is the project-scoped live install file only:
@@ -138,8 +142,10 @@ FOOTPRINT — what this script touches vs. leaves alone:
   DOES NOT TOUCH:
     main branch on origin        never pushed (operator pushes via finalize-release.sh if needed)
     git tags                     never created, moved, or deleted
-    release-state.md Last Released fields
-                                 preserved verbatim (canonical from git tag)
+    release-state.md ## Last Released field
+                                 read before the rewrite and written back
+                                 unchanged (canonical value comes from the
+                                 git tag; cancel never clears it)
     task folders / status.md     not modified; caller must mark tasks WONT-DO
     queue files                  coder_backlog.md, cm_backlog.md, etc. not modified
     requirements/ files          not renamed or deleted
@@ -344,6 +350,15 @@ fi
 
 ACTIVE_RC="$(read_field "Active RC")"
 
+# Read the pre-existing Last Released value so the Step 10 rewrite can carry
+# it forward unchanged. This field is monotonic and latching (SOP.md
+# "Release State File") -- cancel-rc must never clear or alter it, only
+# preserve it. read_field returns "none" when the heading is absent or
+# empty (fresh project that has never shipped), which is itself a valid
+# schema value. Mirrors the same read-before-overwrite pattern in
+# cm/open-rc.sh (RELEASE_STATE_LAST_RELEASED).
+RELEASE_STATE_LAST_RELEASED="$(read_field "Last Released")"
+
 # --- Step 4: Check idempotency — if already cancelled, report and exit cleanly ---
 RC_LOCAL_EXISTS=0
 RC_REMOTE_EXISTS=0
@@ -478,10 +493,12 @@ fi
 
 # --- Step 10: Reset release-state.md ---
 if [[ "$ACTIVE_RC" != "none" ]]; then
-  # Write only the RC fields. Last Released* fields are intentionally NOT written —
-  # the git tag created by cm-release.sh is the canonical Last Released record.
-  # If Last Released* sections happen to be present in an existing release-state.md
-  # they are dropped here (forward-compat: the new schema has no Last Released fields).
+  # Reset the three RC-tracking fields to none. ## Last Released is carried
+  # forward unchanged from RELEASE_STATE_LAST_RELEASED (read in Step 3,
+  # before this rewrite) -- cancel-rc never computes, clears, or fabricates
+  # that value, it only preserves whatever was already on disk (SOP.md
+  # "Release State File": the field is monotonic and latching). Mirrors the
+  # same read-then-rewrite pattern used by cm/open-rc.sh.
   echo "Resetting project-scoped release-state.md (Active RC -> none)..."
   cat > "$RELEASE_STATE" <<EOF
 # Release State
@@ -494,6 +511,9 @@ none
 
 ## RC Opened By Task
 none
+
+## Last Released
+${RELEASE_STATE_LAST_RELEASED}
 EOF
 
   echo "  release-state.md reset."

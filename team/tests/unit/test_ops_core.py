@@ -292,27 +292,19 @@ def test_read_task_state_returns_empty_string_when_heading_absent(
     assert _read_task_state(status) == ""
 
 
-def test_read_intake_state_reads_status_heading(tmp_path: Path) -> None:
-    """_read_intake_state reads ## Status from intake files."""
+@pytest.mark.parametrize(
+    "body, expected",
+    [
+        ("## Status\nrunning\n", "running"),  # reads ## Status directly
+        ("## State\ndone\n", "done"),  # falls back to ## State when ## Status absent
+        ("# Title\n\n## Notes\nsome notes\n", ""),  # neither heading present
+    ],
+)
+def test_read_intake_state(tmp_path: Path, body: str, expected: str) -> None:
+    """_read_intake_state reads ## Status, falls back to ## State, else returns ''."""
     f = tmp_path / "BUG-0001.md"
-    f.write_text("## Status\nrunning\n", encoding="utf-8")
-    assert _read_intake_state(f) == "running"
-
-
-def test_read_intake_state_falls_back_to_state_heading(tmp_path: Path) -> None:
-    """_read_intake_state falls back to ## State when ## Status is absent."""
-    f = tmp_path / "BUG-0001.md"
-    f.write_text("## State\ndone\n", encoding="utf-8")
-    assert _read_intake_state(f) == "done"
-
-
-def test_read_intake_state_returns_empty_when_neither_heading_present(
-    tmp_path: Path,
-) -> None:
-    """_read_intake_state returns '' when neither ## Status nor ## State is present."""
-    f = tmp_path / "BUG-0001.md"
-    f.write_text("# Title\n\n## Notes\nsome notes\n", encoding="utf-8")
-    assert _read_intake_state(f) == ""
+    f.write_text(body, encoding="utf-8")
+    assert _read_intake_state(f) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -892,49 +884,23 @@ def test_normalize_lowercases_and_strips() -> None:
     assert normalize("WORKING") == "working"
 
 
-def test_is_terminal_accepts_lowercase_done() -> None:
-    """is_terminal returns True for lowercase 'done'."""
-    assert is_terminal("done") is True
-
-
-def test_is_terminal_accepts_uppercase_done() -> None:
-    """is_terminal returns True for uppercase 'DONE' (task form)."""
-    assert is_terminal("DONE") is True
-
-
-def test_is_terminal_accepts_lowercase_wont_do() -> None:
-    """is_terminal returns True for lowercase 'wont-do' (intake form written by close.sh)."""
-    assert is_terminal("wont-do") is True
-
-
-def test_is_terminal_accepts_uppercase_wont_do() -> None:
-    """is_terminal returns True for uppercase 'WONT-DO' (task form)."""
-    assert is_terminal("WONT-DO") is True
-
-
-def test_is_terminal_rejects_running() -> None:
-    """is_terminal returns False for 'running' (non-terminal intake state)."""
-    assert is_terminal("running") is False
-
-
-def test_is_terminal_rejects_open() -> None:
-    """is_terminal returns False for 'open' (non-terminal intake state)."""
-    assert is_terminal("open") is False
-
-
-def test_is_terminal_rejects_working() -> None:
-    """is_terminal returns False for 'WORKING' (non-terminal task state)."""
-    assert is_terminal("WORKING") is False
-
-
-def test_is_terminal_rejects_blocked() -> None:
-    """is_terminal returns False for 'blocked' (non-terminal state)."""
-    assert is_terminal("blocked") is False
-
-
-def test_is_terminal_rejects_superseded() -> None:
-    """is_terminal returns False for 'superseded' (close state but not terminal for delete)."""
-    assert is_terminal("superseded") is False
+@pytest.mark.parametrize(
+    "state, expected",
+    [
+        ("done", True),  # lowercase 'done'
+        ("DONE", True),  # uppercase 'DONE' (task form)
+        ("wont-do", True),  # lowercase 'wont-do' (intake form written by close.sh)
+        ("WONT-DO", True),  # uppercase 'WONT-DO' (task form)
+        ("running", False),  # non-terminal intake state
+        ("open", False),  # non-terminal intake state
+        ("WORKING", False),  # non-terminal task state
+        ("blocked", False),  # non-terminal state
+        ("superseded", False),  # close state but not terminal for delete
+    ],
+)
+def test_is_terminal(state: str, expected: bool) -> None:
+    """is_terminal recognizes done/wont-do (either case) as terminal, everything else as not."""
+    assert is_terminal(state) is expected
 
 
 # ---------------------------------------------------------------------------

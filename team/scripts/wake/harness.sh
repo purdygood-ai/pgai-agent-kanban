@@ -11,10 +11,9 @@
 # install.  It is placed under wake/ so that wake-batch.sh can dispatch to it
 # via kanban.cfg [providers] active = harness (only when set in a temp fixture).
 #
-# Root-cause evidence this harness is designed to surface :
-#   [2026-07-14T14:04:10+00:00] wake(tester): task
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-#   TESTER-20260714-008-verify-pvg-closure-check:
+# This harness is designed to surface the class of log line shaped like:
+#   [YYYY-MM-DDTHH:MM:SS+00:00] wake(tester): task
+#   TESTER-YYYYMMDD-NNN-some-slug:
 #   close_intake_on_finalize_report: finalize_mode:report not found
 #   in README constraints — skipping intake closure (not a
 #   finalize=report terminal ticket)

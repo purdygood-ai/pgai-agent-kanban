@@ -856,7 +856,16 @@ def _render_known_issue(
         KI-A.B.C.n — symptom; affects vA · open
         KI-A.B.C.n — symptom; affects vA · won't fix — reason
     """
-    parts = [f"{public_id} — {bug.symptom}"]
+    # Normalize a trailing sentence-ending period off the symptom before
+    # appending the "; affects ... · ..." suffix below — otherwise a
+    # symptom that is itself a full sentence (e.g. "...one pane).")
+    # produces a ".;" double-punctuation artifact once the suffix is
+    # concatenated.
+    symptom = bug.symptom.rstrip()
+    if symptom.endswith("."):
+        symptom = symptom[:-1]
+
+    parts = [f"{public_id} — {symptom}"]
 
     # Affects clause
     affects_str = f"affects {bug.affects}"
@@ -1013,7 +1022,11 @@ def _render_fixed_items(
         if ki_id and ki_id in reverse_index:
             bug = reverse_index[ki_id]
             ki_line = _render_known_issue(bug, ki_id, published)
-            lines.append(ki_line)
+            # The substituted full-disclosure sentence must keep the same
+            # leading list marker the concise "- KI-... — resolved" bullet
+            # it replaces used, so the item still renders as part of the
+            # surrounding bulleted list rather than as a bare paragraph.
+            lines.append(f"- {ki_line}")
             continue
 
         cleaned = _strip_internal_ids(line)

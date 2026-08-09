@@ -12,10 +12,16 @@
 #   $1  prompt          — the full task prompt string
 #   $2  selected_model  — model alias/ID (empty string = use config default)
 #   $3  model_source    — human-readable model source description (for logging)
-#   $4  task_id         — the task ID (for logging and token merge)
-#   $5  task_artifact_dir — artifacts directory path (for tokens.json)
-#   $6  log_file        — path to the per-agent batch log file
-#   $7  subagent        — the subagent role name (coder, writer, etc.)
+#   $4  selected_effort — reasoning-effort value in force (empty string = none
+#                         resolved; no model_reasoning_effort override is
+#                         passed and no narration line is emitted)
+#   $5  effort_source   — human-readable effort source description (for
+#                         narration), e.g. "PGAI_CODER_EFFORT env" or
+#                         "[providers] llm_effort cfg"
+#   $6  task_id         — the task ID (for logging and token merge)
+#   $7  task_artifact_dir — artifacts directory path (for tokens.json)
+#   $8  log_file        — path to the per-agent batch log file
+#   $9  subagent        — the subagent role name (coder, writer, etc.)
 #
 # On return, PROVIDER_AGENT_EXIT_CODE is set to the CLI exit code.
 #
@@ -363,6 +369,7 @@ PY
 
 # ---------------------------------------------------------------------------
 # provider_invoke_agent <prompt> <selected_model> <model_source>
+#                       <selected_effort> <effort_source>
 #                       <task_id> <task_artifact_dir> <log_file> <subagent>
 #
 # Invokes the Codex CLI with the given prompt, captures token usage, and
@@ -372,21 +379,24 @@ PY
 #
 # Invocation: codex exec --json --dangerously-bypass-approvals-and-sandbox <prompt>
 # Optional:   -m <model> when selected_model is non-empty.
+# Optional:   -c model_reasoning_effort=<value> when selected_effort is non-empty.
 #
 # Token capture uses the flat schema (no per-model cost breakdown)
 # because Codex does not provide a modelUsage equivalent. Fields written:
 #   model, provider, agent, rc_version, input_tokens, output_tokens,
 #   cache_read_input_tokens, cache_creation_input_tokens (always 0),
-#   invocations, elapsed_seconds, timestamp.
+#   invocations, elapsed_seconds, timestamp, effort (only when resolved).
 # ---------------------------------------------------------------------------
 provider_invoke_agent() {
     local prompt="$1"
     local selected_model="$2"
     local model_source="$3"
-    local task_id="$4"
-    local task_artifact_dir="$5"
-    local log_file="$6"
-    local subagent="$7"
+    local selected_effort="$4"
+    local effort_source="$5"
+    local task_id="$6"
+    local task_artifact_dir="$7"
+    local log_file="$8"
+    local subagent="$9"
 
     PROVIDER_AGENT_EXIT_CODE=0
 
@@ -402,11 +412,21 @@ provider_invoke_agent() {
         echo "[$(date -Iseconds)] wake(${AGENT}): model: ${model_source}" | tee -a "$log_file"
     fi
 
+    # model_reasoning_effort config override: appended only when a non-empty
+    # reasoning-effort value was resolved (config_loader.sh's
+    # resolve_role_effort — [providers] llm_effort cfg or PGAI_<ROLE>_EFFORT
+    # env). Absent effort appends no override at all, preserving today's
+    # assembled command byte-identically. Codex has no dedicated --effort
+    # flag, so the value is set via the CLI's `-c key=value` config-override
+    # mechanism. Positioned immediately after -m, consistent with the model
+    # flag's ordering before --json.
+    if [[ -n "${selected_effort:-}" ]]; then
+        echo "[$(date -Iseconds)] wake(${AGENT}): effort: ${selected_effort} (from ${effort_source})" | tee -a "$log_file"
+        codex_cmd+=(-c "model_reasoning_effort=${selected_effort}")
+    fi
+
     # --json: emit JSONL event stream to stdout
     # --dangerously-bypass-approvals-and-sandbox: run non-interactively
-    # llm_thinking_enabled (kanban.cfg [providers]): future-mapped — when the
-    #   Codex lane gains a thinking/reasoning switch, wire it here. No behavior
-    #   change yet.
     codex_cmd+=(--json --dangerously-bypass-approvals-and-sandbox)
 
     # Prompt is the last positional argument
@@ -486,6 +506,7 @@ provider_invoke_agent() {
             token_capture_merge_into_task_artifacts \
                 "$_tc_usage_record" "$task_artifact_dir" \
                 "$_codex_model" "$_tc_provider" "$subagent" "$_tc_elapsed" "$_tc_rc_version" \
+                "${selected_effort:-}" \
                 2>>"$log_file" || _tc_merge_exit=$?
         else
             echo "token capture: WARNING: codex_parse_jsonl_result failed (exit ${_tc_parse_exit}) — no usage captured for ${task_id}" \
@@ -493,6 +514,7 @@ provider_invoke_agent() {
             token_capture_merge_into_task_artifacts \
                 "$_tc_usage_record" "$task_artifact_dir" \
                 "$_codex_model" "$_tc_provider" "$subagent" "$_tc_elapsed" "$_tc_rc_version" \
+                "${selected_effort:-}" \
                 2>>"$log_file" || _tc_merge_exit=$?
         fi
 

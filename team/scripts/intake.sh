@@ -82,8 +82,7 @@ _intake_usage() {
         "" \
         "Examples:" \
         "  intake.sh --project myproject /tmp/an earlier defect-some-slug.md" \
-        # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-        "  intake.sh --project myproject --file /tmp/PRIORITY-0010-urgent.md" \
+        "  intake.sh --project myproject --file /tmp/PRIORITY-NNNN-urgent.md" \
         "" \
         "Exit codes:" \
         "  0  File deposited (prints the deposited path)" \

@@ -26,11 +26,21 @@ Test coverage:
  13. main() returns 2 when the dashboard/ subdirectory does not exist.
  14. --help exits 0 (argparse integration smoke test).
  15. Violation message is actionable — names the file, line, and verb.
+ 16. Remedy block (PRIORITY-0001-gates-prescribe-remedies): forcing a
+     network-git violation prints the full three-part remedy block — cause(s)
+     naming the offending file/line/verb, a numbered fix block of verbatim-
+     runnable commands with no angle-bracket placeholders ending with the
+     re-lint check, and the one-line enforced rule.
+ 17. Remedy commands clear the gate: the exact numbered commands printed in
+     the remedy block are parsed out of the captured output and executed,
+     verbatim, through a real shell — the offending line is commented out and
+     the lint re-run against the fixture exits 0.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import re
 import subprocess
 import sys
 import textwrap
@@ -341,3 +351,157 @@ def test_violation_message_names_file_line_and_verb(tmp_path: Path) -> None:
     assert v.verb == "ls-remote"
     assert v.line == 3
     assert "ls-remote" in v.snippet
+
+
+# ---------------------------------------------------------------------------
+# Remedy-block tests (PRIORITY-0001-gates-prescribe-remedies)
+# ---------------------------------------------------------------------------
+
+# A numbered fix-command line, e.g. "  1. sed -i '3s/^/# /' \"...\"".
+_NUMBERED_COMMAND_RE = re.compile(r"^\s*(\d+)\.\s+(.+)$", re.MULTILINE)
+
+# An unresolved angle-bracket placeholder such as "<path>" or "<team-dir>".
+# The house placeholder law (docs/coding-standards.md) forbids these in the
+# printed fix commands — every site-specific value must already be derived
+# and substituted by the time the remedy block is printed.
+_ANGLE_BRACKET_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][\w -]*>")
+
+
+class TestDashboardNetworkGitGateRemedyBlock:
+    """The remedy block: cause(s), numbered verbatim commands, re-lint, rule.
+
+    Exercises PRIORITY-0001-gates-prescribe-remedies' second lint target end
+    to end: force a network-git violation, assert the remedy block contains
+    every required part, assert the printed commands carry no angle-bracket
+    placeholders, and then actually execute the printed commands verbatim to
+    prove they clear the gate.
+    """
+
+    def _write_violation_fixture(self, tmp_path: Path) -> tuple[Path, Path]:
+        """Return (team_dir, script_path) for a synthetic dashboard/ directory
+        containing exactly one network-git violation."""
+        dashboard = _make_dashboard_dir(tmp_path)
+        fixture_sh = _write_sh(
+            dashboard / "violator.sh",
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            git -C "$dev_tree" ls-remote --tags origin
+            """,
+        )
+        team_dir = tmp_path / "team"
+        return team_dir, fixture_sh
+
+    def test_remedy_block_contains_all_required_parts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Forcing a network-git violation prints the full three-part remedy
+        block.
+
+        Asserts, per docs/coding-standards.md "Gates prescribe, not just
+        diagnose":
+          1. Cause(s) with a concrete location (path:line and verb).
+          2. A numbered fix block of at least two verbatim-runnable
+             commands, ending with the re-lint verification command.
+          3. The one-line enforced rule.
+          4. No angle-bracket placeholders anywhere in the output.
+        """
+        team_dir, fixture_sh = self._write_violation_fixture(tmp_path)
+
+        result = _lint.main(["--team-dir", str(team_dir)])
+        assert result == 1, "Forced network-git violation did not fail the gate."
+
+        out = capsys.readouterr().out
+
+        assert "Cause(s):" in out, (
+            f"Remedy block missing the 'Cause(s):' section.\nstdout: {out!r}"
+        )
+        assert str(fixture_sh) in out and "ls-remote" in out, (
+            f"Remedy block does not name the offending file and verb.\nstdout: {out!r}"
+        )
+
+        assert "To fix:" in out, (
+            f"Remedy block missing the 'To fix:' numbered fix block.\nstdout: {out!r}"
+        )
+        commands = _NUMBERED_COMMAND_RE.findall(out)
+        assert len(commands) >= 2, (
+            "Remedy block's numbered fix block has fewer than 2 commands "
+            "(expected at least: comment out the line, then re-lint).\n"
+            f"Parsed commands: {commands!r}\nstdout: {out!r}"
+        )
+        last_command_text = commands[-1][1]
+        assert "lint_dashboard_network_git_gate.py" in last_command_text, (
+            "Last numbered command is not the re-lint verification command.\n"
+            f"Last command: {last_command_text!r}\nstdout: {out!r}"
+        )
+
+        assert "is local-only" in out, (
+            f"Remedy block missing the one-line enforced rule.\nstdout: {out!r}"
+        )
+
+        placeholder_hits = _ANGLE_BRACKET_PLACEHOLDER_RE.findall(out)
+        assert placeholder_hits == [], (
+            "Remedy block contains unresolved angle-bracket placeholder(s), "
+            "violating the house placeholder law.\n"
+            f"Placeholders found: {placeholder_hits!r}\nstdout: {out!r}"
+        )
+
+    def test_remedy_block_commands_clear_the_gate(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Executing the remedy block's printed commands verbatim clears the
+        gate — the motivating end-to-end proof: a stranger reading only the
+        gate's failure output, with no other guidance, can clear it.
+
+        The test parses the exact numbered command strings out of the
+        captured stdout (not a hand-reconstructed equivalent) and runs them
+        through a real shell, then re-invokes the lint directly to confirm
+        it now exits 0.
+        """
+        team_dir, fixture_sh = self._write_violation_fixture(tmp_path)
+
+        result = _lint.main(["--team-dir", str(team_dir)])
+        assert result == 1, "Forced network-git violation did not fail the gate."
+
+        out = capsys.readouterr().out
+        commands = _NUMBERED_COMMAND_RE.findall(out)
+        assert len(commands) >= 2, (
+            f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
+        )
+
+        for _, command_text in commands:
+            proc = subprocess.run(
+                command_text,
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, (
+                f"Printed remedy command exited non-zero: {command_text!r}\n"
+                f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
+            )
+
+        # The last command IS the re-lint verification command and already
+        # asserted returncode == 0 above. Confirm independently via a direct
+        # main() call for belt-and-braces.
+        recheck = _lint.main(["--team-dir", str(team_dir)])
+        assert recheck == 0, (
+            "lint_dashboard_network_git_gate still fails against the fixture "
+            "tree after running every printed remedy command verbatim."
+        )
+
+        # The offending line must now be a comment — proof the fix actually
+        # neutralized the network call, not merely a string that satisfies
+        # the lint's own textual check by coincidence.
+        patched_text = fixture_sh.read_text(encoding="utf-8")
+        offending_line = [
+            line for line in patched_text.splitlines() if "ls-remote" in line
+        ]
+        assert offending_line, (
+            f"Expected the ls-remote line to still be present (commented) "
+            f"in the patched file.\nContents: {patched_text!r}"
+        )
+        assert offending_line[0].lstrip().startswith("#"), (
+            "The offending ls-remote line was not commented out by the "
+            f"remedy command.\nLine: {offending_line[0]!r}"
+        )

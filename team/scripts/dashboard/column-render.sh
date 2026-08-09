@@ -321,7 +321,10 @@ if [[ "$ALL_PROJECTS" == "true" ]]; then
         PROJ_NAMES+=("$_proj")
         # projects_cfg_color requires KANBAN_ROOT to be set (it is).
         _color="$(projects_cfg_color "$_proj" 2>/dev/null || echo "")"
-        [[ -z "$_color" ]] && _color="#888780"
+        # Canonical gray sentinel: PGAI_DEFAULT_PALETTE (built by projects_cfg.sh,
+        # sourced above, from team/config/default_palette.txt) -- its last entry
+        # is the documented "last resort" gray. Do not hand-transcribe the hex.
+        [[ -z "$_color" ]] && _color="${PGAI_DEFAULT_PALETTE[-1]}"
         PROJ_COLORS+=("$_color")
         # per-project max_rows: precedence is per-project cfg > DASHBOARD_MAX_ROWS > 20
         _max_rows="$(KANBAN_ROOT="$KANBAN_ROOT" projects_cfg_max_rows "$_proj" 2>/dev/null || echo "${DASHBOARD_MAX_ROWS:-20}")"
@@ -493,6 +496,18 @@ if _kanban_root and _kanban_root not in sys.path:
     sys.path.insert(0, _kanban_root)
 
 from pgai_agent_kanban.dashboard.status_priority_cap import status_priority_cap as _status_priority_cap  # noqa: E402
+from pgai_agent_kanban.lib.palette import load_default_palette, PaletteFileError  # noqa: E402
+
+# Canonical gray sentinel: sourced from team/config/default_palette.txt via
+# the shared palette loader (its last entry is the documented "last resort"
+# gray). A missing/malformed definition file must not crash this render-path
+# script -- fall back to the literal gray sentinel so a broken/absent dev
+# tree still degrades to a working dashboard pane instead of an unhandled
+# traceback (graceful-degradation contract: dashboards render, never crash).
+try:
+    _GRAY_FALLBACK = load_default_palette()[-1]
+except PaletteFileError:
+    _GRAY_FALLBACK = "#888780"
 
 # Parse dashboard layout configuration injected as CLI args by the bash wrapper.
 # These values come from kanban.cfg [dashboard] section via read_ini.
@@ -568,7 +583,7 @@ else:
 def _pad(lst, n, default="none"):
     return lst + [default] * (n - len(lst))
 
-proj_colors         = _pad(proj_colors,         n_projects, "#888780")
+proj_colors         = _pad(proj_colors,         n_projects, _GRAY_FALLBACK)
 proj_max_rows_raw   = _pad(proj_max_rows_raw,   n_projects, "20")
 proj_input_dirs     = _pad(proj_input_dirs,     n_projects)
 proj_cache_files    = _pad(proj_cache_files,    n_projects)
@@ -646,12 +661,15 @@ def project_tag_color(hex_color):
 
 # ---------------------------------------------------------------------------
 # Status-to-color mapping for entry text.
-# Status colors per spec:
+# Status colors are a fixed ANSI-standard convention for lifecycle status,
+# independent of the project-tag palette in team/config/default_palette.txt
+# -- status colors and project-tag colors are two separate color systems
+# that must not be conflated (palette single-sourcing design):
 #   open        → default (C_WHITE)
-#   running     → amber   (C_YELLOW — closest ANSI approximation to #BA7517)
-#   done        → green   (C_GREEN  — closest ANSI approximation to #639922)
+#   running     → amber   (C_YELLOW)
+#   done        → green   (C_GREEN)
 #   wont-do     → green   (terminal-resolved state, same category as done)
-#   blocked     → red     (C_RED    — closest ANSI approximation to #E24B4A)
+#   blocked     → red     (C_RED)
 #
 # "done" and "wont-do" are both terminal-resolved states: the item is settled
 # and needs no further attention. They share the green color arm so operators

@@ -14,10 +14,10 @@
       }
     },
     "codex": {
-      "_comment": "Codex CLI pricing (OpenAI API rates). metering field: 'per_token' = charged per token via API; 'per_message' = flat rate per invocation (e.g. ChatGPT subscription). Probe task BUG-0115 confirmed: model is 'gpt-5.3-codex' from ~/.codex/config.toml; model identifier absent from JSONL stream. Source: https://openrouter.ai/openai/gpt-5.3-codex (2026-05-20). Cache fields: only cached_input_tokens present (no cache_creation_input_tokens per BUG-0114).",
+      "_comment": "Codex CLI pricing (OpenAI API rates). metering field: 'per_token' = charged per token via API; 'per_message' = flat rate per invocation (e.g. ChatGPT subscription). Model identifier 'gpt-5.3-codex' is confirmed via a ~/.codex/config.toml probe; the identifier itself is absent from the JSONL stream. Source: https://openrouter.ai/openai/gpt-5.3-codex (2026-05-20). Cache fields: only cached_input_tokens is present on this provider; no cache_creation_input_tokens field has been observed.",
       "models": {
         "gpt-5.3-codex": {
-          "_comment": "Observed model on this host (BUG-0115). Rates: $1.75/$14.00 per 1M in/out. Cached reads ~90% off input rate. No cache_creation billing observed (BUG-0114). Source: https://openrouter.ai/openai/gpt-5.3-codex",
+          "_comment": "Observed model on this host. Rates: $1.75/$14.00 per 1M in/out. Cached reads ~90% off input rate. No cache_creation billing observed. Source: https://openrouter.ai/openai/gpt-5.3-codex",
           "input_per_1m":            1.75,
           "output_per_1m":          14.00,
           "cache_creation_per_1m":   0.00,

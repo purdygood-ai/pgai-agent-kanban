@@ -97,34 +97,20 @@ def _make_project_dir(tmp_path: pathlib.Path, project_name: str) -> pathlib.Path
 # ---------------------------------------------------------------------------
 
 
-def test_canonicalize_opus_shortname_maps_to_canonical() -> None:
-    """canonicalize_model maps 'opus' to 'claude-opus-4-8'."""
-    assert ma.canonicalize_model("opus") == "claude-opus-4-8"
-
-
-def test_canonicalize_sonnet_shortname_maps_to_canonical() -> None:
-    """canonicalize_model maps 'sonnet' to 'claude-sonnet-4-6'."""
-    assert ma.canonicalize_model("sonnet") == "claude-sonnet-4-6"
-
-
-def test_canonicalize_haiku_shortname_maps_to_canonical() -> None:
-    """canonicalize_model maps 'haiku' to 'claude-haiku-4-5-20251001'."""
-    assert ma.canonicalize_model("haiku") == "claude-haiku-4-5-20251001"
-
-
-def test_canonicalize_already_canonical_id_is_unchanged() -> None:
-    """canonicalize_model returns a canonical-form ID unchanged."""
-    assert ma.canonicalize_model("claude-sonnet-4-6") == "claude-sonnet-4-6"
-
-
-def test_canonicalize_empty_string_returns_empty() -> None:
-    """canonicalize_model returns empty string for empty input."""
-    assert ma.canonicalize_model("") == ""
-
-
-def test_canonicalize_unknown_model_with_dash_returned_unchanged() -> None:
-    """canonicalize_model returns a dashed model ID unchanged (assumed canonical)."""
-    assert ma.canonicalize_model("some-vendor-model-1") == "some-vendor-model-1"
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("opus", "claude-opus-4-8"),  # shortname maps to canonical
+        ("sonnet", "claude-sonnet-4-6"),
+        ("haiku", "claude-haiku-4-5-20251001"),
+        ("claude-sonnet-4-6", "claude-sonnet-4-6"),  # already canonical, unchanged
+        ("", ""),  # empty input
+        ("some-vendor-model-1", "some-vendor-model-1"),  # unknown dashed id, assumed canonical
+    ],
+)
+def test_canonicalize_model(raw: str, expected: str) -> None:
+    """canonicalize_model maps known shortnames to canonical ids and passes through the rest."""
+    assert ma.canonicalize_model(raw) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -161,19 +147,17 @@ def test_read_field_skips_blank_lines_before_value() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_normalise_version_adds_v_prefix_when_absent() -> None:
-    """normalise_version prepends 'v' when the input lacks a prefix."""
-    assert ma.normalise_version("0.24.7") == "v0.24.7"
-
-
-def test_normalise_version_preserves_existing_v_prefix() -> None:
-    """normalise_version returns the version unchanged when 'v' is already present."""
-    assert ma.normalise_version("v0.24.7") == "v0.24.7"
-
-
-def test_normalise_version_strips_whitespace() -> None:
-    """normalise_version strips surrounding whitespace."""
-    assert ma.normalise_version("  v0.24.7  ") == "v0.24.7"
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("0.24.7", "v0.24.7"),  # prepends 'v' when absent
+        ("v0.24.7", "v0.24.7"),  # unchanged when already present
+        ("  v0.24.7  ", "v0.24.7"),  # strips surrounding whitespace
+    ],
+)
+def test_normalise_version(raw: str, expected: str) -> None:
+    """normalise_version normalizes a version string to a 'v'-prefixed, trimmed form."""
+    assert ma.normalise_version(raw) == expected
 
 
 # ---------------------------------------------------------------------------

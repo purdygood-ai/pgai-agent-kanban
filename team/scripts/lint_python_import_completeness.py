@@ -500,6 +500,126 @@ def lint_import_completeness(
 
 
 # ---------------------------------------------------------------------------
+# Remedy block (docs/coding-standards.md "Gates prescribe, not just diagnose")
+# ---------------------------------------------------------------------------
+
+
+def _target_requirements_file(
+    violations_for_module: list[ImportViolation], team_dir: Path
+) -> str:
+    """Return the requirements file a missing module's declaration belongs in.
+
+    ``requirements-test.txt`` when every source file importing this module
+    lives under team/tests/ (a test-only dependency); ``requirements.txt``
+    otherwise (covers the common case and any mix of production + test
+    importers, since requirements-test.txt already includes requirements.txt
+    via its ``-r`` directive — declaring in requirements.txt covers both).
+    """
+    for v in violations_for_module:
+        try:
+            rel_parts = v.source_file.relative_to(team_dir).parts
+        except ValueError:
+            rel_parts = v.source_file.parts
+        if not rel_parts or rel_parts[0] != "tests":
+            return "requirements.txt"
+    return "requirements-test.txt"
+
+
+def _build_causes(violations: list[ImportViolation]) -> list[str]:
+    """Return one cause bullet per violation, naming the module and source file."""
+    return [
+        f"'{v.module_name}' imported in {v.source_file} is not declared in "
+        "requirements.txt or requirements-test.txt"
+        for v in violations
+    ]
+
+
+def _build_fix_commands(
+    violations: list[ImportViolation],
+    *,
+    team_dir: Path,
+    repo_root: Path,
+    lint_script: Path,
+) -> list[str]:
+    """Return the numbered, verbatim-runnable fix commands for *violations*.
+
+    One command per distinct missing module (not per module/file pair) —
+    appends the import name itself, verbatim, as a declared package name to
+    the requirements file its importer(s) belong in (see
+    ``_target_requirements_file``). Because the lint's coverage check is
+    purely textual/normalisation-based (it never verifies the literal
+    installs under that name via pip), appending the import name as its own
+    package name always clears this gate deterministically, regardless of
+    whether the real PyPI package name happens to differ (the case
+    ``_PACKAGE_TO_IMPORT_NAMES`` exists for).
+
+    The final command re-runs this lint with the exact --team-dir/--repo-root
+    used at detection time, proving the fix cleared the gate.
+    """
+    by_module: dict[str, list[ImportViolation]] = {}
+    for v in violations:
+        by_module.setdefault(v.module_name, []).append(v)
+
+    commands: list[str] = []
+    for module_name in sorted(by_module):
+        target_file = _target_requirements_file(by_module[module_name], team_dir)
+        commands.append(f'echo "{module_name}" >> "{repo_root / target_file}"')
+
+    commands.append(
+        f'python3 "{lint_script}" --team-dir "{team_dir}" --repo-root "{repo_root}"'
+    )
+    return commands
+
+
+def _format_remedy_block(
+    violations: list[ImportViolation],
+    *,
+    team_dir: Path,
+    repo_root: Path,
+    lint_script: Path,
+) -> str:
+    """Assemble the full three-part remedy block required by
+    docs/coding-standards.md ("Gates prescribe, not just diagnose"): cause(s)
+    with concrete location, a numbered fix block of verbatim-runnable
+    commands ending with the re-lint check, then the one-line rule the gate
+    enforces.
+    """
+    causes = _build_causes(violations)
+    commands = _build_fix_commands(
+        violations, team_dir=team_dir, repo_root=repo_root, lint_script=lint_script
+    )
+
+    lines = [
+        f"lint_python_import_completeness: FAIL — {len(violations)} uncovered import(s)",
+        "",
+        "Cause(s):",
+    ]
+    for cause in causes:
+        lines.append(f"  - {cause}")
+    lines.append("")
+    lines.append("To fix:")
+    for i, command in enumerate(commands, start=1):
+        lines.append(f"  {i}. {command}")
+    lines.append("")
+    lines.append(
+        "Note: this appends the import name itself as the declared package "
+        "name. If the real PyPI package name differs from the import name "
+        "(the case _PACKAGE_TO_IMPORT_NAMES exists for), add a mapping there "
+        "instead of, or in addition to, the literal above — e.g. for a "
+        "package that installs as 'PyYAML' but imports as 'yaml': "
+        '_PACKAGE_TO_IMPORT_NAMES["pyyaml"] = frozenset({"yaml"}).'
+    )
+    lines.append("")
+    lines.append(
+        "Rule: every third-party import in team/scripts/, "
+        "team/pgai_agent_kanban/, and team/tests/ must be declared in "
+        "requirements.txt or requirements-test.txt so a fresh environment "
+        "installs every dependency the code actually imports."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -596,22 +716,15 @@ def main(argv: list[str] | None = None) -> int:
     violations = lint_import_completeness(team_dir, repo_root, verbose=args.verbose)
 
     if violations:
+        lint_script = Path(__file__).resolve()
         print(
-            f"\nlint_python_import_completeness: FAIL — "
-            f"{len(violations)} uncovered import(s):\n",
-            flush=True,
-        )
-        for v in violations:
-            print(
-                f"  missing: '{v.module_name}' imported in {v.source_file}",
-                flush=True,
-            )
-        print(
-            "\nFix: add the missing package to requirements.txt or "
-            "requirements-test.txt, or add a mapping to "
-            "_PACKAGE_TO_IMPORT_NAMES in "
-            "team/scripts/lint_python_import_completeness.py if the pip "
-            "package name differs from the import name.",
+            "\n"
+            + _format_remedy_block(
+                violations,
+                team_dir=team_dir,
+                repo_root=repo_root,
+                lint_script=lint_script,
+            ),
             flush=True,
         )
         return 1

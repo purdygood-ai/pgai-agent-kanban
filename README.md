@@ -23,6 +23,9 @@ One sentence, one link per row. Depth lives in the linked document.
 |---|---|---|
 | **Pipeline** | Six specialized agents (PO, PM, CODER, WRITER, TESTER, CM) advance one release candidate at a time per project through a file-driven, single-threaded pipeline. | [team/OVERVIEW.md](team/OVERVIEW.md) |
 | **Workflow-type plugins** | Every workflow type is a directory under `workflows/` with a manifest, hooks, and an optional pipeline — the engine reads capabilities, never type names, and fails closed on unknown types. | [team/workflows/README.md](team/workflows/README.md) |
+| **The Loop + blocking census** | Quality findings become filed bugs, never stops; every gate in the tree is inventoried and classified in a census enforced by lint. | [team/SOP.md](team/SOP.md) |
+| **Resilient verification** | Runners split breakage (fatal) from quality findings (recorded to a findings file, carried into the TESTER report, healed next loop). | [docs/blocking-site-census.md](docs/blocking-site-census.md) |
+| **Dual-channel errors** | Every refusal and HALT emits a machine key plus a plain-language message and runnable remedy — error/message/remedy. | [team/SOP.md](team/SOP.md) |
 | **Operator REST API** (experimental — see [status](#operator-rest-api-and-browser-ui-status)) | A loopback-only FastAPI service (`scripts/api-server.sh`) that thin-adapts the operator command surface — every endpoint shells out to the one canonical script and returns a `{exit_code, stdout, stderr}` envelope. | [docs/operator-api.md](docs/operator-api.md) |
 | **Structured reads** (experimental — see [status](#operator-rest-api-and-browser-ui-status)) | JSON-native reads (`/board`, `/projects/{name}`, `?format=json` on `/metrics` and `/costs`, `/logs/{kind}`, `/traces`) designed for the browser UI, coexisting with the ANSI-pane reads without disturbing them. | [docs/operator-api.md](docs/operator-api.md) |
 | **OVERWATCH self-monitor** | A horizontal watchdog that runs an hourly deterministic sweep (Tier 1) and a daily LLM deep-clean (Tier 2), with an on-BLOCK trigger that wakes it within seconds of a fresh failure. | [team/roles/OVERWATCH.md](team/roles/OVERWATCH.md) |
@@ -214,6 +217,9 @@ project — there is no special flag, no special mode:
   exactly two moments per release, both by CM.
 - **Loopback-only API.** The API binds to `127.0.0.1` and refuses to
   bind anywhere else. SSH does the exposure.
+  Lint findings ride a machine-readable findings file into the report
+  as non-blocking line items — each cites or files a bug, and the next
+  iteration fixes it. Only breakage stops a suite.
 
 ---
 

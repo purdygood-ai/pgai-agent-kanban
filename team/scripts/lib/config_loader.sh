@@ -39,6 +39,13 @@
 #   active                  OPTIONAL  claude
 #   initial                 OPTIONAL  claude
 #   available               OPTIONAL  claude codex
+#   llm_effort              OPTIONAL  ""  (global reasoning-effort level; resolved
+#                                          per role into PGAI_<ROLE>_EFFORT using
+#                                          the same precedence tier and narration-
+#                                          source discipline as PGAI_<ROLE>_MODEL —
+#                                          see resolve_role_effort() below. Absent
+#                                          everywhere = no effort resolved, nothing
+#                                          exported, byte-identical to today.)
 #
 # [chain]
 #   pm_mode                 OPTIONAL  automatic
@@ -99,6 +106,94 @@ fi
 # _CONFIG_LOADER_CFG_PATH — set by load_config; used by config_get.
 # ---------------------------------------------------------------------------
 _CONFIG_LOADER_CFG_PATH=""
+
+# ---------------------------------------------------------------------------
+# _PGAI_VALID_EFFORT_VALUES — the reasoning-effort levels recognized across
+# both provider CLIs (union of the claude and codex lexicons). Deliberately
+# permissive: the kanban does not enforce a per-model or per-provider
+# matrix ("supported values vary by model" is an operator/provider concern,
+# per the brief's deliberate-simplicity constraint) — this list only exists
+# to catch clearly-wrong values (typos, stray text) at config-load time.
+# ---------------------------------------------------------------------------
+_PGAI_VALID_EFFORT_VALUES="minimal low medium high xhigh max"
+
+# ---------------------------------------------------------------------------
+# _config_loader_validate_effort <value>
+#
+# Returns 0 if <value> is a recognized reasoning-effort level, 1 otherwise.
+# ---------------------------------------------------------------------------
+_config_loader_validate_effort() {
+    local value="$1"
+    local candidate
+    for candidate in $_PGAI_VALID_EFFORT_VALUES; do
+        if [[ "$value" == "$candidate" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# resolve_role_effort <role>
+#
+# Resolve the reasoning-effort value in force for <role>, mirroring the
+# PGAI_<ROLE>_MODEL precedence tier and narration-source discipline:
+#
+#   1. PGAI_<ROLE>_EFFORT already exported (env) — wins.
+#   2. [providers] llm_effort from the most recently load_config'd cfg file
+#      (a single global key; there is no per-role or per-provider matrix).
+#   3. Neither set — absent. No effort resolved; this is today's behavior.
+#
+# This is the shared resolution mechanism both provider wake lanes
+# (scripts/wake/claude.sh, scripts/wake/codex.sh) call to determine the
+# effort value and its narration source, exactly as they call the model
+# resolution logic today.
+#
+# On success, prints "<value>|<source>" to stdout and returns 0.
+#   <source> is one of:
+#     "PGAI_<ROLE>_EFFORT env"        (tier 1)
+#     "[providers] llm_effort cfg"    (tier 2)
+#     ""                              (absent — <value> is also empty)
+# On an invalid value, writes an error to stderr naming the exact source
+# key that supplied the bad value, prints nothing to stdout, and returns 1.
+# ---------------------------------------------------------------------------
+resolve_role_effort() {
+    local role="${1:-}"
+    if [[ -z "$role" ]]; then
+        echo "ERROR: resolve_role_effort: role argument is required." >&2
+        return 1
+    fi
+
+    local upper="${role^^}"
+    local env_var="PGAI_${upper}_EFFORT"
+    local env_value="${!env_var:-}"
+
+    if [[ -n "$env_value" ]]; then
+        if ! _config_loader_validate_effort "$env_value"; then
+            echo "ERROR: resolve_role_effort: invalid reasoning-effort value '${env_value}' supplied by ${env_var}. Valid values: ${_PGAI_VALID_EFFORT_VALUES}." >&2
+            return 1
+        fi
+        printf '%s|%s\n' "$env_value" "${env_var} env"
+        return 0
+    fi
+
+    local cfg_value=""
+    if [[ -n "$_CONFIG_LOADER_CFG_PATH" ]]; then
+        cfg_value="$(read_ini "$_CONFIG_LOADER_CFG_PATH" providers llm_effort "")"
+    fi
+
+    if [[ -n "$cfg_value" ]]; then
+        if ! _config_loader_validate_effort "$cfg_value"; then
+            echo "ERROR: resolve_role_effort: invalid reasoning-effort value '${cfg_value}' supplied by [providers] llm_effort. Valid values: ${_PGAI_VALID_EFFORT_VALUES}." >&2
+            return 1
+        fi
+        printf '%s|%s\n' "$cfg_value" "[providers] llm_effort cfg"
+        return 0
+    fi
+
+    printf '|\n'
+    return 0
+}
 
 # ---------------------------------------------------------------------------
 # load_config <cfg_path>
@@ -285,6 +380,32 @@ load_config() {
         if [[ -n "$_model" ]]; then
             export "$_var"="$_model"
         fi
+    done
+
+    # [providers] llm_effort → PGAI_<ROLE>_EFFORT
+    # Resolved exactly like PGAI_<ROLE>_MODEL above (env wins over cfg) via
+    # resolve_role_effort() — a single global cfg key, no per-role or
+    # per-provider matrix. Absent everywhere means nothing is exported,
+    # which is byte-identical to today's behavior (no PGAI_<ROLE>_EFFORT
+    # var exists at all).  An invalid value fails load_config loud, naming
+    # the exact source key that supplied it.
+    local _role_e _resolved_e _resolved_e_value _resolved_e_source _var_e
+    for _role_e in pm coder writer tester cm po; do
+        _resolved_e=""
+        _resolved_e="$(resolve_role_effort "$_role_e")"
+        if [[ $? -ne 0 ]]; then
+            return 1
+        fi
+        _resolved_e_value="${_resolved_e%%|*}"
+        _resolved_e_source="${_resolved_e#*|}"
+        if [[ -n "$_resolved_e_value" ]]; then
+            _var_e="PGAI_${_role_e^^}_EFFORT"
+            export "$_var_e"="$_resolved_e_value"
+        fi
+        # _resolved_e_source is not exported here — it is derivable on demand
+        # by re-calling resolve_role_effort(), which is what the provider
+        # wake lanes do at dispatch time for their narration line.
+        unset _resolved_e_source
     done
 
     return 0

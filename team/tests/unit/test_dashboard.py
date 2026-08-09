@@ -176,74 +176,49 @@ def test_sidecar_path_for_appends_reason_extension(tmp_path: pathlib.Path) -> No
 # ===========================================================================
 
 
-def test_compute_halt_state_returns_normal_when_no_sentinels(tmp_path: pathlib.Path) -> None:
-    """compute_halt_state returns ('normal', None) when neither HALT nor HALT-AFTER exists."""
-    state, event = compute_halt_state(tmp_path)
-    assert state == "normal"
-    assert event is None
-
-
-def test_compute_halt_state_returns_halted_when_halt_sentinel_exists(
+@pytest.mark.parametrize(
+    "files, target_subdir, expected_state, expected_event",
+    [
+        ({}, None, "normal", None),
+        ({"HALT": "rc\n"}, None, "halted", "rc"),
+        ({"HALT": "CODER\n"}, None, "halted", "coder"),
+        ({"HALT": "  \n"}, None, "halted", None),
+        ({"HALT-AFTER": "coder\n"}, None, "draining", "coder"),
+        ({"HALT": "rc\n", "HALT-AFTER": "coder\n"}, None, "halted", "rc"),
+        ({"HALT-AFTER": "not-a-valid-token\n"}, None, "normal", None),
+        ({}, "empty_project", "normal", None),
+    ],
+    ids=[
+        "no-sentinels",
+        "halt-sentinel-present",
+        "halt-event-normalised-lowercase",
+        "halt-empty-body-yields-no-event",
+        "halt-after-valid-token-drains",
+        "halt-beats-halt-after",
+        "halt-after-invalid-token-falls-through-to-normal",
+        "nonexistent-dir-created-fresh",
+    ],
+)
+def test_compute_halt_state(
     tmp_path: pathlib.Path,
+    files: dict,
+    target_subdir: str,
+    expected_state: str,
+    expected_event: str,
 ) -> None:
-    """compute_halt_state returns ('halted', ...) when a HALT file is present."""
-    (tmp_path / "HALT").write_text("rc\n", encoding="utf-8")
-    state, event = compute_halt_state(tmp_path)
-    assert state == "halted"
-
-
-def test_compute_halt_state_halt_event_is_normalised_lowercase(tmp_path: pathlib.Path) -> None:
-    """compute_halt_state lowercases the HALT file body to produce the event string."""
-    (tmp_path / "HALT").write_text("CODER\n", encoding="utf-8")
-    state, event = compute_halt_state(tmp_path)
-    assert event == "coder"
-
-
-def test_compute_halt_state_halt_event_is_none_for_empty_halt_file(
-    tmp_path: pathlib.Path,
-) -> None:
-    """compute_halt_state returns event=None when the HALT file body is empty."""
-    (tmp_path / "HALT").write_text("  \n", encoding="utf-8")
-    state, event = compute_halt_state(tmp_path)
-    assert state == "halted"
-    assert event is None
-
-
-def test_compute_halt_state_returns_draining_for_valid_halt_after(
-    tmp_path: pathlib.Path,
-) -> None:
-    """compute_halt_state returns ('draining', token) for a valid HALT-AFTER file."""
-    (tmp_path / "HALT-AFTER").write_text("coder\n", encoding="utf-8")
-    state, event = compute_halt_state(tmp_path)
-    assert state == "draining"
-    assert event == "coder"
-
-
-def test_compute_halt_state_halt_beats_halt_after(tmp_path: pathlib.Path) -> None:
-    """compute_halt_state returns 'halted' when both HALT and HALT-AFTER exist."""
-    (tmp_path / "HALT").write_text("rc\n", encoding="utf-8")
-    (tmp_path / "HALT-AFTER").write_text("coder\n", encoding="utf-8")
-    state, event = compute_halt_state(tmp_path)
-    assert state == "halted"
-
-
-def test_compute_halt_state_returns_normal_for_invalid_halt_after_token(
-    tmp_path: pathlib.Path,
-) -> None:
-    """compute_halt_state falls through to 'normal' when HALT-AFTER has an invalid token."""
-    (tmp_path / "HALT-AFTER").write_text("not-a-valid-token\n", encoding="utf-8")
-    state, event = compute_halt_state(tmp_path)
-    assert state == "normal"
-    assert event is None
-
-
-def test_compute_halt_state_returns_normal_for_nonexistent_dir(tmp_path: pathlib.Path) -> None:
-    """compute_halt_state returns ('normal', None) for a directory with no sentinel files."""
-    new_dir = tmp_path / "empty_project"
-    new_dir.mkdir()
-    state, event = compute_halt_state(new_dir)
-    assert state == "normal"
-    assert event is None
+    """compute_halt_state resolves (state, event) correctly across every sentinel
+    combination: absent, HALT alone (with lowercase normalisation and empty-body
+    handling), HALT-AFTER alone (valid and invalid token), HALT beating HALT-AFTER
+    when both are present, and a freshly created directory with no sentinels."""
+    target = tmp_path
+    if target_subdir:
+        target = tmp_path / target_subdir
+        target.mkdir()
+    for name, content in files.items():
+        (target / name).write_text(content, encoding="utf-8")
+    state, event = compute_halt_state(target)
+    assert state == expected_state
+    assert event == expected_event
 
 
 # ===========================================================================
@@ -262,23 +237,24 @@ def test_load_pricing_returns_dict_for_valid_json(tmp_path: pathlib.Path) -> Non
     assert "providers" in result
 
 
-def test_load_pricing_returns_empty_dict_for_missing_file(tmp_path: pathlib.Path) -> None:
-    """load_pricing returns {} when the pricing file does not exist."""
-    result = load_pricing(str(tmp_path / "nonexistent.json"))
-    assert result == {}
-
-
-def test_load_pricing_returns_empty_dict_for_empty_path() -> None:
-    """load_pricing returns {} when given an empty string path."""
-    result = load_pricing("")
-    assert result == {}
-
-
-def test_load_pricing_returns_empty_dict_for_malformed_json(tmp_path: pathlib.Path) -> None:
-    """load_pricing returns {} when the pricing file contains invalid JSON."""
-    pricing_file = tmp_path / "pricing.json"
-    pricing_file.write_text("not valid json {{{", encoding="utf-8")
-    result = load_pricing(str(pricing_file))
+@pytest.mark.parametrize(
+    "case",
+    ["missing_file", "empty_path", "malformed_json"],
+)
+def test_load_pricing_returns_empty_dict_for_invalid_input(
+    tmp_path: pathlib.Path, case: str,
+) -> None:
+    """load_pricing returns {} for every invalid-input shape: a missing file,
+    an empty string path, and a file containing malformed JSON."""
+    if case == "missing_file":
+        path = str(tmp_path / "nonexistent.json")
+    elif case == "empty_path":
+        path = ""
+    else:
+        pricing_file = tmp_path / "pricing.json"
+        pricing_file.write_text("not valid json {{{", encoding="utf-8")
+        path = str(pricing_file)
+    result = load_pricing(path)
     assert result == {}
 
 
@@ -365,16 +341,17 @@ def test_load_rollup_returns_dict_for_valid_json(tmp_path: pathlib.Path) -> None
     assert "by_model" in result
 
 
-def test_load_rollup_returns_none_for_missing_file(tmp_path: pathlib.Path) -> None:
-    """load_rollup returns None when the rollup file does not exist."""
-    result = load_rollup(tmp_path / "nonexistent.json")
-    assert result is None
-
-
-def test_load_rollup_returns_none_for_malformed_json(tmp_path: pathlib.Path) -> None:
-    """load_rollup returns None when the rollup file contains invalid JSON."""
-    rollup = tmp_path / "rollup.json"
-    rollup.write_text("invalid", encoding="utf-8")
+@pytest.mark.parametrize("case", ["missing_file", "malformed_json"])
+def test_load_rollup_returns_none_for_invalid_input(
+    tmp_path: pathlib.Path, case: str,
+) -> None:
+    """load_rollup returns None for both invalid-input shapes: a missing
+    file and a file containing malformed JSON."""
+    if case == "missing_file":
+        rollup = tmp_path / "nonexistent.json"
+    else:
+        rollup = tmp_path / "rollup.json"
+        rollup.write_text("invalid", encoding="utf-8")
     result = load_rollup(rollup)
     assert result is None
 
@@ -591,14 +568,19 @@ def test_read_section_stops_at_next_heading() -> None:
 # ===========================================================================
 
 
-def test_format_elapsed_less_than_60_seconds_shows_seconds() -> None:
-    """_format_elapsed returns seconds-based label for values under 60."""
-    assert _format_elapsed(45) == "45s ago"
-
-
-def test_format_elapsed_exactly_60_seconds_shows_minutes() -> None:
-    """_format_elapsed returns minutes-based label for 60 seconds."""
-    assert _format_elapsed(60) == "1m ago"
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [
+        (0, "0s ago"),
+        (45, "45s ago"),
+        (60, "1m ago"),
+    ],
+    ids=["zero", "under-60s", "exactly-60s"],
+)
+def test_format_elapsed_returns_expected_label(seconds: int, expected: str) -> None:
+    """_format_elapsed formats zero, sub-minute, and exactly-one-minute
+    elapsed values with the correct seconds/minutes label."""
+    assert _format_elapsed(seconds) == expected
 
 
 def test_format_elapsed_over_one_hour_shows_hours_and_minutes() -> None:
@@ -606,11 +588,6 @@ def test_format_elapsed_over_one_hour_shows_hours_and_minutes() -> None:
     result = _format_elapsed(3900)  # 1h 5m
     assert "1h" in result
     assert "5m" in result
-
-
-def test_format_elapsed_zero_returns_zero_seconds() -> None:
-    """_format_elapsed returns '0s ago' for zero seconds."""
-    assert _format_elapsed(0) == "0s ago"
 
 
 # ===========================================================================
@@ -1160,30 +1137,29 @@ def test_scan_overwatch_section_existing_sections_unaffected(
 # ===========================================================================
 
 
-def test_seconds_to_label_negative_seconds_returns_now() -> None:
-    """_seconds_to_label returns 'now' for negative or zero seconds."""
-    assert _seconds_to_label(-5) == "now"
-    assert _seconds_to_label(0) == "now"
-
-
-def test_seconds_to_label_under_60_seconds_returns_now() -> None:
-    """_seconds_to_label returns 'now' when seconds is less than 60."""
-    assert _seconds_to_label(59) == "now"
-
-
-def test_seconds_to_label_exactly_one_minute_returns_singular() -> None:
-    """_seconds_to_label returns 'in 1 min' when seconds == 60."""
-    assert _seconds_to_label(60) == "in 1 min"
-
-
-def test_seconds_to_label_multiple_minutes_returns_plural() -> None:
-    """_seconds_to_label returns 'in N min' for N > 1 minutes."""
-    assert _seconds_to_label(360) == "in 6 min"
-
-
-def test_seconds_to_label_two_minutes_exact() -> None:
-    """_seconds_to_label returns 'in 2 min' for exactly 120 seconds."""
-    assert _seconds_to_label(120) == "in 2 min"
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [
+        (-5, "now"),
+        (0, "now"),
+        (59, "now"),
+        (60, "in 1 min"),
+        (120, "in 2 min"),
+        (360, "in 6 min"),
+    ],
+    ids=[
+        "negative",
+        "zero",
+        "under-60s",
+        "exactly-one-minute-singular",
+        "two-minutes-exact",
+        "multiple-minutes-plural",
+    ],
+)
+def test_seconds_to_label(seconds: int, expected: str) -> None:
+    """_seconds_to_label returns 'now' for non-positive/sub-minute values and
+    'in N min' (singular/plural) for minute-granularity values."""
+    assert _seconds_to_label(seconds) == expected
 
 
 # ===========================================================================

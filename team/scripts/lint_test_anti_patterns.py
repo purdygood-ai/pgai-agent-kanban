@@ -4,9 +4,8 @@ lint_test_anti_patterns.py
 ==========================
 CI lint for the pgai-agent-kanban test suite AND runtime scripts.
 
-Scans team/tests/ for the two highest-impact anti-patterns identified in
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-PRIORITY-0024 and documented in SOP.md "Test Authoring Guidelines":
+Scans team/tests/ for the two highest-impact anti-patterns documented in
+SOP.md "Test Authoring Guidelines":
 
   Anti-pattern 1 — Pattern-scan universal invariants
       A test loops over all items returned by a scan function (glob, find,

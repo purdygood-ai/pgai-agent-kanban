@@ -97,6 +97,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 # ---------------------------------------------------------------------------
 # Help-detection patterns
@@ -189,18 +190,29 @@ def _load_exempt_list(exempt_list_path: Path) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
+class _Offender(NamedTuple):
+    """One missing-``--help`` finding, structured for both display and
+    remedy-command derivation (see docs/coding-standards.md "Gates prescribe,
+    not just diagnose").  Callers that need the label string read ``.label``."""
+
+    label: str
+    path: Path
+
+
 def _scan_directory(
     scripts_dir: Path,
     *,
     label_prefix: str,
     exempt_names: frozenset[str],
     verbose: bool,
-) -> tuple[list[str], int, int]:
+) -> tuple[list[_Offender], int, int]:
     """Scan *scripts_dir* non-recursively for .sh files missing --help.
 
     Returns ``(offenders, exempt_count, checked_count)`` where each offender
-    entry is a label string of the form ``<label_prefix><basename>`` (e.g.
-    ``cm/release.sh`` or ``release.sh``).
+    is an ``_Offender(label, path)`` pair.  ``label`` has the form
+    ``<label_prefix><basename>`` (e.g. ``cm/release.sh`` or ``release.sh``);
+    ``path`` is the resolved script path, needed to derive the remedy's fix
+    command.
 
     *exempt_names* is matched against the label form (``cm/name.sh`` or bare
     ``name.sh``), allowing directory-specific exemptions.
@@ -209,7 +221,7 @@ def _scan_directory(
         p for p in scripts_dir.glob("*.sh") if p.is_file()
     )
 
-    offenders: list[str] = []
+    offenders: list[_Offender] = []
     exempt_count = 0
     checked_count = 0
 
@@ -227,9 +239,88 @@ def _scan_directory(
 
         checked_count += 1
         if not _has_help_handler(script):
-            offenders.append(label)
+            offenders.append(_Offender(label, script))
 
     return offenders, exempt_count, checked_count
+
+
+# ---------------------------------------------------------------------------
+# Remedy block (docs/coding-standards.md "Gates prescribe, not just diagnose")
+# ---------------------------------------------------------------------------
+
+# A minimal, self-contained --help/-h case branch.  Appending this single
+# line to the end of an offending script is a genuine, working fix — the
+# handler actually prints a usage line and exits 0 on --help/-h — not merely
+# a pattern-match satisfying the lint.  Every value is resolved at runtime by
+# the script itself ($0, $1), so the fix command carries no site-specific
+# placeholder: the same literal line is correct for any offending script.
+_HELP_HANDLER_SNIPPET = (
+    'case "${1:-}" in --help|-h) echo "Usage: $(basename "$0") [--help]"; '
+    'exit 0 ;; esac'
+)
+
+
+def _build_causes(offenders: list[_Offender]) -> list[str]:
+    """Return one cause bullet per offender, naming the concrete script path."""
+    return [
+        f"{o.path}: does not implement a --help/-h handler (label: {o.label})"
+        for o in offenders
+    ]
+
+
+def _build_fix_commands(
+    offenders: list[_Offender], lint_script: Path, recheck_args: list[str]
+) -> list[str]:
+    """Return the numbered, verbatim-runnable fix commands for *offenders*.
+
+    Each offender gets one single-line command that appends the minimal
+    working --help/-h handler (`_HELP_HANDLER_SNIPPET`) to the end of that
+    script.  The single quotes around the snippet protect every `$`
+    inside it from expansion by the shell running the *fix* command — the
+    literal text lands in the target script unexpanded, to be evaluated only
+    when that script itself later runs.
+
+    The final command re-runs this lint with the exact arguments used at
+    detection time (*recheck_args*), proving the fix cleared the gate.
+    """
+    commands = [
+        f"echo '{_HELP_HANDLER_SNIPPET}' >> \"{o.path}\"" for o in offenders
+    ]
+    args_str = " ".join(recheck_args)
+    suffix = f" {args_str}" if args_str else ""
+    commands.append(f'python3 "{lint_script}"{suffix}')
+    return commands
+
+
+def _format_remedy_block(
+    offenders: list[_Offender], lint_script: Path, recheck_args: list[str]
+) -> str:
+    """Assemble the full three-part remedy block: cause(s) with concrete
+    location, a numbered fix block of verbatim-runnable commands ending with
+    the re-lint check, then the one-line rule the gate enforces.
+    """
+    causes = _build_causes(offenders)
+    commands = _build_fix_commands(offenders, lint_script, recheck_args)
+
+    lines = [
+        f"lint_help_presence: FAIL — {len(offenders)} script(s) missing --help",
+        "",
+        "Cause(s):",
+    ]
+    for cause in causes:
+        lines.append(f"  - {cause}")
+    lines.append("")
+    lines.append("To fix:")
+    for i, command in enumerate(commands, start=1):
+        lines.append(f"  {i}. {command}")
+    lines.append("")
+    lines.append(
+        "Rule: every operator-facing script under team/scripts/ must implement "
+        "a --help/-h handler so operators can discover its usage without "
+        "reading the source; scripts that are process-internal (never invoked "
+        "directly by an operator) belong on the exempt list instead."
+    )
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
 
-        offenders: list[str] = []
+        offenders: list[_Offender] = []
         exempt_count = 0
         checked_count = 0
 
@@ -333,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  scanning: {name}", flush=True)
             checked_count += 1
             if not _has_help_handler(script):
-                offenders.append(name)
+                offenders.append(_Offender(name, script))
 
     else:
         # Default: scan team/scripts/ (top-level) AND team/scripts/cm/.
@@ -389,16 +480,16 @@ def main(argv: list[str] | None = None) -> int:
             checked_count += cm_checked
 
     if offenders:
+        # Reconstruct the exact re-lint invocation so the recheck command in
+        # the remedy block reproduces this run's scan surface precisely.
+        recheck_args: list[str] = []
+        if args.scripts_dir:
+            recheck_args += ["--scripts-dir", str(single_dir)]
+        recheck_args += ["--exempt-list", str(exempt_list_path)]
+
+        lint_script = Path(__file__).resolve()
         print(
-            f"\nlint_help_presence: {len(offenders)} script(s) missing --help:\n",
-            flush=True,
-        )
-        for label in offenders:
-            print(f"  {label}", flush=True)
-        print(
-            f"\nlint_help_presence: FAIL — {len(offenders)} script(s) do not implement "
-            "--help or -h.  Add a --help handler to each script, or add the basename "
-            "to the exempt list if the script is an internal helper.",
+            "\n" + _format_remedy_block(offenders, lint_script, recheck_args),
             flush=True,
         )
         return 1

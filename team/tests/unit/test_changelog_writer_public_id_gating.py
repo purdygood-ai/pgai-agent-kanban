@@ -149,43 +149,32 @@ def _make_published(tmp_path: pathlib.Path, versions: list[str]) -> pathlib.Path
 
 
 class TestLooksLikeVersionString:
-    """_looks_like_version_string must accept version forms and reject prose."""
+    """_looks_like_version_string must accept version forms and reject prose.
 
-    def test_canonical_version_accepted(self) -> None:
-        """v1.2.3 is accepted."""
-        assert _looks_like_version_string("v1.2.3") is True
+    Table-driven: every case is a single input -> bool assertion against the
+    same function, so the accept/reject forms are enumerated as one
+    parametrized case set (survives-as-named-parameterization of the
+    original nine one-liner tests; no case dropped).
+    """
 
-    def test_version_without_prefix_accepted(self) -> None:
-        """1.2.3 (no leading v) is accepted."""
-        assert _looks_like_version_string("1.2.3") is True
-
-    def test_ai_v_prefix_accepted(self) -> None:
-        """ai_v1.2.3 is accepted."""
-        assert _looks_like_version_string("ai_v1.2.3") is True
-
-    def test_two_part_version_accepted(self) -> None:
-        """v1.22 (major.minor only) is accepted."""
-        assert _looks_like_version_string("v1.22") is True
-
-    def test_internal_prose_rejected(self) -> None:
-        """Prose placeholder used by internal bugs is rejected."""
-        assert _looks_like_version_string("(internal — plugin era; no KI)") is False
-
-    def test_empty_string_rejected(self) -> None:
-        """Empty string is rejected."""
-        assert _looks_like_version_string("") is False
-
-    def test_bare_letter_v_rejected(self) -> None:
-        """Bare 'v' with no digits is rejected."""
-        assert _looks_like_version_string("v") is False
-
-    def test_typo_extra_text_rejected(self) -> None:
-        """A version with trailing prose (typo-like) is rejected."""
-        assert _looks_like_version_string("v1.0.0 (fixed)") is False
-
-    def test_whitespace_only_rejected(self) -> None:
-        """Whitespace-only string is rejected."""
-        assert _looks_like_version_string("   ") is False
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            pytest.param("v1.2.3", True, id="canonical_version_accepted"),
+            pytest.param("1.2.3", True, id="version_without_prefix_accepted"),
+            pytest.param("ai_v1.2.3", True, id="ai_v_prefix_accepted"),
+            pytest.param("v1.22", True, id="two_part_version_accepted"),
+            pytest.param(
+                "(internal — plugin era; no KI)", False, id="internal_prose_rejected"
+            ),
+            pytest.param("", False, id="empty_string_rejected"),
+            pytest.param("v", False, id="bare_letter_v_rejected"),
+            pytest.param("v1.0.0 (fixed)", False, id="typo_extra_text_rejected"),
+            pytest.param("   ", False, id="whitespace_only_rejected"),
+        ],
+    )
+    def test_looks_like_version_string(self, value: str, expected: bool) -> None:
+        assert _looks_like_version_string(value) is expected
 
 
 # ===========================================================================

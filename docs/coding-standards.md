@@ -74,3 +74,102 @@ means these directives apply.
     entrypoint standard.** Entrypoints that swallow startup failures
     turn a broken deployment into a silently degraded one — fail loud
     at start so the operator sees the problem before traffic does.
+
+## Gates prescribe, not just diagnose
+
+A deterministic gate that only reports what is wrong forces the reader to
+rediscover the fix that was already knowable at the moment of failure.
+Every deterministic gate — every lint, freshness check, pre-flight abort,
+release-script guard, and pre-tag hook — MUST, on failure, prescribe its own
+remedy, not merely diagnose. The test is concrete: a stranger reading only
+the gate's failure output, with no other guidance, must be able to clear the
+gate.
+
+A "deterministic gate" is any check whose passing condition and whose fix are
+both computable from the state the gate inspects. The comment-provenance lint
+(`team/scripts/lint_comment_provenance.py`) is the seed pattern: on a finding
+it prints the offending `file:line`, the exact token that tripped it, the
+one-line rule it enforces, and the precise way to clear it. Generalize that
+shape to every gate.
+
+### The remedy block: three required parts
+
+On failure a deterministic gate MUST print, in this order:
+
+1. **Cause(s), each with its concrete location.** Name the exact path, line
+   number, config key, or field that tripped the check. "Something is stale"
+   is a diagnosis of nothing; "`CHANGELOG.md` is missing the `## v1.27.2`
+   section" names the file and the field. List every cause when there is more
+   than one — the reader fixes what they can see.
+
+2. **A numbered fix block of verbatim-runnable commands.** The commands must
+   be copy-paste runnable exactly as printed, in the order printed, with no
+   editing required to run them. Number them so the reader follows a sequence,
+   not a paragraph. End the block with the re-check command that proves the
+   fix worked (typically re-running the gate).
+
+3. **The one-line rule the gate enforces.** State the single standing
+   invariant the gate exists to protect, in one sentence, so the reader learns
+   *why* the gate fired and not only *how* to silence it. This is what stops
+   the reader from defeating the gate instead of satisfying it.
+
+### The house placeholder law
+
+The fix commands carry no angle-bracket placeholders. Never print `<path>`,
+`<version>`, `<repo-root>`, or any other bracketed stand-in for a value the
+gate could resolve. Where a value is site-specific, the gate derives it at
+detection time and prints the actual literal: the gate already knows the
+offending path, the current version, the resolved repo root at the moment it
+fails, so it emits them. A placeholder the gate could have resolved is a
+defect in the gate, not a convenience for the reader.
+
+The only slot that may remain textual is genuinely free-form input that only
+a human can author — a justification string, a chosen name — which the gate
+cannot know. Even then, print a concrete, filled-in example line the reader
+can adapt, never a bare `<slot>`.
+
+### Remedy text lives beside the check
+
+The remedy text is maintained in the same file as the check it describes.
+When the check moves, its message moves with it; when a reviewer changes the
+check, the now-stale remedy is in the same diff and is caught in review.
+Remedy text stored apart from its check drifts silently until the day a reader
+runs the printed commands and they no longer clear the gate.
+
+### The non-deterministic exemption
+
+Failures whose fix is not knowable at detection time are exempt from the
+numbered command block. Real test-assertion failures, provider or API errors,
+and network faults have no verbatim command that clears them — prescribing one
+would be a lie.
+
+They are NOT exempt from direction. Each such failure MUST still
+name the next diagnostic step: point the reader at the specific evidence to
+read next and what to look for in it — for example, "the failing test is
+`test_release_gate.py::test_fidelity`; read the assertion tail printed above."
+Exempt from prescription, never exempt from telling the reader where to look
+next.
+
+### The shape, generically
+
+Gate-specific command text belongs beside each gate, not here. The generic
+shape a compliant remedy block fills is:
+
+```
+FAIL: <one-line statement of what failed>
+
+Cause(s):
+  - <derived path/line/field 1> — <what is wrong with it>
+  - <derived path/line/field 2> — <what is wrong with it>
+
+To fix:
+  1. <verbatim command, site-specific values already substituted>
+  2. <verbatim command>
+  3. <re-run the gate to confirm>
+
+Rule: <the one-line invariant this gate enforces>
+```
+
+The angle brackets above mark the slots a gate author fills; a compliant gate
+never prints them at runtime — by the placeholder law it prints the derived
+literals in their place.

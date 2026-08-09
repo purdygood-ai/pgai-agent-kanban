@@ -63,11 +63,18 @@
 #                           color-coded per agent, sorted by mtime (newest at top)
 #                           gated by PGAI_REASONING_TRACE=1; refreshed via watch -n 30
 #   W11: Terminal         — three interactive shell panes
-#   W12: human-review     — single-pane listing of all pending HUMAN-APPROVE gate
-#                           tasks across ALL projects; one row per pending gate
-#                           (project, RC, age, show content, approve cmd, reject cmd).
-#                           Empty state: "no approvals pending."
-#                           Refreshed via watch on the standard interval.
+#   W12: human-review     — two vertical panes:
+#                           Left (Approvals, ~65%): listing of all pending HUMAN-APPROVE
+#                             gate tasks across ALL projects; one row per pending gate
+#                             (project, RC, age, show content, approve cmd, reject cmd).
+#                             Empty state: "no approvals pending." Unchanged from before
+#                             (human-review.sh itself is untouched — byte-identical behavior).
+#                           Right (Auto-Resolutions, ~35%): read-only listing of OVERWATCH's
+#                             autonomous resolution ledger entries across ALL projects
+#                             (RC, attempt N/M, decision, outcome, evidence links).
+#                             Empty state: "no auto-resolutions." No action affordances —
+#                             informs only, never approves or mutates state.
+#                           Both panes refresh via watch on the standard interval.
 #   W13+: drill-N         — one window per registered project (all workflow types),
 #                           numbered in projects.cfg registration order (drill-1, drill-2, ...).
 #                           Release/feature projects: 5-pane release layout scoped to
@@ -368,6 +375,12 @@ if [[ "$NO_TMUX" == "true" ]]; then
   echo "$SEPARATOR"
   "${SCRIPT_DIR}/human-review.sh" --kanban-root "${KANBAN_ROOT}" || true
 
+  echo ""
+  echo "$SEPARATOR"
+  echo "  HUMAN-REVIEW (AUTO-RESOLUTIONS)"
+  echo "$SEPARATOR"
+  "${SCRIPT_DIR}/auto-resolutions.sh" --kanban-root "${KANBAN_ROOT}" || true
+
   exit 0
 fi
 
@@ -485,8 +498,13 @@ METADATA_CMD="watch -t -c -n 10 -- ${SCRIPT_DIR}/metadata.sh --kanban-root ${KAN
 # Uses the same refresh interval as other dashboard panes.
 METRICS_CMD="watch -t -c -n ${REFRESH_INTERVAL} -- ${SCRIPT_DIR}/metrics.sh --kanban-root ${KANBAN_ROOT}"
 
-# Human-review window — single pane listing pending HUMAN-APPROVE gate tasks.
+# Human-review window — left pane listing pending HUMAN-APPROVE gate tasks.
 HUMAN_REVIEW_CMD="watch -t -c -n ${REFRESH_INTERVAL} -- ${SCRIPT_DIR}/human-review.sh --kanban-root ${KANBAN_ROOT}"
+
+# Human-review window — right pane: read-only OVERWATCH auto-resolutions
+# ledger listing (RC, attempt N/M, decision, outcome, evidence links).
+# Beside Approvals; informs only, never approves or mutates state.
+AUTO_RESOLUTIONS_CMD="watch -t -c -n ${REFRESH_INTERVAL} -- ${SCRIPT_DIR}/auto-resolutions.sh --kanban-root ${KANBAN_ROOT}"
 
 # Metrics window — right pane running watch against show-metrics.sh.
 # Shows historical RC metrics from history.csv (last 10 RCs): rc, wall time,
@@ -808,6 +826,12 @@ tmux split-window -t "${SESSION_NAME}:operator.5" -h -l 67%
 tmux split-window -t "${SESSION_NAME}:operator.6" -h -l 50%
 # Final: 0=bugs 1=prio 2=reqs 3=pm 4=coder 5=writer 6=tester 7=cm 8=shell
 
+# Track the shell pane's index in a variable rather than hardcoding ".8" at
+# every use site below; a future change to the column ladder only needs to
+# update this one assignment for the active-pane selection to keep tracking
+# the right pane.
+OP_SHELL_PANE=8
+
 # ---------------------------------------------------------------------------
 # Post-creation explicit resize for operator window — absolute widths/heights.
 # Same pattern as Window 0 and the Visibility window: query true dimensions
@@ -870,8 +894,41 @@ if [[ -f "${KANBAN_ROOT}/shell-env" ]]; then
 fi
 tmux send-keys -t "${SESSION_NAME}:operator.8" "bash -l -c '${_OPERATOR_SHELL_INIT}; exec bash -l'" Enter
 
+# Guarded ~/.bashrc source so the operator's aliases, prompt, and other
+# interactive conveniences are present. This is sent as a SEPARATE
+# send-keys call, typed into the shell AFTER it starts,
+# rather than folded into _OPERATOR_SHELL_INIT above: the "exec bash -l" on
+# the previous line replaces the process, which would discard any aliases
+# a `source ~/.bashrc` had defined earlier in that same process. Typing it
+# here means it runs in the shell that actually stays resident for the
+# operator, so the aliases survive. Guarded so hosts without a ~/.bashrc
+# start silently and cleanly (no error output in the pane).
+tmux send-keys -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}" '[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"' Enter
+
+# Ordering: the operator's ~/.bashrc is arbitrary and may redefine PATH or
+# unset/override a PGAI_* value. Sourcing bashrc AFTER shell-env (naively
+# "kanban env wins because it ran first") is backwards -- whichever source
+# runs LAST wins, so if bashrc runs after shell-env it can clobber kanban
+# env. To guarantee PGAI_* / kanban-env values are correct once the pane
+# is ready, re-source shell-env LAST, after bashrc, so kanban's values are
+# always the ones left standing regardless of what bashrc does.
+if [[ -f "${KANBAN_ROOT}/shell-env" ]]; then
+    tmux send-keys -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}" "source ${KANBAN_ROOT}/shell-env" Enter
+fi
+
 # Label the bottom pane so its border identifies it as the operator shell
-tmux select-pane -t "${SESSION_NAME}:operator.8" -T "operator"
+tmux select-pane -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}" -T "operator"
+
+# Make the shell pane the window's active pane: entering the operator
+# window should land the operator on the command line, not on a
+# read-only column pane. The last split performed above
+# (building the 8-column ladder) leaves an unrelated column pane as this
+# window's remembered "active" pane, and `select-pane -T` immediately
+# above sets only the pane's border title -- it does not change which
+# pane is active. An explicit selection, via the tracked OP_SHELL_PANE
+# variable rather than a hardcoded literal, is required so this keeps
+# tracking the shell pane even if the column ladder changes later.
+tmux select-pane -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}"
 
 # ---------------------------------------------------------------------------
 # Window 3: Visibility — unified 3+5 pane layout + legend (Dashboard 2.1)
@@ -1220,16 +1277,33 @@ tmux send-keys -t "${SESSION_NAME}:terminal.0" "${LOGS_WIN_CMD}" Enter
 tmux send-keys -t "${SESSION_NAME}:terminal.1" "cd ${KANBAN_ROOT} && exec bash" Enter
 
 # ---------------------------------------------------------------------------
-# Window 12: human-review — pending HUMAN-APPROVE gate tasks (single pane)
+# Window 12: human-review — Approvals (left) + Auto-Resolutions (right)
 #
-# Lists every pending HUMAN-APPROVE task across ALL registered projects.
-# Renders: project, target RC, age, show content, approve command,
-#          reject command.  Empty state: "no approvals pending."
+# Left pane (Approvals): lists every pending HUMAN-APPROVE task across ALL
+# registered projects.  Renders: project, target RC, age, show content,
+# approve command, reject command.  Empty state: "no approvals pending."
+# human-review.sh itself is unchanged — its rendered output is
+# byte-identical to before this pane gained a neighbor.
 #
-# Single pane; refreshes on the standard dashboard interval via watch.
+# Right pane (Auto-Resolutions): read-only listing of OVERWATCH's
+# autonomous resolution ledger entries across ALL registered projects
+# (RC, attempt N/M, decision, outcome, evidence links).  Empty state:
+# "no auto-resolutions."  No action affordances — informs, never
+# approves or mutates state.
+#
+# Split sequence:
+#   Step 1: window created → pane 0 (full width)
+#   Step 2: split pane 0 -h -l 35% → pane 0=left Approvals (~65%),
+#           pane 1=right Auto-Resolutions (~35%)
+#   The narrower right pane matches the Git window's tags-pane sizing
+#   convention (a compact secondary listing beside the primary one).
+#
+# Both panes refresh on the standard dashboard interval via watch.
 # ---------------------------------------------------------------------------
 tmux new-window -t "${SESSION_NAME}" -n "human-review"
-tmux send-keys -t "${SESSION_NAME}:human-review" "${HUMAN_REVIEW_CMD}" Enter
+tmux split-window -t "${SESSION_NAME}:human-review.0" -h -l 35%
+tmux send-keys -t "${SESSION_NAME}:human-review.0" "${HUMAN_REVIEW_CMD}" Enter
+tmux send-keys -t "${SESSION_NAME}:human-review.1" "${AUTO_RESOLUTIONS_CMD}" Enter
 
 # ---------------------------------------------------------------------------
 # Windows W13+: Per-project drill windows (Feature 4 — per-project view selector)

@@ -118,22 +118,18 @@ def test_get_project_path_accepts_numeric_start(tmp_path: pathlib.Path) -> None:
     assert result == tmp_path / "artifacts" / "3d-project"
 
 
-def test_get_project_path_raises_for_uppercase_name(tmp_path: pathlib.Path) -> None:
-    """get_project_path raises ArtifactsError for project names with uppercase letters."""
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "MyProject",  # uppercase letters
+        "-bad",  # leading hyphen
+        "",  # empty name
+    ],
+)
+def test_get_project_path_raises_for_invalid_name(tmp_path: pathlib.Path, bad_name: str) -> None:
+    """get_project_path raises ArtifactsError for uppercase, leading-hyphen, or empty names."""
     with pytest.raises(ArtifactsError, match="Invalid project name"):
-        get_project_path("MyProject", kanban_root=tmp_path)
-
-
-def test_get_project_path_raises_for_leading_hyphen(tmp_path: pathlib.Path) -> None:
-    """get_project_path raises ArtifactsError when the name starts with a hyphen."""
-    with pytest.raises(ArtifactsError, match="Invalid project name"):
-        get_project_path("-bad", kanban_root=tmp_path)
-
-
-def test_get_project_path_raises_for_empty_name(tmp_path: pathlib.Path) -> None:
-    """get_project_path raises ArtifactsError for an empty project name."""
-    with pytest.raises(ArtifactsError, match="Invalid project name"):
-        get_project_path("", kanban_root=tmp_path)
+        get_project_path(bad_name, kanban_root=tmp_path)
 
 
 def test_get_project_path_does_not_create_directory(tmp_path: pathlib.Path) -> None:

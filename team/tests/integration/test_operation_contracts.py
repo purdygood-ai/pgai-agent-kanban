@@ -1094,27 +1094,59 @@ class TestIntakeContracts:
     the deposit is triggered (CLI today; REST/automation later).
     """
 
-    def test_bug_prefixed_file_deposits_to_bugs_directory(
+    @pytest.mark.parametrize(
+        "prefix_label, filename, header, subdir",
+        [
+            pytest.param(
+                "BUG-prefixed",
+                "BUG-9001-contract-routing-test.md",
+                "# BUG-9001: contract-routing-test\n\n"
+                "## Status\nopen\n\n"
+                "## Summary\nContract test bug file.\n",
+                "bugs",
+                id="bug_prefixed_file_deposits_to_bugs_directory",
+            ),
+            pytest.param(
+                "PRIORITY-prefixed",
+                "PRIORITY-0010-contract-routing-test.md",
+                "# PRIORITY-0010: contract-routing-test\n\n"
+                "## Status\nopen\n\n"
+                "## Summary\nContract test priority file.\n",
+                "priority",
+                id="priority_prefixed_file_deposits_to_priority_directory",
+            ),
+            pytest.param(
+                "v[0-9]*.md",
+                "v9.9.9-contract-routing-test.md",
+                "# v9.9.9 — contract-routing-test\n\n"
+                "## Status\nopen\n\n"
+                "## Summary\nContract test requirements file.\n",
+                "requirements",
+                id="requirements_prefixed_file_deposits_to_requirements_directory",
+            ),
+        ],
+    )
+    def test_prefixed_file_deposits_to_matching_directory(
         self,
         two_project_root: pathlib.Path,
         cli_invoker: CliAdapter,
         tmp_path: pathlib.Path,
+        prefix_label: str,
+        filename: str,
+        header: str,
+        subdir: str,
     ) -> None:
-        """intake routes a BUG-* file to the project bugs/ directory.
+        """intake routes a file to the project subdirectory matching its filename prefix.
 
-        The routing contract for BUG-prefixed files: a file named
-        BUG-NNNN-<slug>.md must always land in ``projects/<name>/bugs/``,
-        never in requirements/ or priority/.
+        The routing contract, one case per recognized prefix family: a file named
+        BUG-NNNN-<slug>.md, PRIORITY-NNNN-<slug>.md, or vX.Y.Z-<slug>.md must
+        always land in ``projects/<name>/bugs/``, ``priority/``, or
+        ``requirements/`` respectively, and never in either of the other two.
         """
         root = two_project_root
-        staged = tmp_path / "BUG-9001-contract-routing-test.md"
-        staged.write_text(
-            "# BUG-9001: contract-routing-test\n\n"
-            "## Status\nopen\n\n"
-            "## Summary\nContract test bug file.\n",
-            encoding="utf-8",
-        )
-        (root / "projects" / "project_a" / "bugs").mkdir(parents=True, exist_ok=True)
+        staged = tmp_path / filename
+        staged.write_text(header, encoding="utf-8")
+        (root / "projects" / "project_a" / subdir).mkdir(parents=True, exist_ok=True)
 
         result = cli_invoker.invoke(
             "intake",
@@ -1123,94 +1155,12 @@ class TestIntakeContracts:
         )
 
         assert result.returncode == 0, (
-            f"intake must exit 0 for a BUG-prefixed file; "
+            f"intake must exit 0 for a {prefix_label} file; "
             f"rc={result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        deposited = root / "projects" / "project_a" / "bugs" / "BUG-9001-contract-routing-test.md"
+        deposited = root / "projects" / "project_a" / subdir / filename
         assert deposited.exists(), (
-            f"BUG-prefixed file must be deposited to bugs/; "
-            f"not found at {deposited}.\nstdout: {result.stdout}"
-        )
-
-    def test_priority_prefixed_file_deposits_to_priority_directory(
-        self,
-        two_project_root: pathlib.Path,
-        cli_invoker: CliAdapter,
-        tmp_path: pathlib.Path,
-    ) -> None:
-        """intake routes a PRIORITY-* file to the project priority/ directory.
-
-        The routing contract for PRIORITY-prefixed files: a file named
-        PRIORITY-NNNN-<slug>.md must always land in ``projects/<name>/priority/``,
-        never in bugs/ or requirements/.
-        """
-        root = two_project_root
-        staged = tmp_path / "PRIORITY-0010-contract-routing-test.md"
-        staged.write_text(
-            "# PRIORITY-0010: contract-routing-test\n\n"
-            "## Status\nopen\n\n"
-            "## Summary\nContract test priority file.\n",
-            encoding="utf-8",
-        )
-        (root / "projects" / "project_a" / "priority").mkdir(parents=True, exist_ok=True)
-
-        result = cli_invoker.invoke(
-            "intake",
-            ["--project", "project_a", str(staged)],
-            kanban_root=root,
-        )
-
-        assert result.returncode == 0, (
-            f"intake must exit 0 for a PRIORITY-prefixed file; "
-            f"rc={result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        deposited = (
-            root / "projects" / "project_a" / "priority"
-            / "PRIORITY-0010-contract-routing-test.md"
-        )
-        assert deposited.exists(), (
-            f"PRIORITY-prefixed file must be deposited to priority/; "
-            f"not found at {deposited}.\nstdout: {result.stdout}"
-        )
-
-    def test_requirements_prefixed_file_deposits_to_requirements_directory(
-        self,
-        two_project_root: pathlib.Path,
-        cli_invoker: CliAdapter,
-        tmp_path: pathlib.Path,
-    ) -> None:
-        """intake routes a v[0-9]*.md file to the project requirements/ directory.
-
-        The routing contract for version-prefixed files: a file named
-        vX.Y.Z-<slug>.md must always land in ``projects/<name>/requirements/``,
-        never in bugs/ or priority/.
-        """
-        root = two_project_root
-        staged = tmp_path / "v9.9.9-contract-routing-test.md"
-        staged.write_text(
-            "# v9.9.9 — contract-routing-test\n\n"
-            "## Status\nopen\n\n"
-            "## Summary\nContract test requirements file.\n",
-            encoding="utf-8",
-        )
-        (root / "projects" / "project_a" / "requirements").mkdir(parents=True, exist_ok=True)
-
-        result = cli_invoker.invoke(
-            "intake",
-            ["--project", "project_a", str(staged)],
-            kanban_root=root,
-        )
-
-        assert result.returncode == 0, (
-            f"intake must exit 0 for a v[0-9]*.md file; "
-            f"rc={result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        deposited = (
-            root / "projects" / "project_a" / "requirements"
-            / "v9.9.9-contract-routing-test.md"
-        )
-        assert deposited.exists(), (
-            f"v[0-9]*.md file must be deposited to requirements/; "
+            f"{prefix_label} file must be deposited to {subdir}/; "
             f"not found at {deposited}.\nstdout: {result.stdout}"
         )
 

@@ -1,0 +1,168 @@
+Running test anti-pattern lint...
+lint_test_anti_patterns: scanning tests /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/tests
+lint_test_anti_patterns: scanning runtime scripts in /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/scripts, /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/scripts/lib, /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/scripts/lib/overwatch-checks
+lint_test_anti_patterns: OK — 0 findings across 303 file(s) (164 test, 139 runtime).
+Running skip-cites-real-bug gate...
+lint_skip_bug_gate: checking for placeholder skip IDs in /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/tests...
+lint_skip_bug_gate: checking that cited BUG-NNNN IDs exist in bugs/ ...
+lint_skip_bug_gate: BUG-NNNN file-existence check: 0 missing files
+lint_skip_bug_gate: OK — all skip annotations are compliant.
+Running ICD freshness gate...
+ICD artifact written to /tmp/pgai_kanban_tmp/icd_freshness/icd_fresh_t_6wuqf3.json  (info.version='1.3.0')
+Package-data ICD_VERSION synced to /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/pgai_agent_kanban/api/ICD_VERSION
+lint_icd_freshness: ok — /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/docs/api/icd.json is fresh.
+Running ICD compatibility gate...
+lint_icd_compat: ok — current ICD is a compatible superset of all 4 supported baseline(s): 1.0.0, 1.1.0, 1.2.0, 1.3.0
+Running CHANGELOG freshness gate...
+lint_changelog_freshness: ok — /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/CHANGELOG.md is fresh.
+Running lib-function-dedupe lint...
+lint_lib_function_dedupe: ok — 40 lib/*.sh file(s) scanned, no duplicate function names.
+Running env-bootstrap lint...
+lint_env_bootstrap: OK (sides checked: bash, python)
+Running help-presence lint...
+lint_help_presence: scanning 73 scripts in /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/scripts and /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/scripts/cm
+lint_help_presence: OK — 73 script(s) checked, 0 exempt, 0 offenders.
+Running comment-provenance lint...
+lint_comment_provenance: scanning 251 file(s) in /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/scripts, /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/scripts/lib, /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/scripts/cm, /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/pgai_agent_kanban
+lint_comment_provenance: OK — 0 findings across 251 file(s).
+Running integration tests in /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team/tests/integration/
+run-integration-tests.sh: pytest launched via setsid (own session); SIGTERM guard active
+============================= test session starts ==============================
+platform linux -- Python 3.12.12, pytest-8.4.2, pluggy-1.6.0
+Using --randomly-seed=4158400748
+rootdir: /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20260806-002-coverage-baseline/team
+configfile: pyproject.toml
+plugins: anyio-4.13.0, randomly-4.1.0, cov-7.1.0, web3-6.20.4
+collected 284 items
+
+tests/integration/test_cert_source_ref_guard_ordering.py ...             [  1%]
+tests/integration/test_cert_branch_normalization_guard.py ........       [  3%]
+tests/integration/test_cm_release_synthetic.py .........                 [  7%]
+tests/integration/test_reset_force.py ..s.                               [  8%]
+tests/integration/test_overwatch_resolution_stage.py ................    [ 14%]
+tests/integration/test_create_project.py ........................        [ 22%]
+tests/integration/test_cert_two_ticket_testing_only_pipeline.py ........ [ 25%]
+...                                                                      [ 26%]
+tests/integration/test_document_pipeline.py ........                     [ 29%]
+tests/integration/test_rc_lifecycle.py ....................              [ 36%]
+tests/integration/test_discovery_race_guard.py .........                 [ 39%]
+tests/integration/test_cert_recycled_folder_fresh_contract.py .......    [ 41%]
+tests/integration/test_cert_three_ticket_testing_only_pipeline.py ...    [ 42%]
+tests/integration/test_api_server_fixture_leaks.py ...                   [ 44%]
+tests/integration/test_changelog_freshness_gate_cli_recovery.py ..       [ 44%]
+tests/integration/test_operation_contracts.py .......................... [ 53%]
+.                                                                        [ 54%]
+tests/integration/test_cert_one_ticket_testing_only_pipeline.py ........ [ 57%]
+...                                                                      [ 58%]
+tests/integration/test_cancel_rc_frees_version.py .....                  [ 59%]
+tests/integration/test_discovery_pipeline.py ........................... [ 69%]
+..                                                                       [ 70%]
+tests/integration/test_eligibility_semantics.py ...............          [ 75%]
+tests/integration/test_operator_commands.py ............................ [ 85%]
+............                                                             [ 89%]
+tests/integration/test_cross_cutting.py ................                 [ 95%]
+tests/integration/test_retry_counter_bundle_family.py ....               [ 96%]
+tests/integration/test_overwatch_wake_driven_fixtures.py ..........      [100%]
+
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.12-final-0 _______________
+
+Name                                                            Stmts   Miss Branch BrPart  Cover
+-------------------------------------------------------------------------------------------------
+pgai_agent_kanban/__init__.py                                       0      0      0      0   100%
+pgai_agent_kanban/api/__init__.py                                   0      0      0      0   100%
+pgai_agent_kanban/api/adapter.py                                   36     36     10      0     0%
+pgai_agent_kanban/api/app.py                                       54     54      4      0     0%
+pgai_agent_kanban/api/board_classifier.py                         150    150     60      0     0%
+pgai_agent_kanban/api/config.py                                    38     38      8      0     0%
+pgai_agent_kanban/api/dependencies.py                              14     14      8      0     0%
+pgai_agent_kanban/api/generate_icd.py                              68     68      6      0     0%
+pgai_agent_kanban/api/main.py                                      13     13      4      0     0%
+pgai_agent_kanban/api/metrics_data.py                             169    169     78      0     0%
+pgai_agent_kanban/api/reads.py                                    177    177     56      0     0%
+pgai_agent_kanban/api/routers/__init__.py                           0      0      0      0   100%
+pgai_agent_kanban/api/routers/board.py                            167    167     66      0     0%
+pgai_agent_kanban/api/routers/logs.py                             145    145     66      0     0%
+pgai_agent_kanban/api/routers/operations.py                       496    496    118      0     0%
+pgai_agent_kanban/api/routers/projects.py                         118    118     38      0     0%
+pgai_agent_kanban/api/routers/traces.py                           134    134     58      0     0%
+pgai_agent_kanban/api/tests/__init__.py                             0      0      0      0   100%
+pgai_agent_kanban/api/tests/conftest.py                             8      8      2      0     0%
+pgai_agent_kanban/api/tests/test_adapter.py                        87     87      6      0     0%
+pgai_agent_kanban/api/tests/test_approvals.py                     247    247     20      0     0%
+pgai_agent_kanban/api/tests/test_auto_resolutions_endpoint.py     247    247     16      0     0%
+pgai_agent_kanban/api/tests/test_board.py                         266    266     64      0     0%
+pgai_agent_kanban/api/tests/test_bug0041_acceptance.py            205    205     30      0     0%
+pgai_agent_kanban/api/tests/test_cors.py                           39     39      0      0     0%
+pgai_agent_kanban/api/tests/test_fidelity.py                      336    336     32      0     0%
+pgai_agent_kanban/api/tests/test_health_version_fields.py          88     88      2      0     0%
+pgai_agent_kanban/api/tests/test_icd_generator.py                 155    155      2      0     0%
+pgai_agent_kanban/api/tests/test_logs.py                          256    256      2      0     0%
+pgai_agent_kanban/api/tests/test_metrics_json.py                  263    263      6      0     0%
+pgai_agent_kanban/api/tests/test_projects.py                      242    242     14      0     0%
+pgai_agent_kanban/api/tests/test_registry_verbs.py                 82     82      0      0     0%
+pgai_agent_kanban/api/tests/test_ship_rc.py                        80     80      0      0     0%
+pgai_agent_kanban/api/tests/test_traces.py                        331    331     16      0     0%
+pgai_agent_kanban/cm/__init__.py                                    0      0      0      0   100%
+pgai_agent_kanban/cm/bundle_family.py                              87     16     38      8    79%
+pgai_agent_kanban/cm/changelog_writer.py                          486    486    214      0     0%
+pgai_agent_kanban/cm/read_state_field.py                           30     10     14      6    64%
+pgai_agent_kanban/cm/write_rc_state.py                            122     85     24      4    28%
+pgai_agent_kanban/dashboard/__init__.py                             0      0      0      0   100%
+pgai_agent_kanban/dashboard/_rejected.py                           26     26      8      0     0%
+pgai_agent_kanban/dashboard/cron_firings.py                        55     55     20      0     0%
+pgai_agent_kanban/dashboard/halt_state.py                          31     31     10      0     0%
+pgai_agent_kanban/dashboard/render_costs.py                       141    141     42      0     0%
+pgai_agent_kanban/dashboard/scan_attention.py                     526    526    222      0     0%
+pgai_agent_kanban/dashboard/scan_auto_resolutions.py               85     85     28      0     0%
+pgai_agent_kanban/dashboard/scan_human_approvals.py               175    175     74      0     0%
+pgai_agent_kanban/dashboard/status_priority_cap.py                 14     14      4      0     0%
+pgai_agent_kanban/env.py                                            9      4      2      0    45%
+pgai_agent_kanban/halt_after/__init__.py                            4      4      0      0     0%
+pgai_agent_kanban/halt_after/__main__.py                           50     50     10      0     0%
+pgai_agent_kanban/halt_after/drain.py                             162    162     62      0     0%
+pgai_agent_kanban/halt_after/promote.py                            38     38      8      0     0%
+pgai_agent_kanban/halt_after/token.py                              18     18      6      0     0%
+pgai_agent_kanban/lib/__init__.py                                   0      0      0      0   100%
+pgai_agent_kanban/lib/filename_contract.py                         17      8      4      0    43%
+pgai_agent_kanban/lib/ledger_filename_contract.py                  64     64     26      0     0%
+pgai_agent_kanban/lib/terminal_states.py                            6      2      0      0    67%
+pgai_agent_kanban/ops/__init__.py                                   6      0      0      0   100%
+pgai_agent_kanban/ops/__main__.py                                   3      3      0      0     0%
+pgai_agent_kanban/ops/context.py                                   32     10      2      0    65%
+pgai_agent_kanban/ops/errors.py                                    11      3      0      0    73%
+pgai_agent_kanban/ops/read.py                                     121    105     38      0    10%
+pgai_agent_kanban/ops/resolve.py                                  164     98     60      9    39%
+pgai_agent_kanban/ops/write.py                                    750    600    288     22    17%
+pgai_agent_kanban/overwatch/__init__.py                             0      0      0      0   100%
+pgai_agent_kanban/overwatch/ledger.py                             233     45     74     11    79%
+pgai_agent_kanban/overwatch/resolution_matrix.py                  327     83    118     44    70%
+pgai_agent_kanban/overwatch/resolution_stage.py                   272     48     70     19    79%
+pgai_agent_kanban/reports/__init__.py                               0      0      0      0   100%
+pgai_agent_kanban/reports/agent_timing.py                         145    145     48      0     0%
+pgai_agent_kanban/reports/project_summary.py                      775    775    282      0     0%
+pgai_agent_kanban/workflows/__init__.py                             0      0      0      0   100%
+pgai_agent_kanban/workflows/create_new_workflow.py                101    101     18      0     0%
+pm-agent/aggregate_tokens.py                                      428    428    132      0     0%
+pm-agent/lib/__init__.py                                            0      0      0      0   100%
+pm-agent/lib/artifacts.py                                          70     70     12      0     0%
+pm-agent/lib/bug_scanner.py                                       189    189     74      0     0%
+pm-agent/lib/config.py                                             51     51     26      0     0%
+pm-agent/lib/cron_parser.py                                       153    153     80      0     0%
+pm-agent/lib/project_md.py                                        136    136     54      0     0%
+pm-agent/lib/semver.py                                             43     43     12      0     0%
+pm-agent/lib/workflow_loader.py                                   246    246    126      0     0%
+pm-agent/pm_materialize.py                                       1607   1607    756      0     0%
+pm-agent/pm_status.py                                             249    249    110      0     0%
+scripts/lib/metrics_aggregator.py                                 365    365    126      0     0%
+scripts/lib/metrics_csv_writer.py                                  88     88     20      0     0%
+scripts/lib/resolve_item_shim.py                                   26     26     14      0     0%
+-------------------------------------------------------------------------------------------------
+TOTAL                                                           13448  12378   4148    123     8%
+Coverage JSON written to file /tmp/pgai_kanban_tmp/coverage/integration.json
+================== 283 passed, 1 skipped in 193.12s (0:03:13) ==================
+Integration tests PASSED
+Checking for bare-/tmp residue...
+Bare-/tmp cleanliness check PASSED
+Checking for framework-rooted TCP listener leaks...
+Listener cleanliness check PASSED

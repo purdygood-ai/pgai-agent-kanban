@@ -25,6 +25,8 @@ These tests cover the acceptance fixtures required by an earlier defect:
 
 from __future__ import annotations
 
+import pytest
+
 from pgai_agent_kanban.dashboard.status_priority_cap import status_priority_cap as _status_priority_cap
 
 
@@ -184,24 +186,43 @@ def test_multiple_blocked_rows_filled_to_cap() -> None:
 # Test 3 — Under-cap fast path (regression check)
 # ---------------------------------------------------------------------------
 
-def test_under_cap_output_byte_identical_to_naive_slice() -> None:
+@pytest.mark.parametrize(
+    "items, cap",
+    [
+        (
+            [
+                _make_item("running", 10),
+                _make_item("open", 9),
+                _make_item("blocked", 8),
+                _make_item("open", 7),
+            ],
+            8,  # well above len(items)=4
+        ),
+        ([_make_item("open", k) for k in range(5, 0, -1)], 5),  # exact boundary
+        (
+            [
+                _make_item("running", 3),
+                _make_item("blocked", 2),
+                _make_item("open", 1),
+            ],
+            10,  # mixed statuses, well under cap
+        ),
+        ([_make_item("running", k) for k in range(3, 0, -1)], 5),  # all running, under cap
+    ],
+    ids=["basic-under-cap", "exact-boundary", "mixed-statuses", "all-running"],
+)
+def test_under_cap_output_byte_identical_to_naive_slice(items: list, cap: int) -> None:
     """Under-cap boards return output byte-identical to the pre-fix items[:cap] slice.
 
     an earlier defect acceptance criterion #2:
     When len(items) <= cap, status_priority_cap must return a copy that is
     structurally identical to items[:cap], preserving the pre-fix behavior
-    for boards that do not require truncation.
+    for boards that do not require truncation — across a plain under-cap
+    board, the exact len(items) == cap boundary, mixed running/blocked/open
+    statuses, and an all-running board.
     """
-    items = [
-        _make_item("running", 10),
-        _make_item("open",    9),
-        _make_item("blocked", 8),
-        _make_item("open",    7),
-    ]
-    cap = 8  # well above len(items)=4
-
     result = _status_priority_cap(items, cap=cap)
-    expected = items[:]
+    expected = items[:cap]
 
     assert result == expected, (
         f"Under-cap result differs from items[:cap].\n"
@@ -220,30 +241,6 @@ def test_under_cap_returns_copy_not_same_object() -> None:
     # Mutate the copy and verify the original is unchanged.
     result.clear()
     assert len(items) == 3, "Original items list was mutated by status_priority_cap"
-
-
-def test_under_cap_exact_boundary() -> None:
-    """When len(items) == cap, the fast path applies and all items are returned."""
-    items = [_make_item("open", k) for k in range(5, 0, -1)]
-    result = _status_priority_cap(items, cap=5)
-
-    assert result == items[:5], (
-        "Exact-boundary case (len == cap) should return a copy identical to items[:cap]"
-    )
-    assert len(result) == 5
-
-
-def test_under_cap_with_mixed_statuses() -> None:
-    """Under-cap fast path applies even when items contain running/blocked statuses."""
-    items = [
-        _make_item("running", 3),
-        _make_item("blocked", 2),
-        _make_item("open",    1),
-    ]
-    result = _status_priority_cap(items, cap=10)
-    assert result == items[:], (
-        "Under-cap with mixed statuses must be byte-identical to items[:]"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -359,13 +356,6 @@ def test_result_sorted_desc_by_id_sort_key() -> None:
     )
     # 1 running + 1 blocked + 2 open = 4 == cap
     assert len(result) == 4
-
-
-def test_only_running_items_all_returned_under_cap() -> None:
-    """When all items are running and under cap, all are returned unchanged."""
-    items = [_make_item("running", k) for k in range(3, 0, -1)]
-    result = _status_priority_cap(items, cap=5)
-    assert result == items[:], "All running items under cap must be returned unchanged"
 
 
 def test_only_blocked_items_returned_up_to_cap() -> None:

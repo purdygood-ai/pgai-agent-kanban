@@ -292,74 +292,43 @@ def test_tmux_version_meets_floor_in_built_image(built_image_tag: str) -> None:
     )
 
 
-def test_tput_available_in_built_image(built_image_tag: str) -> None:
+@pytest.mark.parametrize(
+    "package, extra_docker_args, command_args",
+    [
+        pytest.param(
+            "ncurses (tput)", ["-e", "TERM=xterm-256color"], ["tput", "cols"],
+            id="tput",
+        ),
+        pytest.param("procps/procps-ng (watch)", [], ["watch", "--version"], id="watch"),
+        pytest.param("git", [], ["git", "--version"], id="git"),
+    ],
+)
+def test_package_available_in_built_image(
+    built_image_tag: str, package: str, extra_docker_args: list[str], command_args: list[str]
+) -> None:
     """
-    tput is present and functional inside the built image.
+    A spot-checked package's command runs successfully inside the built image.
 
-    Spot-check that the ncurses package was installed correctly.
-    tput is critical for the visibility-window cursor positioning loops
-    in the dashboard (create.sh pane commands use tput cup/el/ed).
+    tput is critical for the visibility-window cursor positioning loops in
+    the dashboard (create.sh pane commands use tput cup/el/ed); watch is
+    required by all dashboard pane refresh loops; git is required by the
+    kanban chain for worktree operations and by dashboard git-status.sh /
+    git-recent-tags.sh.
 
     --entrypoint "" bypasses the baked entrypoint's root-path verification so
     this sanity check can run without the full production mount contract.
     The entrypoint's own contract is covered end-to-end by test_entrypoint_shipped_image.py.
     """
     result = subprocess.run(
-        ["docker", "run", "--rm", "--entrypoint", "", "-e", "TERM=xterm-256color",
-         built_image_tag, "tput", "cols"],
+        ["docker", "run", "--rm", "--entrypoint", "", *extra_docker_args,
+         built_image_tag, *command_args],
         capture_output=True,
         text=True,
         timeout=30,
     )
     assert result.returncode == 0, (
-        f"tput cols failed inside built image (rc={result.returncode}): "
-        f"{result.stderr.strip()}"
-    )
-
-
-def test_watch_available_in_built_image(built_image_tag: str) -> None:
-    """
-    watch is present inside the built image.
-
-    Spot-check that the procps/procps-ng package was installed correctly.
-    watch is required by all dashboard pane refresh loops.
-
-    --entrypoint "" bypasses the baked entrypoint's root-path verification so
-    this sanity check can run without the full production mount contract.
-    The entrypoint's own contract is covered end-to-end by test_entrypoint_shipped_image.py.
-    """
-    result = subprocess.run(
-        ["docker", "run", "--rm", "--entrypoint", "", built_image_tag, "watch", "--version"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, (
-        f"watch --version failed inside built image (rc={result.returncode}): "
-        f"{result.stderr.strip()}"
-    )
-
-
-def test_git_available_in_built_image(built_image_tag: str) -> None:
-    """
-    git is present inside the built image.
-
-    git is required by the kanban chain for worktree operations and by
-    dashboard git-status.sh / git-recent-tags.sh.
-
-    --entrypoint "" bypasses the baked entrypoint's root-path verification so
-    this sanity check can run without the full production mount contract.
-    The entrypoint's own contract is covered end-to-end by test_entrypoint_shipped_image.py.
-    """
-    result = subprocess.run(
-        ["docker", "run", "--rm", "--entrypoint", "", built_image_tag, "git", "--version"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, (
-        f"git --version failed inside built image (rc={result.returncode}): "
-        f"{result.stderr.strip()}"
+        f"{' '.join(command_args)} failed inside built image (rc={result.returncode}, "
+        f"package={package}): {result.stderr.strip()}"
     )
 
 

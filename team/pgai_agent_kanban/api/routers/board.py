@@ -68,6 +68,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from pgai_agent_kanban.lib.palette import load_default_palette
 from ..adapter import HTTP_UNPROCESSABLE_ENTITY
 from ..dependencies import warn_unknown_query_params
 from ..board_classifier import (
@@ -92,18 +93,6 @@ router = APIRouter(tags=["board"])
 # (Source: column-render.sh DASHBOARD_MAX_ROWS default ~line 179)
 # ---------------------------------------------------------------------------
 _DEFAULT_MAX_ROWS = 20
-
-# Default color palette (mirrors PGAI_DEFAULT_PALETTE in projects.sh)
-_DEFAULT_PALETTE = [
-    "#378ADD",
-    "#E24B4A",
-    "#639922",
-    "#BA7517",
-    "#7B5EA7",
-    "#2BA0A0",
-    "#C4762A",
-    "#4A7FA5",
-]
 
 # ---------------------------------------------------------------------------
 # projects.cfg helpers
@@ -161,13 +150,17 @@ def _assign_palette_colors(projects: list[dict]) -> None:
     """Assign palette colors in-place to projects missing a color.
 
     Mirrors the palette-fallback logic in projects_cfg_color() in
-    team/scripts/lib/projects.sh: projects without an explicit dashboard_color
-    get a deterministic palette color based on registration order.
+    team/scripts/lib/projects_cfg.sh: projects without an explicit
+    dashboard_color get a deterministic palette color based on registration
+    order.  The palette itself is loaded via the shared, cached
+    pgai_agent_kanban.lib.palette helper -- see that module for the single
+    source of truth this mirrors.
     """
+    palette = load_default_palette()
     palette_idx = 0
     for proj in projects:
         if not proj["color"]:
-            proj["color"] = _DEFAULT_PALETTE[palette_idx % len(_DEFAULT_PALETTE)]
+            proj["color"] = palette[palette_idx % len(palette)]
             palette_idx += 1
         else:
             # Explicit color set; still advance palette index to keep

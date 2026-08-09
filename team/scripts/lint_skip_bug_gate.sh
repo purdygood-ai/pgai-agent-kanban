@@ -119,13 +119,17 @@ _lsg_log "bugs dir: ${_LSG_BUGS_DIR}"
 #
 # A match here means the annotation cites a placeholder bug that was never
 # filed, or uses an informal identifier instead of the canonical BUG-NNNN form.
+#
+# artifacts/ is excluded: it holds committed report evidence (coverage
+# baselines, run logs), not test source, and its own recorded terminal
+# output can echo this gate's diagnostic strings back at itself.
 # ---------------------------------------------------------------------------
 echo "lint_skip_bug_gate: checking for placeholder skip IDs in ${_LSG_TESTS_DIR}..."
 
 _LSG_PLACEHOLDER_HITS=0
 # grep -rn returns non-zero when no matches; use set +e around it.
 set +e
-_LSG_PLACEHOLDER_OUTPUT="$(grep -rnE 'BUG-SKIP|skip.*BUG-[A-Za-z]' "${_LSG_TESTS_DIR}" 2>/dev/null)"
+_LSG_PLACEHOLDER_OUTPUT="$(grep -rnE --exclude-dir=artifacts 'BUG-SKIP|skip.*BUG-[A-Za-z]' "${_LSG_TESTS_DIR}" 2>/dev/null)"
 _LSG_GREP1_EXIT=$?
 set -e
 
@@ -172,7 +176,7 @@ else
     # The skip keyword forms covered:
     #   pytest.skip, mark.skip, mark.skipif, reason=, SKIP:, skip() [bash]
     set +e
-    _LSG_SKIP_LINES="$(grep -rnEi '(pytest\.skip|mark\.skip|reason=|#\s*SKIP:|\bskip\s*\()[^)]*BUG-[0-9]{4,}' \
+    _LSG_SKIP_LINES="$(grep -rnEi --exclude-dir=artifacts '(pytest\.skip|mark\.skip|reason=|#\s*SKIP:|\bskip\s*\()[^)]*BUG-[0-9]{4,}' \
         "${_LSG_TESTS_DIR}" 2>/dev/null)"
     set -e
 
@@ -223,8 +227,7 @@ if [[ "${_LSG_TOTAL_FINDINGS}" -gt 0 ]]; then
     echo "  (a) replacing the placeholder/missing citation with a real filed BUG-NNNN" >&2
     echo "      whose file exists in the bugs/ directory, or" >&2
     echo "  (b) un-skipping the test if the underlying issue is resolved." >&2
-    # provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-    echo "  See PRIORITY-0100-20260624-skipped-tests-cite-real-bug-grep-gated.md for policy." >&2
+    echo "  See SOP.md \"Test Authoring Guidelines\" for the full skip-citation policy." >&2
     exit 1
 fi
 

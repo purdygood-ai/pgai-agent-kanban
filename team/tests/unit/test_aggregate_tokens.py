@@ -238,30 +238,19 @@ def test_is_new_schema_accepts_integer_zero_as_total_cost() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_is_captured_returns_true_when_field_is_absent() -> None:
-    """is_captured returns True when the 'captured' field is absent (default assumption)."""
-    assert is_captured({}) is True
-
-
-def test_is_captured_returns_true_when_captured_is_true() -> None:
-    """is_captured returns True when captured is explicitly True."""
-    assert is_captured({"captured": True}) is True
-
-
-def test_is_captured_returns_false_when_captured_is_false() -> None:
-    """is_captured returns False only when captured is explicitly False."""
-    assert is_captured({"captured": False}) is False
-
-
-def test_is_captured_returns_true_when_captured_is_zero() -> None:
-    """is_captured returns True for captured=0 (falsy but not False)."""
-    # The spec says 'only explicit False means not captured'
-    assert is_captured({"captured": 0}) is True
-
-
-def test_is_captured_returns_true_when_captured_is_none() -> None:
-    """is_captured returns True when captured is None (not explicitly False)."""
-    assert is_captured({"captured": None}) is True
+@pytest.mark.parametrize(
+    "record, expected",
+    [
+        ({}, True),  # field absent -> default assumption
+        ({"captured": True}, True),  # explicitly True
+        ({"captured": False}, False),  # only explicit False means not captured
+        ({"captured": 0}, True),  # falsy but not False
+        ({"captured": None}, True),  # None is not explicitly False
+    ],
+)
+def test_is_captured(record: dict, expected: bool) -> None:
+    """is_captured returns False only when 'captured' is explicitly False."""
+    assert is_captured(record) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -312,24 +301,18 @@ def test_read_field_from_markdown_handles_empty_text() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_normalise_version_adds_v_prefix_when_absent() -> None:
-    """normalise_version prepends 'v' to a bare version number."""
-    assert normalise_version("0.23.22") == "v0.23.22"
-
-
-def test_normalise_version_leaves_v_prefix_intact() -> None:
-    """normalise_version does not double-prefix versions that already start with 'v'."""
-    assert normalise_version("v0.23.22") == "v0.23.22"
-
-
-def test_normalise_version_strips_surrounding_whitespace() -> None:
-    """normalise_version strips leading/trailing whitespace before processing."""
-    assert normalise_version("  v0.1.0  ") == "v0.1.0"
-
-
-def test_normalise_version_handles_empty_string() -> None:
-    """normalise_version returns an empty string for empty input."""
-    assert normalise_version("") == ""
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("0.23.22", "v0.23.22"),  # prepends 'v' to a bare version number
+        ("v0.23.22", "v0.23.22"),  # does not double-prefix
+        ("  v0.1.0  ", "v0.1.0"),  # strips surrounding whitespace
+        ("", ""),  # empty input stays empty
+    ],
+)
+def test_normalise_version(raw: str, expected: str) -> None:
+    """normalise_version normalizes a version string to a 'v'-prefixed, trimmed form."""
+    assert normalise_version(raw) == expected
 
 
 # ---------------------------------------------------------------------------

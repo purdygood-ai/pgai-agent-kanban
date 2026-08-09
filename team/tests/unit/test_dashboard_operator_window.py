@@ -321,6 +321,87 @@ def _run_tmux_session_commands(
     )
 
 
+# ---------------------------------------------------------------------------
+# Helper: run create.sh against a writable fixture HOME / kanban-root inside
+# the container, then probe the operator shell pane and capture its
+# transcript.  The checked-out repo is bind-mounted read-only, so tests that
+# need a real ~/.bashrc or shell-env file write them into a fresh writable
+# directory created inside the container instead of the mounted repo.
+# ---------------------------------------------------------------------------
+
+_PANE_CAPTURE_START = "===PANE_CAPTURE_START==="
+_PANE_CAPTURE_END = "===PANE_CAPTURE_END==="
+
+
+def _run_operator_shell_fixture(
+    image_tag: str,
+    session_name: str,
+    setup_commands: list[str],
+    home_dir: str,
+    kanban_root_dir: str,
+    probe_command: str,
+) -> subprocess.CompletedProcess:
+    """
+    Start create.sh in a container against a fixture HOME / kanban-root,
+    send `probe_command` to the operator shell pane (pane 8), and capture
+    its transcript between marker lines.
+
+    `setup_commands` run first (creating the fixture HOME / kanban-root
+    directories and writing any .bashrc / shell-env fixture files).
+    `create.sh` itself is still read from the read-only repo mount at
+    /pgai_agent_kanban; only its `--kanban-root` operational directory and
+    the pane's HOME are redirected to writable fixture paths.
+
+    Returns the CompletedProcess with combined stdout/stderr as text; use
+    `_extract_pane_capture` to pull out just the pane transcript.
+    """
+    setup = " ; ".join(setup_commands) if setup_commands else "true"
+    script = (
+        f"{setup} ; "
+        f"HOME={home_dir} bash /pgai_agent_kanban/team/scripts/dashboard/create.sh "
+        f"--kanban-root {kanban_root_dir} --session {session_name} "
+        f"2>&1 || true ; "
+        f"sleep 2 ; "
+        f"tmux send-keys -t {session_name}:operator.8 '{probe_command}' Enter ; "
+        f"sleep 1 ; "
+        f"echo '{_PANE_CAPTURE_START}' ; "
+        f"tmux capture-pane -p -t {session_name}:operator.8 ; "
+        f"echo '{_PANE_CAPTURE_END}'"
+    )
+    return subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "bash",
+            "--volume",
+            f"{_REPO_ROOT}:/pgai_agent_kanban:ro",
+            "--env",
+            "PGAI_AGENT_KANBAN_ROOT_PATH=/pgai_agent_kanban",
+            "--env",
+            f"PGAI_DASHBOARD_SESSION_NAME={session_name}",
+            "--env",
+            "TERM=xterm-256color",
+            image_tag,
+            "-c",
+            script,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def _extract_pane_capture(output: str) -> str:
+    """Return the text between the pane-capture marker lines, or "" if absent."""
+    start = output.find(_PANE_CAPTURE_START)
+    end = output.find(_PANE_CAPTURE_END)
+    if start == -1 or end == -1:
+        return ""
+    return output[start + len(_PANE_CAPTURE_START) : end]
+
+
 # ===========================================================================
 # Group 1 — Static analysis tests (no Docker required)
 # ===========================================================================
@@ -592,6 +673,76 @@ def test_operator_bottom_pane_sends_interactive_bash() -> None:
     )
 
 
+def test_operator_shell_pane_bashrc_source_is_guarded() -> None:
+    """
+    The operator shell pane's startup chain contains a guarded ~/.bashrc
+    source: `[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"`.
+
+    PRIORITY-0002 goal 2: the guard means hosts without a ~/.bashrc start
+    silently and cleanly — an unguarded `source "$HOME/.bashrc"` would print
+    a "No such file or directory" error on those hosts.
+    """
+    content = _CREATE_SH.read_text(encoding="utf-8")
+
+    operator_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "operator"')
+    visibility_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "visibility"')
+    assert operator_start != -1, "operator new-window not found in create.sh"
+    assert visibility_start != -1, "visibility new-window not found in create.sh"
+
+    operator_section = content[operator_start:visibility_start]
+
+    guard = '[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"'
+    assert guard in operator_section, (
+        f"create.sh's operator section does not contain the guarded bashrc "
+        f"source {guard!r}; the operator shell pane must source ~/.bashrc "
+        f"guarded against a missing file"
+    )
+
+
+def test_operator_shell_pane_reorders_shell_env_after_bashrc() -> None:
+    """
+    create.sh re-sources shell-env AFTER the guarded ~/.bashrc source, with
+    an inline comment documenting why.
+
+    PRIORITY-0002 goal 2's ordering decision: the operator's ~/.bashrc is
+    arbitrary and may redefine or clobber a PGAI_* / kanban-env value, so
+    shell-env must be the last thing sourced in the pane's startup chain —
+    otherwise a clobbering bashrc would win.  This asserts both halves: the
+    guarded bashrc source appears before the follow-up shell-env source, and
+    an inline comment documents the ordering choice.
+    """
+    content = _CREATE_SH.read_text(encoding="utf-8")
+
+    operator_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "operator"')
+    visibility_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "visibility"')
+    operator_section = content[operator_start:visibility_start]
+
+    guard = '[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"'
+    guard_pos = operator_section.find(guard)
+    assert guard_pos != -1, "guarded bashrc source not found in the operator section"
+
+    # A follow-up "source .../shell-env" (re-sourcing shell-env) must appear
+    # AFTER the guarded bashrc source, so kanban env is applied last.
+    reshell_env_pattern = re.compile(r'"source\s+\$\{KANBAN_ROOT\}/shell-env"')
+    reshell_env_match = reshell_env_pattern.search(operator_section, pos=guard_pos)
+    assert reshell_env_match is not None, (
+        "create.sh does not re-source shell-env after the guarded bashrc "
+        "source in the operator section; PGAI_* / kanban-env values are "
+        "not guaranteed to win over a clobbering ~/.bashrc"
+    )
+
+    # An inline comment near the ordering decision documents the "why".
+    ordering_comment_present = (
+        "clobber" in operator_section.lower()
+        and "LAST" in operator_section
+    )
+    assert ordering_comment_present, (
+        "create.sh's operator section does not document the shell-env / "
+        "bashrc ordering decision in an inline comment (expected wording "
+        "referencing clobbering and sourcing shell-env LAST)"
+    )
+
+
 def test_kill_sh_kills_session_by_name() -> None:
     """
     kill.sh destroys the dashboard session by name using tmux kill-session.
@@ -821,6 +972,159 @@ def test_operator_window_has_nine_panes_in_session(
         f"Expected 9 panes in the operator window (8-column layout: 3 input "
         f"columns + 5 agent-queue columns + bottom shell); found "
         f"{len(pane_lines)}. tmux list-panes output:\n{output}"
+    )
+
+
+def test_operator_window_active_pane_is_shell_pane_after_create(
+    operator_test_image: str,
+) -> None:
+    """
+    After create.sh runs, the operator window's ACTIVE pane is the bottom
+    shell pane (border title "operator"), not one of the read-only column
+    panes.
+
+    PRIORITY-0002 acceptance criterion 1: "After session create, the
+    operator window's active pane is the shell pane, asserted via tmux
+    display -p on the window's active pane title == 'operator'."
+    """
+    probe_cmd = (
+        "tmux display -p -t " + _TEST_SESSION_NAME + ":operator "
+        "'#{pane_title}' 2>/dev/null || echo 'no-operator'"
+    )
+    result = _run_tmux_session_commands(
+        operator_test_image,
+        _TEST_SESSION_NAME,
+        [probe_cmd],
+    )
+
+    output = result.stdout + result.stderr
+    if "no-operator" in output or "no server" in output.lower():
+        pytest.skip(
+            "tmux session did not start in container (no TTY in "
+            "non-interactive docker run); active-pane live test cannot run "
+            "in this environment"
+        )
+
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+    assert lines, f"no output captured from tmux display -p; raw output:\n{output}"
+    active_title = lines[-1]
+    assert active_title == "operator", (
+        f"operator window's active pane title is {active_title!r} after "
+        f"create.sh ran, expected 'operator' (the bottom shell pane). "
+        f"Entering the window should land the operator on the command "
+        f"line without a pane-switch first. Full output:\n{output}"
+    )
+
+
+def test_operator_shell_pane_starts_cleanly_without_bashrc(
+    operator_test_image: str,
+) -> None:
+    """
+    With a fixture HOME that has no ~/.bashrc, the operator shell pane's
+    startup produces no error output — the guard is silent on a missing
+    file.
+
+    PRIORITY-0002 acceptance criterion 2: "a fixture HOME without .bashrc
+    produces no error output in the pane."
+    """
+    session_name = _TEST_SESSION_NAME + "-nobashrc"
+    home_dir = "/home/kanban/pgai-test-fixture-home-nobashrc"
+
+    result = _run_operator_shell_fixture(
+        operator_test_image,
+        session_name,
+        setup_commands=[f"mkdir -p {home_dir}"],
+        home_dir=home_dir,
+        kanban_root_dir="/pgai_agent_kanban",
+        probe_command="echo PGAI_PROBE_OK",
+    )
+
+    output = result.stdout + result.stderr
+    if _PANE_CAPTURE_START not in output and "no server" in output.lower():
+        pytest.skip(
+            "tmux session did not start in container (no TTY in "
+            "non-interactive docker run); operator shell-pane live test "
+            "cannot run in this environment"
+        )
+
+    pane_output = _extract_pane_capture(output)
+    assert "PGAI_PROBE_OK" in pane_output, (
+        f"probe echo did not appear in the pane; the shell may not have "
+        f"started cleanly. Pane capture:\n{pane_output}\nFull output:\n{output}"
+    )
+    for error_marker in ("No such file or directory", "syntax error", "command not found"):
+        assert error_marker not in pane_output, (
+            f"unexpected error output {error_marker!r} in the operator "
+            f"shell pane with a HOME lacking ~/.bashrc; the guarded source "
+            f"must start silently and cleanly. Pane capture:\n{pane_output}"
+        )
+
+
+def test_operator_shell_pane_bashrc_alias_resolves_and_env_stays_correct(
+    operator_test_image: str,
+) -> None:
+    """
+    With a fixture ~/.bashrc defining an alias, the alias resolves in the
+    operator shell pane, and a PGAI_* / kanban-env value set by a fixture
+    shell-env survives even when that same ~/.bashrc tries to clobber it.
+
+    PRIORITY-0002 acceptance criterion 3: "A fixture .bashrc defining an
+    alias: the alias resolves in the operator shell (send-keys probe), and
+    PGAI_* env values remain correct after startup (ordering fixture for
+    goal 2's decision)."
+
+    The fixture kanban-root is a writable directory created inside the
+    container — the checked-out repo is bind-mounted read-only, so a real
+    shell-env file cannot be written into it.
+    """
+    session_name = _TEST_SESSION_NAME + "-bashrc-alias"
+    home_dir = "/home/kanban/pgai-test-fixture-home-withbashrc"
+    kanban_root_dir = "/home/kanban/pgai-test-fixture-kanban-root"
+
+    setup_commands = [
+        f"mkdir -p {home_dir} {kanban_root_dir}",
+        (
+            "printf 'export PGAI_TEST_MARKER=kanban-correct-value\\n' "
+            f"> {kanban_root_dir}/shell-env"
+        ),
+        (
+            'printf \'alias hello="echo bashrc-alias-worked"\\n'
+            "export PGAI_TEST_MARKER=clobbered-by-bashrc\\n' "
+            f"> {home_dir}/.bashrc"
+        ),
+    ]
+
+    result = _run_operator_shell_fixture(
+        operator_test_image,
+        session_name,
+        setup_commands=setup_commands,
+        home_dir=home_dir,
+        kanban_root_dir=kanban_root_dir,
+        probe_command="hello; echo MARKER=$PGAI_TEST_MARKER",
+    )
+
+    output = result.stdout + result.stderr
+    if _PANE_CAPTURE_START not in output and "no server" in output.lower():
+        pytest.skip(
+            "tmux session did not start in container (no TTY in "
+            "non-interactive docker run); operator shell-pane live test "
+            "cannot run in this environment"
+        )
+
+    pane_output = _extract_pane_capture(output)
+    assert "bashrc-alias-worked" in pane_output, (
+        f"the fixture ~/.bashrc alias did not resolve in the operator "
+        f"shell pane. Pane capture:\n{pane_output}\nFull output:\n{output}"
+    )
+    assert "MARKER=kanban-correct-value" in pane_output, (
+        f"PGAI_TEST_MARKER was not the kanban shell-env value after "
+        f"startup; the fixture ~/.bashrc's attempt to clobber it must not "
+        f"win — shell-env must be sourced LAST. Pane capture:\n{pane_output}"
+    )
+    assert "MARKER=clobbered-by-bashrc" not in pane_output, (
+        f"PGAI_TEST_MARKER was clobbered by ~/.bashrc and never corrected; "
+        f"shell-env must be re-sourced after bashrc so kanban env wins. "
+        f"Pane capture:\n{pane_output}"
     )
 
 

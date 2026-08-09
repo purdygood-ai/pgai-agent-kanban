@@ -15,10 +15,17 @@ identifier safety pass and desynchronizes its byte-exact rendering,
 which trips the CHANGELOG freshness gate and the internal-bug-
 identifier unit test. Write the notes; let CM regenerate the changelog.
 
-The release-notes body must refer to bugs by symptom and public
-identifier — not by internal ticket ID. The changelog writer strips
-internal identifiers automatically when it renders CHANGELOG.md; writing
-symptoms here keeps both this file and the rendered changelog clean.
+The release-notes body must describe every resolved item by SUBSTANCE —
+what was wrong and what changed, drawn from the bug's own Symptom/Fix
+text — never by the bare internal ticket ID (BUG-NNNN, PRIORITY-NNNN).
+There is no lint carve-out for this file: release-notes/*.md is scanned
+by team/scripts/lint_comment_provenance.py the same as production code.
+When an item has already been disclosed, cite its public KI-N.N.N.N
+identifier alongside the substance description — that public namespace
+is unchanged by this rule and is exactly what a reader outside the
+kanban can look up. The changelog writer also strips any internal
+identifier that slips through when it renders CHANGELOG.md, but that is
+a backstop, not a license to write bare ticket IDs here.
 
 STATUS FIELD GUIDE
 ==================
@@ -34,16 +41,26 @@ mismatching the actual ship policy applied at release time.
 
 NON-FUNCTIONAL WARNING
 ======================
-When Status == NON-FUNCTIONAL, the ## Known Issues section MUST include:
-  "Do not use this version in production. Issues filed: BUG-NNNN, BUG-MMMM. Fix expected in v.next-patch."
-Replace BUG-NNNN / BUG-MMMM with the actual filed bug IDs.
+When Status == NON-FUNCTIONAL, the ## Known Issues section MUST include a
+warning line naming what is broken IN PLAIN LANGUAGE (substance, drawn from
+each bug's own Symptom), never the bare internal ticket ID:
+  "Do not use this version in production. <substance of what's broken>. Fix expected in v.next-patch."
 Replace v.next-patch with the actual next patch version (e.g. vX.Y.Z+1).
+If any of the underlying items have a public KI-N.N.N.N identifier, cite it
+next to its substance description (see KNOWN-BUGS BUG LIST below) — the
+public disclosure namespace is unaffected by this rule.
 
 KNOWN-BUGS BUG LIST
 ====================
 When Status == KNOWN-BUGS or NON-FUNCTIONAL, ## Known Issues MUST list
-each filed bug. Format each entry as:
-  - **BUG-NNNN** — Short description. Workaround if known, else "No workaround available."
+each open item by substance, sourced from its own Symptom/Fix text. Format
+each entry as:
+  - <Substance description of what's wrong, from the Symptom text> — Workaround if known, else "No workaround available."
+When the item has a public KI-N.N.N.N identifier assigned, prefix the
+substance with it:
+  - **KI-N.N.N.N** — <Substance description> — Workaround if known, else "No workaround available."
+Never render the bare internal ticket ID (BUG-NNNN) in this list — there is
+no lint carve-out for this file.
 -->
 
 # Release Notes: <project-name> vX.Y.Z
@@ -77,11 +94,14 @@ Features, improvements, and changes included in this release.
 
 ## Bugs Resolved
 
-Bugs that were identified and fixed in this release.
+Bugs that were identified and fixed in this release, described by substance
+(drawn from each bug's own Symptom/Fix text) — never by the bare internal
+ticket ID. Cite the public KI-N.N.N.N identifier when one has been assigned;
+that public namespace is unaffected by this rule.
 
-| Bug ID | Description | Severity | Resolution |
-|--------|-------------|----------|------------|
-| `<id>` | Short description | HIGH / MEDIUM / LOW | Fixed in commit `<hash>` |
+| Substance (what was wrong / what changed) | Public ID (if disclosed) | Severity | Resolution |
+|--------------------------------------------|---------------------------|----------|------------|
+| Short substance description | `KI-N.N.N.N` or "internal-only" | HIGH / MEDIUM / LOW | Fixed in commit `<hash>` |
 
 If no bugs were resolved, write "None."
 
@@ -89,11 +109,11 @@ If no bugs were resolved, write "None."
 
 ## Bugs Skipped
 
-Bugs that were identified during verification but intentionally not fixed in this release. Include the rationale for each.
+Bugs that were identified during verification but intentionally not fixed in this release, described by substance — never by the bare internal ticket ID. Include the rationale for each.
 
-| Bug ID | Description | Severity | Rationale for Skipping |
-|--------|-------------|----------|------------------------|
-| `<id>` | Short description | HIGH / MEDIUM / LOW | Deferred to vX.Y.Z / Low impact / Will not fix |
+| Substance (what was wrong) | Public ID (if disclosed) | Severity | Rationale for Skipping |
+|------------------------------|---------------------------|----------|------------------------|
+| Short substance description | `KI-N.N.N.N` or "internal-only" | HIGH / MEDIUM / LOW | Deferred to vX.Y.Z / Low impact / Will not fix |
 
 If no bugs were skipped, write "None."
 
@@ -104,14 +124,20 @@ If no bugs were skipped, write "None."
 <!--
 FUNCTIONAL release: write "None." below and stop.
 
-KNOWN-BUGS release: replace the placeholder lines below with one bullet per filed bug:
-  - **BUG-NNNN** — Short description. Workaround if known, else "No workaround available."
+KNOWN-BUGS release: replace the placeholder lines below with one bullet per
+open item, described by substance (from its own Symptom/Fix text), citing
+the public KI-N.N.N.N identifier when one has been assigned:
+  - **KI-N.N.N.N** — <Substance description> — Workaround if known, else "No workaround available."
+  - <Substance description> (internal-only, not yet disclosed) — Workaround if known, else "No workaround available."
 
-NON-FUNCTIONAL release: include the warning line first, then the bug list:
-  Do not use this version in production. Issues filed: BUG-NNNN, BUG-MMMM. Fix expected in v.next-patch.
+NON-FUNCTIONAL release: include the warning line first, then the substance list:
+  Do not use this version in production. <substance of what's broken>. Fix expected in v.next-patch.
 
-  - **BUG-NNNN** — Short description. Workaround if known, else "No workaround available."
-  - **BUG-MMMM** — Short description. Workaround if known, else "No workaround available."
+  - **KI-N.N.N.N** — <Substance description> — Workaround if known, else "No workaround available."
+  - <Substance description> (internal-only, not yet disclosed) — Workaround if known, else "No workaround available."
+
+Never render the bare internal ticket ID (BUG-NNNN) anywhere in this
+section — there is no lint carve-out for this file.
 -->
 
 Issues that exist in this release and have not been resolved or formally skipped. Users should be aware of these.

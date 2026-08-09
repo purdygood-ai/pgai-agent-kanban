@@ -126,52 +126,44 @@ def _run_guard(tmp_path: pathlib.Path, paths: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_priority_template_in_templates_tree_is_not_flagged(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize(
+    "paths, template_kind",
+    [
+        (
+            [
+                "team/templates/project/release/PRIORITY-TEMPLATE.md",
+                "team/templates/project/document/PRIORITY-TEMPLATE.md",
+            ],
+            "PRIORITY-TEMPLATE.md",
+        ),
+        (
+            [
+                "team/templates/project/release/BUG-TEMPLATE.md",
+                "team/templates/project/document/BUG-TEMPLATE.md",
+            ],
+            "BUG-TEMPLATE.md",
+        ),
+        (
+            [
+                "team/templates/project/release/REQUIREMENTS-TEMPLATE.md",
+                "team/templates/project/document/REQUIREMENTS-TEMPLATE.md",
+            ],
+            "REQUIREMENTS-TEMPLATE.md",
+        ),
+    ],
+)
+def test_template_source_in_templates_tree_is_not_flagged(
+    tmp_path: pathlib.Path, paths: list, template_kind: str
 ) -> None:
-    """PRIORITY-TEMPLATE.md under team/templates/ must pass silently.
+    """Template source files under team/templates/ pass silently, regardless of PRIORITY/BUG/REQUIREMENTS shape.
 
     This is the canonical false-positive from an earlier defect: the guard flagged
-    legitimate template source files because they matched the PRIORITY-*.md
+    legitimate template source files because they matched the *-TEMPLATE.md
     pattern without a location-based exclusion.
     """
-    paths = [
-        "team/templates/project/release/PRIORITY-TEMPLATE.md",
-        "team/templates/project/document/PRIORITY-TEMPLATE.md",
-    ]
     output = _run_guard(tmp_path, paths)
     assert output == "", (
-        "Template source PRIORITY-TEMPLATE.md files should not be flagged; "
-        f"guard produced: {output!r}"
-    )
-
-
-def test_bug_template_in_templates_tree_is_not_flagged(
-    tmp_path: pathlib.Path,
-) -> None:
-    """BUG-TEMPLATE.md under team/templates/ must pass silently."""
-    paths = [
-        "team/templates/project/release/BUG-TEMPLATE.md",
-        "team/templates/project/document/BUG-TEMPLATE.md",
-    ]
-    output = _run_guard(tmp_path, paths)
-    assert output == "", (
-        "Template source BUG-TEMPLATE.md files should not be flagged; "
-        f"guard produced: {output!r}"
-    )
-
-
-def test_requirements_template_in_templates_tree_is_not_flagged(
-    tmp_path: pathlib.Path,
-) -> None:
-    """REQUIREMENTS-TEMPLATE.md under team/templates/ must pass silently."""
-    paths = [
-        "team/templates/project/release/REQUIREMENTS-TEMPLATE.md",
-        "team/templates/project/document/REQUIREMENTS-TEMPLATE.md",
-    ]
-    output = _run_guard(tmp_path, paths)
-    assert output == "", (
-        "Template source REQUIREMENTS-TEMPLATE.md files should not be flagged; "
+        f"Template source {template_kind} files should not be flagged; "
         f"guard produced: {output!r}"
     )
 
@@ -215,39 +207,25 @@ def test_any_file_under_templates_tree_is_not_flagged(
 # ---------------------------------------------------------------------------
 
 
-def test_priority_file_in_intake_dir_is_flagged(tmp_path: pathlib.Path) -> None:
-    """A PRIORITY-*.md deposited in a non-sanctioned location is still flagged.
-
-    This is the regression guard: the fix must not blind the guard to real
-    priority-intake strays.  A file at the repo root level that is NOT inside
-    team/templates/ AND NOT inside projects/<name>/priority/ must be caught.
-    """
-    paths = ["PRIORITY-0042-some-important-thing.md"]
-    output = _run_guard(tmp_path, paths)
-    assert "stray" in output, (
-        "A PRIORITY-*.md at repo root should be flagged as a stray; "
-        f"guard produced: {output!r}"
-    )
-
-
-def test_priority_file_in_team_subdir_is_flagged(tmp_path: pathlib.Path) -> None:
-    """A PRIORITY-*.md inside team/ but outside team/templates/ is flagged."""
-    paths = ["team/tasks/PRIORITY-0001-urgent.md"]
-    output = _run_guard(tmp_path, paths)
-    assert "stray" in output, (
-        "A PRIORITY-*.md in team/tasks/ should be flagged; "
-        f"guard produced: {output!r}"
-    )
-
-
-def test_priority_file_in_wrong_project_subdir_is_flagged(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize(
+    "stray_path, location_description",
+    [
+        ("PRIORITY-0042-some-important-thing.md", "repo root"),
+        ("team/tasks/PRIORITY-0001-urgent.md", "team/tasks/"),
+        ("projects/my-project/backlog/PRIORITY-0007-todo.md", "outside projects/<name>/priority/"),
+    ],
+)
+def test_priority_file_outside_sanctioned_location_is_flagged(
+    tmp_path: pathlib.Path, stray_path: str, location_description: str
 ) -> None:
-    """A PRIORITY-*.md in projects/<name>/ but outside priority/ is flagged."""
-    paths = ["projects/my-project/backlog/PRIORITY-0007-todo.md"]
-    output = _run_guard(tmp_path, paths)
+    """A PRIORITY-*.md deposited outside team/templates/ or projects/<name>/priority/ is still flagged.
+
+    This is the regression guard: the template-source and priority-directory
+    exclusions must not blind the guard to genuine priority-intake strays.
+    """
+    output = _run_guard(tmp_path, [stray_path])
     assert "stray" in output, (
-        "A PRIORITY-*.md outside projects/<name>/priority/ should be flagged; "
+        f"A PRIORITY-*.md in {location_description} should be flagged; "
         f"guard produced: {output!r}"
     )
 

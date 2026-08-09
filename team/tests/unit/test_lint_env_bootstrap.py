@@ -837,22 +837,26 @@ def test_file_references_root_var_ignores_comment_lines() -> None:
     assert _lint._file_references_root_var(text) is False
 
 
-def test_file_sources_approved_prelude_detects_env_bootstrap() -> None:
-    """_file_sources_approved_prelude returns True when env_bootstrap.sh is sourced."""
-    text = 'source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"\n'
-    assert _lint._file_sources_approved_prelude(text) is True
-
-
-def test_file_sources_approved_prelude_detects_wake_common() -> None:
-    """_file_sources_approved_prelude returns True when wake_common.sh is sourced."""
-    text = 'source "$(dirname "${BASH_SOURCE[0]}")/lib/wake_common.sh"\n'
-    assert _lint._file_sources_approved_prelude(text) is True
-
-
-def test_file_sources_approved_prelude_rejects_missing_source() -> None:
-    """_file_sources_approved_prelude returns False when no approved prelude is sourced."""
-    text = "KANBAN=${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}\n"
-    assert _lint._file_sources_approved_prelude(text) is False
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (
+            'source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"\n',
+            True,
+        ),  # env_bootstrap.sh sourced
+        (
+            'source "$(dirname "${BASH_SOURCE[0]}")/lib/wake_common.sh"\n',
+            True,
+        ),  # wake_common.sh sourced
+        (
+            "KANBAN=${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}\n",
+            False,
+        ),  # no approved prelude sourced
+    ],
+)
+def test_file_sources_approved_prelude(text: str, expected: bool) -> None:
+    """_file_sources_approved_prelude recognizes env_bootstrap.sh/wake_common.sh, else False."""
+    assert _lint._file_sources_approved_prelude(text) is expected
 
 
 def test_check_python_file_detects_dict_style_read(tmp_path: Path) -> None:

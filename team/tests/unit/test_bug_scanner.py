@@ -15,6 +15,7 @@ Test areas:
   - claim_next_bug_id()         — atomic claiming
   - release_bug_id_claim()      — lock removal
   - detect_duplicate_bug_ids()  — collision detection
+  - _scan_highest_bug_num()     — gate-valid-only numeric high-water scan
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ try:
         _extract_summary,
         _extract_severity,
         _extract_status,
+        _scan_highest_bug_num,
     )
 except ImportError:
     import sys
@@ -55,6 +57,7 @@ except ImportError:
         _extract_summary,
         _extract_severity,
         _extract_status,
+        _scan_highest_bug_num,
     )
 
 
@@ -480,3 +483,98 @@ def test_resolve_bugs_dir_uses_project_root_env(
     monkeypatch.delenv("PGAI_AGENT_KANBAN_ROOT_PATH", raising=False)
     result = resolve_bugs_dir(None)
     assert result == str(tmp_path / "bugs")
+
+
+# ---------------------------------------------------------------------------
+# _scan_highest_bug_num() — gate-valid-only numeric high-water scan
+# ---------------------------------------------------------------------------
+#
+# A malformed filename (date-first, under-padded, or otherwise) must never
+# participate in the high-water scan that claim_next_bug_id relies on.  The
+# defect this guards against: a looser "4 or more digits" prefix match would
+# read a date-first filename's 8-digit date as if it were the sequence
+# number, jumping the high-water mark from a legitimate 4-digit value to an
+# 8-digit one and permanently breaking subsequent numbering.
+
+
+def test_scan_highest_bug_num_ignores_date_first_filename(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A date-first filename does not poison the high-water scan.
+
+    Without the gate-valid filter, a filename shaped like
+    BUG-<8-digit-date>-<seq>-<slug>.md would be misread as claiming an
+    8-digit sequence number, jumping the high-water mark far beyond any
+    legitimate value.
+    """
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    _write_bug(bugs_dir, "BUG-0009-well-formed")
+    (bugs_dir / "BUG-20260803-001-date-first-bad.md").write_text(
+        "## Status\nopen\n", encoding="utf-8"
+    )
+    highest = _scan_highest_bug_num(bugs_dir)
+    assert highest == 9, (
+        f"Expected the date-first filename to be excluded from the scan "
+        f"(highest=9); got highest={highest}"
+    )
+
+
+def test_scan_highest_bug_num_ignores_under_padded_filename(
+    tmp_path: pathlib.Path,
+) -> None:
+    """An under-padded (fewer than 4 digits) filename does not participate."""
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    _write_bug(bugs_dir, "BUG-0036-well-formed")
+    (bugs_dir / "BUG-37-under-padded-bad.md").write_text(
+        "## Status\nopen\n", encoding="utf-8"
+    )
+    highest = _scan_highest_bug_num(bugs_dir)
+    assert highest == 36, (
+        f"Expected the under-padded filename to be excluded from the scan "
+        f"(highest=36); got highest={highest}"
+    )
+
+
+def test_scan_highest_bug_num_parses_numerically_not_lexically(
+    tmp_path: pathlib.Path,
+) -> None:
+    """0009 and 0036 in the same directory yield a numeric high-water of 36.
+
+    A lexical (string) comparison of "0009" against "0036" would still sort
+    correctly by coincidence (both are zero-padded to the same width), so
+    this test also plants a fixture that would only pass a numeric parse:
+    the scan result must equal the actual maximum int value, not a
+    string-sorted maximum.
+    """
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    _write_bug(bugs_dir, "BUG-0009-lower")
+    _write_bug(bugs_dir, "BUG-0036-higher")
+    highest = _scan_highest_bug_num(bugs_dir)
+    assert highest == 36, highest
+    assert isinstance(highest, int)
+
+
+def test_claim_next_bug_id_recovers_correct_next_id_with_malformed_file_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    """claim_next_bug_id allocates BUG-0037 even with a date-first file present.
+
+    End-to-end regression check: the malformed file must not leak its
+    8-digit date into the allocated ID.
+    """
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    _write_bug(bugs_dir, "BUG-0009-lower")
+    _write_bug(bugs_dir, "BUG-0036-higher")
+    (bugs_dir / "BUG-20260803-001-date-first-bad.md").write_text(
+        "## Status\nopen\n", encoding="utf-8"
+    )
+    bug_id, bug_path, lock_path = claim_next_bug_id(str(bugs_dir), "next-slot")
+    try:
+        assert bug_id == "BUG-0037", bug_id
+        assert bug_path == bugs_dir / "BUG-0037-next-slot.md"
+    finally:
+        release_bug_id_claim(lock_path)

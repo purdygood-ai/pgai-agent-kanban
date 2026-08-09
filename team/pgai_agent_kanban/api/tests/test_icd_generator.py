@@ -257,7 +257,7 @@ class TestIcdVersionSource:
         )
 
     def test_icd_version_file_contains_expected_version(self) -> None:
-        """ICD_VERSION file exists and contains exactly '1.2.0' followed by a newline.
+        """ICD_VERSION file exists and contains exactly '1.3.0' followed by a newline.
 
         This test encodes the acceptance criterion directly: the file must exist
         with the current contract version for this RC.
@@ -267,12 +267,12 @@ class TestIcdVersionSource:
         """
         assert _ICD_VERSION_FILE.exists(), (
             f"ICD_VERSION file not found at {_ICD_VERSION_FILE}.\n"
-            "The file must be created at docs/api/ICD_VERSION with content '1.2.0\\n'."
+            "The file must be created at docs/api/ICD_VERSION with content '1.3.0\\n'."
         )
         raw = _ICD_VERSION_FILE.read_bytes()
-        assert raw == b"1.2.0\n", (
-            f"ICD_VERSION file content is {raw!r}; expected b'1.2.0\\n'.\n"
-            "The file must contain exactly '1.2.0' followed by a single newline."
+        assert raw == b"1.3.0\n", (
+            f"ICD_VERSION file content is {raw!r}; expected b'1.3.0\\n'.\n"
+            "The file must contain exactly '1.3.0' followed by a single newline."
         )
 
 
@@ -301,6 +301,7 @@ class TestIcdArtifactContent:
         required_paths = [
             "/board",
             "/approvals",
+            "/auto-resolutions",
             "/operations/create-project",
             "/logs/{kind}",
             "/traces",
@@ -311,12 +312,12 @@ class TestIcdArtifactContent:
             "Run 'bash team/scripts/generate-icd.sh' to regenerate."
         )
 
-    def test_committed_artifact_info_version_is_1_2_0(self) -> None:
-        """The committed icd.json has info.version == '1.2.0'.
+    def test_committed_artifact_info_version_is_1_3_0(self) -> None:
+        """The committed icd.json has info.version == '1.3.0'.
 
         Verifies the artifact reflects the current ICD contract version (additive
-        minor bump: 1.1.0 → 1.2.0) after the dry_run request field and warnings
-        response field were added universally across all 17 operation endpoints.
+        minor bump: 1.2.0 → 1.3.0) after GET /auto-resolutions was added as a new
+        read endpoint alongside GET /approvals.
         """
         assert _ICD_ARTIFACT.exists(), (
             f"ICD artifact not found at {_ICD_ARTIFACT}.\n"
@@ -324,8 +325,8 @@ class TestIcdArtifactContent:
         )
         artifact = json.loads(_ICD_ARTIFACT.read_text(encoding="utf-8"))
         version = artifact.get("info", {}).get("version")
-        assert version == "1.2.0", (
-            f"docs/api/icd.json info.version is {version!r}; expected '1.2.0'.\n"
+        assert version == "1.3.0", (
+            f"docs/api/icd.json info.version is {version!r}; expected '1.3.0'.\n"
             "Regenerate with 'bash team/scripts/generate-icd.sh'."
         )
 

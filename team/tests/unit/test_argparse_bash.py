@@ -40,40 +40,80 @@ def _source(func_call: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_boolean_flag_gets_value_one(tmp_path: pathlib.Path) -> None:
-    """A standalone --flag (not in value-flags) is recorded with value '1'."""
-    result = run_bash(
-        tmp_path,
-        _source("argparse_parse --dry-run && echo ${ARGPARSE_FLAGS[dry-run]}"),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "1"
-
-
-def test_value_flag_equals_form(tmp_path: pathlib.Path) -> None:
-    """--flag=value form records the value in ARGPARSE_FLAGS."""
-    result = run_bash(
-        tmp_path,
-        _source(
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        (
+            "argparse_parse --dry-run && echo ${ARGPARSE_FLAGS[dry-run]}",
+            "1",
+        ),  # standalone --flag (not in value-flags) gets value '1'
+        (
             "argparse_parse --value-flags 'project' -- --project=myproject"
-            " && echo ${ARGPARSE_FLAGS[project]}"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "myproject"
-
-
-def test_value_flag_space_form(tmp_path: pathlib.Path) -> None:
-    """--flag value (space-separated) form records the value in ARGPARSE_FLAGS."""
-    result = run_bash(
-        tmp_path,
-        _source(
+            " && echo ${ARGPARSE_FLAGS[project]}",
+            "myproject",
+        ),  # --flag=value form
+        (
             "argparse_parse --value-flags 'project' -- --project myproject"
-            " && echo ${ARGPARSE_FLAGS[project]}"
-        ),
-    )
+            " && echo ${ARGPARSE_FLAGS[project]}",
+            "myproject",
+        ),  # --flag value (space-separated) form
+        (
+            "argparse_parse --value-flags 'foo' -- --foo a=b"
+            " && echo ${ARGPARSE_FLAGS[foo]}",
+            "a=b",
+        ),  # values containing '=' are preserved verbatim
+        (
+            "argparse_parse -- --some-unknown-flag"
+            " && echo ${ARGPARSE_FLAGS[some-unknown-flag]:-MISSING}",
+            "1",
+        ),  # unknown flags are recorded, not rejected
+        (
+            "argparse_parse alpha beta gamma"
+            " && echo ${ARGPARSE_POSITIONAL[0]} ${ARGPARSE_POSITIONAL[1]} ${ARGPARSE_POSITIONAL[2]}",
+            "alpha beta gamma",
+        ),  # non-flag tokens appear in ARGPARSE_POSITIONAL in input order
+        (
+            "argparse_parse --value-flags 'project' -- --project"
+            " && echo ${ARGPARSE_MISSING[0]}",
+            "project",
+        ),  # value-taking flag with no value (end of argv) goes into ARGPARSE_MISSING
+        (
+            "argparse_parse --value-flags 'project color' -- --project --color red"
+            " && echo ${ARGPARSE_MISSING[0]}",
+            "project",
+        ),  # value-taking flag whose next token is another flag goes into ARGPARSE_MISSING
+        (
+            "argparse_parse --value-flags 'project agent' -- --project foo --agent coder --verbose"
+            " && echo ${ARGPARSE_FLAGS[project]} ${ARGPARSE_FLAGS[agent]} ${ARGPARSE_FLAGS[verbose]}",
+            "foo coder 1",
+        ),  # multiple flags in a single argparse_parse call are all recorded
+        (
+            "argparse_parse --dry-run"
+            " && argparse_has dry-run && echo yes || echo no",
+            "yes",
+        ),  # argparse_has returns 0 (true) when the flag was present in argv
+        (
+            "argparse_parse --some-flag"
+            " && argparse_has absent-flag && echo yes || echo no",
+            "no",
+        ),  # argparse_has returns 1 (false) when the flag was not in argv
+        (
+            "argparse_parse --value-flags 'project' -- --project"
+            " && argparse_missing project && echo yes || echo no",
+            "yes",
+        ),  # argparse_missing returns 0 when the flag was declared value-taking but got no value
+        (
+            "argparse_parse --value-flags 'project' -- --project myproj"
+            " && argparse_missing project && echo yes || echo no",
+            "no",
+        ),  # argparse_missing returns 1 when the flag was present with a value
+    ],
+)
+def test_argparse_parse_behaviors(tmp_path: pathlib.Path, command: str, expected: str) -> None:
+    """argparse_parse/has/missing behaviors across flag forms, unknown flags, positionals, and value presence."""
+    result = run_bash(tmp_path, _source(command))
     assert result.returncode == 0
-    assert result.stdout.strip() == "myproject"
+    assert result.stdout.strip() == expected
 
 
 def test_value_flag_equals_and_space_forms_produce_same_result(tmp_path: pathlib.Path) -> None:
@@ -96,32 +136,6 @@ def test_value_flag_equals_and_space_forms_produce_same_result(tmp_path: pathlib
     assert result_sp.stdout.strip() == "/path/to/tree"
 
 
-def test_value_with_equals_sign_in_value(tmp_path: pathlib.Path) -> None:
-    """Values that themselves contain '=' are preserved verbatim."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse --value-flags 'foo' -- --foo a=b"
-            " && echo ${ARGPARSE_FLAGS[foo]}"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "a=b"
-
-
-def test_unknown_flag_is_recorded_not_rejected(tmp_path: pathlib.Path) -> None:
-    """Unknown flags are recorded in ARGPARSE_FLAGS with value '1'."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse -- --some-unknown-flag"
-            " && echo ${ARGPARSE_FLAGS[some-unknown-flag]:-MISSING}"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "1"
-
-
 def test_double_dash_signals_end_of_flags(tmp_path: pathlib.Path) -> None:
     """Tokens after -- are treated as positional arguments, not flags."""
     result = run_bash(
@@ -135,45 +149,6 @@ def test_double_dash_signals_end_of_flags(tmp_path: pathlib.Path) -> None:
     out = result.stdout.strip()
     assert "--not-a-flag" in out
     assert "pos1" in out
-
-
-def test_positional_arguments_collected_in_order(tmp_path: pathlib.Path) -> None:
-    """Non-flag tokens appear in ARGPARSE_POSITIONAL in input order."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse alpha beta gamma"
-            " && echo ${ARGPARSE_POSITIONAL[0]} ${ARGPARSE_POSITIONAL[1]} ${ARGPARSE_POSITIONAL[2]}"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "alpha beta gamma"
-
-
-def test_value_flag_missing_value_goes_to_argparse_missing(tmp_path: pathlib.Path) -> None:
-    """A value-taking flag with no value (end of argv) is recorded in ARGPARSE_MISSING."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse --value-flags 'project' -- --project"
-            " && echo ${ARGPARSE_MISSING[0]}"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "project"
-
-
-def test_value_flag_missing_when_next_token_is_flag(tmp_path: pathlib.Path) -> None:
-    """A value-taking flag whose next token is another flag goes into ARGPARSE_MISSING."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse --value-flags 'project color' -- --project --color red"
-            " && echo ${ARGPARSE_MISSING[0]}"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "project"
 
 
 def test_empty_value_via_equals_not_missing(tmp_path: pathlib.Path) -> None:
@@ -190,81 +165,6 @@ def test_empty_value_via_equals_not_missing(tmp_path: pathlib.Path) -> None:
     assert "MISSING:0" in out
     # The key should exist with an empty value (not "NOKEY")
     assert "VAL:" in out
-
-
-def test_multiple_flags_parsed_independently(tmp_path: pathlib.Path) -> None:
-    """Multiple flags in a single argparse_parse call are all recorded."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse --value-flags 'project agent' -- --project foo --agent coder --verbose"
-            " && echo ${ARGPARSE_FLAGS[project]} ${ARGPARSE_FLAGS[agent]} ${ARGPARSE_FLAGS[verbose]}"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "foo coder 1"
-
-
-# ---------------------------------------------------------------------------
-# argparse_has — presence check
-# ---------------------------------------------------------------------------
-
-
-def test_argparse_has_returns_true_for_present_flag(tmp_path: pathlib.Path) -> None:
-    """argparse_has returns 0 (true) when the flag was present in argv."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse --dry-run"
-            " && argparse_has dry-run && echo yes || echo no"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "yes"
-
-
-def test_argparse_has_returns_false_for_absent_flag(tmp_path: pathlib.Path) -> None:
-    """argparse_has returns 1 (false) when the flag was not in argv."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse --some-flag"
-            " && argparse_has absent-flag && echo yes || echo no"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "no"
-
-
-# ---------------------------------------------------------------------------
-# argparse_missing — missing value check
-# ---------------------------------------------------------------------------
-
-
-def test_argparse_missing_returns_true_when_flag_had_no_value(tmp_path: pathlib.Path) -> None:
-    """argparse_missing returns 0 when the flag was declared value-taking but got no value."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse --value-flags 'project' -- --project"
-            " && argparse_missing project && echo yes || echo no"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "yes"
-
-
-def test_argparse_missing_returns_false_when_flag_had_a_value(tmp_path: pathlib.Path) -> None:
-    """argparse_missing returns 1 when the flag was present with a value."""
-    result = run_bash(
-        tmp_path,
-        _source(
-            "argparse_parse --value-flags 'project' -- --project myproj"
-            " && argparse_missing project && echo yes || echo no"
-        ),
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "no"
 
 
 # ---------------------------------------------------------------------------

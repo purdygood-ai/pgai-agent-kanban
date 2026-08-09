@@ -236,107 +236,71 @@ class TestSiblingParityResolutionOutput:
     phases.  This exercises the shared implementation (which is the contract).
     """
 
-    def test_pre_squash_prints_none_configured_when_no_hook(
-        self, tmp_path: pathlib.Path
+    @pytest.mark.parametrize("phase", ["pre-squash", "pre-tag", "post-tag"])
+    def test_prints_none_configured_when_no_hook(
+        self, tmp_path: pathlib.Path, phase: str
     ) -> None:
-        """Both scripts print 'pre-squash hook: none configured' when no hook exists."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "parity-pre-squash")
+        """Both scripts print '<phase> hook: none configured' when no hook exists.
+
+        Survives-as-named-parameterization of the original three per-phase
+        tests; no case dropped."""
+        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, f"parity-{phase}")
 
         result = _run_resolve(
-            tmp_path, kanban_root, "parity-pre-squash",
+            tmp_path, kanban_root, f"parity-{phase}",
             project_dir / "hooks", dev_tree,
-            phase="pre-squash",
+            phase=phase,
         )
         assert result.returncode == 0
-        assert "pre-squash hook: none configured" in result.stdout
+        assert f"{phase} hook: none configured" in result.stdout
 
-    def test_pre_tag_prints_none_configured_when_no_hook(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """Both scripts print 'pre-tag hook: none configured' when no hook exists."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "parity-pre-tag")
+    @staticmethod
+    def _plant_kanban_side(dev_tree: pathlib.Path, project_dir: pathlib.Path, phase: str) -> None:
+        _write_hook(project_dir / "hooks" / f"cm-release-{phase}.sh")
 
-        result = _run_resolve(
-            tmp_path, kanban_root, "parity-pre-tag",
-            project_dir / "hooks", dev_tree,
-            phase="pre-tag",
-        )
-        assert result.returncode == 0
-        assert "pre-tag hook: none configured" in result.stdout
+    @staticmethod
+    def _plant_inrepo(dev_tree: pathlib.Path, project_dir: pathlib.Path, phase: str) -> None:
+        _write_hook(dev_tree / ".pgai" / "hooks" / f"cm-release-{phase}.sh")
 
-    def test_post_tag_prints_none_configured_when_no_hook(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """Both scripts print 'post-tag hook: none configured' when no hook exists."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "parity-post-tag")
-
-        result = _run_resolve(
-            tmp_path, kanban_root, "parity-post-tag",
-            project_dir / "hooks", dev_tree,
-            phase="post-tag",
-        )
-        assert result.returncode == 0
-        assert "post-tag hook: none configured" in result.stdout
-
-    def test_pre_squash_prints_path_and_source_when_kanban_side_hook_present(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """Both scripts print '<phase> hook: <path> (source: kanban-side)' when kanban-side hook present."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "parity-ks-pre")
-        hook = project_dir / "hooks" / "cm-release-pre-squash.sh"
-        _write_hook(hook)
-
-        result = _run_resolve(
-            tmp_path, kanban_root, "parity-ks-pre",
-            project_dir / "hooks", dev_tree,
-            phase="pre-squash",
-        )
-        assert result.returncode == 0
-        assert "pre-squash hook:" in result.stdout
-        assert "source: kanban-side" in result.stdout
-
-    def test_pre_tag_prints_path_and_source_when_inrepo_hook_present(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """Both scripts print '<phase> hook: <path> (source: in-repo)' when in-repo hook present."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "parity-ir-pre-tag")
-        hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-tag.sh"
-        _write_hook(hook)
-
-        result = _run_resolve(
-            tmp_path, kanban_root, "parity-ir-pre-tag",
-            project_dir / "hooks", dev_tree,
-            phase="pre-tag",
-        )
-        assert result.returncode == 0
-        assert "pre-tag hook:" in result.stdout
-        assert "source: in-repo" in result.stdout
-        assert str(hook) in result.stdout
-
-    def test_post_tag_prints_path_and_source_when_cfg_hook_present(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """Both scripts print '<phase> hook: <path> (source: cfg)' when cfg hook configured."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "parity-cfg-post")
-        cfg_hook = dev_tree / "post-tag-hook.sh"
+    @staticmethod
+    def _plant_cfg(dev_tree: pathlib.Path, project_dir: pathlib.Path, phase: str) -> None:
+        cfg_hook = dev_tree / f"{phase}-hook.sh"
         _write_hook(cfg_hook)
         cfg_text = (
             "[project]\n"
-            "project_name = parity-cfg-post\n"
+            f"project_name = parity-cfg-{phase}\n"
             f"dev_tree_path = {dev_tree}\n"
             "[hooks]\n"
-            "cm_release_post_tag_hook = post-tag-hook.sh\n"
+            f"cm_release_{phase.replace('-', '_')}_hook = {phase}-hook.sh\n"
         )
         (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
 
+    @pytest.mark.parametrize(
+        "phase, plant_hook, expected_source",
+        [
+            pytest.param("pre-squash", _plant_kanban_side, "kanban-side", id="kanban_side_pre_squash"),
+            pytest.param("pre-tag", _plant_inrepo, "in-repo", id="inrepo_pre_tag"),
+            pytest.param("post-tag", _plant_cfg, "cfg", id="cfg_post_tag"),
+        ],
+    )
+    def test_prints_path_and_source_when_hook_present(
+        self, tmp_path: pathlib.Path, phase: str, plant_hook, expected_source: str
+    ) -> None:
+        """Both scripts print '<phase> hook: <path> (source: <tier>)' for each
+        resolution tier. Survives-as-named-parameterization of the original
+        three per-tier tests; no case dropped."""
+        project_name = f"parity-{expected_source}-{phase}"
+        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, project_name)
+        plant_hook(dev_tree, project_dir, phase)
+
         result = _run_resolve(
-            tmp_path, kanban_root, "parity-cfg-post",
+            tmp_path, kanban_root, project_name,
             project_dir / "hooks", dev_tree,
-            phase="post-tag",
+            phase=phase,
         )
         assert result.returncode == 0
-        assert "post-tag hook:" in result.stdout
-        assert "source: cfg" in result.stdout
+        assert f"{phase} hook:" in result.stdout
+        assert f"source: {expected_source}" in result.stdout
 
 
 class TestSiblingParityEnforcement:
@@ -346,93 +310,41 @@ class TestSiblingParityEnforcement:
     These tests verify the shared enforcement semantics at each phase.
     """
 
-    def test_required_pre_squash_halts_when_no_hook(self, tmp_path: pathlib.Path) -> None:
-        """Both scripts HALT before pre-squash when required=true and no hook."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "enf-pre-squash")
+    @pytest.mark.parametrize("phase", ["pre-squash", "pre-tag", "post-tag"])
+    def test_required_halts_when_no_hook_and_names_the_phase(
+        self, tmp_path: pathlib.Path, phase: str
+    ) -> None:
+        """Both scripts HALT before the phase when required=true and no hook,
+        and the HALT message names the phase.
+
+        Survives-as-named-parameterization of the original three
+        'halts_when_no_hook' tests plus 'test_halt_message_names_phase_pre_squash'
+        (folded in as an extra assertion applied to every phase, not just
+        pre-squash); no case dropped."""
+        project_name = f"enf-{phase}"
+        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, project_name)
+        key = f"cm_release_{phase.replace('-', '_')}_hook_required"
         cfg_text = (
             "[project]\n"
-            "project_name = enf-pre-squash\n"
+            f"project_name = {project_name}\n"
             f"dev_tree_path = {dev_tree}\n"
             "[hooks]\n"
-            "cm_release_pre_squash_hook_required = true\n"
+            f"{key} = true\n"
         )
         (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
 
         result = _run_resolve(
-            tmp_path, kanban_root, "enf-pre-squash",
+            tmp_path, kanban_root, project_name,
             project_dir / "hooks", dev_tree,
-            phase="pre-squash",
+            phase=phase,
         )
         # cm_halt stub exits 2
         assert result.returncode == 2, (
-            f"Expected HALT (rc=2) for required pre-squash hook, got {result.returncode}; "
+            f"Expected HALT (rc=2) for required {phase} hook, got {result.returncode}; "
             f"stdout: {result.stdout}; stderr: {result.stderr}"
         )
-
-    def test_required_pre_tag_halts_when_no_hook(self, tmp_path: pathlib.Path) -> None:
-        """Both scripts HALT before pre-tag when required=true and no hook."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "enf-pre-tag")
-        cfg_text = (
-            "[project]\n"
-            "project_name = enf-pre-tag\n"
-            f"dev_tree_path = {dev_tree}\n"
-            "[hooks]\n"
-            "cm_release_pre_tag_hook_required = true\n"
-        )
-        (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
-
-        result = _run_resolve(
-            tmp_path, kanban_root, "enf-pre-tag",
-            project_dir / "hooks", dev_tree,
-            phase="pre-tag",
-        )
-        assert result.returncode == 2, (
-            f"Expected HALT (rc=2) for required pre-tag hook, got {result.returncode}; "
-            f"stdout: {result.stdout}; stderr: {result.stderr}"
-        )
-
-    def test_required_post_tag_halts_when_no_hook(self, tmp_path: pathlib.Path) -> None:
-        """Both scripts HALT before post-tag when required=true and no hook."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "enf-post-tag")
-        cfg_text = (
-            "[project]\n"
-            "project_name = enf-post-tag\n"
-            f"dev_tree_path = {dev_tree}\n"
-            "[hooks]\n"
-            "cm_release_post_tag_hook_required = true\n"
-        )
-        (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
-
-        result = _run_resolve(
-            tmp_path, kanban_root, "enf-post-tag",
-            project_dir / "hooks", dev_tree,
-            phase="post-tag",
-        )
-        assert result.returncode == 2, (
-            f"Expected HALT (rc=2) for required post-tag hook, got {result.returncode}; "
-            f"stdout: {result.stdout}; stderr: {result.stderr}"
-        )
-
-    def test_halt_message_names_phase_pre_squash(self, tmp_path: pathlib.Path) -> None:
-        """HALT message names the phase 'pre-squash'."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "enf-msg-pre-squash")
-        cfg_text = (
-            "[project]\n"
-            "project_name = enf-msg-pre-squash\n"
-            f"dev_tree_path = {dev_tree}\n"
-            "[hooks]\n"
-            "cm_release_pre_squash_hook_required = true\n"
-        )
-        (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
-
-        result = _run_resolve(
-            tmp_path, kanban_root, "enf-msg-pre-squash",
-            project_dir / "hooks", dev_tree,
-            phase="pre-squash",
-        )
-        assert result.returncode == 2
         combined = result.stdout + result.stderr
-        assert "pre-squash" in combined
+        assert phase in combined
 
     def test_halt_message_names_three_locations(self, tmp_path: pathlib.Path) -> None:
         """HALT message names all three searched locations."""
@@ -515,52 +427,22 @@ class TestSiblingParityNonExecutableHook:
     Both call cm_resolve_and_enforce_hook which returns 1 for this case.
     """
 
-    def test_nonexecutable_inrepo_hook_returns_error_for_pre_squash(
-        self, tmp_path: pathlib.Path
+    @pytest.mark.parametrize("phase", ["pre-squash", "pre-tag", "post-tag"])
+    def test_nonexecutable_inrepo_hook_returns_error(
+        self, tmp_path: pathlib.Path, phase: str
     ) -> None:
-        """A non-executable pre-squash in-repo hook triggers a loud error (rc=1)."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "noexec-ps")
-        hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-squash.sh"
+        """A non-executable in-repo hook triggers a loud error (rc=1) at every
+        phase. Survives-as-named-parameterization of the original three
+        per-phase tests; no case dropped."""
+        project_name = f"noexec-{phase}"
+        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, project_name)
+        hook = dev_tree / ".pgai" / "hooks" / f"cm-release-{phase}.sh"
         _write_hook(hook, executable=False)
 
         result = _run_resolve(
-            tmp_path, kanban_root, "noexec-ps",
+            tmp_path, kanban_root, project_name,
             project_dir / "hooks", dev_tree,
-            phase="pre-squash",
-        )
-        assert result.returncode == 1
-        combined = result.stdout + result.stderr
-        assert "chmod" in combined
-
-    def test_nonexecutable_inrepo_hook_returns_error_for_pre_tag(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """A non-executable pre-tag in-repo hook triggers a loud error (rc=1)."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "noexec-pt")
-        hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-tag.sh"
-        _write_hook(hook, executable=False)
-
-        result = _run_resolve(
-            tmp_path, kanban_root, "noexec-pt",
-            project_dir / "hooks", dev_tree,
-            phase="pre-tag",
-        )
-        assert result.returncode == 1
-        combined = result.stdout + result.stderr
-        assert "chmod" in combined
-
-    def test_nonexecutable_inrepo_hook_returns_error_for_post_tag(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """A non-executable post-tag in-repo hook triggers a loud error (rc=1)."""
-        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "noexec-post")
-        hook = dev_tree / ".pgai" / "hooks" / "cm-release-post-tag.sh"
-        _write_hook(hook, executable=False)
-
-        result = _run_resolve(
-            tmp_path, kanban_root, "noexec-post",
-            project_dir / "hooks", dev_tree,
-            phase="post-tag",
+            phase=phase,
         )
         assert result.returncode == 1
         combined = result.stdout + result.stderr

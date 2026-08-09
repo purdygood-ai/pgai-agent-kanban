@@ -13,9 +13,8 @@
 #
 # Format:
 #   <AGENT>-YYYYMMDD-NNN-slug
-#   e.g. PM-20260518-001-decompose-v0-26-1
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-#        CODER-20260518-002-implement-feature
+#   e.g. PM-YYYYMMDD-NNN-decompose-vX-Y-Z
+#        CODER-YYYYMMDD-NNN-implement-feature
 #
 # ===========================================================================
 # API SUMMARY
@@ -25,27 +24,20 @@
 #   source "$(dirname "${BASH_SOURCE[0]}")/task_ids.sh"
 #
 # Emission:
-#   SEQ=$(kanban_next_task_seq "$TASKS_DIR" "CODER" "20260518")
-#   ID=$(kanban_task_id "$TASKS_DIR" "CODER" "20260518" "fix-something")
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-#   # → "CODER-20260518-001-fix-something"
+#   SEQ=$(kanban_next_task_seq "$TASKS_DIR" "CODER" "YYYYMMDD")
+#   ID=$(kanban_task_id "$TASKS_DIR" "CODER" "YYYYMMDD" "fix-something")
+#   # → "CODER-YYYYMMDD-NNN-fix-something"
 #
 # Parsing:
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-#   kanban_parse_task_id "CODER-20260518-002-implement-feature"
+#   kanban_parse_task_id "CODER-YYYYMMDD-NNN-implement-feature"
 #   # Populates: _TASK_AGENT  _TASK_DATE  _TASK_SEQ  _TASK_SLUG  _TASK_PARTICIPANT
 #
 # Individual field accessors:
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-#   kanban_task_agent       "CODER-20260518-002-implement-feature"  # → CODER
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-#   kanban_task_date        "CODER-20260518-002-implement-feature"  # → 20260518
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-#   kanban_task_seq         "CODER-20260518-002-implement-feature"  # → 002
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-#   kanban_task_slug        "CODER-20260518-002-implement-feature"  # → implement-feature
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-#   kanban_task_participant "CODER-20260518-002-implement-feature"  # → claude (default)
+#   kanban_task_agent       "CODER-YYYYMMDD-NNN-implement-feature"  # → CODER
+#   kanban_task_date        "CODER-YYYYMMDD-NNN-implement-feature"  # → YYYYMMDD
+#   kanban_task_seq         "CODER-YYYYMMDD-NNN-implement-feature"  # → NNN
+#   kanban_task_slug        "CODER-YYYYMMDD-NNN-implement-feature"  # → implement-feature
+#   kanban_task_participant "CODER-YYYYMMDD-NNN-implement-feature"  # → claude (default)
 
 # ---------------------------------------------------------------------------
 # _kanban_parse_id_internal  ID

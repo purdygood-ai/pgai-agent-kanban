@@ -117,15 +117,44 @@ EOF
       exit 0
       ;;
     *)
-      echo "ERROR: Unknown argument: $1" >&2
+      # Partial remedy (docs/coding-standards.md "Gates prescribe, not just
+      # diagnose"; classified in docs/audits/v1.27.2-gate-remedy-census.md,
+      # row 32): the offending argument is named deterministically, but which
+      # valid flag the operator meant to pass is user intent this runner
+      # cannot resolve — --help names every accepted flag as the next step.
+      echo "FAIL: unrecognized argument '$1'." >&2
+      echo "" >&2
+      echo "Cause(s):" >&2
+      echo "  - '$1' does not match any flag this runner accepts." >&2
+      echo "" >&2
+      echo "To fix:" >&2
+      echo "  1. bash \"${BASH_SOURCE[0]}\" --help          # list every accepted flag" >&2
+      echo "  2. Re-run with the corrected flag, e.g.: bash \"${BASH_SOURCE[0]}\" --verbose" >&2
+      echo "" >&2
+      echo "Rule: this runner accepts only the flags listed in its --help output; an" >&2
+      echo "unrecognized argument is rejected rather than silently ignored." >&2
       exit 1
       ;;
   esac
 done
 
 # --- Check pytest is available ---
+# Full remedy (docs/coding-standards.md "Gates prescribe, not just diagnose";
+# classified in docs/audits/v1.27.2-gate-remedy-census.md, row 31): pytest's
+# absence has one universal, verbatim-runnable fix.
 if ! command -v pytest >/dev/null 2>&1 && ! python3 -m pytest --version >/dev/null 2>&1; then
-  echo "ERROR: pytest not installed. Install it with: pip install pytest" >&2
+  echo "FAIL: pytest is not installed in this Python environment." >&2
+  echo "" >&2
+  echo "Cause(s):" >&2
+  echo "  - no 'pytest' executable found on PATH" >&2
+  echo "  - 'python3 -m pytest --version' also failed (pytest not importable)" >&2
+  echo "" >&2
+  echo "To fix:" >&2
+  echo "  1. pip install pytest" >&2
+  echo "  2. bash \"${BASH_SOURCE[0]}\"" >&2
+  echo "" >&2
+  echo "Rule: this runner requires pytest as a hard dependency; it cannot execute" >&2
+  echo "the test suite without it." >&2
   exit 2
 fi
 
@@ -162,7 +191,14 @@ if [[ $PYTEST_EXIT -eq 5 ]]; then
 fi
 
 if [[ $PYTEST_EXIT -ne 0 ]]; then
+  # Non-deterministic (exempt) per docs/coding-standards.md "The
+  # non-deterministic exemption" — a real test/assertion failure has no
+  # verbatim fix; point at the evidence pytest already printed above.
   echo "Docker-gated tests FAILED (exit code: $PYTEST_EXIT)" >&2
+  echo "Next diagnostic step: scroll up to the pytest output directly above —" >&2
+  echo "its short-test-summary 'FAILED <file>::<test>' lines name the specific" >&2
+  echo "test and assertion that failed. Read that test's traceback for the" >&2
+  echo "actual defect; there is no command that fixes a real test failure." >&2
   exit 1
 fi
 

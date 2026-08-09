@@ -547,94 +547,70 @@ class TestReviewCmdsJsonVsWindow14:
 
 
 class TestIcdLifecycle:
-    """ICD version 1.2.0 lifecycle: version file, artifact, baselines, freeze."""
+    """ICD version 1.3.0 lifecycle: version file, artifact, baselines, freeze."""
 
-    def test_icd_version_file_is_1_2_0(self) -> None:
-        """docs/api/ICD_VERSION contains exactly '1.2.0\\n'."""
+    def test_icd_version_file_is_1_3_0(self) -> None:
+        """docs/api/ICD_VERSION contains exactly '1.3.0\\n'."""
         icd_version_file = _DEV_TREE_ROOT / "docs" / "api" / "ICD_VERSION"
         assert icd_version_file.exists(), (
             f"ICD_VERSION not found at {icd_version_file}"
         )
         raw = icd_version_file.read_bytes()
-        assert raw == b"1.2.0\n", (
-            f"ICD_VERSION content is {raw!r}; expected b'1.2.0\\n'."
+        assert raw == b"1.3.0\n", (
+            f"ICD_VERSION content is {raw!r}; expected b'1.3.0\\n'."
         )
 
-    def test_icd_json_info_version_is_1_2_0(self) -> None:
-        """docs/api/icd.json info.version is '1.2.0'."""
+    def test_icd_json_info_version_is_1_3_0(self) -> None:
+        """docs/api/icd.json info.version is '1.3.0'."""
         assert _ICD_JSON.exists(), f"icd.json not found at {_ICD_JSON}"
         artifact = json.loads(_ICD_JSON.read_text(encoding="utf-8"))
         version = artifact.get("info", {}).get("version")
-        assert version == "1.2.0", (
-            f"icd.json info.version is {version!r}; expected '1.2.0'."
+        assert version == "1.3.0", (
+            f"icd.json info.version is {version!r}; expected '1.3.0'."
         )
 
-    def test_supported_contains_1_0_0(self) -> None:
-        """docs/api/baselines/SUPPORTED lists 1.0.0 (backward compat preserved)."""
+    @pytest.mark.parametrize("version", ["1.0.0", "1.1.0", "1.2.0", "1.3.0"])
+    def test_supported_contains_version(self, version: str) -> None:
+        """docs/api/baselines/SUPPORTED lists every frozen ICD version (backward compat preserved)."""
         supported = _BASELINES_DIR / "SUPPORTED"
         assert supported.exists(), f"SUPPORTED not found at {supported}"
         lines = [v.strip() for v in supported.read_text(encoding="utf-8").splitlines() if v.strip()]
-        assert "1.0.0" in lines, (
-            f"1.0.0 missing from SUPPORTED.\nGot: {lines!r}\n"
-            "ICD 1.0.0 must remain in SUPPORTED — the compat gate proves additivity."
+        assert version in lines, (
+            f"{version} missing from SUPPORTED.\nGot: {lines!r}\n"
+            f"ICD {version} must remain in SUPPORTED — the compat gate proves additivity."
         )
 
-    def test_supported_contains_1_1_0(self) -> None:
-        """docs/api/baselines/SUPPORTED lists 1.1.0 (prior freeze preserved)."""
-        supported = _BASELINES_DIR / "SUPPORTED"
-        assert supported.exists(), f"SUPPORTED not found at {supported}"
-        lines = [v.strip() for v in supported.read_text(encoding="utf-8").splitlines() if v.strip()]
-        assert "1.1.0" in lines, (
-            f"1.1.0 missing from SUPPORTED.\nGot: {lines!r}\n"
-            "ICD 1.1.0 must remain in SUPPORTED — the compat gate proves additivity."
-        )
-
-    def test_supported_contains_1_2_0(self) -> None:
-        """docs/api/baselines/SUPPORTED lists 1.2.0 (new freeze)."""
-        supported = _BASELINES_DIR / "SUPPORTED"
-        assert supported.exists(), f"SUPPORTED not found at {supported}"
-        lines = [v.strip() for v in supported.read_text(encoding="utf-8").splitlines() if v.strip()]
-        assert "1.2.0" in lines, (
-            f"1.2.0 missing from SUPPORTED.\nGot: {lines!r}\n"
-            "ICD 1.2.0 must be added to SUPPORTED after the minor bump."
-        )
-
-    def test_icd_v1_2_0_baseline_exists(self) -> None:
-        """docs/api/baselines/icd-v1.2.0.json exists."""
-        baseline = _BASELINES_DIR / "icd-v1.2.0.json"
+    @pytest.mark.parametrize(
+        "version, extra_context",
+        [
+            ("1.0.0", "The 1.0.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.1.0", "The 1.1.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.2.0", "The 1.2.0 baseline must be preserved — it proves backward compatibility."),
+            (
+                "1.3.0",
+                "The file must be created as a byte-identical copy of docs/api/icd.json.",
+            ),
+        ],
+    )
+    def test_icd_baseline_exists(self, version: str, extra_context: str) -> None:
+        """docs/api/baselines/icd-v<version>.json exists for every frozen ICD version."""
+        baseline = _BASELINES_DIR / f"icd-v{version}.json"
         assert baseline.exists(), (
-            f"Baseline icd-v1.2.0.json not found at {baseline}.\n"
-            "The file must be created as a byte-identical copy of docs/api/icd.json."
+            f"Baseline icd-v{version}.json not found at {baseline}.\n{extra_context}"
         )
 
-    def test_icd_v1_2_0_baseline_byte_identical_to_icd_json(self) -> None:
-        """docs/api/baselines/icd-v1.2.0.json is byte-identical to docs/api/icd.json."""
-        baseline = _BASELINES_DIR / "icd-v1.2.0.json"
-        assert baseline.exists(), f"Baseline icd-v1.2.0.json not found at {baseline}"
+    def test_icd_v1_3_0_baseline_byte_identical_to_icd_json(self) -> None:
+        """docs/api/baselines/icd-v1.3.0.json is byte-identical to docs/api/icd.json."""
+        baseline = _BASELINES_DIR / "icd-v1.3.0.json"
+        assert baseline.exists(), f"Baseline icd-v1.3.0.json not found at {baseline}"
 
         current_bytes = _ICD_JSON.read_bytes()
         baseline_bytes = baseline.read_bytes()
         assert current_bytes == baseline_bytes, (
-            "icd-v1.2.0.json is NOT byte-identical to docs/api/icd.json.\n"
+            "icd-v1.3.0.json is NOT byte-identical to docs/api/icd.json.\n"
             f"icd.json size: {len(current_bytes)} bytes\n"
-            f"icd-v1.2.0.json size: {len(baseline_bytes)} bytes\n"
-            "Create the baseline with: cp docs/api/icd.json docs/api/baselines/icd-v1.2.0.json"
-        )
-
-    def test_icd_v1_1_0_baseline_still_exists(self) -> None:
-        """docs/api/baselines/icd-v1.1.0.json still exists (1.1.0 not removed)."""
-        baseline = _BASELINES_DIR / "icd-v1.1.0.json"
-        assert baseline.exists(), (
-            f"Baseline icd-v1.1.0.json not found at {baseline}.\n"
-            "The 1.1.0 baseline must be preserved — it proves backward compatibility."
-        )
-
-    def test_icd_v1_0_0_baseline_still_exists(self) -> None:
-        """docs/api/baselines/icd-v1.0.0.json still exists (1.0.0 not removed)."""
-        baseline = _BASELINES_DIR / "icd-v1.0.0.json"
-        assert baseline.exists(), (
-            f"Baseline icd-v1.0.0.json not found at {baseline}.\n"
-            "The 1.0.0 baseline must be preserved — it proves backward compatibility."
+            f"icd-v1.3.0.json size: {len(baseline_bytes)} bytes\n"
+            "Create the baseline with: cp docs/api/icd.json docs/api/baselines/icd-v1.3.0.json"
         )
 
 

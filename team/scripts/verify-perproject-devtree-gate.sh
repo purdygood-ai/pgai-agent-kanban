@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # team/scripts/verify-perproject-devtree-gate.sh
 #
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-# Regression guard for D3 (CODER-20260612-010): per-project dev-tree gate in
-# wake layer.
+# Regression guard for the per-project dev-tree gate in the wake layer: the
+# dev-tree presence check must be scoped per project, not a single global
+# check shared across all projects.
 #
 # Verifies that:
 #   AC-1  _check_project_dev_tree returns 1 for release-workflow project with
@@ -76,9 +76,9 @@ while [[ $# -gt 0 ]]; do
             cat <<EOF
 Usage: $(basename "$0") [--verbose]
 
-# provenance-allowlist: remediation-pending — cited ID belongs in commit history; remove when rewriting comment
-Regression guard for D3 (CODER-20260612-010): per-project dev-tree gate in
-wake layer.
+Regression guard for the per-project dev-tree gate in the wake layer: the
+dev-tree presence check must be scoped per project, not a single global
+check shared across all projects.
 
 Options:
   --verbose, -v   Enable verbose bash tracing.

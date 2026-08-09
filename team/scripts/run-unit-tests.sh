@@ -51,6 +51,12 @@ fi
 # Must happen before strict mode so resolver can read config without triggering pipefail.
 # shellcheck source=lib/temp.sh
 [[ -f "${_RUT_SCRIPT_DIR}/lib/temp.sh" ]] && source "${_RUT_SCRIPT_DIR}/lib/temp.sh"
+# Source error_contract.sh (dual-channel error contract emitter) and
+# gated_runner_lint.sh (breakage-class/quality-class pre-flight split).
+# shellcheck source=lib/error_contract.sh
+[[ -f "${_RUT_SCRIPT_DIR}/lib/error_contract.sh" ]] && source "${_RUT_SCRIPT_DIR}/lib/error_contract.sh"
+# shellcheck source=lib/gated_runner_lint.sh
+[[ -f "${_RUT_SCRIPT_DIR}/lib/gated_runner_lint.sh" ]] && source "${_RUT_SCRIPT_DIR}/lib/gated_runner_lint.sh"
 # Self-locate fallback: derive the dev tree from the runner's own location
 # so the suite can run from a clean checkout with no configured dev_tree_path.
 # Precedence: PGAI_DEV_TREE_PATH env var > kanban.cfg dev_tree_path > self-located root.
@@ -141,16 +147,70 @@ EOF
       exit 0
       ;;
     *)
-      echo "ERROR: Unknown argument: $1" >&2
+      # Partial remedy (docs/coding-standards.md "Gates prescribe, not just
+      # diagnose"; classified in docs/audits/v1.27.2-gate-remedy-census.md,
+      # row 32): the offending argument is named deterministically, but which
+      # valid flag the operator meant to pass is user intent this runner
+      # cannot resolve — --help names every accepted flag as the next step.
+      echo "FAIL: unrecognized argument '$1'." >&2
+      echo "" >&2
+      echo "Cause(s):" >&2
+      echo "  - '$1' does not match any flag this runner accepts." >&2
+      echo "" >&2
+      echo "To fix:" >&2
+      echo "  1. bash \"${BASH_SOURCE[0]}\" --help          # list every accepted flag" >&2
+      echo "  2. Re-run with the corrected flag, e.g.: bash \"${BASH_SOURCE[0]}\" --verbose" >&2
+      echo "" >&2
+      echo "Rule: this runner accepts only the flags listed in its --help output; an" >&2
+      echo "unrecognized argument is rejected rather than silently ignored." >&2
       exit 1
       ;;
   esac
 done
 
 # --- Check pytest is available ---
+# Full remedy (docs/coding-standards.md "Gates prescribe, not just diagnose";
+# classified in docs/audits/v1.27.2-gate-remedy-census.md, row 31): pytest's
+# absence has one universal, verbatim-runnable fix.
 if ! command -v pytest >/dev/null 2>&1 && ! python3 -m pytest --version >/dev/null 2>&1; then
-  echo "ERROR: pytest not installed. Install it with: pip install pytest" >&2
+  echo "FAIL: pytest is not installed in this Python environment." >&2
+  echo "" >&2
+  echo "Cause(s):" >&2
+  echo "  - no 'pytest' executable found on PATH" >&2
+  echo "  - 'python3 -m pytest --version' also failed (pytest not importable)" >&2
+  echo "" >&2
+  echo "To fix:" >&2
+  echo "  1. pip install pytest" >&2
+  echo "  2. bash \"${BASH_SOURCE[0]}\"" >&2
+  echo "" >&2
+  echo "Rule: this runner requires pytest as a hard dependency; it cannot execute" >&2
+  echo "the test suite without it." >&2
   exit 2
+fi
+
+# --- Run breakage-class gate (fatal; the only fatal pre-flight check) ---
+# Syntax errors, compile failures, and unresolved first-party imports mean
+# running the suite is meaningless -- this is the one pre-flight check that
+# still blocks before pytest.  Every other pre-flight check below is
+# quality-class: non-fatal, findings filed, runner continues to pytest.
+# See team/scripts/lib/gated_runner_lint.sh for the split rationale and the
+# findings-file schema quality-class checks write into.
+cd "$REPO_ROOT/team"
+echo "Running breakage-class gate..."
+set +e
+python3 scripts/check_breakage_class.py
+BREAKAGE_EXIT=$?
+set -e
+
+if [[ $BREAKAGE_EXIT -ne 0 ]]; then
+  # Dual-channel error contract (team/scripts/lib/error_contract.sh): this
+  # is a fail-loud site -- the breakage-class gate is fatal, unlike every
+  # quality-class lint below.
+  pgai_emit_error_contract \
+    "run-unit-tests.breakage-class-gate" \
+    "The breakage-class pre-flight gate found a syntax error, compile failure, or unresolved first-party import; running the unit test suite would produce no meaningful signal until this is fixed." \
+    "Scroll up to the Cause(s) list printed by check_breakage_class.py above, fix each file:line it names, then re-run bash \"${BASH_SOURCE[0]}\"."
+  exit 1
 fi
 
 # --- Redirect pytest basetemp under the framework temp root ---
@@ -262,282 +322,168 @@ chmod +x "${_CRONTAB_SEAM_DIR}/fake-crontab"
 export PGAI_CRONTAB_CMD="${_CRONTAB_SEAM_DIR}/fake-crontab"
 export PGAI_CRONTAB_SEAM_STATE="$_CRONTAB_SEAM_STATE"
 
-# --- Run test anti-pattern lint ---
-# Scans team/tests/ for anti-pattern 1 (pattern-scan assertion loops) and
-# anti-pattern 2 (hardcoded /tmp or $HOME paths), per SOP.md
-# "Test Authoring Guidelines". Runs before pytest so failures surface early.
+# --- Run quality-class pre-flight lints (non-fatal: warn, file, continue) ---
+# Every lint below is quality-class per the breakage/quality split (see
+# team/scripts/lib/gated_runner_lint.sh): findings print in full via
+# gated_runner_run_quality_lint, are recorded into GATED_RUNNER_FINDINGS,
+# and the runner ALWAYS continues to the next lint and eventually to
+# pytest, regardless of any individual lint's exit code.  The breakage-class
+# gate above is the only fatal pre-flight check.
 cd "$REPO_ROOT/team"
+
+# Test anti-pattern lint: scans team/tests/ for anti-pattern 1 (pattern-scan
+# assertion loops) and anti-pattern 2 (hardcoded /tmp or $HOME paths), per
+# SOP.md "Test Authoring Guidelines".
 echo "Running test anti-pattern lint..."
-set +e
-python3 scripts/lint_test_anti_patterns.py
-LINT_EXIT=$?
-set -e
+gated_runner_run_quality_lint "test_anti_patterns" -- \
+  python3 scripts/lint_test_anti_patterns.py
 
-if [[ $LINT_EXIT -ne 0 ]]; then
-  echo "Test anti-pattern lint FAILED (exit code: $LINT_EXIT)" >&2
-  echo "Fix findings above or add per-instance opt-out comments." >&2
-  echo "See SOP.md 'Test Authoring Guidelines' for the preferred patterns." >&2
-  exit 1
-fi
-
-# --- Run skip-cites-real-bug grep gate ---
-# Enforces the skip-citation policy: every skip()/SKIP: annotation that cites
-# a bug must reference a real BUG-NNNN whose file exists in bugs/.
-# Placeholder IDs (BUG-SKIP-* or non-BUG-NNNN forms) are rejected.
+# Skip-cites-real-bug grep gate: enforces the skip-citation policy — every
+# skip()/SKIP: annotation that cites a bug must reference a real BUG-NNNN
+# whose file exists in bugs/.  Placeholder IDs (BUG-SKIP-* or non-BUG-NNNN
+# forms) are flagged.
 echo "Running skip-cites-real-bug gate..."
-set +e
-bash "${SCRIPT_DIR}/lint_skip_bug_gate.sh" \
-  --tests-dir "${REPO_ROOT}/team/tests"
-SKIP_GATE_EXIT=$?
-set -e
+gated_runner_run_quality_lint "skip_cites_real_bug" -- \
+  bash "${SCRIPT_DIR}/lint_skip_bug_gate.sh" --tests-dir "${REPO_ROOT}/team/tests"
 
-if [[ $SKIP_GATE_EXIT -ne 0 ]]; then
-  echo "Skip-cites-real-bug gate FAILED (exit code: $SKIP_GATE_EXIT)" >&2
-  echo "Fix: replace placeholder or absent-file citations with a real BUG-NNNN" >&2
-  echo "whose file exists in the bugs/ directory, or un-skip the test." >&2
-  exit 1
-fi
-
-# --- Run orphan-test lint ---
-# Scans team/ for test_*.py files that are unreachable from either gated
-# runner's pytest argv.  An orphan test means a regression it catches will
-# never surface in the authoritative UNIT_EXIT/INTEGRATION_EXIT signal.
-# Runs before pytest so failures surface early without consuming test-run CPU.
+# Orphan-test lint: scans team/ for test_*.py files that are unreachable
+# from either gated runner's pytest argv.  An orphan test means a
+# regression it catches will never surface in the authoritative
+# UNIT_EXIT/INTEGRATION_EXIT signal.
 echo "Running orphan-test lint..."
-set +e
-python3 scripts/lint_orphan_tests.py
-ORPHAN_LINT_EXIT=$?
-set -e
+gated_runner_run_quality_lint "orphan_tests" -- \
+  python3 scripts/lint_orphan_tests.py
 
-if [[ $ORPHAN_LINT_EXIT -ne 0 ]]; then
-  echo "Orphan-test lint FAILED (exit code: $ORPHAN_LINT_EXIT)" >&2
-  echo "Fix: move the orphan test file into a collected root, or add the" >&2
-  echo "directory to a runner's PYTEST_ARGS and update _COLLECTED_ROOTS in" >&2
-  echo "team/scripts/lint_orphan_tests.py." >&2
-  exit 1
-fi
-
-# --- Run API-parity lint ---
-# Asserts that every operator script fronted by the API has full flag-parity
-# with the corresponding request body model.  A script gaining a new operator
-# flag without the body growing the field fails this check immediately, keeping
-# parity a property rather than a review habit.
-# Runs in the same pre-flight slot as lint_orphan_tests, before pytest.
+# API-parity lint: asserts that every operator script fronted by the API
+# has full flag-parity with the corresponding request body model.
 echo "Running API-parity lint..."
-set +e
-python3 scripts/lint_api_parity.py
-API_PARITY_LINT_EXIT=$?
-set -e
+gated_runner_run_quality_lint "api_parity" -- \
+  python3 scripts/lint_api_parity.py
 
-if [[ $API_PARITY_LINT_EXIT -ne 0 ]]; then
-  echo "API-parity lint FAILED (exit code: $API_PARITY_LINT_EXIT)" >&2
-  echo "Fix: add the missing field to the corresponding body model in" >&2
-  echo "team/pgai_agent_kanban/api/routers/operations.py." >&2
-  exit 1
-fi
-
-# --- Run upgrade no-temp-copy-guard lint ---
-# Asserts that the retired temp-copy guard identifiers (_PGAI_UPGRADE_SELF_COPY,
-# _PGAI_UPGRADE_REEXEC, _PGAI_UPGRADE_ORIG_DIR) are absent from executable lines
-# in team/scripts/upgrade.sh.  A squash-merge conflict can silently resurrect the
-# retired block; this check makes such resurrection fail the suite immediately.
+# Upgrade no-temp-copy-guard lint: asserts that the retired temp-copy guard
+# identifiers (_PGAI_UPGRADE_SELF_COPY, _PGAI_UPGRADE_REEXEC,
+# _PGAI_UPGRADE_ORIG_DIR) are absent from executable lines in
+# team/scripts/upgrade.sh.  A squash-merge conflict can silently resurrect
+# the retired block.
 echo "Running upgrade no-temp-copy-guard lint..."
-set +e
-python3 scripts/lint_upgrade_no_temp_copy_guard.py
-UPGRADE_GUARD_LINT_EXIT=$?
-set -e
+gated_runner_run_quality_lint "upgrade_no_temp_copy_guard" -- \
+  python3 scripts/lint_upgrade_no_temp_copy_guard.py
 
-if [[ $UPGRADE_GUARD_LINT_EXIT -ne 0 ]]; then
-  echo "Upgrade no-temp-copy-guard lint FAILED (exit code: $UPGRADE_GUARD_LINT_EXIT)" >&2
-  echo "Fix: remove the retired temp-copy guard block from team/scripts/upgrade.sh." >&2
-  exit 1
-fi
-
-# --- Run ICD freshness gate ---
-# Asserts that docs/api/icd.json is byte-identical to a fresh regeneration from
-# the current codebase.  A stale artifact means the checked-in contract no longer
-# matches the served /openapi.json — consumers would pin the wrong schema.
-# Run 'bash team/scripts/generate-icd.sh' and commit the result to fix.
+# ICD freshness gate: asserts that docs/api/icd.json is byte-identical to a
+# fresh regeneration from the current codebase.  Fix: run
+# 'bash team/scripts/generate-icd.sh' and commit the result.
 echo "Running ICD freshness gate..."
-set +e
-python3 scripts/lint_icd_freshness.py
-ICD_FRESHNESS_EXIT=$?
-set -e
+gated_runner_run_quality_lint "icd_freshness" -- \
+  python3 scripts/lint_icd_freshness.py
 
-if [[ $ICD_FRESHNESS_EXIT -ne 0 ]]; then
-  echo "ICD freshness gate FAILED (exit code: $ICD_FRESHNESS_EXIT)" >&2
-  echo "Fix: run 'bash team/scripts/generate-icd.sh' from the repository root" >&2
-  echo "and commit docs/api/icd.json." >&2
-  exit 1
-fi
-
-# --- Run ICD compatibility gate ---
-# Asserts that docs/api/icd.json is a compatible superset of every ICD version
-# listed in docs/api/baselines/SUPPORTED.  A breaking change (removed path,
-# removed response field, new required request field, enum shrink) against any
-# supported baseline fails immediately, enforcing the "breaking changes require
-# a major ICD version and an operator-approved RC" policy.
-# Wired here alongside the freshness gate, before pytest.
+# ICD compatibility gate: asserts that docs/api/icd.json is a compatible
+# superset of every ICD version listed in docs/api/baselines/SUPPORTED.
 echo "Running ICD compatibility gate..."
-set +e
-python3 scripts/lint_icd_compat.py
-ICD_COMPAT_EXIT=$?
-set -e
+gated_runner_run_quality_lint "icd_compat" -- \
+  python3 scripts/lint_icd_compat.py
 
-if [[ $ICD_COMPAT_EXIT -ne 0 ]]; then
-  echo "ICD compatibility gate FAILED (exit code: $ICD_COMPAT_EXIT)" >&2
-  echo "Fix: resolve the compatibility break or retire the affected baseline" >&2
-  echo "version from docs/api/baselines/SUPPORTED (operator-approved RC required)." >&2
-  exit 1
-fi
-
-# --- Run CHANGELOG freshness gate ---
-# Asserts that CHANGELOG.md is byte-identical to a fresh regeneration from the
-# current codebase via changelog_writer.  A stale artifact means the committed
-# CHANGELOG no longer reflects the actual release notes and bug ledger state.
-# Regenerate using cm-release (or run changelog_writer via pp_run_ops helper)
-# and commit the result to fix.
+# CHANGELOG freshness gate: asserts that CHANGELOG.md is byte-identical to
+# a fresh regeneration from the current codebase via changelog_writer.
 #
 # RC-mode tolerance: when the worktree HEAD is on an rc/* or ai_rc/* branch,
-# PGAI_LINT_CHANGELOG_MODE=rc is set so the lint tolerates CHANGELOG staleness
-# caused only by BUG-NNNN files filed after the CHANGELOG.md commit.  This
-# prevents post-RC bug filings from blocking TESTER verification on in-flight
-# RCs.  The variable is left unset on all other branches (including ai_main),
-# keeping the gate strictly byte-exact on the main branch and at release time.
-#
-# PYTHONHASHSEED=0: changelog_writer uses frozenset over string section headings
-# whose iteration order is hash-seed-dependent.  Pinning the seed ensures the
-# gate's regeneration produces byte-identical output across independent process
-# invocations, matching the CHANGELOG.md committed under the same seed.
-_CHANGELOG_MODE_VAR=""
+# PGAI_LINT_CHANGELOG_MODE=rc is set so the lint tolerates CHANGELOG
+# staleness caused only by BUG-NNNN files filed after the CHANGELOG.md
+# commit.  PYTHONHASHSEED=0 pins changelog_writer's frozenset iteration
+# order so the gate's regeneration is byte-identical across invocations.
 _RU_CURRENT_BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
 if [[ -z "$_RU_CURRENT_BRANCH" ]]; then
   # Detached HEAD — check if it is at a commit reachable from an rc/* branch.
   _RU_CURRENT_BRANCH="$(git -C "$REPO_ROOT" branch --format='%(refname:short)' \
     --points-at HEAD 2>/dev/null | grep -E '^(rc/|ai_rc/)' | head -1 || true)"
 fi
+export PYTHONHASHSEED=0
+export PGAI_LINT_CHANGELOG_MODE=""
 if [[ "$_RU_CURRENT_BRANCH" =~ ^(rc/|ai_rc/) ]]; then
-  _CHANGELOG_MODE_VAR="rc"
+  export PGAI_LINT_CHANGELOG_MODE="rc"
 fi
 unset _RU_CURRENT_BRANCH
 echo "Running CHANGELOG freshness gate..."
-set +e
-PYTHONHASHSEED=0 PGAI_LINT_CHANGELOG_MODE="${_CHANGELOG_MODE_VAR}" \
+gated_runner_run_quality_lint "changelog_freshness" -- \
   python3 scripts/lint_changelog_freshness.py
-CHANGELOG_FRESHNESS_EXIT=$?
-set -e
-unset _CHANGELOG_MODE_VAR
+unset PYTHONHASHSEED PGAI_LINT_CHANGELOG_MODE
 
-if [[ $CHANGELOG_FRESHNESS_EXIT -ne 0 ]]; then
-  echo "CHANGELOG freshness gate FAILED (exit code: $CHANGELOG_FRESHNESS_EXIT)" >&2
-  echo "Fix: regenerate CHANGELOG.md via the changelog_writer and commit it." >&2
-  echo "  Run: bash team/scripts/regenerate-changelog.sh --project <name>" >&2
-  exit 1
-fi
-
-# --- Run lib-function-dedupe lint ---
-# Asserts that no function name is defined in more than one team/scripts/lib/*.sh
-# file.  A duplicated function name causes bash's last-sourced-wins semantics to
-# silently shadow one implementation whenever both files are sourced — exactly the
-# latent defect class documented in the defect ledger.  This check makes the constraint
-# permanent and gated so future edits that reintroduce a duplicate are caught
-# before they reach production.
+# Lib-function-dedupe lint: asserts that no function name is defined in
+# more than one team/scripts/lib/*.sh file (bash's last-sourced-wins
+# semantics would silently shadow one implementation).
 echo "Running lib-function-dedupe lint..."
-set +e
-python3 scripts/lint_lib_function_dedupe.py
-LIB_DEDUPE_LINT_EXIT=$?
-set -e
+gated_runner_run_quality_lint "lib_function_dedupe" -- \
+  python3 scripts/lint_lib_function_dedupe.py
 
-if [[ $LIB_DEDUPE_LINT_EXIT -ne 0 ]]; then
-  echo "Lib-function-dedupe lint FAILED (exit code: $LIB_DEDUPE_LINT_EXIT)" >&2
-  echo "Fix: ensure each function name is defined in exactly one team/scripts/lib/*.sh" >&2
-  echo "file.  If the duplication is intentional (provider-interface), add both" >&2
-  echo "defining files to the allow-list via --allow-file." >&2
-  exit 1
-fi
-
-# --- Run env-bootstrap lint ---
-# Asserts the env-bootstrap unification contract on both runtimes:
-#   - bash side: every executable entry point that references PGAI_AGENT_KANBAN_ROOT_PATH
-#     sources env_bootstrap.sh or wake_common.sh before using it.
-#   - python side: every Python entry point imports resolve_kanban_root from
-#     pgai_agent_kanban.env rather than reading the env var directly via os.environ.
-# A failure here means a newly-added script bypassed the canonical bootstrap,
-# reintroducing the class of silent-failure bug the RC closes.
+# Env-bootstrap lint: asserts the env-bootstrap unification contract on
+# both runtimes (bash entry points source env_bootstrap.sh/wake_common.sh;
+# Python entry points import resolve_kanban_root rather than reading
+# PGAI_AGENT_KANBAN_ROOT_PATH directly).
 echo "Running env-bootstrap lint..."
-set +e
-python3 scripts/lint_env_bootstrap.py
-ENV_BOOTSTRAP_LINT_EXIT=$?
-set -e
+gated_runner_run_quality_lint "env_bootstrap" -- \
+  python3 scripts/lint_env_bootstrap.py
 
-if [[ $ENV_BOOTSTRAP_LINT_EXIT -ne 0 ]]; then
-  echo "Env-bootstrap lint FAILED (exit code: $ENV_BOOTSTRAP_LINT_EXIT)" >&2
-  echo "Fix: add 'source \"\$(dirname \"\${BASH_SOURCE[0]}\")/lib/env_bootstrap.sh\"'" >&2
-  echo "as the first line (after the shebang/set lines) in any flagged bash entry point," >&2
-  echo "or route Python entry points through resolve_kanban_root from pgai_agent_kanban.env." >&2
-  exit 1
-fi
-
-# --- Run help-presence lint ---
-# Asserts that every operator-facing shell script under team/scripts/ implements
-# a --help or -h flag.  Scripts listed in help_presence_exempt.txt are exempt.
-# Ships Directive 6 of docs/coding-standards.md as a permanent gated check so
-# future scripts that omit --help fail immediately rather than accumulating debt.
+# Help-presence lint: asserts that every operator-facing shell script under
+# team/scripts/ implements a --help or -h flag (Directive 6,
+# docs/coding-standards.md).  Scripts in help_presence_exempt.txt are exempt.
 echo "Running help-presence lint..."
-set +e
-python3 scripts/lint_help_presence.py
-HELP_PRESENCE_EXIT=$?
-set -e
+gated_runner_run_quality_lint "help_presence" -- \
+  python3 scripts/lint_help_presence.py
 
-if [[ $HELP_PRESENCE_EXIT -ne 0 ]]; then
-  echo "Help-presence lint FAILED (exit code: $HELP_PRESENCE_EXIT)" >&2
-  echo "Fix: add a --help handler to each flagged script, or add its" >&2
-  echo "basename to team/scripts/help_presence_exempt.txt with a comment" >&2
-  echo "explaining the exemption category." >&2
-  exit 1
-fi
-
-# --- Run comment-provenance lint ---
-# Asserts that code files in team/scripts/ and team/pgai_agent_kanban/ do not
-# cite internal bug IDs, task IDs, priority IDs, or version-bundle names.
-# These identifiers belong in commit messages and task state, not in source
-# code comments.  Implements Directive 8 of docs/coding-standards.md.
-# Existing violations are suppressed with per-line provenance-allowlist markers
-# pending the coding-standards remediation release.
+# Comment-provenance lint: asserts that code files in team/scripts/ and
+# team/pgai_agent_kanban/, and release-summary prose in release-notes/, do
+# not cite internal bug IDs, task IDs, priority IDs, or version-bundle
+# names (Directive 8, docs/coding-standards.md).
 echo "Running comment-provenance lint..."
-set +e
-python3 scripts/lint_comment_provenance.py
-COMMENT_PROV_EXIT=$?
-set -e
+gated_runner_run_quality_lint "comment_provenance" -- \
+  python3 scripts/lint_comment_provenance.py
 
-if [[ $COMMENT_PROV_EXIT -ne 0 ]]; then
-  echo "Comment-provenance lint FAILED (exit code: $COMMENT_PROV_EXIT)" >&2
-  echo "Fix: remove internal ID references from code/comments and move them" >&2
-  echo "to the commit message or task status, or add a per-line opt-out:" >&2
-  echo "  # provenance-allowlist: <justification>" >&2
-  echo "within 5 lines before the flagged line." >&2
-  exit 1
-fi
-
-# --- Run import-completeness lint ---
-# Asserts that every third-party Python import across team/scripts/,
-# team/pgai_agent_kanban/, and team/tests/ is declared in requirements.txt or
-# requirements-test.txt.  An import not covered by the requirements union fails
-# immediately with the missing module name and the first offending source path,
-# preventing uninstallable imports from reaching a container environment.
+# Import-completeness lint: asserts that every third-party Python import
+# across team/scripts/, team/pgai_agent_kanban/, and team/tests/ is
+# declared in requirements.txt or requirements-test.txt.
 echo "Running import-completeness lint..."
-set +e
-python3 scripts/lint_python_import_completeness.py
-IMPORT_COMPLETENESS_EXIT=$?
-set -e
+gated_runner_run_quality_lint "python_import_completeness" -- \
+  python3 scripts/lint_python_import_completeness.py
 
-if [[ $IMPORT_COMPLETENESS_EXIT -ne 0 ]]; then
-  echo "Import-completeness lint FAILED (exit code: $IMPORT_COMPLETENESS_EXIT)" >&2
-  echo "Fix: add the missing package to requirements.txt or requirements-test.txt." >&2
-  echo "If the pip package name differs from the import name, also add a mapping" >&2
-  echo "to _PACKAGE_TO_IMPORT_NAMES in team/scripts/lint_python_import_completeness.py." >&2
-  exit 1
-fi
+# Dashboard network-git gate: asserts that no network-capable git verb
+# (ls-remote, fetch, pull, push, clone) appears anywhere under
+# team/scripts/dashboard/ — the dashboard render path must stay local-only.
+# CONVERT-class per docs/blocking-site-census.md row 39: previously a
+# standalone script with no call site in either gated runner; wired in here
+# so a regression is filed as a finding instead of never surfacing at all.
+echo "Running dashboard network-git gate..."
+gated_runner_run_quality_lint "dashboard_network_git_gate" -- \
+  python3 scripts/lint_dashboard_network_git_gate.py
+
+# Dual-channel error-contract pair lint: flags any fail-loud call site
+# missing the error/message/remedy triple.  Always exits 0 by design; it
+# already emits per-instance structured findings via --findings-file, so
+# its output is merged directly into the aggregate rather than wrapped
+# through gated_runner_run_quality_lint's coarse pass/fail shape.
+echo "Running dual-channel error-contract pair lint..."
+_RU_PAIR_LINT_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/dual_channel_pair_unit.json"
+mkdir -p "$(dirname "$_RU_PAIR_LINT_FINDINGS")"
+python3 scripts/lint_dual_channel_pair.py --findings-file "$_RU_PAIR_LINT_FINDINGS"
+gated_runner_merge_findings_file "$_RU_PAIR_LINT_FINDINGS"
+unset _RU_PAIR_LINT_FINDINGS
+
+# Census-compliance lint: enforces the new-gate rule (team/SOP.md, "Gates
+# and Refusals" -> "New-gate rule") -- every gate/refusal site added to the
+# census-documented loop-bearing surface must declare its classification
+# comment and carry the dual-channel error contract.  Scoped by default to
+# the exact files docs/blocking-site-census.md documents; pure operator-CLI
+# utilities the census excludes are never scanned.  Always exits 0 by
+# design (like the dual-channel-pair lint above); it already emits
+# per-instance structured findings via --findings-file, so its output is
+# merged directly into the aggregate rather than wrapped through
+# gated_runner_run_quality_lint's coarse pass/fail shape -- that wrapper
+# only records a finding when the underlying command's own exit code is
+# non-zero, which this lint's exit code never is.
+echo "Running census-compliance lint..."
+_RU_CENSUS_LINT_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/gate_census_compliance_unit.json"
+mkdir -p "$(dirname "$_RU_CENSUS_LINT_FINDINGS")"
+python3 scripts/lint_gate_census_compliance.py --findings-file "$_RU_CENSUS_LINT_FINDINGS"
+gated_runner_merge_findings_file "$_RU_CENSUS_LINT_FINDINGS"
+unset _RU_CENSUS_LINT_FINDINGS
 
 # --- Run tests ---
 echo "Running unit tests in $(pwd)/tests/ (unit/ + cm module tests)"
@@ -547,51 +493,85 @@ PYTEST_EXIT=$?
 set -e
 
 if [[ $PYTEST_EXIT -ne 0 ]]; then
+  # Non-deterministic (exempt) per docs/coding-standards.md "The
+  # non-deterministic exemption" — a real test/assertion failure has no
+  # verbatim fix; point at the evidence pytest already printed above.
   echo "Unit tests FAILED (exit code: $PYTEST_EXIT)" >&2
+  echo "Next diagnostic step: scroll up to the pytest output directly above —" >&2
+  echo "its short-test-summary 'FAILED <file>::<test>' lines name the specific" >&2
+  echo "test file and assertion that failed. Read that test's traceback for the" >&2
+  echo "actual defect; there is no command that fixes a real test failure." >&2
   exit 1
 fi
 
 echo "Unit tests PASSED"
 
-# --- Post-suite /tmp cleanliness assertion ---
-# Assert the suite left no kanban residue in bare /tmp.
-# Runs only on success so the exit code reflects test failures cleanly.
-# The check uses the snapshot taken before the suite ran (_TMP_SNAPSHOT_FILE).
+# --- Post-suite /tmp cleanliness assertion (quality-class: warn, file, continue) ---
+# CONVERT-class per docs/blocking-site-census.md row 52: previously a hard
+# `exit 1` on residue detection.  Wrapped through gated_runner_run_quality_lint
+# so a leak is recorded as a non-blocking finding instead of aborting the
+# runner — pytest's own PYTEST_EXIT check above is the only fatal exit left
+# in this script.  Runs only after a passing pytest run, unchanged from
+# before.  The check uses the snapshot taken before the suite ran
+# (_TMP_SNAPSHOT_FILE).
+_run_unit_bare_tmp_cleanliness_check() {
+  if ! pgai_tmp_cleanliness_check "$_TMP_SNAPSHOT_FILE"; then
+    # Non-deterministic (exempt) per docs/coding-standards.md — which test
+    # bypassed the temp resolver is not computable at detection time;
+    # pgai_tmp_cleanliness_check already printed the offending paths above as
+    # the starting evidence.
+    echo "Next diagnostic step: the '[pgai-cleanliness]' lines above name each" >&2
+    echo "residue path; find which test wrote there directly (bare /tmp or" >&2
+    echo "open()/tempfile calls) instead of via pgai_mktemp / pgai_mktemp_d." >&2
+    return 1
+  fi
+}
 echo "Checking for bare-/tmp residue..."
-set +e
-pgai_tmp_cleanliness_check "$_TMP_SNAPSHOT_FILE"
-_CLEAN_EXIT=$?
-set -e
-if [[ $_CLEAN_EXIT -ne 0 ]]; then
-  echo "Bare-/tmp cleanliness check FAILED: kanban suite left residue in /tmp." >&2
-  exit 1
-fi
-echo "Bare-/tmp cleanliness check PASSED"
+gated_runner_run_quality_lint "bare_tmp_cleanliness" -- _run_unit_bare_tmp_cleanliness_check
 
-# --- Post-suite listener cleanliness assertion ---
-# Assert the suite left no framework-rooted TCP listeners alive after pytest.
-# Runs only on success so the exit code reflects test failures cleanly.
-# Only listeners rooted in this project's own temp subtree are flagged; sibling
-# projects' leaked listeners are not attributed to this runner.  The subtree
-# was resolved once, before pytest launched (_RUT_PROJECT_TEMP_SUBTREE), so the
-# pre-suite snapshot and this check agree on the same scope; PGAI_PROJECT_TEMP_SUBTREE
-# is exported here — after pytest has already exited — so callers/tests that
-# read the env var directly still see it, without pytest itself (or fixtures
-# it spawns) ever inheriting a narrowed scope.  Listeners already present in
-# the pre-suite snapshot (_LISTENER_SNAPSHOT_FILE) are pre-existing orphans and
-# are not flagged; only a listener first observed after that snapshot — i.e.
-# spawned by this run — causes a non-zero exit.
+# --- Post-suite listener cleanliness assertion (quality-class: warn, file, continue) ---
+# CONVERT-class per docs/blocking-site-census.md row 53: previously a hard
+# `exit 1` when a framework-rooted TCP listener survived the suite.  Same
+# non-blocking treatment as the cleanliness check above.  Only listeners
+# rooted in this project's own temp subtree are flagged; sibling projects'
+# leaked listeners are not attributed to this runner.  The subtree was
+# resolved once, before pytest launched (_RUT_PROJECT_TEMP_SUBTREE), so the
+# pre-suite snapshot and this check agree on the same scope;
+# PGAI_PROJECT_TEMP_SUBTREE is exported here — after pytest has already
+# exited — so callers/tests that read the env var directly still see it,
+# without pytest itself (or fixtures it spawns) ever inheriting a narrowed
+# scope.  Listeners already present in the pre-suite snapshot
+# (_LISTENER_SNAPSHOT_FILE) are pre-existing orphans and are not flagged;
+# only a listener first observed after that snapshot — i.e. spawned by this
+# run — is recorded as a finding.
 export PGAI_PROJECT_TEMP_SUBTREE="${_RUT_PROJECT_TEMP_SUBTREE}"
+_run_unit_listener_cleanliness_check() {
+  if ! pgai_listener_cleanliness_check "${PGAI_PROJECT_TEMP_SUBTREE}" "${_LISTENER_SNAPSHOT_FILE}"; then
+    # Non-deterministic (exempt) per docs/coding-standards.md — which test
+    # leaked the listener is not computable at detection time;
+    # pgai_listener_cleanliness_check already printed the surviving pid(s)
+    # and cmdline(s) above as the starting evidence.
+    echo "Next diagnostic step: the '[pgai-listener]' lines above name each" >&2
+    echo "surviving pid and cmdline; identify which test spawned it and confirm" >&2
+    echo "the test tears its server/socket fixture down in a finally block or" >&2
+    echo "guaranteed teardown fixture." >&2
+    return 1
+  fi
+}
 echo "Checking for framework-rooted TCP listener leaks..."
-set +e
-pgai_listener_cleanliness_check "${PGAI_PROJECT_TEMP_SUBTREE}" "${_LISTENER_SNAPSHOT_FILE}"
-_LISTENER_EXIT=$?
-set -e
-if [[ $_LISTENER_EXIT -ne 0 ]]; then
-  echo "Listener cleanliness check FAILED: framework-rooted listener(s) survived the suite." >&2
-  exit 1
-fi
-echo "Listener cleanliness check PASSED"
+gated_runner_run_quality_lint "listener_cleanliness" -- _run_unit_listener_cleanliness_check
+
+# --- Write the aggregate quality-class findings file ---
+# Written unconditionally (even when GATED_RUNNER_FINDINGS is empty) so a
+# downstream consumer (TESTER's "Lint Findings (non-blocking)" report
+# section) can rely on the file's existence as proof this pre-flight ran.
+# Written here — after the pre-flight lints above AND the two post-suite
+# cleanliness checks — so the findings array is a complete record of every
+# quality-class check this run performed, not just the pre-pytest subset.
+# See team/scripts/lib/gated_runner_lint.sh for the findings-file schema.
+_RU_FINDINGS_FILE="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-unit.json"
+gated_runner_write_findings_file "$_RU_FINDINGS_FILE" "run-unit-tests.sh"
+unset _RU_FINDINGS_FILE
 
 # --- Sweep tests/ scratch after a successful run ---
 # Calls pgai_temp_cleanup_tests, which removes ONLY the tests/ subtree

@@ -75,3 +75,13 @@ The kanban shipped a release. The agents picked tasks from the queue, did the wo
 Every iteration that ships without human recovery is a success. Every iteration that requires recovery is a signal to refine the prompts, not to add more human checkpoints.
 
 That's the goal. That's what you are part of.
+
+## Verification never stops the line for quality
+
+The gated runners separate breakage (syntax, compile — fatal) from
+quality findings (every lint — recorded to a findings file the TESTER
+report ingests; TESTER cites or files the bug; the release ships and
+the next loop heals it). Blocking is reserved for the sites the
+blocking-site census classifies as BLOCK-WORTHY, and every refusal
+speaks two channels: a stable machine key and a plain-language message
+with a runnable remedy.

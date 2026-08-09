@@ -293,60 +293,29 @@ def test_validate_project_md_returns_empty_list_for_valid_metadata(
     assert errors == []
 
 
-def test_validate_project_md_reports_missing_workflow_type() -> None:
-    """validate_project_md flags an empty workflow_type as an error."""
+@pytest.mark.parametrize(
+    "name, workflow_type, description, output_name, expected_substring",
+    [
+        ("Bad", "", "Desc.", "out", "Workflow Type"),  # empty workflow_type
+        ("Mismatch", "document", "Desc.", "out", "does not match"),  # workflow_type != workflow name
+        ("No Desc", "release", "", "out", "Description"),  # empty description
+        ("No Output Name", "release", "Has description.", "", "Output Name"),  # empty output_name
+    ],
+)
+def test_validate_project_md_reports_missing_or_mismatched_field(
+    name: str, workflow_type: str, description: str, output_name: str, expected_substring: str
+) -> None:
+    """validate_project_md flags a missing/empty required field or a workflow_type mismatch."""
     meta = ProjectMetadata(
-        name="Bad",
-        workflow_type="",
-        description="Desc.",
-        output_name="out",
+        name=name,
+        workflow_type=workflow_type,
+        description=description,
+        output_name=output_name,
         output_formats=["markdown"],
     )
     workflow = _make_workflow(name="release")
     errors = validate_project_md(meta, workflow)
-    assert any("Workflow Type" in e for e in errors)
-
-
-def test_validate_project_md_reports_workflow_type_mismatch() -> None:
-    """validate_project_md flags a workflow_type that does not match the workflow name."""
-    meta = ProjectMetadata(
-        name="Mismatch",
-        workflow_type="document",
-        description="Desc.",
-        output_name="out",
-        output_formats=["markdown"],
-    )
-    workflow = _make_workflow(name="release")
-    errors = validate_project_md(meta, workflow)
-    assert any("does not match" in e for e in errors)
-
-
-def test_validate_project_md_reports_missing_description() -> None:
-    """validate_project_md flags an empty description as an error."""
-    meta = ProjectMetadata(
-        name="No Desc",
-        workflow_type="release",
-        description="",
-        output_name="out",
-        output_formats=["markdown"],
-    )
-    workflow = _make_workflow(name="release")
-    errors = validate_project_md(meta, workflow)
-    assert any("Description" in e for e in errors)
-
-
-def test_validate_project_md_reports_missing_output_name() -> None:
-    """validate_project_md flags an empty output_name as an error."""
-    meta = ProjectMetadata(
-        name="No Output Name",
-        workflow_type="release",
-        description="Has description.",
-        output_name="",
-        output_formats=["markdown"],
-    )
-    workflow = _make_workflow(name="release")
-    errors = validate_project_md(meta, workflow)
-    assert any("Output Name" in e for e in errors)
+    assert any(expected_substring in e for e in errors)
 
 
 def test_validate_project_md_reports_empty_output_formats() -> None:

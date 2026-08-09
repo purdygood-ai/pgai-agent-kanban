@@ -194,78 +194,54 @@ def _run_model_selection(
 
 
 # ---------------------------------------------------------------------------
-# (1) & (2) Tier precedence: each tier wins when higher tiers are absent;
-#     the task override wins even when the env var is also present.
+# (1), (2) & (3) Tier precedence: each tier wins when higher tiers are
+#     absent; the task override wins even when the env var is also present;
+#     an explicit "none" override value falls through like an absent field.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("provider", ["claude", "codex"])
-def test_task_override_wins_when_env_var_also_present(
-    tmp_path: pathlib.Path, provider: str
+@pytest.mark.parametrize(
+    "override, env_model, expected_selected, expected_source",
+    [
+        pytest.param(
+            "claude-opus-4-7", "claude-haiku-4-0", "claude-opus-4-7", "task force override",
+            id="task_override_wins_when_env_var_also_present",
+        ),
+        pytest.param(
+            "opus", None, "opus", "task force override",
+            id="task_override_wins_when_env_var_absent",
+        ),
+        pytest.param(
+            None, "claude-sonnet-4-6", "claude-sonnet-4-6", "PGAI_CODER_MODEL env",
+            id="env_var_wins_when_task_override_absent",
+        ),
+        pytest.param(
+            None, None, "", "subagent default for coder",
+            id="provider_default_wins_when_no_override_or_env",
+        ),
+        pytest.param(
+            "none", "claude-sonnet-4-6", "claude-sonnet-4-6", "PGAI_CODER_MODEL env",
+            id="task_override_none_value_falls_through_to_env",
+        ),
+    ],
+)
+def test_model_selection_tier_precedence(
+    tmp_path: pathlib.Path,
+    provider: str,
+    override: str | None,
+    env_model: str | None,
+    expected_selected: str,
+    expected_source: str,
 ) -> None:
-    """The task README override outranks the env var when both are set."""
+    """Model resolution honors the 3-tier precedence (task override > env var
+    > provider default), with an explicit 'none' override value treated as
+    absent rather than as a literal model name."""
     result = _run_model_selection(
-        tmp_path,
-        provider,
-        override="claude-opus-4-7",
-        env_model="claude-haiku-4-0",
+        tmp_path, provider, override=override, env_model=env_model
     )
-    assert result["selected_model"] == "claude-opus-4-7", result
-    assert result["model_source"] == "task force override", result
-
-
-@pytest.mark.parametrize("provider", ["claude", "codex"])
-def test_task_override_wins_when_env_var_absent(
-    tmp_path: pathlib.Path, provider: str
-) -> None:
-    """The task README override alone (no env var set) is honored."""
-    result = _run_model_selection(
-        tmp_path, provider, override="opus", env_model=None
-    )
-    assert result["selected_model"] == "opus", result
-    assert result["model_source"] == "task force override", result
-
-
-@pytest.mark.parametrize("provider", ["claude", "codex"])
-def test_env_var_wins_when_task_override_absent(
-    tmp_path: pathlib.Path, provider: str
-) -> None:
-    """With no task override, the PGAI_<ROLE>_MODEL env var is honored."""
-    result = _run_model_selection(
-        tmp_path, provider, override=None, env_model="claude-sonnet-4-6"
-    )
-    assert result["selected_model"] == "claude-sonnet-4-6", result
-    assert result["model_source"] == "PGAI_CODER_MODEL env", result
-
-
-@pytest.mark.parametrize("provider", ["claude", "codex"])
-def test_provider_default_wins_when_no_override_or_env(
-    tmp_path: pathlib.Path, provider: str
-) -> None:
-    """With neither tier set, resolution falls through to the empty
-    provider-CLI-default tier, named for the resolved subagent."""
-    result = _run_model_selection(
-        tmp_path,
-        provider,
-        override=None,
-        env_model=None,
-        subagent="coder",
-    )
-    assert result["selected_model"] == "", result
-    assert result["model_source"] == "subagent default for coder", result
-
-
-@pytest.mark.parametrize("provider", ["claude", "codex"])
-def test_task_override_none_value_falls_through_to_env(
-    tmp_path: pathlib.Path, provider: str
-) -> None:
-    """A ## Model Override value of 'none' is treated as absent, so
-    resolution falls through to the env tier — not to an empty string."""
-    result = _run_model_selection(
-        tmp_path, provider, override="none", env_model="claude-sonnet-4-6"
-    )
-    assert result["selected_model"] == "claude-sonnet-4-6", result
-    assert result["model_source"] == "PGAI_CODER_MODEL env", result
+    assert result["selected_model"] == expected_selected, result
+    assert result["model_source"] == expected_source, result
 
 
 # ---------------------------------------------------------------------------

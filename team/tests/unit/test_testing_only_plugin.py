@@ -218,38 +218,34 @@ def test_testing_only_plugin_sets_wf_plugin_dir(tmp_path: pathlib.Path) -> None:
     assert "testing-only" in result.stdout
 
 
-def test_testing_only_plugin_sets_wf_type(tmp_path: pathlib.Path) -> None:
-    """wf_load_plugin sets WF_TYPE to 'testing-only'."""
-    script = _load_plugin_script() + "\necho \"$WF_TYPE\""
+@pytest.mark.parametrize(
+    "script_suffix, expected",
+    [
+        ('\necho "$WF_TYPE"', "testing-only"),  # wf_load_plugin sets WF_TYPE
+        ("\nwf_git_mode", "ro"),  # read-only worktree
+        ("\nwf_agents", "pm,tester"),  # no CM step in the testing-only workflow
+        ("\nwf_finalize", "report"),  # writes a report, not a tag
+        ("\nwf_dashboard_render", "label"),  # label-semantics declared to the dashboard
+        ("\nwf_bundle_source_branch", "main"),  # no RC branches for testing-only
+        (
+            "\nwf_resolve_target_version 'v1.0.0-testing-run-1'",
+            "v1.0.0-testing-run-1",
+        ),  # echoes back the supplied label argument unchanged
+    ],
+)
+def test_testing_only_plugin_function_output(
+    tmp_path: pathlib.Path, script_suffix: str, expected: str
+) -> None:
+    """Testing-only plugin's wf_* functions echo the documented fixed values for this workflow type."""
+    script = _load_plugin_script() + script_suffix
     result = run_bash(tmp_path, script)
     assert result.returncode == 0
-    assert result.stdout.strip() == "testing-only"
-
-
-# ===========================================================================
-# (f) wf_git_mode returns "ro"
-# ===========================================================================
-
-
-def test_testing_only_wf_git_mode_returns_ro(tmp_path: pathlib.Path) -> None:
-    """wf_git_mode returns 'ro' for the testing-only plugin (read-only worktree)."""
-    script = _load_plugin_script() + "\nwf_git_mode"
-    result = run_bash(tmp_path, script)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "ro"
+    assert result.stdout.strip() == expected
 
 
 # ===========================================================================
 # (e) wf_agents returns "pm,tester"
 # ===========================================================================
-
-
-def test_testing_only_wf_agents_returns_pm_tester(tmp_path: pathlib.Path) -> None:
-    """wf_agents returns 'pm,tester' — no CM step in the testing-only workflow."""
-    script = _load_plugin_script() + "\nwf_agents"
-    result = run_bash(tmp_path, script)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "pm,tester"
 
 
 def test_testing_only_wf_agents_does_not_include_cm(tmp_path: pathlib.Path) -> None:
@@ -265,14 +261,6 @@ def test_testing_only_wf_agents_does_not_include_cm(tmp_path: pathlib.Path) -> N
 # ===========================================================================
 
 
-def test_testing_only_wf_finalize_returns_report(tmp_path: pathlib.Path) -> None:
-    """wf_finalize returns 'report' — testing-only workflow writes a report, not a tag."""
-    script = _load_plugin_script() + "\nwf_finalize"
-    result = run_bash(tmp_path, script)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "report"
-
-
 def test_testing_only_wf_finalize_not_tag(tmp_path: pathlib.Path) -> None:
     """wf_finalize does not return 'tag' — testing-only workflow never creates a git tag."""
     script = _load_plugin_script() + "\nwf_finalize"
@@ -286,14 +274,6 @@ def test_testing_only_wf_finalize_not_tag(tmp_path: pathlib.Path) -> None:
 # ===========================================================================
 
 
-def test_testing_only_wf_dashboard_render_returns_label(tmp_path: pathlib.Path) -> None:
-    """wf_dashboard_render returns 'label' to declare label-semantics to the dashboard."""
-    script = _load_plugin_script() + "\nwf_dashboard_render"
-    result = run_bash(tmp_path, script)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "label"
-
-
 def test_testing_only_wf_dashboard_render_not_git(tmp_path: pathlib.Path) -> None:
     """wf_dashboard_render does not return 'git' — testing-only has no git column data."""
     script = _load_plugin_script() + "\nwf_dashboard_render"
@@ -305,26 +285,6 @@ def test_testing_only_wf_dashboard_render_not_git(tmp_path: pathlib.Path) -> Non
 # ===========================================================================
 # (c) Dashboard label semantics: no last_released → items render as open
 # ===========================================================================
-
-
-def test_testing_only_wf_bundle_source_branch_returns_main(
-    tmp_path: pathlib.Path,
-) -> None:
-    """wf_bundle_source_branch returns 'main' — no RC branches for testing-only."""
-    script = _load_plugin_script() + "\nwf_bundle_source_branch"
-    result = run_bash(tmp_path, script)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "main"
-
-
-def test_testing_only_wf_resolve_target_version_echoes_label(
-    tmp_path: pathlib.Path,
-) -> None:
-    """wf_resolve_target_version echoes back the supplied label argument unchanged."""
-    script = _load_plugin_script() + "\nwf_resolve_target_version 'v1.0.0-testing-run-1'"
-    result = run_bash(tmp_path, script)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "v1.0.0-testing-run-1"
 
 
 def test_testing_only_wf_resolve_target_version_requires_argument(
@@ -510,53 +470,23 @@ def test_contract_check_all_passes_for_testing_only_plugin(
     )
 
 
-def test_contract_manifest_check_passes_for_testing_only_plugin(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize(
+    "wfc_function",
+    [
+        "wfc_check_manifest",  # manifest passes for the real testing-only plugin
+        "wfc_check_hooks",  # all 8 hooks defined
+        "wfc_check_stubs",  # no NOT IMPLEMENTED markers
+        "wfc_check_capabilities",  # git_mode=ro, version_semantics=label, finalize=report
+    ],
+)
+def test_contract_check_passes_for_testing_only_plugin(
+    tmp_path: pathlib.Path, wfc_function: str
 ) -> None:
-    """wfc_check_manifest passes for the real testing-only plugin."""
+    """Each individual wfc_check_* contract function passes for the real testing-only plugin."""
     plugin_dir = _PLUGIN_DIR.resolve()
     script = textwrap.dedent(f"""\
         source {_CONTRACT_LIB}
-        wfc_check_manifest '{plugin_dir}' 'testing-only'
-    """)
-    result = run_bash(tmp_path, script)
-    assert result.returncode == 0
-
-
-def test_contract_hook_check_passes_for_testing_only_plugin(
-    tmp_path: pathlib.Path,
-) -> None:
-    """wfc_check_hooks passes for the real testing-only plugin (all 8 hooks defined)."""
-    plugin_dir = _PLUGIN_DIR.resolve()
-    script = textwrap.dedent(f"""\
-        source {_CONTRACT_LIB}
-        wfc_check_hooks '{plugin_dir}' 'testing-only'
-    """)
-    result = run_bash(tmp_path, script)
-    assert result.returncode == 0
-
-
-def test_contract_stub_check_passes_for_testing_only_plugin(
-    tmp_path: pathlib.Path,
-) -> None:
-    """wfc_check_stubs passes for the real testing-only plugin (no NOT IMPLEMENTED markers)."""
-    plugin_dir = _PLUGIN_DIR.resolve()
-    script = textwrap.dedent(f"""\
-        source {_CONTRACT_LIB}
-        wfc_check_stubs '{plugin_dir}' 'testing-only'
-    """)
-    result = run_bash(tmp_path, script)
-    assert result.returncode == 0
-
-
-def test_contract_capabilities_check_passes_for_testing_only_plugin(
-    tmp_path: pathlib.Path,
-) -> None:
-    """wfc_check_capabilities passes: git_mode=ro, version_semantics=label, finalize=report."""
-    plugin_dir = _PLUGIN_DIR.resolve()
-    script = textwrap.dedent(f"""\
-        source {_CONTRACT_LIB}
-        wfc_check_capabilities '{plugin_dir}' 'testing-only'
+        {wfc_function} '{plugin_dir}' 'testing-only'
     """)
     result = run_bash(tmp_path, script)
     assert result.returncode == 0

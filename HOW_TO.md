@@ -3,8 +3,8 @@
 The operator manual: setup, project management, workflows, agents, intake
 documents, the dashboard, and stopping the system safely. The [README](README.md)
 explains what the framework is; this document explains how to run it. For the
-operator command surface in one place — `reset`, `show`, `close`, `delete`,
-`wontdo`, the `halt` family, and `unwind-rc` — see
+operator command surface in one place — `reset`, `show`, `show-readme`,
+`close`, `delete`, `wontdo`, the `halt` family, and `unwind-rc` — see
 [docs/operator-commands.md](docs/operator-commands.md).
 
 Paths in this document are live-install paths (`$KANBAN_ROOT/scripts/...`).
@@ -51,6 +51,30 @@ first project (section 2).
 ```bash
 export PGAI_AGENT_KANBAN_ROOT_PATH="$HOME/pgai_agent_kanban"   # in .bashrc
 ```
+
+**Targeting a specific version.** `install.sh` takes an optional positional
+version argument to lay down a specific released tag's tree, instead of
+whatever this checkout currently has:
+
+<!-- doc-lint: skip — requires a git checkout of the repo carrying the target tag; cannot run verbatim in harness -->
+```bash
+./install.sh v2.1.0        # lay down tag v2.1.0's tree
+./install.sh ai_v2.1.0     # same tag; the internal "ai_" prefix is normalized
+```
+
+The tag must exist in this clone's git history. If it does not, the install
+fails loud, names the version you requested, and lists the nearest available
+tags — nothing is laid down. The resolved tag's tree is materialized into a
+temporary detached worktree and the entire install comes from there, so this
+repo's checked-out branch is never touched and the temporary worktree is
+removed before the script exits (success or failure).
+
+A fresh install is **directionless**: any existing tag may be targeted, even
+one older than other tags that also exist. This is the sanctioned way to move
+an installation *backwards* in version — `upgrade.sh` is forward-only and
+refuses it, so a fresh install is the path (see the upgrade note in section 10).
+Omit the version argument to install from the current checkout exactly as
+before, the default back-compatible behavior.
 
 ### 1.2 kanban.cfg — framework settings
 
@@ -746,6 +770,16 @@ BACKLOG so the next CM wake re-runs the release step.
 
 ## 10. Common Operations
 
+### Reading lint findings (non-blocking)
+
+Quality-class lints never fail a suite. Findings print in full and
+land in `${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-unit.json` (and
+`findings-integration.json`). The TESTER report carries each finding
+with the bug that tracks it. Operators need to do nothing: the next
+bugfix bundle picks the bugs up. If a suite exits non-zero, the cause
+is breakage (syntax/compile) or a test failure — never a lint.
+
+
 **Upgrade the live install** (drains nothing by itself — HALT first):
 
 <!-- doc-lint: skip — upgrade narrative requires a live $KANBAN_ROOT install, a tracked git clone, and scripts/ on the relative path from cwd; cannot run verbatim in harness -->
@@ -757,6 +791,48 @@ $KANBAN_ROOT/scripts/upgrade.sh  # backs up, checks out latest tag, installs
 scripts/unhalt-global.sh
 scripts/dashboard/create.sh
 ```
+
+**Targeting a specific version (forward-only).** Like `install.sh`,
+`upgrade.sh` takes an optional positional version argument to upgrade *to* a
+specific released tag's tree, instead of whatever the dev tree currently has
+checked out:
+
+<!-- doc-lint: skip — requires a live $KANBAN_ROOT install and a dev-tree checkout carrying the target tag; cannot run verbatim in harness -->
+```bash
+$KANBAN_ROOT/scripts/upgrade.sh v2.2.0      # upgrade to tag v2.2.0's tree
+$KANBAN_ROOT/scripts/upgrade.sh ai_v2.2.0   # same tag; the "ai_" prefix is normalized
+```
+
+The tag is resolved exactly the way the version-targeted install resolves it:
+it must exist in the dev tree's git history, or the upgrade fails loud, names
+the requested version, and lists the nearest available tags. The resolved tree
+is laid down from a temporary detached worktree, so the dev tree's checked-out
+branch is never touched.
+
+Upgrades are **forward-only**. The target must be strictly newer than the
+version recorded in the live install's `VERSION` file — a semver-aware
+comparison, not a string compare — or the upgrade is refused before anything
+is deposited:
+
+- **Target equals the installed version** — refused. To force a clean re-lay
+  of the version you already run, use `install.sh --force` instead.
+- **Target is older than the installed version** — refused. There is no
+  `--force` override for direction; `--force` only controls per-file overwrite
+  prompts, never which way time moves.
+
+To move an installation *backwards* to an older version, do a fresh install —
+`install.sh` is directionless and lays everything down from scratch, so it can
+go backwards where `upgrade.sh` will not (this is the same path referenced in
+section 1.1):
+
+<!-- doc-lint: skip — requires a git checkout carrying the target tag; sanctioned downgrade path, cannot run verbatim in harness -->
+```bash
+./install.sh v2.1.0 --force    # fresh install of an older tag: the sanctioned downgrade
+```
+
+Omit the version argument to upgrade using whatever the dev tree currently has
+checked out — the default, back-compatible behavior. On success the summary
+narrates the move, for example `upgraded v2.1.0 -> v2.2.0 (from tag v2.2.0)`.
 
 **Two-phase upgrade model (v1.7.0+).** The command above is unchanged
 from the operator's perspective. Under the hood, from v1.7.0 onward

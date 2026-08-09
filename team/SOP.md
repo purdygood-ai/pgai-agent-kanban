@@ -7,6 +7,48 @@ This document defines the shared operating model for all participants in the sys
 
 This file is shared governance. It does not override `DIRECTIVES.md`.
 
+## The Loop
+
+The kanban is a looped system, and these are its first principles. Every role reads them on every wake.
+
+- **The loop.** Human input goes in; verified output comes out. The loop keeps turning on one of two signals: new human input, or a bug the verifier files against work already shipped.
+- **Bugs heal.** Bugs are the healing mechanism, and the next iteration is the default repair path — almost everything wrong with a release is fixed by the loop coming around again, not by stopping it.
+- **Quality findings never stop the loop.** They carry zero risk of runtime failure; they are noted and carried into the next turn.
+- **Blocking is the rare exception.** It is reserved for work that moves the system backwards: destructive failures, unusable builds, or verification unable to run at all.
+- **Ownership.** TESTER is the sole author of verification reports and of the bugs that record quality findings; CM notes those findings and ships.
+
+## Gates and Refusals
+
+Every gate, guard, and refusal in the shipped tree is inventoried and classified in `docs/blocking-site-census.md` against The Loop. Each site carries exactly one class:
+
+- **BLOCK-WORTHY** — the refusal catches backward motion (a destructive/state-corrupting failure, an unusable build, verification unable to run, or an approval/invariant by design). It is a real stop.
+- **CONVERT** — a quality-class finding that carries zero runtime-failure risk; it should warn, file a bug, and continue.
+- **AGENT-RESOLVABLE** — fatal to the current done-claim but self-serviceable by the agent in the same session.
+
+This section states two standing rules that follow from that classification. Both are canonical here; role files reference them rather than restate them.
+
+### Completion-gate refusals are self-service, never a block
+
+The CODER/WRITER completion gate (`coder_writer_completion_gate` in `team/scripts/lib/wake_common.sh`, the authoring-time delivery gate) is **AGENT-RESOLVABLE**. When it refuses a done-claim, the agent resolves the cause in the same session and re-completes:
+
+- **Unmerged feature branch** — merge it into the source branch, then re-complete.
+- **Dirty worktree** — commit or discard the changes, then re-complete.
+
+A completion-gate refusal is an agent chore, not a `Needs-Human` block. Do not set `BLOCKED`, do not set `Needs Human: yes`, and do not defer it to the next iteration — resolve it and re-complete now.
+
+The gate checks delivery only — that the work merged and the worktree is clean. It no longer runs a diff-scope comment-provenance lint; provenance litter is caught downstream by the verification-time provenance lint and healed on the next loop (a quality finding, not a completion-time stop). Keeping provenance out of new diffs is a prompt-side authoring habit — see the pre-completion self-check in `roles/CODER.md` and `roles/WRITER.md`.
+
+This self-service path applies ONLY to the completion gate. It does not weaken BLOCK-WORTHY halts: squash conflicts, fidelity-gate divergence, operator/CM HALT flags, and the other BLOCK-WORTHY sites in the census remain real stops the agent must not paper over.
+
+### New-gate rule (for every future gate)
+
+Any new gate, guard, or refusal added to the shipped tree must, at the refusal site:
+
+1. **Declare its census classification in a code comment** — one of `BLOCK-WORTHY`, `CONVERT`, or `AGENT-RESOLVABLE` — so a future reader knows how the site behaves under The Loop and so it can be recorded in `docs/blocking-site-census.md`.
+2. **Carry the dual-channel error contract** — emit the refusal through the shared error-contract emitter (`team/scripts/lib/error_contract.sh` / `pgai_agent_kanban.lib.error_contract`) with all three fields populated: a stable machine `error` key a tool can grep, a plain-language `message`, and a runnable `remedy` a stranger can act on.
+
+The **census lint** is the enforcement mechanism: it checks that every gate declares a valid census class and that its refusal carries a complete dual-channel error contract. A gate that omits either half fails the lint. See `docs/blocking-site-census.md` for the full inventory and the classification vocabulary.
+
 ## Shared Team Root
 
 The shared team tree is rooted at:

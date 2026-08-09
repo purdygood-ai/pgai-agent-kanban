@@ -108,8 +108,27 @@ if [[ -n "${_eb_candidate}" && -f "${_eb_candidate}/shell-env" ]]; then
 fi
 
 # --- Fail loud when the root is still unset after the source attempt ---
+# Partial remedy (docs/coding-standards.md "Gates prescribe, not just
+# diagnose", classified in docs/audits/v1.27.2-gate-remedy-census.md): the
+# candidate shell-env path is fully derivable and named below, but the
+# correct PGAI_AGENT_KANBAN_ROOT_PATH value for a non-standard install layout
+# is site-specific — only the operator knows it — so the fix command below is
+# a filled-in example the reader adapts, not a claimed universal literal.
 if [[ -z "${PGAI_AGENT_KANBAN_ROOT_PATH:-}" ]]; then
     echo "PGAI_AGENT_KANBAN_ROOT_PATH not set — shell-env missing or broken at ${_eb_candidate}/shell-env" >&2
+    echo "" >&2
+    echo "Cause: no PGAI_AGENT_KANBAN_ROOT_PATH export reached this shell — the" >&2
+    echo "derived candidate shell-env file at ${_eb_candidate}/shell-env is either" >&2
+    echo "missing or present but does not export the variable." >&2
+    echo "" >&2
+    echo "To fix:" >&2
+    echo "  1. ls -la \"${_eb_candidate}/shell-env\"" >&2
+    echo "  2. printf 'export PGAI_AGENT_KANBAN_ROOT_PATH=\"%s\"\\n' \"${_eb_candidate}\" >> \"${_eb_candidate}/shell-env\"" >&2
+    echo "  3. Re-run this script — env_bootstrap.sh re-sources shell-env on the next invocation." >&2
+    echo "" >&2
+    echo "Rule: every kanban entry-point script resolves PGAI_AGENT_KANBAN_ROOT_PATH" >&2
+    echo "through this shared prelude before its first use; a missing or broken" >&2
+    echo "shell-env fails loud here rather than silently defaulting." >&2
     unset _eb_caller _eb_candidate _eb_dir _eb_walk _eb_base
     return 1
 fi

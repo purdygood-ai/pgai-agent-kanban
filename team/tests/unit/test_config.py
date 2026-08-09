@@ -38,53 +38,45 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_cfg_reads_key_value_pairs(tmp_path: pathlib.Path) -> None:
-    """_parse_cfg parses a simple KEY=value file into a dict."""
+@pytest.mark.parametrize(
+    "cfg_content, expected",
+    [
+        pytest.param(
+            "FOO=bar\nBAZ=qux\n", {"FOO": "bar", "BAZ": "qux"},
+            id="reads_key_value_pairs",
+        ),
+        pytest.param(
+            'KEY="/some/path with spaces"\n', {"KEY": "/some/path with spaces"},
+            id="strips_double_quoted_values",
+        ),
+        pytest.param(
+            "KEY='/opt/value'\n", {"KEY": "/opt/value"},
+            id="strips_single_quoted_values",
+        ),
+        pytest.param(
+            "# this is a comment\nFOO=real\n", {"FOO": "real"},
+            id="ignores_comment_lines",
+        ),
+        pytest.param(
+            "\n\nFOO=bar\n\n", {"FOO": "bar"},
+            id="ignores_blank_lines",
+        ),
+        pytest.param(
+            "export MY_VAR=hello\n", {"MY_VAR": "hello"},
+            id="accepts_export_prefix",
+        ),
+    ],
+)
+def test_parse_cfg_reads_shell_style_key_value_file(
+    tmp_path: pathlib.Path, cfg_content: str, expected: dict
+) -> None:
+    """_parse_cfg parses a bash-sourcing-style KEY=value file into exactly the dict
+    the content specifies — quotes stripped, comments and blank lines skipped, and
+    an 'export ' prefix tolerated."""
     cfg_file = tmp_path / "test.cfg"
-    cfg_file.write_text("FOO=bar\nBAZ=qux\n", encoding="utf-8")
+    cfg_file.write_text(cfg_content, encoding="utf-8")
     result = _parse_cfg(str(cfg_file))
-    assert result == {"FOO": "bar", "BAZ": "qux"}
-
-
-def test_parse_cfg_strips_double_quoted_values(tmp_path: pathlib.Path) -> None:
-    """_parse_cfg strips matching outer double quotes from values."""
-    cfg_file = tmp_path / "test.cfg"
-    cfg_file.write_text('KEY="/some/path with spaces"\n', encoding="utf-8")
-    result = _parse_cfg(str(cfg_file))
-    assert result["KEY"] == "/some/path with spaces"
-
-
-def test_parse_cfg_strips_single_quoted_values(tmp_path: pathlib.Path) -> None:
-    """_parse_cfg strips matching outer single quotes from values."""
-    cfg_file = tmp_path / "test.cfg"
-    cfg_file.write_text("KEY='/opt/value'\n", encoding="utf-8")
-    result = _parse_cfg(str(cfg_file))
-    assert result["KEY"] == "/opt/value"
-
-
-def test_parse_cfg_ignores_comment_lines(tmp_path: pathlib.Path) -> None:
-    """_parse_cfg skips lines starting with '#'."""
-    cfg_file = tmp_path / "test.cfg"
-    cfg_file.write_text("# this is a comment\nFOO=real\n", encoding="utf-8")
-    result = _parse_cfg(str(cfg_file))
-    assert "# this is a comment" not in result
-    assert result.get("FOO") == "real"
-
-
-def test_parse_cfg_ignores_blank_lines(tmp_path: pathlib.Path) -> None:
-    """_parse_cfg skips blank/empty lines without raising."""
-    cfg_file = tmp_path / "test.cfg"
-    cfg_file.write_text("\n\nFOO=bar\n\n", encoding="utf-8")
-    result = _parse_cfg(str(cfg_file))
-    assert result == {"FOO": "bar"}
-
-
-def test_parse_cfg_accepts_export_prefix(tmp_path: pathlib.Path) -> None:
-    """_parse_cfg handles lines with 'export KEY=value' (bash sourcing style)."""
-    cfg_file = tmp_path / "test.cfg"
-    cfg_file.write_text("export MY_VAR=hello\n", encoding="utf-8")
-    result = _parse_cfg(str(cfg_file))
-    assert result.get("MY_VAR") == "hello"
+    assert result == expected
 
 
 def test_parse_cfg_returns_empty_dict_for_nonexistent_file() -> None:

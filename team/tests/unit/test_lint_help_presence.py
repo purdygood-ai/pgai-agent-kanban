@@ -43,6 +43,19 @@ Tests cover the core acceptance criteria:
      against the real team/scripts/cm/ (via --scripts-dir) finds exactly the
      five expected offender scripts still awaiting remediation.
 
+ 12. **Remedy block (PRIORITY-0001-gates-prescribe-remedies)**: forcing a
+     missing-``--help`` failure prints the full three-part remedy block
+     required by docs/coding-standards.md ("Gates prescribe, not just
+     diagnose") — cause(s) naming the offending script, a numbered fix block
+     of verbatim-runnable commands with no angle-bracket placeholders ending
+     with the re-lint check, and the one-line enforced rule.
+
+ 13. **Remedy commands clear the gate**: the exact numbered commands printed
+     in the remedy block are parsed out of the captured output and executed,
+     verbatim, through a real shell — the appended handler actually responds
+     to ``--help`` (proving the fix is a genuine implementation, not a
+     pattern-match exploit), and the lint re-run against the fixture exits 0.
+
 All tests use pytest's ``tmp_path`` and importlib for isolation — no bare /tmp
 paths, no live kanban state mutations.
 """
@@ -50,6 +63,8 @@ paths, no live kanban state mutations.
 from __future__ import annotations
 
 import importlib.util
+import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -494,3 +509,171 @@ def test_real_tree_cm_offenders_match_expected() -> None:
         f"  Reported: {sorted(reported_offenders)}\n"
         "Add --help to the listed cm/ script(s) or add them to help_presence_exempt.txt."
     )
+
+
+# ---------------------------------------------------------------------------
+# Remedy-block tests (PRIORITY-0001-gates-prescribe-remedies)
+# ---------------------------------------------------------------------------
+
+# A numbered fix-command line, e.g. "  1. echo '...' >> \"...\"".
+_NUMBERED_COMMAND_RE = re.compile(r"^\s*(\d+)\.\s+(.+)$", re.MULTILINE)
+
+# An unresolved angle-bracket placeholder such as "<name>" or "<repo-root>".
+# The house placeholder law (docs/coding-standards.md) forbids these in the
+# printed fix commands — every site-specific value must already be derived
+# and substituted by the time the remedy block is printed.
+_ANGLE_BRACKET_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][\w -]*>")
+
+
+class TestHelpPresenceRemedyBlock:
+    """The remedy block: cause(s), numbered verbatim commands, re-lint, rule.
+
+    Exercises PRIORITY-0001-gates-prescribe-remedies' second lint target end
+    to end: force a missing-``--help`` failure, assert the remedy block
+    contains every required part, assert the printed commands carry no
+    angle-bracket placeholders, and then actually execute the printed
+    commands verbatim to prove they clear the gate — including proving the
+    appended handler genuinely responds to ``--help``, not merely satisfies
+    the lint's textual pattern match.
+    """
+
+    def _write_no_help_fixture(self, tmp_path: Path) -> tuple[Path, Path, Path]:
+        """Return (scripts_dir, exempt_list_path, script_path) for a synthetic
+        scripts directory containing exactly one no-help script."""
+        scripts_dir = tmp_path / "remedy_fixture"
+        scripts_dir.mkdir()
+        script = _write_shell_script(
+            scripts_dir,
+            "no_help_target.sh",
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'echo "running with args: $*"\n',
+        )
+        exempt_path = _write_exempt_list(tmp_path, [])
+        return scripts_dir, exempt_path, script
+
+    def test_remedy_block_contains_all_required_parts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Forcing a missing-``--help`` failure prints the full three-part
+        remedy block.
+
+        Asserts, per docs/coding-standards.md "Gates prescribe, not just
+        diagnose":
+          1. Cause(s) with a concrete location (the offending script path).
+          2. A numbered fix block of at least two verbatim-runnable
+             commands, ending with the re-lint verification command.
+          3. The one-line enforced rule.
+          4. No angle-bracket placeholders anywhere in the output.
+        """
+        scripts_dir, exempt_path, script = self._write_no_help_fixture(tmp_path)
+
+        result = _lint.main([
+            "--scripts-dir", str(scripts_dir),
+            "--exempt-list", str(exempt_path),
+        ])
+        assert result == 1, "Forced no-help fixture did not fail the gate."
+
+        out = capsys.readouterr().out
+
+        assert "Cause(s):" in out, (
+            f"Remedy block missing the 'Cause(s):' section.\nstdout: {out!r}"
+        )
+        assert str(script) in out, (
+            f"Remedy block does not name the actual offending script path.\nstdout: {out!r}"
+        )
+
+        assert "To fix:" in out, (
+            f"Remedy block missing the 'To fix:' numbered fix block.\nstdout: {out!r}"
+        )
+        commands = _NUMBERED_COMMAND_RE.findall(out)
+        assert len(commands) >= 2, (
+            "Remedy block's numbered fix block has fewer than 2 commands "
+            "(expected at least: append handler, then re-lint).\n"
+            f"Parsed commands: {commands!r}\nstdout: {out!r}"
+        )
+        last_command_text = commands[-1][1]
+        assert "lint_help_presence.py" in last_command_text, (
+            "Last numbered command is not the re-lint verification command.\n"
+            f"Last command: {last_command_text!r}\nstdout: {out!r}"
+        )
+
+        assert (
+            "must implement a --help/-h handler" in out
+        ), (
+            f"Remedy block missing the one-line enforced rule.\nstdout: {out!r}"
+        )
+
+        placeholder_hits = _ANGLE_BRACKET_PLACEHOLDER_RE.findall(out)
+        assert placeholder_hits == [], (
+            "Remedy block contains unresolved angle-bracket placeholder(s), "
+            "violating the house placeholder law.\n"
+            f"Placeholders found: {placeholder_hits!r}\nstdout: {out!r}"
+        )
+
+    def test_remedy_block_commands_clear_the_gate(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Executing the remedy block's printed commands verbatim clears the
+        gate — the motivating end-to-end proof (acceptance criterion 4 of
+        CODER-20260727-017-retrofit-provenance-help): a stranger reading only
+        the gate's failure output, with no other guidance, can clear it.
+
+        The test parses the exact numbered command strings out of the
+        captured stdout (not a hand-reconstructed equivalent) and runs them
+        through a real shell. It then invokes the now-patched script with
+        --help directly to prove the appended handler is a genuine, working
+        implementation — not merely a string that satisfies the lint's regex.
+        """
+        scripts_dir, exempt_path, script = self._write_no_help_fixture(tmp_path)
+
+        result = _lint.main([
+            "--scripts-dir", str(scripts_dir),
+            "--exempt-list", str(exempt_path),
+        ])
+        assert result == 1, "Forced no-help fixture did not fail the gate."
+
+        out = capsys.readouterr().out
+        commands = _NUMBERED_COMMAND_RE.findall(out)
+        assert len(commands) >= 2, (
+            f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
+        )
+
+        for _, command_text in commands:
+            proc = subprocess.run(
+                command_text,
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, (
+                f"Printed remedy command exited non-zero: {command_text!r}\n"
+                f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
+            )
+
+        # The last command IS the re-lint verification command and already
+        # asserted returncode == 0 above. Confirm independently via a direct
+        # main() call for belt-and-braces.
+        recheck = _lint.main([
+            "--scripts-dir", str(scripts_dir),
+            "--exempt-list", str(exempt_path),
+        ])
+        assert recheck == 0, (
+            "lint_help_presence still fails against the fixture directory "
+            "after running every printed remedy command verbatim."
+        )
+
+        # The appended handler must be a genuine, working --help responder,
+        # not merely text that satisfies the lint's textual pattern match.
+        help_proc = subprocess.run(
+            ["bash", str(script), "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert help_proc.returncode == 0, (
+            f"Patched script exited non-zero on --help: {help_proc.stderr!r}"
+        )
+        assert "Usage:" in help_proc.stdout, (
+            f"Patched script did not print a usage line on --help.\n"
+            f"stdout: {help_proc.stdout!r}"
+        )

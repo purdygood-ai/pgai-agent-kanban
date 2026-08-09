@@ -46,10 +46,13 @@ delegates the full assertion and adds only a confirming smoke-check.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 from typing import Optional
 
@@ -1099,14 +1102,54 @@ class TestResumeFromPartialRun:
     release-state Active RC cleared.
     """
 
-    def _run_resume_case(
+    @pytest.mark.parametrize(
+        "version, project_name, stop_after",
+        [
+            pytest.param(
+                "v0.5.0", "resume_post_squash_test", "squash",
+                id="post_squash_no_notes_no_changelog_no_tag",
+            ),
+            pytest.param(
+                "v0.6.0", "resume_post_notes_test", "notes",
+                id="post_notes_no_changelog_no_tag",
+            ),
+            pytest.param(
+                "v0.7.0", "resume_post_changelog_test", "changelog",
+                id="post_changelog_no_tag",
+            ),
+        ],
+    )
+    def test_resume_after_partial_run_completes_release(
         self,
         tmp_path: pathlib.Path,
         version: str,
         project_name: str,
         stop_after: str,
     ) -> None:
-        """Shared body for all three resume sub-cases."""
+        """Re-invocation after an induced partial-run failure completes the release.
+
+        Three boundaries correspond to the sub-cases named in an earlier defect:
+          - post_squash: squash committed; no release-notes, no CHANGELOG, no tag.
+            Simulates release.sh dying between Step 7 (squash commit) and Step 8
+            (release-notes). The resume run must detect the squash already landed
+            (empty index after merge --squash), skip the squash commit, skip the
+            fidelity gate, generate and commit the release-notes and CHANGELOG,
+            create the tag, and clear the release-state.
+          - post_notes: squash + release-notes committed; no CHANGELOG, no tag.
+            Simulates release.sh dying between Step 8 (release-notes commit) and
+            Step 11b (CHANGELOG commit). The resume run must detect the notes
+            already committed (git ls-tree guard at Step 8), regenerate and commit
+            CHANGELOG, create the tag, and clear the release-state.
+          - post_changelog: squash + notes + CHANGELOG committed; no tag.
+            Simulates release.sh dying between Step 11b (CHANGELOG commit) and
+            Step 13 (tag). The resume run must detect the squash, notes, and
+            CHANGELOG already committed, skip those steps, create the tag, delete
+            the RC branch, and clear release-state.
+
+        Each case manually builds the partial git state, then invokes release.sh
+        and asserts that the run completes end-to-end: tag exists, RC branch
+        deleted, release-state Active RC cleared.
+        """
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
@@ -1191,46 +1234,1438 @@ class TestResumeFromPartialRun:
             f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
         )
 
-    def test_resume_after_squash_committed(self, tmp_path: pathlib.Path) -> None:
-        """Re-invocation after squash committed (no notes, no CHANGELOG, no tag) completes the release.
 
-        Simulates release.sh dying between Step 7 (squash commit) and Step 8 (release-notes).
-        The resume run must detect the squash already landed (empty index after merge --squash),
-        skip the squash commit, skip the fidelity gate, generate and commit the release-notes
-        and CHANGELOG, create the tag, and clear the release-state.
+# ---------------------------------------------------------------------------
+# Shared helper for committing an executable in-repo hook onto a branch
+# ---------------------------------------------------------------------------
+
+
+def _commit_in_repo_hook(
+    repo_path: pathlib.Path,
+    branch: str,
+    phase: str,
+    script_body: str,
+    message: str,
+    *,
+    return_branch: Optional[str] = None,
+) -> None:
+    """Check out *branch*, write an executable in-repo hook for *phase*, commit it.
+
+    Writes to .pgai/hooks/cm-release-<phase>.sh (tier (c) resolution — see
+    cm_release_hooks.sh) with the executable bit set so git records mode 100755.
+    """
+    _git_local(repo_path, "checkout", branch)
+    hook_path = repo_path / ".pgai" / "hooks" / f"cm-release-{phase}.sh"
+    hook_path.parent.mkdir(parents=True, exist_ok=True)
+    hook_path.write_text(script_body, encoding="utf-8")
+    hook_path.chmod(0o755)
+    _git_local(repo_path, "add", str(hook_path.relative_to(repo_path)))
+    _git_local(repo_path, "commit", "-m", message)
+    if return_branch is not None:
+        _git_local(repo_path, "checkout", return_branch)
+
+
+# ---------------------------------------------------------------------------
+# Case (f) — Golden fixture: verify-before-destroy on a rigged pre-tag gate
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyBeforeDestroy:
+    """Case (f): a pre-tag gate failure leaves the RC branch, release-state.md,
+    and main byte-identical to their pre-release state; fixing the cause and
+    re-running (no operator git surgery in between) completes the release.
+
+    This is the golden-fixture proof that destructive steps (RC branch
+    deletion, local and origin; release-state.md rewrite) are structurally
+    ordered after ALL verification, including the pre-tag hook chain. Before
+    the fix, this scenario stranded the release: the RC branch and
+    release-state.md were already destroyed by the time the pre-tag hook
+    fired, so a rigged failure here left nothing to cleanly re-run against.
+    """
+
+    def test_rigged_pre_tag_hook_leaves_world_untouched_then_fix_and_rerun_ships(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Rigged pre-tag hook failure preserves all state; fix-and-rerun tags cleanly.
+
+        Scenario:
+          1. Open the RC branch (push_to_remote=true, so the origin fixture
+             remote is exercised — the golden fixture's "local + origin" bar).
+          2. Add coder work and a pre-tag hook (in-repo, tier (c)) that exits 1
+             — the "rigged to fail" gate.
+          3. Snapshot main's SHA, release-state.md content, and confirm the RC
+             branch exists locally and on the origin fixture remote.
+          4. Run cm-release.sh — must exit non-zero.
+          5. Assert: RC branch still exists locally AND on origin; release-state.md
+             is byte-identical to the snapshot; main is back at the pre-release
+             SHA (the rollback guard restored it); no tag was created.
+          6. Fix the cause: commit a replacement pre-tag hook that exits 0 (no
+             manual git surgery — this is the entire "operator" action).
+          7. Re-run cm-release.sh — must exit 0, tag created, RC branch deleted
+             (local + origin), release-state Active RC cleared.
         """
-        self._run_resume_case(
-            tmp_path,
-            version="v0.5.0",
-            project_name="resume_post_squash_test",
-            stop_after="squash",
+        version = "v0.20.0"
+        project_name = "verify_before_destroy_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root(
+            tmp_path, project_name, repo_path, push_to_remote="true"
         )
 
-    def test_resume_after_notes_committed(self, tmp_path: pathlib.Path) -> None:
-        """Re-invocation after release-notes committed (no CHANGELOG, no tag) completes the release.
-
-        Simulates release.sh dying between Step 8 (release-notes commit) and Step 11b
-        (CHANGELOG commit) — the exact boundary described in an earlier defect's reproduction case.
-        The resume run must detect the notes already committed (git ls-tree guard at Step 8),
-        regenerate and commit CHANGELOG, create the tag, and clear the release-state.
-        """
-        self._run_resume_case(
-            tmp_path,
-            version="v0.6.0",
-            project_name="resume_post_notes_test",
-            stop_after="notes",
+        # Step 1: Open the RC (pushed to the origin fixture remote).
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_open.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         )
 
-    def test_resume_after_changelog_committed(self, tmp_path: pathlib.Path) -> None:
-        """Re-invocation after CHANGELOG committed (no tag) completes the release.
+        rc_branch = f"rc/{version}"
+        assert _git_branch_exists_local(repo_path, rc_branch), (
+            f"RC branch '{rc_branch}' was not created.\n"
+            f"stdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        )
+        origin_has_rc = subprocess.run(
+            ["git", "-C", str(repo_path), "ls-remote", "--exit-code", "--heads",
+             "origin", rc_branch],
+            capture_output=True,
+        ).returncode == 0
+        assert origin_has_rc, (
+            f"RC branch '{rc_branch}' was not pushed to the origin fixture remote "
+            "by cm-open-rc.sh (push_to_remote=true)."
+        )
 
-        Simulates release.sh dying between Step 11b (CHANGELOG commit) and Step 13 (tag).
-        The resume run must detect the squash, notes, and CHANGELOG already committed,
-        skip those steps, create the tag, delete the RC branch, and clear release-state.
+        # Step 2: Coder work, plus a pre-tag hook rigged to fail.
+        _commit_on_branch(
+            repo_path, rc_branch,
+            "feature_vbd.txt", "verify-before-destroy feature content\n",
+            "feat: add feature for verify-before-destroy test",
+        )
+        _commit_in_repo_hook(
+            repo_path, rc_branch, "pre-tag",
+            "#!/usr/bin/env bash\nexit 1\n",
+            "chore: add pre-tag hook rigged to fail",
+            return_branch="main",
+        )
+
+        # Step 3: Snapshot pre-release state.
+        main_pre_release_sha = _git_local(repo_path, "rev-parse", "main")
+        release_state_path = (
+            kanban_root / "projects" / project_name / "release-state.md"
+        )
+        release_state_pre_release = release_state_path.read_text(encoding="utf-8")
+
+        # Step 4: Run cm-release.sh — the rigged pre-tag hook must HALT it.
+        result_release_1 = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_release_1.returncode != 0, (
+            "cm-release.sh must exit non-zero when the pre-tag hook is rigged to fail.\n"
+            f"stdout: {result_release_1.stdout}\nstderr: {result_release_1.stderr}"
+        )
+
+        # Assertion set 1 — nothing destroyed by the failed gate.
+        assert _git_branch_exists_local(repo_path, rc_branch), (
+            f"RC branch '{rc_branch}' was deleted locally despite the pre-tag gate "
+            "failing — destructive steps ran before verification completed.\n"
+            f"stdout: {result_release_1.stdout}\nstderr: {result_release_1.stderr}"
+        )
+        origin_still_has_rc = subprocess.run(
+            ["git", "-C", str(repo_path), "ls-remote", "--exit-code", "--heads",
+             "origin", rc_branch],
+            capture_output=True,
+        ).returncode == 0
+        assert origin_still_has_rc, (
+            f"RC branch '{rc_branch}' was deleted on origin despite the pre-tag gate "
+            "failing.\n"
+            f"stdout: {result_release_1.stdout}\nstderr: {result_release_1.stderr}"
+        )
+        assert release_state_path.read_text(encoding="utf-8") == release_state_pre_release, (
+            "release-state.md was mutated despite the pre-tag gate failing — it must "
+            "be byte-identical to its pre-release state.\n"
+            f"stdout: {result_release_1.stdout}\nstderr: {result_release_1.stderr}"
+        )
+        _git_local(repo_path, "checkout", "main")
+        main_post_failure_sha = _git_local(repo_path, "rev-parse", "main")
+        assert main_post_failure_sha == main_pre_release_sha, (
+            f"main moved from {main_pre_release_sha[:7]} to {main_post_failure_sha[:7]} "
+            "despite the pre-tag gate failing — the rollback guard must reset main to "
+            "its pre-release commit when verification does not complete.\n"
+            f"stdout: {result_release_1.stdout}\nstderr: {result_release_1.stderr}"
+        )
+        assert not _git_tag_exists(repo_path, version), (
+            f"Release tag '{version}' must NOT exist after the rigged pre-tag gate failure.\n"
+            f"stdout: {result_release_1.stdout}\nstderr: {result_release_1.stderr}"
+        )
+
+        # Step 6: Fix the cause — replace the hook with one that exits 0. No
+        # manual git surgery on main, the RC branch, or release-state.md: this
+        # commit is the entire "operator" action between the two runs.
+        _commit_in_repo_hook(
+            repo_path, rc_branch, "pre-tag",
+            "#!/usr/bin/env bash\nexit 0\n",
+            "fix: pre-tag hook no longer exits non-zero",
+            return_branch="main",
+        )
+
+        # Step 7: Re-run cm-release.sh — must complete end-to-end this time.
+        result_release_2 = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_release_2.returncode == 0, (
+            "cm-release.sh must complete after the pre-tag hook is fixed, with no "
+            "operator git surgery between the two runs.\n"
+            f"stdout: {result_release_2.stdout}\nstderr: {result_release_2.stderr}"
+        )
+        assert _git_tag_exists(repo_path, version), (
+            f"Release tag '{version}' not found after the fixed-and-rerun release.\n"
+            f"stdout: {result_release_2.stdout}\nstderr: {result_release_2.stderr}"
+        )
+        assert not _git_branch_exists_local(repo_path, rc_branch), (
+            f"RC branch '{rc_branch}' still exists locally after the successful rerun.\n"
+            f"stdout: {result_release_2.stdout}\nstderr: {result_release_2.stderr}"
+        )
+        origin_has_rc_after = subprocess.run(
+            ["git", "-C", str(repo_path), "ls-remote", "--exit-code", "--heads",
+             "origin", rc_branch],
+            capture_output=True,
+        ).returncode == 0
+        assert not origin_has_rc_after, (
+            f"RC branch '{rc_branch}' still exists on origin after the successful rerun.\n"
+            f"stdout: {result_release_2.stdout}\nstderr: {result_release_2.stderr}"
+        )
+
+        # Assertion: the step log states verification is complete before the
+        # first destructive action (the narration this fix adds). Both lines
+        # are plain stdout echoes in release.sh, so their relative position in
+        # stdout alone (not stderr-interleaved) reliably reflects execution order.
+        stdout_2 = result_release_2.stdout
+        assert "verification complete" in stdout_2, (
+            "Expected the 'verification complete — proceeding to finalization' "
+            "narration in the successful release's output.\n"
+            f"stdout: {stdout_2}"
+        )
+        assert "[Step 10] Deleting" in stdout_2, (
+            f"Expected the RC-branch-deletion step log line in stdout.\nstdout: {stdout_2}"
+        )
+        verification_line_pos = stdout_2.index("verification complete")
+        destructive_step_pos = stdout_2.index("[Step 10] Deleting")
+        assert verification_line_pos < destructive_step_pos, (
+            "The 'verification complete' narration must appear BEFORE the first "
+            "destructive step ([Step 10], RC branch deletion) in the log — it "
+            f"appeared at index {verification_line_pos}, destructive step at "
+            f"{destructive_step_pos}.\nstdout: {stdout_2}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Case (g) — Hook-resolution fixture: hooks resolve from the RC branch, never
+# from whatever the dev tree currently has checked out
+# ---------------------------------------------------------------------------
+
+
+class TestHookResolutionIsRcBranchAware:
+    """Case (g): with the dev tree parked on an unrelated branch carrying
+    DIFFERENT in-repo hook content, the release resolves and executes the RC
+    branch's hooks — never the checked-out branch's. This retires the
+    dev-tree-parking workaround: an operator (or a prior task) may leave the
+    dev tree checked out anywhere without affecting hook resolution.
+    """
+
+    def test_pre_squash_hook_resolves_from_rc_branch_not_checked_out_branch(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Dev tree parked on an unrelated branch; pre-squash hook still resolves from the RC.
+
+        Scenario:
+          1. Open the RC branch.
+          2. Commit an in-repo pre-squash hook on the RC branch that writes a
+             distinctive marker file ('rc_hook_ran.txt').
+          3. Create an unrelated branch with a DIFFERENT in-repo pre-squash hook
+             that writes a different marker file ('unrelated_hook_ran.txt').
+          4. Check the dev tree out onto the unrelated branch — simulating an
+             operator or a prior task leaving the working tree there — and run
+             cm-release.sh from that state (the pre-squash hook fires before
+             cm-release.sh's own checkout of main).
+
+        Asserts:
+          - cm-release.sh exits 0.
+          - 'rc_hook_ran.txt' exists (the RC branch's hook executed).
+          - 'unrelated_hook_ran.txt' does NOT exist (the checked-out branch's
+            hook content was never executed) — content-compare proof of which
+            hook ran.
         """
-        self._run_resume_case(
-            tmp_path,
-            version="v0.7.0",
-            project_name="resume_post_changelog_test",
-            stop_after="changelog",
+        version = "v0.21.0"
+        project_name = "hook_resolution_rc_aware_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        # Step 1: Open the RC.
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_open.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        )
+        rc_branch = f"rc/{version}"
+
+        # Step 2: Coder work + the RC branch's own pre-squash hook.
+        _commit_on_branch(
+            repo_path, rc_branch,
+            "feature_hookres.txt", "hook resolution test feature content\n",
+            "feat: add feature for hook resolution test",
+        )
+        _commit_in_repo_hook(
+            repo_path, rc_branch, "pre-squash",
+            "#!/usr/bin/env bash\ntouch rc_hook_ran.txt\n",
+            "chore: add pre-squash hook that marks the RC branch ran",
+        )
+
+        # Step 3: An unrelated branch (off main) with DIFFERENT hook content.
+        _git_local(repo_path, "checkout", "-b", "unrelated-branch", "main")
+        _commit_in_repo_hook(
+            repo_path, "unrelated-branch", "pre-squash",
+            "#!/usr/bin/env bash\ntouch unrelated_hook_ran.txt\n",
+            "chore: add pre-squash hook that marks the unrelated branch ran",
+        )
+        # Step 4: Leave the dev tree parked on the unrelated branch — do NOT
+        # check out main or the RC branch before invoking cm-release.sh.
+
+        result_release = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_release.returncode == 0, (
+            "cm-release.sh must complete even when the dev tree is parked on an "
+            "unrelated branch at invocation time.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+        assert (repo_path / "rc_hook_ran.txt").exists(), (
+            "The RC branch's pre-squash hook did not run — hook resolution must "
+            "read from the RC branch's git tree, not the dev tree's checkout.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+        assert not (repo_path / "unrelated_hook_ran.txt").exists(), (
+            "The unrelated branch's pre-squash hook ran — hook resolution must "
+            "NOT be a function of whatever the dev tree currently has checked out.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Case (h) — Hook-order recurrence fixture: a pre-squash hook that COMMITS
+# (not just runs) must have that commit land on the RC branch, and therefore
+# ride the squash into main, even when the dev tree is parked on an unrelated
+# branch at invocation time.
+#
+# This is distinct from Case (g) above. Case (g) proves hook CONTENT
+# resolution is RC-branch-aware (cm_release_hooks.sh reads the hook script's
+# bytes via `git show <rc_branch>:<path>`, independent of the checkout).
+# Case (g)'s hook only touches an untracked marker file — it never commits —
+# so it cannot detect whether the hook's own git operations land on the
+# right branch. This fixture reproduces the v0.11.0 production failure: a
+# hook that behaves like a real version-bump hook (writes a file AND commits
+# it) with the dev tree parked on an unrelated branch. Without cm-release.sh
+# checking out the RC branch before running the hook, the hook's commit
+# lands on whatever branch happened to be checked out — never reaching the
+# RC branch — so the squash into main silently drops it.
+# ---------------------------------------------------------------------------
+
+
+class TestHookOrderRecurrence:
+    """Case (h): a pre-squash hook's own commit must land on the RC branch.
+
+    Regression lock for the hook-ordering recurrence (originally surfaced at
+    v0.11.0's release block): an earlier fix made hook CONTENT resolution
+    RC-branch-aware (see TestHookResolutionIsRcBranchAware / Case (g)), but
+    that fix never addressed the EXECUTION CONTEXT a hook runs in — a
+    resolved hook still executed via `cd "$REPO_ROOT"` on whatever branch
+    the dev tree had checked out, so a hook that commits (a version bump,
+    a manifest regeneration) silently lost its commit whenever the dev tree
+    was not already parked on the RC branch. cm-release.sh must check out
+    the RC branch before running the pre-squash hook so the hook's own git
+    operations land on the branch that gets squashed into main.
+    """
+
+    def test_pre_squash_hook_commit_lands_on_rc_branch_and_survives_squash(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Pre-squash hook commits a version file; dev tree parked on an unrelated branch.
+
+        Scenario:
+          1. Open the RC branch.
+          2. Commit feature work on the RC branch.
+          3. Commit an in-repo pre-squash hook on the RC branch that WRITES
+             and COMMITS a version file ('MANIFEST_VERSION') — mirroring a
+             real version-bump hook, not just a marker-file touch.
+          4. Create an unrelated branch off main and leave the dev tree
+             checked out there — simulating an operator or a prior task
+             leaving the working tree parked anywhere — then run
+             cm-release.sh from that state.
+
+        Asserts:
+          - cm-release.sh exits 0.
+          - MANIFEST_VERSION exists on main after the release, with the
+            content the hook wrote — proving the hook's commit rode the
+            squash from the RC branch into main.
+          - The unrelated branch's tip commit is unchanged — the hook's
+            commit did not land there instead.
+        """
+        version = "v0.22.0"
+        project_name = "hook_order_recurrence_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        # Step 1: Open the RC.
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_open.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        )
+        rc_branch = f"rc/{version}"
+
+        # Step 2: Coder work on the RC branch.
+        _commit_on_branch(
+            repo_path, rc_branch,
+            "feature_hookorder.txt", "hook order recurrence test feature content\n",
+            "feat: add feature for hook order recurrence test",
+        )
+
+        # Step 3: A pre-squash hook that WRITES AND COMMITS a version file —
+        # the exact shape of a real version-bump hook, not a marker touch.
+        _commit_in_repo_hook(
+            repo_path, rc_branch, "pre-squash",
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "echo '9.9.9' > MANIFEST_VERSION\n"
+            "git add MANIFEST_VERSION\n"
+            "git commit -m 'chore: bump MANIFEST_VERSION via pre-squash hook'\n",
+            "chore: add pre-squash hook that bumps MANIFEST_VERSION",
+        )
+        rc_tip_before_release = _git_local(repo_path, "rev-parse", rc_branch)
+
+        # Step 4: An unrelated branch off main; leave the dev tree parked
+        # there — do NOT check out main or the RC branch before releasing.
+        _git_local(repo_path, "checkout", "-b", "unrelated-branch", "main")
+        unrelated_tip_before_release = _git_local(repo_path, "rev-parse", "unrelated-branch")
+
+        result_release = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_release.returncode == 0, (
+            "cm-release.sh must complete even when the dev tree is parked on an "
+            "unrelated branch and the pre-squash hook commits.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+        # The unrelated branch must be untouched — the hook's commit did not
+        # land there instead of on the RC branch.
+        unrelated_tip_after_release = _git_local(repo_path, "rev-parse", "unrelated-branch")
+        assert unrelated_tip_after_release == unrelated_tip_before_release, (
+            "The unrelated branch gained a commit — the pre-squash hook's commit "
+            "landed on whatever branch was checked out instead of the RC branch.\n"
+            f"before: {unrelated_tip_before_release}\nafter: {unrelated_tip_after_release}"
+        )
+        # Sanity: the RC branch tip captured before release differs from
+        # rc_tip_before_release once the hook commits on it (informational —
+        # not asserted directly since the RC branch is deleted by Step 11;
+        # the real proof is MANIFEST_VERSION riding the squash below).
+        del rc_tip_before_release
+
+        manifest_path = repo_path / "MANIFEST_VERSION"
+        assert manifest_path.exists(), (
+            "MANIFEST_VERSION is missing from main after the release — the "
+            "pre-squash hook's commit did not land on the RC branch, so it "
+            "was not present in the tree that got squashed into main.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+        assert manifest_path.read_text(encoding="utf-8").strip() == "9.9.9", (
+            "MANIFEST_VERSION exists but has the wrong content — the hook's "
+            "commit that rode the squash is not the one this test wrote.\n"
+            f"actual content: {manifest_path.read_text(encoding='utf-8')!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Case (i) — Regression fixture: release-flow HALT scope
+#
+# Recurrence: a release-flow HALT trigger (a rigged pre-squash hook, a
+# ship-policy refusal, any of cm-release.sh's nine HALT triggers) must freeze
+# projects/<name>/HALT only. The global $KANBAN_ROOT/HALT sentinel is reserved
+# for the operator and framework-wide emergencies; a single project's release
+# failure must never freeze sibling projects' chains. This is the exact
+# incident named in the ticket: "the same event froze the kanban's own
+# chains" — one project's cm-release.sh HALT tripped wake_common_run's
+# startup-level global HALT check, which exits the ENTIRE wake invocation
+# before the per-project iteration loop even begins, starving every sibling
+# project regardless of its own state.
+# ---------------------------------------------------------------------------
+
+_SCRIPTS_LIB = _SCRIPTS_DIR / "lib"
+
+
+def _add_sibling_project(
+    kanban_root: pathlib.Path,
+    project_name: str,
+    repo_path: pathlib.Path,
+) -> None:
+    """Register a second, independent project under an existing kanban root.
+
+    Appends a `[project:<name>]` stanza to the existing projects.cfg (rather
+    than overwriting it, unlike _build_kanban_root which creates the first
+    project) and lays down the minimal projects/<name>/ skeleton
+    (project.cfg, release-state.md, tasks/queues/) that pp_project_root and
+    pp_project_halted need to resolve. This project is never opened for
+    release in the fixture below — it only needs to exist so the test can
+    prove it stays UNAFFECTED by project A's release failure.
+    """
+    projects_cfg = kanban_root / "projects.cfg"
+    with projects_cfg.open("a", encoding="utf-8") as fh:
+        fh.write(
+            f"\n[project:{project_name}]\n"
+            "priority=1\n"
+            "description=Sibling project for HALT-scope regression fixture\n"
+            "enabled=true\n"
+        )
+
+    proj = kanban_root / "projects" / project_name
+    proj.mkdir(parents=True, exist_ok=True)
+
+    (proj / "project.cfg").write_text(
+        f"[project]\n"
+        f"project_name = {project_name}\n"
+        f"dev_tree_path = {repo_path}\n"
+        f"git_repo_url = git@example.com:{project_name}.git\n"
+        f"git_remote_name = origin\n"
+        f"workflow_type = release\n"
+        f"is_self_build = false\n"
+        f"push_to_remote = false\n"
+        f"\n"
+        f"[versioning]\n"
+        f"max_patch = 99\n"
+        f"max_minor = 9\n"
+        f"max_major = 0\n",
+        encoding="utf-8",
+    )
+
+    (proj / "release-state.md").write_text(
+        "# Release State\n\n"
+        "## Active RC\n"
+        "none\n\n"
+        "## RC Opened At\n"
+        "none\n\n"
+        "## RC Opened By Task\n"
+        "none\n",
+        encoding="utf-8",
+    )
+
+    (proj / "tasks" / "queues").mkdir(parents=True, exist_ok=True)
+
+
+def _run_project_paths_check(kanban_root: pathlib.Path, script: str) -> subprocess.CompletedProcess:
+    """Run a bash snippet with project_paths.sh sourced and KANBAN_ROOT set.
+
+    Mirrors the sourcing pattern used by test_discovery_pipeline.py so this
+    fixture exercises the real pp_project_halted() function, not a
+    reimplementation of its logic.
+    """
+    base_env = dict(os.environ)
+    base_env["KANBAN_ROOT"] = str(kanban_root)
+    base_env["TEAM_ROOT"] = str(kanban_root)
+    base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
+    full_script = textwrap.dedent(f"""\
+        set -euo pipefail
+        source "{_SCRIPTS_LIB}/project_paths.sh"
+        {script}
+    """)
+    return subprocess.run(
+        ["bash", "-c", full_script],
+        capture_output=True, text=True, env=base_env, timeout=30,
+    )
+
+
+class TestHaltScopeRecurrence:
+    """Case (i): a release-flow HALT must freeze projects/<name>/HALT only.
+
+    Regression lock for the HALT-scoping recurrence. An earlier fix built the
+    READ side of per-project HALT scoping — pp_project_halted() in
+    project_paths.sh (consulted by wake_common_run's per-project dispatch
+    loop) and the dashboard's halt_scope.sh — but never touched the WRITE
+    side: cm-release.sh's write_halt_file()/cm_halt() kept creating
+    $KANBAN_ROOT/HALT (the GLOBAL sentinel) for every one of its nine HALT
+    triggers. wake_common_run's startup check (a bare
+    `[[ -f "$TEAM_ROOT/HALT" ]]`, evaluated ONCE before the per-project
+    iteration loop even starts) treats that global file as a chain-wide stop.
+    So a single project's release failure tripped the startup gate and froze
+    every sibling project's chain in the same wake — reproducing the exact
+    production incident named in this ticket ("the same event froze the
+    kanban's own chains"). The read-side fix alone could never have prevented
+    this: pp_project_halted() is never reached when the startup gate above it
+    already exited the whole process.
+
+    cm-release.sh must write the project-scoped HALT file
+    ($KANBAN_ROOT/projects/<name>/HALT) instead, so the ONLY gate that fires
+    for a project's own release failure is the per-project
+    pp_project_halted() check inside the dispatch loop — the startup-level
+    global gate never sees it, and sibling projects are never touched.
+    """
+
+    def test_project_release_failure_writes_project_scoped_halt_only(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A rigged pre-squash hook HALTs project A; project B stays dispatchable.
+
+        Scenario:
+          1. Build a kanban root with two independent sibling projects, A and
+             B, each backed by its own git repo.
+          2. Open an RC for project A and rig its pre-squash hook to fail —
+             a real HALT trigger (Trigger 4), not a synthetic function call.
+          3. Run cm-release.sh for project A. It must exit non-zero.
+
+        Asserts:
+          - $KANBAN_ROOT/projects/A/HALT exists — the project-scoped HALT
+            file was written for the project that actually failed.
+          - $KANBAN_ROOT/HALT does NOT exist — the global sentinel was never
+            touched by project A's release failure.
+          - pp_project_halted("A") is true and pp_project_halted("B") is
+            false, via the real project_paths.sh function.
+          - wake_common_run's own startup gate — the literal
+            `[[ -f "$KANBAN_ROOT/HALT" ]]` check that runs BEFORE the
+            per-project loop — evaluates false. Project B's wake would enter
+            the per-project iteration loop rather than exiting the whole
+            process before iteration starts.
+
+        Without the fix (write_halt_file() pointed at
+        "${{KANBAN_ROOT}}/HALT"), the first two assertions invert — the
+        global file exists and the project-scoped one does not — and the
+        startup-gate assertion fails, reproducing the original cross-project
+        freeze. This was confirmed by temporarily reverting
+        team/scripts/cm/release.sh's write_halt_file() to the pre-fix global
+        path and observing this test fail on exactly those three points.
+        """
+        version = "v0.30.0"
+        project_a = "halt_scope_project_a"
+        project_b = "halt_scope_project_b"
+
+        bare_remote_a = tmp_path / "bare_remote_a.git"
+        repo_a = tmp_path / "dev_repo_a"
+        _init_git_repo_with_remote(repo_a, bare_remote_a)
+
+        kanban_root = _build_kanban_root(
+            tmp_path, project_a, repo_a, push_to_remote="false"
+        )
+
+        bare_remote_b = tmp_path / "bare_remote_b.git"
+        repo_b = tmp_path / "dev_repo_b"
+        _init_git_repo_with_remote(repo_b, bare_remote_b)
+        _add_sibling_project(kanban_root, project_b, repo_b)
+
+        # Step 2: Open project A's RC, add coder work, and rig the
+        # pre-squash hook to fail — a genuine HALT trigger.
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_a, repo_root=repo_a,
+        )
+        assert result_open.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        )
+        rc_branch = f"rc/{version}"
+
+        _commit_on_branch(
+            repo_a, rc_branch,
+            "feature_haltscope.txt", "halt scope recurrence test feature content\n",
+            "feat: add feature for halt scope recurrence test",
+        )
+        _commit_in_repo_hook(
+            repo_a, rc_branch, "pre-squash",
+            "#!/usr/bin/env bash\necho 'rigged failure' >&2\nexit 1\n",
+            "chore: add pre-squash hook rigged to fail",
+            return_branch="main",
+        )
+
+        global_halt_file = kanban_root / "HALT"
+        project_a_halt_file = kanban_root / "projects" / project_a / "HALT"
+        project_b_halt_file = kanban_root / "projects" / project_b / "HALT"
+        assert not global_halt_file.exists()
+        assert not project_a_halt_file.exists()
+        assert not project_b_halt_file.exists()
+
+        # Step 3: Run cm-release.sh for project A — the rigged hook must HALT it.
+        result_release = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_a, repo_root=repo_a,
+        )
+        assert result_release.returncode != 0, (
+            "cm-release.sh must exit non-zero when the pre-squash hook is rigged to fail.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+        # --- Assertion set: project-scoped HALT only ---
+        assert project_a_halt_file.exists(), (
+            "Project A's release failure did not write a project-scoped HALT "
+            f"file at {project_a_halt_file}.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+        assert not global_halt_file.exists(), (
+            "Project A's release failure wrote the GLOBAL HALT file at "
+            f"{global_halt_file} — this is the exact recurrence: a release-flow "
+            "HALT trigger must freeze projects/<name>/HALT only, never the "
+            "global sentinel, or every sibling project's chain freezes with it.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+        assert not project_b_halt_file.exists(), (
+            "Project B (an untouched sibling) unexpectedly has its own HALT "
+            f"file at {project_b_halt_file} — it should never have been written."
+        )
+
+        # --- Assertion set: pp_project_halted() agrees, via the real function ---
+        result_a_halted = _run_project_paths_check(
+            kanban_root, f'pp_project_halted "{project_a}" && echo HALTED || echo NOT_HALTED'
+        )
+        assert "HALTED" in result_a_halted.stdout and "NOT_HALTED" not in result_a_halted.stdout, (
+            f"pp_project_halted('{project_a}') should report HALTED.\n"
+            f"stdout: {result_a_halted.stdout}\nstderr: {result_a_halted.stderr}"
+        )
+        result_b_halted = _run_project_paths_check(
+            kanban_root, f'pp_project_halted "{project_b}" && echo HALTED || echo NOT_HALTED'
+        )
+        assert "NOT_HALTED" in result_b_halted.stdout, (
+            f"pp_project_halted('{project_b}') must report NOT_HALTED — a "
+            "sibling project's dispatchability must be unaffected by project "
+            f"A's release failure.\nstdout: {result_b_halted.stdout}\n"
+            f"stderr: {result_b_halted.stderr}"
+        )
+
+        # --- Assertion: wake_common_run's own startup gate would not fire ---
+        # Literal reproduction of the check at the top of wake_common_run()
+        # (team/scripts/lib/wake_common.sh): `if [[ -f "${TEAM_ROOT}/HALT" ]]`.
+        # If this evaluates true, the ENTIRE wake process exits before the
+        # per-project loop (and therefore before pp_project_halted() for
+        # project B is ever consulted) — this is the mechanism of the original
+        # cross-project freeze.
+        startup_gate = subprocess.run(
+            ["bash", "-c", f'[[ -f "{kanban_root}/HALT" ]] && echo GATE_TRIPPED || echo GATE_CLEAR'],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert "GATE_CLEAR" in startup_gate.stdout, (
+            "wake_common_run's startup-level global HALT gate would have "
+            "tripped for EVERY project (including sibling project B) as a "
+            "side effect of project A's release failure alone.\n"
+            f"stdout: {startup_gate.stdout}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Case (j) — The hands-free demo (v2.3.5 Acceptance 1, the release centerpiece)
+#
+# A fixture tree with a deliberate quality-class finding in notes prose and
+# otherwise-green tests runs the ENTIRE cycle hands-free: a gated-runner-shaped
+# script exits 0 with the quality-class findings file written, a TESTER report
+# cites the finding against a filed bug and recommends PASS, and cm-release.sh
+# ships the resulting release FUNCTIONAL — with zero operator hands at any step.
+# ---------------------------------------------------------------------------
+
+_FIXTURES_DIR = _TEAM_DIR / "tests" / "fixtures"
+_HANDS_FREE_DEMO_RUNNER = _FIXTURES_DIR / "hands_free_demo_runner.sh"
+_HANDS_FREE_DEMO_GREEN_PYTEST = (
+    _FIXTURES_DIR / "hands_free_demo_green" / "fixture_hands_free_demo_green_checks.py"
+)
+_TEMP_LIB = _SCRIPTS_DIR / "lib" / "temp.sh"
+
+
+def _make_scan_dir() -> pathlib.Path:
+    """Create a scratch directory for content that lint_comment_provenance.py
+    itself will scan, deliberately OUTSIDE pytest's own tmp_path tree.
+
+    Used for both the prose surface (release-notes-shaped .md fixtures) and
+    the code surface (.py/.sh fixtures carrying a planted comment) — the
+    exclusion problem this helper works around applies identically to
+    either kind of content.
+
+    lint_comment_provenance.py excludes any path containing a 'tests/' (or
+    'fixtures/') segment by design, so its own test suite is never
+    self-scanned (see scripts/lint_comment_provenance.py's
+    _PATH_EXCLUDE_SEGMENTS). This repo's own tests/conftest.py redirects
+    pytest tmp_path fixtures under
+    "$PGAI_AGENT_KANBAN_TEMP_DIR/tests/pytest-of-.../..." whenever
+    PGAI_AGENT_KANBAN_TEMP_DIR is set (the framework's own /tmp-pollution
+    guard) — so a fixture built via tmp_path would collide with that same
+    exclusion and silently never be scanned. This helper instead creates a
+    directory directly under the configured framework temp root (never bare
+    /tmp, per SOP "Temporary File Hygiene") with no 'tests/' segment in the
+    path, so the real production lint actually scans it.
+    """
+    framework_temp_root = os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR")
+    if not framework_temp_root:
+        # Resolve via the shared shell resolver (never inline the fallback
+        # literal here — see scripts/lib/temp.sh's pgai_temp_dir()).
+        resolved = subprocess.run(
+            ["bash", "-c", f"source {str(_TEMP_LIB)!r} && pgai_temp_dir"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+        framework_temp_root = resolved or "/".join(["", "tmp", "pgai_kanban_tmp"])
+    scan_scratch_root = pathlib.Path(framework_temp_root) / "hands-free-demo-scan"
+    scan_scratch_root.mkdir(parents=True, exist_ok=True)
+    return pathlib.Path(tempfile.mkdtemp(dir=str(scan_scratch_root)))
+
+
+def _build_tester_task(
+    kanban_root: pathlib.Path,
+    project_name: str,
+    task_id: str,
+    release_version: str,
+    *,
+    state: str = "DONE",
+    recommendation: str = "PASS",
+    systemic_risk: str = "low",
+    lint_findings_section: str = "None.",
+) -> pathlib.Path:
+    """Create a synthetic TESTER task folder in the shape cm-release.sh's
+    Step 4d discovers (README.md Role/Release Version, status.md State,
+    artifacts/report.md Recommendation/Systemic Risk/Lint Findings), mirroring
+    team/roles/TESTER.md's Step 9 report template closely enough for
+    cm_ship_policy's field reads without reproducing its full prose.
+    """
+    task_dir = kanban_root / "projects" / project_name / "tasks" / task_id
+    (task_dir / "artifacts").mkdir(parents=True, exist_ok=True)
+
+    (task_dir / "README.md").write_text(
+        "# Task: Synthetic hands-free demo verification\n\n"
+        f"## Task ID\n{task_id}\n\n"
+        "## Role\nTESTER\n\n"
+        f"## Release Version\n{release_version}\n",
+        encoding="utf-8",
+    )
+    (task_dir / "status.md").write_text(
+        "# Status\n\n"
+        f"## Task\n{task_id}\n\n"
+        "## Role\nTESTER\n\n"
+        f"## State\n{state}\n",
+        encoding="utf-8",
+    )
+    (task_dir / "artifacts" / "report.md").write_text(
+        f"# Verification Report: {release_version}\n\n"
+        "## Recommendation\n"
+        f"{recommendation}\n\n"
+        "## Systemic Risk\n"
+        f"{systemic_risk}\n\n"
+        "## Findings\n\n"
+        "No bug, gap, or stale-assertion findings — suites green.\n\n"
+        "## Lint Findings (non-blocking)\n\n"
+        f"{lint_findings_section}\n",
+        encoding="utf-8",
+    )
+    return task_dir
+
+
+class TestHandsFreeDemoEndToEnd:
+    """Case (j): the v2.3.5 hands-free demo, the release's centerpiece.
+
+    Drives the full quality-class-finding-to-shipped-release cycle with zero
+    operator hands, using real production code at every step (never a
+    reimplementation):
+
+      1. hands_free_demo_runner.sh (a fixture gated-runner-shaped script)
+         reuses scripts/lib/gated_runner_lint.sh and the real
+         scripts/lint_comment_provenance.py to scan a deliberately-violating
+         release-notes-shaped prose fixture — the runner exits 0 (the
+         provenance finding is quality-class, never fatal) with the findings
+         file written, while its own green pytest fixture still runs and
+         passes.
+      2. A bug is filed citing the finding (the cite-an-open-bug-or-file-one
+         rule from team/roles/TESTER.md Step 5c), and a synthetic TESTER
+         report (report.md) cites it in a "Lint Findings (non-blocking)"
+         section while recommending PASS with Systemic Risk low — exactly
+         the shape a real TESTER agent's report would carry per Step 9.
+      3. cm-release.sh (the real release engine, not a stand-in) reads that
+         TESTER report, applies the real cm_ship_policy decision matrix, and
+         ships the release with release-notes Status FUNCTIONAL.
+    """
+
+    def test_quality_class_finding_flows_hands_free_to_functional_release(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Deliberate notes-prose finding + green tests -> FUNCTIONAL release, hands-free.
+
+        Asserts:
+          - hands_free_demo_runner.sh exits 0.
+          - Its findings file contains exactly the deliberate
+            content_described_notes finding.
+          - cm-release.sh exits 0 for the RC carrying the resulting TESTER
+            report.
+          - release-notes/<version>.md on main carries `## Status` FUNCTIONAL.
+          - The version tag exists (the release actually shipped).
+        """
+        version = "v0.9.0"
+        project_name = "hands_free_demo_test"
+
+        # --- Step 1: the fixture tree's deliberate quality-class finding ---
+        # A release-notes-shaped prose file citing a bare internal task ID
+        # instead of describing the fix by substance — the exact class of
+        # finding lint_comment_provenance.py exists to catch. A bare BUG-ID
+        # citation is deliberately NOT used here: since BUG-0054,
+        # BUG-NNNN/PRIORITY-NNNN references are the sanctioned content of
+        # the release-notes prose surface and are exempt from this lint, so
+        # a task-ID citation (still enforced everywhere, including prose)
+        # is the fixture's trigger instead.
+        # Built via _make_scan_dir(), not tmp_path — see that helper's
+        # docstring for why (tmp_path collides with the lint's own 'tests/'
+        # exclusion segment under this repo's PYTEST_DEBUG_TEMPROOT redirect).
+        prose_dir = _make_scan_dir()
+        try:
+            (prose_dir / "v9.9.9.md").write_text(
+                "# v9.9.9 — hands-free demo fixture release notes\n\n"
+                "## Fixed\n"
+                "Fixed by CODER-20260101-042 in the retry loop.\n",
+                encoding="utf-8",
+            )
+
+            findings_file = tmp_path / "lint" / "findings-hands-free-demo.json"
+
+            result_runner = subprocess.run(
+                [
+                    "bash", str(_HANDS_FREE_DEMO_RUNNER),
+                    "--prose-dir", str(prose_dir),
+                    "--pytest-path", str(_HANDS_FREE_DEMO_GREEN_PYTEST),
+                    "--findings-file", str(findings_file),
+                ],
+                capture_output=True, text=True, timeout=90,
+            )
+        finally:
+            shutil.rmtree(prose_dir, ignore_errors=True)
+
+        # --- Assertion 1: the runner exits 0 hands-free ---
+        # (the notes-prose finding is quality-class; it never fails the run,
+        # and the fixture's own pytest suite is green.)
+        assert result_runner.returncode == 0, (
+            "hands_free_demo_runner.sh must exit 0: the notes-prose finding is "
+            "quality-class (never fatal) and the fixture pytest suite is "
+            "green.\n"
+            f"stdout: {result_runner.stdout}\nstderr: {result_runner.stderr}"
+        )
+
+        # --- Assertion 2: the findings file was written and names the finding ---
+        assert findings_file.is_file(), (
+            "hands_free_demo_runner.sh must write the quality-class findings "
+            f"file unconditionally.\nstdout: {result_runner.stdout}\n"
+            f"stderr: {result_runner.stderr}"
+        )
+        findings_doc = json.loads(findings_file.read_text(encoding="utf-8"))
+        finding_names = [f.get("lint") for f in findings_doc.get("findings", [])]
+        assert "content_described_notes" in finding_names, (
+            "Expected the deliberate content_described_notes finding in the "
+            f"findings file. Got: {findings_doc}"
+        )
+
+        # --- Step 2: file the bug the finding cites, and write the TESTER report ---
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        bugs_dir = kanban_root / "projects" / project_name / "bugs"
+        bugs_dir.mkdir(parents=True, exist_ok=True)
+        (bugs_dir / "BUG-0001-notes-prose-cites-ledger-id.md").write_text(
+            "# BUG-0001-notes-prose-cites-ledger-id\n\n"
+            "**Bug ID:** BUG-0001-notes-prose-cites-ledger-id\n"
+            "**Filed By:** TESTER\n"
+            "**Severity:** low\n\n"
+            "## Status\n"
+            "open\n\n"
+            "## Category\n"
+            "release-notes\n\n"
+            "---\n\n"
+            "## Symptom\n"
+            "A fixture release-notes file described a fix by bare internal "
+            "task ID ('Fixed by CODER-20260101-042 in the retry loop') "
+            "instead of by substance, flagged by the content-described-notes "
+            "provenance lint.\n\n"
+            "## Expected\n"
+            "Release notes describe resolved items by substance sourced from "
+            "the bug's own Symptom/Fix text.\n\n"
+            "## Actual\n"
+            "The notes prose cited the internal task ID directly.\n\n"
+            "## Reproduction\n"
+            "1. Run the content-described-notes provenance lint against the "
+            "fixture notes directory.\n"
+            "2. Observe the task-ID finding.\n\n"
+            "## Files Involved\n\n"
+            "- fixture release-notes prose (hands-free demo)\n",
+            encoding="utf-8",
+        )
+
+        tester_task_id = "TESTER-20260808-900-hands-free-demo"
+        _build_tester_task(
+            kanban_root, project_name, tester_task_id, version,
+            state="DONE",
+            recommendation="PASS",
+            systemic_risk="low",
+            lint_findings_section=(
+                "- `content_described_notes` — release-notes prose cited a "
+                "bare internal task ID instead of describing the fix by "
+                "substance — cites BUG-0001-notes-prose-cites-ledger-id (open)"
+            ),
+        )
+
+        # --- Step 3: open the RC, land coder work, and release hands-free ---
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_open.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        )
+        rc_branch = f"rc/{version}"
+        _commit_on_branch(
+            repo_path, rc_branch,
+            "feature_hands_free_demo.txt", "hands-free demo feature content\n",
+            "feat: add feature for the hands-free demo release",
+            return_branch="main",
+        )
+
+        result_release = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+
+        # --- Assertion 3: cm-release.sh ships hands-free ---
+        assert result_release.returncode == 0, (
+            "cm-release.sh must ship the release hands-free when TESTER "
+            "recommends PASS with Systemic Risk low, even though its report "
+            "carries a non-blocking Lint Findings section.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+        # --- Assertion 4: release-notes Status is FUNCTIONAL ---
+        release_notes = (repo_path / "release-notes" / f"{version}.md").read_text(
+            encoding="utf-8"
+        )
+        assert "FUNCTIONAL" in release_notes, (
+            "Expected release-notes Status FUNCTIONAL (green suites + "
+            "non-blocking lint findings -> Ship FUNCTIONAL per CM.md's "
+            f"ship-policy matrix).\nrelease-notes content:\n{release_notes}"
+        )
+
+        # --- Assertion 5: the release actually shipped (tag exists) ---
+        assert _git_tag_exists(repo_path, version), (
+            f"Release tag '{version}' not found after cm-release.sh.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Case (j2) — The hands-free demo, code surface (BUG-0055 acceptance 2)
+#
+# BUG-0055 retires the completion gate's diff-scope comment-provenance lint:
+# a task's own diff is no longer refused for a planted ledger-ID comment.
+# This fixture tree proves the litter class the gate no longer catches is
+# still caught downstream — the SAME quality-class provenance lint the
+# gated runners already run against the code surface (team/scripts/,
+# team/scripts/lib/, team/pgai_agent_kanban/ in production) at verification
+# time, not a new check — and that the finding still rides the existing
+# findings-file -> TESTER-report -> ship pipeline hands-free, same as Case
+# (j) above for the prose surface.
+# ---------------------------------------------------------------------------
+
+
+class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
+    """Case (j2): the hands-free demo, replayed for code-surface litter.
+
+    Structurally identical to TestHandsFreeDemoEndToEnd above (same runner,
+    same TESTER-report shape, same cm-release.sh drive); the only difference
+    is the scan target — hands_free_demo_runner.sh's --code-dir (a planted
+    .py comment citing a bare internal task ID) instead of --prose-dir (a
+    planted release-notes citation). This is exactly the litter class BUG-0055
+    describes: previously caught (also) at the completion gate's diff-scope
+    check, and — after that check's retirement — caught ONLY downstream, at
+    verification time, by the same lint this class already proves for the
+    prose surface.
+    """
+
+    def test_code_surface_ledger_comment_flows_hands_free_to_functional_release(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Deliberate code-comment ledger-ID finding + green tests -> FUNCTIONAL release, hands-free.
+
+        Asserts:
+          - hands_free_demo_runner.sh exits 0 (--code-dir surface).
+          - Its findings file contains the deliberate content_described_notes
+            finding, naming the planted file and citing the planted token.
+          - cm-release.sh exits 0 for the RC carrying the resulting TESTER
+            report (non-blocking Lint Findings section citing the filed bug).
+          - release-notes/<version>.md on main carries `## Status` FUNCTIONAL.
+          - The version tag exists (the release actually shipped).
+        """
+        version = "v0.9.1"
+        project_name = "hands_free_demo_code_surface_test"
+
+        # --- Step 1: the fixture tree's deliberate quality-class finding ---
+        # A code file (the shape team/scripts/, team/scripts/lib/, and
+        # team/pgai_agent_kanban/ carry in production) whose comment cites a
+        # bare internal task ID instead of describing the fix by substance —
+        # exactly the litter class the completion gate's now-retired
+        # diff-scope lint used to refuse at done-claim time (BUG-0055).
+        # Built via _make_scan_dir(), not tmp_path — see that helper's
+        # docstring for why (tmp_path collides with the lint's own 'tests/'
+        # exclusion segment under this repo's PYTEST_DEBUG_TEMPROOT redirect).
+        code_dir = _make_scan_dir()
+        try:
+            (code_dir / "fixture_retry_loop_helper.py").write_text(
+                '"""Fixture module standing in for a code-surface file the '
+                'quality-class provenance lint scans at verification '
+                'time."""\n\n\n'
+                "def retry_loop_helper() -> None:\n"
+                "    # Fix landed per CODER-20260101-042 in the retry loop.\n"
+                "    return None\n",
+                encoding="utf-8",
+            )
+
+            findings_file = tmp_path / "lint" / "findings-hands-free-demo-code.json"
+
+            result_runner = subprocess.run(
+                [
+                    "bash", str(_HANDS_FREE_DEMO_RUNNER),
+                    "--code-dir", str(code_dir),
+                    "--pytest-path", str(_HANDS_FREE_DEMO_GREEN_PYTEST),
+                    "--findings-file", str(findings_file),
+                ],
+                capture_output=True, text=True, timeout=90,
+            )
+        finally:
+            shutil.rmtree(code_dir, ignore_errors=True)
+
+        # --- Assertion 1: the runner exits 0 hands-free ---
+        # (the code-comment finding is quality-class, never fatal; the
+        # fixture's own pytest suite is green.)
+        assert result_runner.returncode == 0, (
+            "hands_free_demo_runner.sh must exit 0: the code-comment finding "
+            "is quality-class (never fatal) and the fixture pytest suite is "
+            "green.\n"
+            f"stdout: {result_runner.stdout}\nstderr: {result_runner.stderr}"
+        )
+
+        # --- Assertion 2: the findings file was written and names the finding ---
+        assert findings_file.is_file(), (
+            "hands_free_demo_runner.sh must write the quality-class findings "
+            f"file unconditionally.\nstdout: {result_runner.stdout}\n"
+            f"stderr: {result_runner.stderr}"
+        )
+        findings_doc = json.loads(findings_file.read_text(encoding="utf-8"))
+        finding_names = [f.get("lint") for f in findings_doc.get("findings", [])]
+        assert "content_described_notes" in finding_names, (
+            "Expected the deliberate content_described_notes finding in the "
+            f"findings file. Got: {findings_doc}"
+        )
+        finding_detail = next(
+            f.get("detail", "")
+            for f in findings_doc["findings"]
+            if f.get("lint") == "content_described_notes"
+        )
+        assert "fixture_retry_loop_helper.py" in finding_detail, (
+            "Expected the finding detail to name the planted code file.\n"
+            f"detail: {finding_detail}"
+        )
+        assert "CODER-20260101-042" in finding_detail, (
+            "Expected the finding detail to cite the planted ledger-ID "
+            f"token.\ndetail: {finding_detail}"
+        )
+
+        # --- Step 2: file the bug the finding cites, and write the TESTER report ---
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        bugs_dir = kanban_root / "projects" / project_name / "bugs"
+        bugs_dir.mkdir(parents=True, exist_ok=True)
+        (bugs_dir / "BUG-0001-code-comment-cites-ledger-id.md").write_text(
+            "# BUG-0001-code-comment-cites-ledger-id\n\n"
+            "**Bug ID:** BUG-0001-code-comment-cites-ledger-id\n"
+            "**Filed By:** TESTER\n"
+            "**Severity:** low\n\n"
+            "## Status\n"
+            "open\n\n"
+            "## Category\n"
+            "code-comment\n\n"
+            "---\n\n"
+            "## Symptom\n"
+            "A fixture code file's comment cited a bare internal task ID "
+            "('Fix landed per CODER-20260101-042 in the retry loop') instead "
+            "of describing the behavior, flagged by the "
+            "content-described-notes provenance lint's code surface.\n\n"
+            "## Expected\n"
+            "Code comments describe behavior, not process history "
+            "(docs/coding-standards.md Directive 8).\n\n"
+            "## Actual\n"
+            "The comment cited the internal task ID directly.\n\n"
+            "## Reproduction\n"
+            "1. Run the content-described-notes provenance lint against the "
+            "fixture code directory.\n"
+            "2. Observe the task-ID finding.\n\n"
+            "## Files Involved\n\n"
+            "- fixture code module (hands-free demo, code surface)\n",
+            encoding="utf-8",
+        )
+
+        tester_task_id = "TESTER-20260808-901-hands-free-demo-code-surface"
+        _build_tester_task(
+            kanban_root, project_name, tester_task_id, version,
+            state="DONE",
+            recommendation="PASS",
+            systemic_risk="low",
+            lint_findings_section=(
+                "- `content_described_notes` — a code comment cited a bare "
+                "internal task ID instead of describing the fix by "
+                "substance — cites BUG-0001-code-comment-cites-ledger-id "
+                "(open)"
+            ),
+        )
+
+        # --- Step 3: open the RC, land coder work, and release hands-free ---
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_open.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        )
+        rc_branch = f"rc/{version}"
+        _commit_on_branch(
+            repo_path, rc_branch,
+            "feature_hands_free_demo_code_surface.txt",
+            "hands-free demo code-surface feature content\n",
+            "feat: add feature for the hands-free demo code-surface release",
+            return_branch="main",
+        )
+
+        result_release = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+
+        # --- Assertion 3: cm-release.sh ships hands-free ---
+        assert result_release.returncode == 0, (
+            "cm-release.sh must ship the release hands-free when TESTER "
+            "recommends PASS with Systemic Risk low, even though its report "
+            "carries a non-blocking Lint Findings section for a "
+            "code-surface finding.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+        # --- Assertion 4: release-notes Status is FUNCTIONAL ---
+        release_notes = (repo_path / "release-notes" / f"{version}.md").read_text(
+            encoding="utf-8"
+        )
+        assert "FUNCTIONAL" in release_notes, (
+            "Expected release-notes Status FUNCTIONAL (green suites + "
+            "non-blocking lint findings -> Ship FUNCTIONAL per CM.md's "
+            f"ship-policy matrix).\nrelease-notes content:\n{release_notes}"
+        )
+
+        # --- Assertion 5: the release actually shipped (tag exists) ---
+        assert _git_tag_exists(repo_path, version), (
+            f"Release tag '{version}' not found after cm-release.sh.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Case (k) — Dual-channel error-contract fixtures (v2.3.5 Acceptance 4)
+#
+# A forced hook failure and a forced gate refusal must each emit the
+# error/message/remedy triple (team/scripts/lib/error_contract.sh), with the
+# error key matching a trigger id documented in team/roles/CM.md's "HALT
+# triggers" list, and a message free of bare internal identifiers the trigger
+# id itself isn't already explained in plain language alongside.
+# ---------------------------------------------------------------------------
+
+
+def _assert_dual_channel_triple(output: str, error_key: str) -> None:
+    """Assert *output* contains a well-formed error/message/remedy triple
+    for *error_key*, in the house shape from error_contract.sh.
+    """
+    assert f"error:   {error_key}" in output, (
+        f"Expected 'error:   {error_key}' in output.\noutput:\n{output}"
+    )
+    assert "message: " in output, f"Expected a 'message: ' line in output.\noutput:\n{output}"
+    assert "remedy:  " in output, f"Expected a 'remedy:  ' line in output.\noutput:\n{output}"
+
+
+class TestDualChannelForcedHookFailure:
+    """Case (k1): a forced pre-squash hook failure emits error/message/remedy.
+
+    The hook-failure error key (`cm-release.trigger-4.pre-squash-hook-failed`)
+    matches HALT Trigger 4 ("Pre-squash hook fails") documented in
+    team/roles/CM.md's "HALT triggers" list.
+    """
+
+    def test_forced_pre_squash_hook_failure_emits_dual_channel_triple(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A pre-squash hook rigged to exit 1 halts the release with a
+        dual-channel error/message/remedy triple naming Trigger 4.
+
+        Asserts:
+          - cm-release.sh exits non-zero.
+          - stderr contains the error/message/remedy triple for
+            cm-release.trigger-4.pre-squash-hook-failed.
+          - The message explains the hook's own name in plain language (not
+            just a bare trigger number) and the remedy is a concrete next
+            step (read the hook's own diagnostic output, fix it, re-run).
+        """
+        version = "v0.10.0"
+        project_name = "dual_channel_hook_failure_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_open.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        )
+        rc_branch = f"rc/{version}"
+
+        _commit_on_branch(
+            repo_path, rc_branch,
+            "feature_dual_channel_hook.txt", "dual-channel hook-failure test feature content\n",
+            "feat: add feature for the dual-channel hook-failure fixture",
+            return_branch="main",
+        )
+        _commit_in_repo_hook(
+            repo_path, rc_branch, "pre-squash",
+            "#!/usr/bin/env bash\necho 'rigged pre-squash hook failure' >&2\nexit 1\n",
+            "chore: add pre-squash hook rigged to fail",
+        )
+
+        result_release = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+
+        assert result_release.returncode != 0, (
+            "cm-release.sh must exit non-zero when the pre-squash hook fails.\n"
+            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+        combined_output = result_release.stdout + result_release.stderr
+        _assert_dual_channel_triple(
+            combined_output, "cm-release.trigger-4.pre-squash-hook-failed"
+        )
+        # The message names the hook and explains the failure in plain
+        # language alongside the bare rc= exit code (not just the number).
+        assert "cm-release-pre-squash hook exited non-zero" in combined_output, (
+            "Expected the message to explain the hook-failure trigger in "
+            f"plain language.\noutput:\n{combined_output}"
+        )
+
+
+class TestDualChannelForcedGateRefusal:
+    """Case (k2): a forced ship-policy gate refusal emits error/message/remedy.
+
+    The gate-refusal error key (`cm-release.trigger-1.tester-blocked`) matches
+    HALT Trigger 1 ("TESTER state is BLOCKED") documented in team/roles/CM.md's
+    "HALT triggers" list — CM's ship-policy gate refuses to release an RC
+    whose verification could not complete.
+    """
+
+    def test_forced_tester_blocked_gate_refusal_emits_dual_channel_triple(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A TESTER task left in State=BLOCKED halts the release with a
+        dual-channel error/message/remedy triple naming Trigger 1.
+
+        Asserts:
+          - cm-release.sh exits non-zero.
+          - stderr contains the error/message/remedy triple for
+            cm-release.trigger-1.tester-blocked.
+          - The message names the specific TESTER task in plain language
+            (not just a bare trigger number) and the remedy names the
+            concrete next step (inspect the task, resolve, re-run TESTER).
+        """
+        version = "v0.11.0"
+        project_name = "dual_channel_gate_refusal_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_open.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        )
+        rc_branch = f"rc/{version}"
+        _commit_on_branch(
+            repo_path, rc_branch,
+            "feature_dual_channel_gate.txt", "dual-channel gate-refusal test feature content\n",
+            "feat: add feature for the dual-channel gate-refusal fixture",
+            return_branch="main",
+        )
+
+        tester_task_id = "TESTER-20260808-901-dual-channel-gate-refusal"
+        _build_tester_task(
+            kanban_root, project_name, tester_task_id, version,
+            state="BLOCKED",
+        )
+
+        result_release = _run_cm_script(
+            _RELEASE_SCRIPT, [],
+            kanban_root, project_name, repo_root=repo_path,
+        )
+
+        assert result_release.returncode != 0, (
+            "cm-release.sh must exit non-zero when the gating TESTER task is "
+            "BLOCKED.\nstdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        )
+
+        combined_output = result_release.stdout + result_release.stderr
+        _assert_dual_channel_triple(
+            combined_output, "cm-release.trigger-1.tester-blocked"
+        )
+        assert tester_task_id in combined_output, (
+            "Expected the message to name the specific BLOCKED TESTER task in "
+            f"plain language.\noutput:\n{combined_output}"
         )

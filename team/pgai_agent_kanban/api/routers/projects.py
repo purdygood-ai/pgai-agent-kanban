@@ -57,6 +57,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from pgai_agent_kanban.lib.terminal_states import is_terminal as _is_terminal_state
+from pgai_agent_kanban.lib.palette import load_default_palette
 from ..dependencies import warn_unknown_query_params
 from ..board_classifier import (
     get_active_rc_for_project,
@@ -75,22 +76,6 @@ router = APIRouter(tags=["projects"])
 # ---------------------------------------------------------------------------
 
 _AGENT_ROLES = ["pm", "coder", "writer", "tester", "cm"]
-
-# ---------------------------------------------------------------------------
-# Default palette (mirrors board.py / projects.sh)
-# ---------------------------------------------------------------------------
-
-_DEFAULT_PALETTE = [
-    "#378ADD",
-    "#E24B4A",
-    "#639922",
-    "#BA7517",
-    "#7B5EA7",
-    "#2BA0A0",
-    "#C4762A",
-    "#4A7FA5",
-]
-
 
 # ---------------------------------------------------------------------------
 # INI helpers
@@ -189,11 +174,15 @@ def _read_projects_registry(
 def _resolve_color(color: str, registration_index: int) -> str:
     """Return the project color, applying the palette fallback when absent.
 
-    Mirrors the palette-fallback logic in board.py / projects.sh.
+    Mirrors the palette-fallback logic in board.py / team/scripts/lib/
+    projects_cfg.sh.  The palette itself is loaded via the shared, cached
+    pgai_agent_kanban.lib.palette helper -- see that module for the single
+    source of truth this mirrors.
     """
     if color:
         return color
-    return _DEFAULT_PALETTE[registration_index % len(_DEFAULT_PALETTE)]
+    palette = load_default_palette()
+    return palette[registration_index % len(palette)]
 
 
 # ---------------------------------------------------------------------------

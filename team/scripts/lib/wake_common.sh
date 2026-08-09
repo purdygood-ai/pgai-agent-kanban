@@ -94,6 +94,13 @@ source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
 # shellcheck source=scripts/lib/overwatch_protocol.sh
 source "${SCRIPT_DIR}/../lib/overwatch_protocol.sh"
 
+# --- Source the shared dual-channel error-contract emitter ---
+# coder_writer_completion_gate's refusal narrations speak both channels
+# through this one primitive: see team/scripts/lib/error_contract.sh for the
+# house shape.
+# shellcheck source=scripts/lib/error_contract.sh
+source "${SCRIPT_DIR}/../lib/error_contract.sh"
+
 # PGAI_PROJECT_ROOT / PGAI_PROJECT_NAME initial values.
 # These are pre-loop placeholders overridden per-project in wake_common_run.
 # Resolution: honor PGAI_PROJECT_NAME if already set in the environment
@@ -1628,9 +1635,21 @@ handle_working_after_exit() {
   if [[ -f "$log_file" ]]; then
     local _tail_lines
     _tail_lines="$(tail -50 "$log_file" 2>/dev/null || true)"
-    if echo "$_tail_lines" | grep -qiE "$_DETECT_RE"; then
+    # Here-string (<<<), not `echo ... | grep`: piping into `grep -q` forks a
+    # separate writer process whose write() can race grep's early exit-on-match.
+    # Under host CPU contention, grep -q closing its read end mid-write can
+    # deliver SIGPIPE to the echo side; with `set -o pipefail` (active in every
+    # caller of this function) the pipeline's reported exit status becomes the
+    # echo side's non-zero SIGPIPE code instead of grep's real (successful)
+    # match, so the `if` silently takes the no-match branch even though the
+    # tail content plainly contains the signature. A here-string hands grep its
+    # input via a pre-written temp fd before grep execs, so there is no writer
+    # process and no such race. Measured a nonzero false-negative rate for the
+    # piped form under host CPU contention versus zero failures for the
+    # here-string form across an equivalent number of trials.
+    if grep -qiE "$_DETECT_RE" <<< "$_tail_lines"; then
       _transient_matched=true
-      _transient_sig="$(echo "$_tail_lines" | grep -iEo "$_EXTRACT_RE" \
+      _transient_sig="$(grep -iEo "$_EXTRACT_RE" <<< "$_tail_lines" \
         | tail -1 | cut -c1-80 || true)"
       [[ -z "$_transient_sig" ]] && _transient_sig="transient provider error"
     fi
@@ -1685,6 +1704,191 @@ handle_working_after_exit() {
 
   normalize_status_file "$task_status"
   printf 'BLOCKED\n'
+}
+
+# ---------------------------------------------------------------------------
+# coder_writer_completion_gate <task_id> <task_status> <subagent>
+#                               <feature_branch> <source_branch> <worktree_path>
+#
+# Mechanical completion gate for CODER/WRITER DONE-claims. Called by both
+# claude.sh and codex.sh immediately after final_state is read from the
+# task's status.md, BEFORE the DONE transition is accepted anywhere else in
+# wake reconciliation (mark_backlog, the on-BLOCK overwatch trigger, the
+# training-corpus copy, worktree teardown). Verifies the completion contract
+# mechanically instead of trusting the agent's own done-claim:
+#
+#   1. Merge check — the task's feature branch must be merged into its
+#      target (source/RC) branch. Checked via `git merge-base --is-ancestor`
+#      when the feature branch ref still exists (the common "agent skipped
+#      the merge" failure mode this gate exists to catch). When the ref is
+#      already gone, the CODER/WRITER procedure's only deletion path is
+#      `git branch -d` (never -D — see roles/CODER.md "Step 8"), which
+#      refuses to delete a branch that is not already merged. A missing ref
+#      is trusted as "merged" in either of two ways:
+#        (a) the worktree's current HEAD is the expected source branch —
+#            the state a plain `-d` performed IN this worktree requires; or
+#        (b) merge-evidence read from the source branch's own history,
+#            independent of this worktree's HEAD state — either a merge
+#            commit naming the feature branch appears in the source
+#            branch's recent log (the `--no-ff` procedure in CODER.md/
+#            WRITER.md always produces one), or this worktree's current
+#            HEAD commit is itself an ancestor of the source branch.
+#      (b) exists because git allows a branch checked out in only one
+#      worktree at a time, so when a
+#      sibling task's worktree legitimately holds the source/RC branch,
+#      this task's own merge --no-ff necessarily happens in THAT sibling
+#      worktree, not here. This worktree is then merely detached so its
+#      feature-branch ref can be deleted — its HEAD never becomes the
+#      source branch, even though the merge is real and complete. Evidence
+#      is read from the source branch itself (shared across every worktree
+#      of the same repository) so the verdict does not depend on which
+#      worktree happened to perform the merge.
+#   2. Cleanliness check — the task worktree must have no uncommitted
+#      changes at done-claim time (`git status --porcelain`).
+#
+# Both checks are delivery checks — they confirm the work actually landed on
+# the source branch and that nothing was left uncommitted; that is the
+# gate's whole job. A third check, a diff-scope comment-provenance lint, ran
+# here through v2.3.10 and is retired: by gate time the merge has usually
+# already landed and the feature branch is already deleted, so a
+# wording-only finding at this point cost an operator reword-and-reset for
+# litter the TESTER-time path already catches. The same litter class is
+# still caught — the gated runners' quality-class provenance lint
+# (`lint_comment_provenance.py`, tree-wide, no `--diff-scope`) still scans
+# every release, its findings still ride the non-blocking findings file,
+# and TESTER still cites-or-files the low-severity bug. Detection did not
+# regress; only the expensive, already-redundant stopping point did.
+#
+# Scope: only CODER/WRITER subagents route through this gate (the call site
+# in each wake provider script only invokes it for those two). Tasks with no
+# worktree (workflow git_mode=none, e.g. the document workflow) pass
+# trivially — there is nothing to verify. CM/TESTER/PM completion semantics
+# are untouched; this function is never called for those roles.
+#
+# On refusal, rewrites task_status to BLOCKED with a prescriptive remedy
+# naming both branches (merge failure) or the dirty paths (cleanliness
+# failure), sets Needs Human=yes, and echoes "BLOCKED". On pass, the status
+# file is untouched and the function echoes "DONE" — byte-identical to the
+# final_state the caller already had, so a properly merged, clean
+# completion adds zero friction to the golden path.
+#
+# Narration: every outcome (pass or either refusal) is logged as exactly one
+# line via log(), so intermittent agent omissions become a visible pattern
+# in the wake log rather than a downstream surprise. Each log() call here is
+# redirected to /dev/null at the call site (log() tees its message to both
+# LOG_FILE and its own stdout — the ONE legitimate way to keep the durable
+# log write while keeping this function's own stdout clean for the caller's
+# `final_state="$(coder_writer_completion_gate ...)"` command substitution).
+# ---------------------------------------------------------------------------
+coder_writer_completion_gate() {
+  local task_id="${1:-}"
+  local task_status="${2:-}"
+  local subagent="${3:-}"
+  local feature_branch="${4:-}"
+  local source_branch="${5:-}"
+  local worktree_path="${6:-}"
+
+  if [[ "$subagent" != "coder" && "$subagent" != "writer" ]]; then
+    printf 'DONE\n'
+    return 0
+  fi
+
+  if [[ -z "$worktree_path" || -z "$feature_branch" || -z "$source_branch" ]]; then
+    log "completion gate: task ${task_id} has no git worktree/branch to verify (workflow git_mode=none) — pass trivially" >/dev/null
+    printf 'DONE\n'
+    return 0
+  fi
+
+  if [[ ! -d "$worktree_path" ]]; then
+    log "completion gate: task ${task_id} WARNING: worktree ${worktree_path} not found at gate time — cannot verify; passing (best-effort; gate must run before worktree teardown)" >/dev/null
+    printf 'DONE\n'
+    return 0
+  fi
+
+  # --- Merge check ---
+  local merge_ok=false
+  local feature_ref_exists=false
+  local current_head=""
+  local merge_evidence=""
+  if git -C "$worktree_path" rev-parse --verify --quiet "$feature_branch" >/dev/null 2>&1; then
+    feature_ref_exists=true
+    if git -C "$worktree_path" merge-base --is-ancestor "$feature_branch" "$source_branch" 2>/dev/null; then
+      merge_ok=true
+    fi
+  else
+    current_head="$(git -C "$worktree_path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    if [[ "$current_head" == "$source_branch" ]]; then
+      merge_ok=true
+    else
+      # Merge-evidence fallback. The ref is gone AND this
+      # worktree's HEAD is not the source branch — the shape produced when
+      # the merge legitimately happened in a SIBLING worktree that held the
+      # source/RC branch at merge time (git allows a branch checked out in
+      # only one worktree, so this worktree's own merge --no-ff was
+      # impossible here). Read evidence from the source branch's own
+      # history instead, which is shared across every worktree of the same
+      # repository regardless of which one performed the merge.
+      local _merge_log_hits
+      _merge_log_hits="$(git -C "$worktree_path" log --format=%s -50 "$source_branch" 2>/dev/null | grep -cF -- "$feature_branch" || true)"
+      if [[ "${_merge_log_hits:-0}" -gt 0 ]]; then
+        merge_ok=true
+        merge_evidence="merge commit naming ${feature_branch} found in ${source_branch}'s recent history"
+      else
+        local _worktree_head_commit
+        _worktree_head_commit="$(git -C "$worktree_path" rev-parse --verify --quiet HEAD 2>/dev/null || true)"
+        if [[ -n "$_worktree_head_commit" ]] && git -C "$worktree_path" merge-base --is-ancestor "$_worktree_head_commit" "$source_branch" 2>/dev/null; then
+          merge_ok=true
+          merge_evidence="worktree's current commit ${_worktree_head_commit} is an ancestor of ${source_branch}"
+        fi
+      fi
+    fi
+  fi
+
+  if [[ "$merge_ok" != "true" ]]; then
+    log "completion gate: task ${task_id} REFUSED — ${feature_branch} is not merged into ${source_branch}" >/dev/null
+    if [[ "$feature_ref_exists" == "true" ]]; then
+      set_block "$task_status" "Blockers" "$(pgai_format_error_contract \
+        "wake.completion-gate.merge-not-found" \
+        "The completion gate refused this DONE-claim because ${feature_branch} is not merged into ${source_branch} — the work is intact on the feature branch, but the merge step (CODER/WRITER PHASE 2 Step 7) never ran." \
+        "Reset this task; on re-entry the agent merges and re-completes (or an operator can run: git checkout ${source_branch} && git merge --no-ff ${feature_branch}, then reset the task).")"
+    else
+      set_block "$task_status" "Blockers" "$(pgai_format_error_contract \
+        "wake.completion-gate.merge-evidence-not-found" \
+        "The completion gate refused this DONE-claim because ${feature_branch} no longer exists and the worktree at ${worktree_path} is not on ${source_branch} (HEAD=${current_head:-detached}) — the merge cannot be confirmed." \
+        "A human must inspect ${worktree_path} for the feature branch's work (check 'git reflog' / dangling commits if the branch was deleted without merging), then reset this task.")"
+    fi
+    set_state "$task_status" "BLOCKED"
+    set_block "$task_status" "Needs Human" "yes"
+    normalize_status_file "$task_status"
+    printf 'BLOCKED\n'
+    return 0
+  fi
+
+  # --- Cleanliness check ---
+  local dirty_status
+  dirty_status="$(git -C "$worktree_path" status --porcelain 2>/dev/null || true)"
+  if [[ -n "$dirty_status" ]]; then
+    local dirty_paths_oneline
+    dirty_paths_oneline="$(printf '%s' "$dirty_status" | tr '\n' ';' | sed 's/;$//')"
+    log "completion gate: task ${task_id} REFUSED — worktree ${worktree_path} has uncommitted changes" >/dev/null
+    set_state "$task_status" "BLOCKED"
+    set_block "$task_status" "Blockers" "$(pgai_format_error_contract \
+      "wake.completion-gate.dirty-worktree" \
+      "The completion gate refused this DONE-claim because the task worktree ${worktree_path} has uncommitted changes at done-claim time (dirty paths: ${dirty_paths_oneline})." \
+      "Reset this task; on re-entry the agent commits or discards the changes and re-completes (or an operator can inspect ${worktree_path}, commit or discard, then reset the task). The worktree is retained (not torn down) so the dirty paths remain inspectable.")"
+    set_block "$task_status" "Needs Human" "yes"
+    normalize_status_file "$task_status"
+    printf 'BLOCKED\n'
+    return 0
+  fi
+
+  if [[ -n "$merge_evidence" ]]; then
+    log "completion gate: task ${task_id} PASS — ${feature_branch} merged into ${source_branch} via merge-evidence fallback (${merge_evidence}), worktree clean" >/dev/null
+  else
+    log "completion gate: task ${task_id} PASS — ${feature_branch} merged into ${source_branch}, worktree clean" >/dev/null
+  fi
+  printf 'DONE\n'
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -2216,6 +2420,48 @@ _check_project_dev_tree() {
 }
 
 # ---------------------------------------------------------------------------
+# run_overwatch_resolution_stage <project_name>
+# Invokes pgai_agent_kanban.overwatch.resolution_stage for the named
+# project when AGENT is overwatch. No-op for every other agent.
+#
+# This is the ONE call site both wake provider siblings (claude.sh, codex.sh)
+# invoke from run_project_chain, once per project, on every OVERWATCH firing
+# — including the firing the on-BLOCK trigger produces within seconds of a
+# fresh BLOCKED task (see "on-BLOCK overwatch trigger" below and
+# team/roles/OVERWATCH.md "Autonomous Block Resolution (v2.0.0)"). The stage
+# itself decides whether there is anything to resolve; calling it on every
+# firing (including ordinary firings with no ship-policy HALT present) is
+# safe and cheap — it declines silently when there is nothing to evaluate.
+#
+# This call site is also where a project-scope HALT reaches the resolution
+# stage's own classification (see the wake-loop carve-out comment at the
+# per-project HALT fast-exit above): the outer loop lets an overwatch firing
+# through despite a projects/<name>/HALT file so this call can classify it
+# as ship-policy or operator-authored and narrate the matching decline
+# itself, rather than the project being skipped unnarrated by the coarser
+# gate before this ever runs.
+#
+# Runs with the per-project repo flock already held by the caller (see the
+# "Per-project repo flock" block above this function's call site), so the
+# drill's git-touching step (cm-cancel-rc.sh) never races another agent's
+# git operations on the same dev tree.
+#
+# Failure is logged and swallowed — a broken resolution stage must never
+# abort the wake loop or prevent OVERWATCH's own task processing from
+# running; the on-BLOCK trigger's degrade-to-next-hour-coverage guarantee
+# (see OVERWATCH.md "Fire-and-forget") extends to this stage as well.
+# ---------------------------------------------------------------------------
+run_overwatch_resolution_stage() {
+  local project_name="$1"
+  [[ "$AGENT" == "overwatch" ]] || return 0
+  mkdir -p "${KANBAN_ROOT}/logs" 2>/dev/null || true
+  pp_run_ops pgai_agent_kanban.overwatch.resolution_stage \
+    --project "$project_name" --kanban-root "$KANBAN_ROOT" \
+    >>"${KANBAN_ROOT}/logs/overwatch-resolution-stage.log" 2>&1 \
+    || log "project ${project_name}: overwatch resolution stage exited non-zero (see logs/overwatch-resolution-stage.log)"
+}
+
+# ---------------------------------------------------------------------------
 # wake_common_preflight
 # Script-level preflight checks. Called by the wake script after sourcing
 # this file and the provider lib, before wake_common_run.
@@ -2266,9 +2512,24 @@ wake_common_run() {
     # This honors an ALREADY-promoted HALT file so the wake exits fast without
     # spinning up the agent.  It does NOT evaluate HALT-AFTER drain/promotion —
     # that decision is made AFTER the agent's work loop (see below).
+    #
+    # Overwatch carve-out: every other agent is fully skipped here, unchanged.
+    # Overwatch alone is let through to run_project_chain so
+    # run_overwatch_resolution_stage can classify the file itself (a
+    # ship-policy HALT vs. an operator-authored one) and narrate its own
+    # decline reason instead of being shadowed by this coarser gate.
+    # run_project_chain still refuses to do any further task processing for a
+    # halted project once the resolution stage has had its look — see the
+    # per-project HALT check placed immediately after run_overwatch_resolution_stage
+    # in run_project_chain (claude.sh / codex.sh) — so this carve-out narrows
+    # only "does the resolution stage get to classify the HALT", never "does
+    # a halted project still get worked".
     if pp_project_halted "$_iter_project" 2>/dev/null; then
-      log "project ${_iter_project}: per-project HALT present, skipping"
-      continue
+      if [[ "$AGENT" != "overwatch" ]]; then
+        log "project ${_iter_project}: per-project HALT present, skipping"
+        continue
+      fi
+      log "project ${_iter_project}: per-project HALT present; overwatch carve-out — entering chain so the resolution stage can classify it"
     fi
 
     export PGAI_PROJECT_ROOT="$(pp_project_root "$_iter_project")"

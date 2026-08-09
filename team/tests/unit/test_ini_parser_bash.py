@@ -50,91 +50,59 @@ def _write_ini_file(path: pathlib.Path, content: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_read_ini_returns_value_for_known_key(tmp_path: pathlib.Path) -> None:
-    """read_ini echoes the value for a key that exists in the specified section."""
+@pytest.mark.parametrize(
+    "file_content, section, key, extra_args, expected",
+    [
+        ("[section]\nkey = hello\n", "section", "key", "", "hello"),  # known key
+        (
+            "[section]\nkey =   spaced value   \n",
+            "section",
+            "key",
+            "",
+            "spaced value",
+        ),  # strips leading/trailing whitespace from value
+        ("[section]\nother_key = value\n", "section", "missing_key", "", ""),  # absent key
+        (
+            "[section]\nother = x\n",
+            "section",
+            "missing_key",
+            "fallback",
+            "fallback",
+        ),  # absent key, supplied default echoed
+        ("[other_section]\nkey = val\n", "missing_section", "key", "", ""),  # absent section
+        ("[section]\nkey = a=b=c\n", "section", "key", "", "a=b=c"),  # '=' preserved in value
+        (
+            "[section]\n# this is a comment\nkey = real_value\n",
+            "section",
+            "key",
+            "",
+            "real_value",
+        ),  # '#' comment lines ignored
+        (
+            "[section]\n; another comment style\nkey = value\n",
+            "section",
+            "key",
+            "",
+            "value",
+        ),  # ';' comment lines ignored
+        ("[project.foo]\nbar = baz\n", "project.foo", "bar", "", "baz"),  # dotted section names
+    ],
+)
+def test_read_ini(
+    tmp_path: pathlib.Path,
+    file_content: str,
+    section: str,
+    key: str,
+    extra_args: str,
+    expected: str,
+) -> None:
+    """read_ini resolves values by section/key, honoring comments, dots, '=' in values, and defaults."""
     cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[section]\nkey = hello\n")
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' section key"))
+    _write_ini_file(cfg, file_content)
+    args = f"'{cfg}' {section} {key}" + (f" {extra_args}" if extra_args else "")
+    result = run_bash(tmp_path, _source(f"read_ini {args}"))
     assert result.returncode == 0
-    assert result.stdout.strip() == "hello"
-
-
-def test_read_ini_strips_whitespace_from_value(tmp_path: pathlib.Path) -> None:
-    """read_ini strips leading and trailing whitespace from values."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[section]\nkey =   spaced value   \n")
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' section key"))
-    assert result.returncode == 0
-    assert result.stdout.strip() == "spaced value"
-
-
-def test_read_ini_returns_empty_for_absent_key(tmp_path: pathlib.Path) -> None:
-    """read_ini echoes empty string when the key is not found in the section."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[section]\nother_key = value\n")
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' section missing_key"))
-    assert result.returncode == 0
-    assert result.stdout.strip() == ""
-
-
-def test_read_ini_returns_default_for_absent_key(tmp_path: pathlib.Path) -> None:
-    """read_ini echoes the supplied default when the key is not found."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[section]\nother = x\n")
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' section missing_key fallback"))
-    assert result.returncode == 0
-    assert result.stdout.strip() == "fallback"
-
-
-def test_read_ini_returns_empty_for_absent_section(tmp_path: pathlib.Path) -> None:
-    """read_ini echoes empty string when the section does not exist."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[other_section]\nkey = val\n")
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' missing_section key"))
-    assert result.returncode == 0
-    assert result.stdout.strip() == ""
-
-
-def test_read_ini_handles_value_containing_equals(tmp_path: pathlib.Path) -> None:
-    """read_ini preserves '=' characters within the value."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[section]\nkey = a=b=c\n")
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' section key"))
-    assert result.returncode == 0
-    assert result.stdout.strip() == "a=b=c"
-
-
-def test_read_ini_ignores_hash_comment_lines(tmp_path: pathlib.Path) -> None:
-    """read_ini ignores lines beginning with '#' as comments."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(
-        cfg,
-        "[section]\n# this is a comment\nkey = real_value\n",
-    )
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' section key"))
-    assert result.returncode == 0
-    assert result.stdout.strip() == "real_value"
-
-
-def test_read_ini_ignores_semicolon_comment_lines(tmp_path: pathlib.Path) -> None:
-    """read_ini ignores lines beginning with ';' as comments."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(
-        cfg,
-        "[section]\n; another comment style\nkey = value\n",
-    )
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' section key"))
-    assert result.returncode == 0
-    assert result.stdout.strip() == "value"
-
-
-def test_read_ini_handles_section_names_with_dots(tmp_path: pathlib.Path) -> None:
-    """read_ini resolves keys under section names containing dots."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[project.foo]\nbar = baz\n")
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' project.foo bar"))
-    assert result.returncode == 0
-    assert result.stdout.strip() == "baz"
+    assert result.stdout.strip() == expected
 
 
 def test_read_ini_missing_file_returns_default_not_error(tmp_path: pathlib.Path) -> None:
@@ -175,31 +143,54 @@ def test_read_ini_blank_value_is_distinguishable_from_missing(
 # ---------------------------------------------------------------------------
 
 
-def test_write_ini_updates_existing_key(tmp_path: pathlib.Path) -> None:
-    """write_ini replaces the value of an existing key in-place."""
+@pytest.mark.parametrize(
+    "initial_content, write_section, write_key, write_value, read_section, read_key, expected",
+    [
+        (
+            "[section]\nkey = old_value\n",
+            "section",
+            "key",
+            "new_value",
+            "section",
+            "key",
+            "new_value",
+        ),  # replaces existing key's value in-place
+        (
+            "[section]\nexisting = val\n",
+            "section",
+            "new_key",
+            "inserted",
+            "section",
+            "new_key",
+            "inserted",
+        ),  # inserts a new key under an existing section
+        (
+            "[other]\nkey = val\n",
+            "newsection",
+            "newkey",
+            "newvalue",
+            "newsection",
+            "newkey",
+            "newvalue",
+        ),  # appends a new [section] and key when the section is absent
+    ],
+)
+def test_write_ini(
+    tmp_path: pathlib.Path,
+    initial_content: str,
+    write_section: str,
+    write_key: str,
+    write_value: str,
+    read_section: str,
+    read_key: str,
+    expected: str,
+) -> None:
+    """write_ini updates existing keys, adds new keys, and creates sections as needed."""
     cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[section]\nkey = old_value\n")
-    run_bash(tmp_path, _source(f"write_ini '{cfg}' section key new_value"))
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' section key"))
-    assert result.stdout.strip() == "new_value"
-
-
-def test_write_ini_adds_new_key_to_existing_section(tmp_path: pathlib.Path) -> None:
-    """write_ini inserts a new key under an existing section."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[section]\nexisting = val\n")
-    run_bash(tmp_path, _source(f"write_ini '{cfg}' section new_key inserted"))
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' section new_key"))
-    assert result.stdout.strip() == "inserted"
-
-
-def test_write_ini_creates_section_when_absent(tmp_path: pathlib.Path) -> None:
-    """write_ini appends a new [section] and key when the section is absent."""
-    cfg = tmp_path / "test.cfg"
-    _write_ini_file(cfg, "[other]\nkey = val\n")
-    run_bash(tmp_path, _source(f"write_ini '{cfg}' newsection newkey newvalue"))
-    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' newsection newkey"))
-    assert result.stdout.strip() == "newvalue"
+    _write_ini_file(cfg, initial_content)
+    run_bash(tmp_path, _source(f"write_ini '{cfg}' {write_section} {write_key} {write_value}"))
+    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' {read_section} {read_key}"))
+    assert result.stdout.strip() == expected
 
 
 def test_write_ini_creates_file_when_absent(tmp_path: pathlib.Path) -> None:

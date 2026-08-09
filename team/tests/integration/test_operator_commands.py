@@ -61,6 +61,7 @@ _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent   # team/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 
 _SHOW_SCRIPT = _SCRIPTS_DIR / "show.sh"
+_SHOW_README_SCRIPT = _SCRIPTS_DIR / "show-readme.sh"
 _RESET_SCRIPT = _SCRIPTS_DIR / "reset.sh"
 _CLOSE_SCRIPT = _SCRIPTS_DIR / "close.sh"
 _WONTDO_SCRIPT = _SCRIPTS_DIR / "wontdo.sh"
@@ -443,6 +444,153 @@ class TestShowCommand:
         assert result.returncode == 3, (
             f"Expected exit code 3 (not found) for unknown key; got {result.returncode}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: show-readme command
+# ---------------------------------------------------------------------------
+
+
+class TestShowReadmeCommand:
+    """show-readme.sh emits a task's README.md to stdout without mutating state.
+
+    Task-key-only sibling of show.sh: same resolution ergonomics and
+    not-found shape, but refuses ledger keys (bug/priority/requirement)
+    instead of emitting their document.
+    """
+
+    def test_show_readme_emits_task_readme_file(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """show-readme.sh prints the task's README.md verbatim to stdout.
+
+        Output must match the on-disk README.md byte-for-byte, and the file
+        must not be mutated by the read.
+        """
+        root = two_project_root
+        task_id = "CODER-20260628-T003-show-readme-script-test"
+        task_dir = _build_task_folder(root, "project_a", task_id)
+        original_readme = (task_dir / "README.md").read_text(encoding="utf-8")
+
+        result = _run_operator(
+            _SHOW_README_SCRIPT,
+            ["--project", "project_a", "--key", task_id],
+            root,
+        )
+
+        assert result.returncode == 0, (
+            f"show-readme.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert result.stdout == original_readme, (
+            "show-readme.sh output did not match tasks/<key>/README.md byte-for-byte.\n"
+            f"stdout: {result.stdout!r}\nexpected: {original_readme!r}"
+        )
+        assert (task_dir / "README.md").read_text(encoding="utf-8") == original_readme, (
+            "show-readme.sh must not modify README.md (read-only command)."
+        )
+
+    def test_show_readme_resolves_prefix_key(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """show-readme.sh resolves a prefix key the same way show.sh does.
+
+        A shortened key (agent+date+seq) that unambiguously matches one task
+        directory must resolve to that task, mirroring show.sh's prefix-glob
+        resolution behavior.
+        """
+        root = two_project_root
+        task_id = "CODER-20260628-T004-show-readme-prefix-test"
+        task_dir = _build_task_folder(root, "project_a", task_id)
+        original_readme = (task_dir / "README.md").read_text(encoding="utf-8")
+        prefix_key = "CODER-20260628-T004"
+
+        result = _run_operator(
+            _SHOW_README_SCRIPT,
+            ["--project", "project_a", "--key", prefix_key],
+            root,
+        )
+
+        assert result.returncode == 0, (
+            f"show-readme.sh exited non-zero for prefix key.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert result.stdout == original_readme, (
+            "show-readme.sh prefix resolution did not emit the matching task's README.md.\n"
+            f"stdout: {result.stdout!r}\nexpected: {original_readme!r}"
+        )
+
+    def test_show_readme_refuses_ledger_key(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """show-readme.sh refuses a bug (ledger) key with a prescriptive message.
+
+        Task keys only: a bug/priority/requirement key must not be emitted.
+        Instead show-readme.sh prints a prescriptive refusal line naming the
+        key and directing the operator to show.sh, and exits non-zero.
+        """
+        root = two_project_root
+        _build_bug_file(
+            root, "project_a", bug_id="BUG-0101", slug="show-readme-refusal-test"
+        )
+        bug_key = "BUG-0101-show-readme-refusal-test"
+
+        result = _run_operator(
+            _SHOW_README_SCRIPT,
+            ["--project", "project_a", "--key", bug_key],
+            root,
+        )
+
+        assert result.returncode != 0, (
+            f"show-readme.sh must exit non-zero for a ledger key.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert bug_key in result.stderr, (
+            f"Expected the refusal message to name the key {bug_key!r}.\n"
+            f"stderr: {result.stderr}"
+        )
+        assert "show.sh" in result.stderr, (
+            "Expected the refusal message to direct the operator to show.sh.\n"
+            f"stderr: {result.stderr}"
+        )
+        assert result.stdout == "", (
+            f"show-readme.sh must not emit bug content on refusal.\nstdout: {result.stdout}"
+        )
+
+    def test_show_readme_returns_not_found_for_unknown_key(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """show-readme.sh exits with the same not-found shape as show.sh.
+
+        A key that does not match any task, bug, priority, or requirement
+        must result in exit code 3 and the standard not-found message.
+        """
+        root = two_project_root
+
+        result = _run_operator(
+            _SHOW_README_SCRIPT,
+            ["--project", "project_a", "--key", "CODER-99999999-MISSING-TASK"],
+            root,
+        )
+
+        assert result.returncode == 3, (
+            f"Expected exit code 3 (not found) for unknown key; got {result.returncode}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_show_readme_help_exits_zero(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """show-readme.sh --help prints usage and exits 0 without requiring flags."""
+        root = two_project_root
+
+        result = _run_operator(_SHOW_README_SCRIPT, ["--help"], root)
+
+        assert result.returncode == 0, (
+            f"show-readme.sh --help must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "Usage:" in result.stdout, (
+            f"Expected a Usage: line in --help output.\nstdout: {result.stdout}"
         )
 
 
@@ -1566,23 +1714,48 @@ class TestScrubbedEnvCensusCloser:
     confirms that the failure mode from BUG-0082 is fixed and remains fixed.
     """
 
+    @pytest.mark.parametrize(
+        "task_id, foreign_cwd_name, failure_context",
+        [
+            pytest.param(
+                "CODER-20260628-T070-close-item-scrubbed-env",
+                "census_closer_scrubbed_cwd",
+                "This is the BUG-0082 production failure shape: python3 -m pgai_agent_kanban.ops "
+                "must be cwd-independent.  Ensure all call sites use pp_run_ops.",
+                id="close_item_via_pp_run_ops_from_scrubbed_env",
+            ),
+            pytest.param(
+                "CODER-20260628-T071-no-pythonpath-needed",
+                "no_pythonpath_cwd",
+                "pp_run_ops must not require PYTHONPATH to be set by the caller.",
+                id="close_item_does_not_require_pythonpath_in_environment",
+            ),
+        ],
+    )
     def test_close_item_via_pp_run_ops_from_scrubbed_env(
         self,
         two_project_root: pathlib.Path,
         tmp_path: pathlib.Path,
+        task_id: str,
+        foreign_cwd_name: str,
+        failure_context: str,
     ) -> None:
         """close_item succeeds when PYTHONPATH is absent and cwd is foreign.
 
         This is the canonical scrubbed-env + foreign-cwd regression: the exact
         environment shape that caused the production BUG-0082 failure.  close.sh
         routes through pp_run_ops, which sets PYTHONPATH correctly from its own
-        file location regardless of the caller's environment.
+        file location regardless of the caller's environment.  Two independent
+        invocations exercise this: one framed as the BUG-0082 production
+        reproduction, one framed as the "no PYTHONPATH required" corollary
+        (pp_run_ops derives the own-tree root from BASH_SOURCE and constructs
+        PYTHONPATH internally — the calling environment must not need to
+        provide PYTHONPATH at all).
         """
         root = two_project_root
-        task_id = "CODER-20260628-T070-close-item-scrubbed-env"
         task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
 
-        foreign_cwd = tmp_path / "census_closer_scrubbed_cwd"
+        foreign_cwd = tmp_path / foreign_cwd_name
         foreign_cwd.mkdir(parents=True, exist_ok=True)
 
         result = _run_operator_scrubbed_foreign_cwd(
@@ -1595,46 +1768,9 @@ class TestScrubbedEnvCensusCloser:
         assert result.returncode == 0, (
             f"close_item via pp_run_ops failed under scrubbed env + foreign cwd.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}\n"
-            "This is the BUG-0082 production failure shape: python3 -m pgai_agent_kanban.ops "
-            "must be cwd-independent.  Ensure all call sites use pp_run_ops."
+            f"{failure_context}"
         )
         assert _read_status_state(task_dir) == "DONE", (
             f"Task must be DONE after close_item via pp_run_ops under scrubbed env.\n"
-            f"status.md:\n{(task_dir / 'status.md').read_text(encoding='utf-8')}"
-        )
-
-    def test_close_item_does_not_require_pythonpath_in_environment(
-        self,
-        two_project_root: pathlib.Path,
-        tmp_path: pathlib.Path,
-    ) -> None:
-        """close_item succeeds with PYTHONPATH absent from the environment.
-
-        pp_run_ops derives the own-tree root from BASH_SOURCE and constructs
-        PYTHONPATH internally.  The calling environment must not need to provide
-        PYTHONPATH at all for close_item to succeed.
-        """
-        root = two_project_root
-        task_id = "CODER-20260628-T071-no-pythonpath-needed"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
-
-        foreign_cwd = tmp_path / "no_pythonpath_cwd"
-        foreign_cwd.mkdir(parents=True, exist_ok=True)
-
-        # Explicitly verify PYTHONPATH is absent (scrubbed env has only HOME/PATH/root).
-        result = _run_operator_scrubbed_foreign_cwd(
-            _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
-            root,
-            foreign_cwd,
-        )
-
-        assert result.returncode == 0, (
-            f"close_item failed when PYTHONPATH was absent from environment.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}\n"
-            "pp_run_ops must not require PYTHONPATH to be set by the caller."
-        )
-        assert _read_status_state(task_dir) == "DONE", (
-            "Task must be DONE; close_item must work without caller-provided PYTHONPATH.\n"
             f"status.md:\n{(task_dir / 'status.md').read_text(encoding='utf-8')}"
         )

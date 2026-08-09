@@ -178,45 +178,32 @@ def test_get_status_fields_handles_typical_coder_status(tmp_path: pathlib.Path) 
 # ---------------------------------------------------------------------------
 
 
-def test_is_queue_entry_recognizes_unchecked_dash_format(
-) -> None:
-    """is_queue_entry returns True for '- [ ] TASK-ID' format."""
-    assert is_queue_entry("- [ ] CODER-20260101-001-my-task")
+@pytest.mark.parametrize(
+    "line",
+    [
+        "- [ ] CODER-20260101-001-my-task",  # unchecked dash format
+        "- [x] CODER-20260101-001-my-task",  # checked dash format
+        "* [ ] WRITER-20260101-002-write-docs",  # asterisk prefix
+        "  - [ ] PM-20260101-003-my-task",  # leading whitespace
+        "- [ ] CODER-20260101-001-my-task  # optional note",  # trailing text
+    ],
+)
+def test_is_queue_entry_recognizes_valid_forms(line: str) -> None:
+    """is_queue_entry recognizes dash/asterisk-prefixed checkbox lines regardless of check state, indent, or trailing text."""
+    assert is_queue_entry(line)
 
 
-def test_is_queue_entry_recognizes_checked_dash_format() -> None:
-    """is_queue_entry returns True for '- [x] TASK-ID' format."""
-    assert is_queue_entry("- [x] CODER-20260101-001-my-task")
-
-
-def test_is_queue_entry_recognizes_asterisk_prefix() -> None:
-    """is_queue_entry returns True for '* [ ] TASK-ID' format."""
-    assert is_queue_entry("* [ ] WRITER-20260101-002-write-docs")
-
-
-def test_is_queue_entry_accepts_leading_whitespace() -> None:
-    """is_queue_entry returns True when the line has leading spaces."""
-    assert is_queue_entry("  - [ ] PM-20260101-003-my-task")
-
-
-def test_is_queue_entry_rejects_plain_text_line() -> None:
-    """is_queue_entry returns False for a plain prose line."""
-    assert not is_queue_entry("This is just a heading or note.")
-
-
-def test_is_queue_entry_rejects_blank_line() -> None:
-    """is_queue_entry returns False for an empty string."""
-    assert not is_queue_entry("")
-
-
-def test_is_queue_entry_rejects_h2_heading() -> None:
-    """is_queue_entry returns False for a markdown ## heading line."""
-    assert not is_queue_entry("## CODER queue")
-
-
-def test_is_queue_entry_with_trailing_text() -> None:
-    """is_queue_entry returns True when the line has optional trailing text."""
-    assert is_queue_entry("- [ ] CODER-20260101-001-my-task  # optional note")
+@pytest.mark.parametrize(
+    "line",
+    [
+        "This is just a heading or note.",  # plain prose line
+        "",  # blank line
+        "## CODER queue",  # markdown ## heading
+    ],
+)
+def test_is_queue_entry_rejects_non_entry_lines(line: str) -> None:
+    """is_queue_entry returns False for prose, blank lines, and markdown headings."""
+    assert not is_queue_entry(line)
 
 
 # ---------------------------------------------------------------------------
@@ -224,23 +211,21 @@ def test_is_queue_entry_with_trailing_text() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_extract_task_id_returns_id_and_not_done_for_unchecked(
-) -> None:
-    """extract_task_id_from_queue_line returns (task_id, False) for '[ ]' marker."""
-    result = extract_task_id_from_queue_line("- [ ] CODER-20260101-001-slug")
+@pytest.mark.parametrize(
+    "line, expected_task_id, expected_is_done",
+    [
+        ("- [ ] CODER-20260101-001-slug", "CODER-20260101-001-slug", False),  # unchecked
+        ("- [x] CODER-20260101-001-slug", "CODER-20260101-001-slug", True),  # 'x' marker
+        ("* [ ] PM-20260101-003-make-plan", "PM-20260101-003-make-plan", False),  # asterisk prefix
+    ],
+)
+def test_extract_task_id(line: str, expected_task_id: str, expected_is_done: bool) -> None:
+    """extract_task_id_from_queue_line parses (task_id, is_done) across dash/asterisk and check state."""
+    result = extract_task_id_from_queue_line(line)
     assert result is not None
     task_id, is_done = result
-    assert task_id == "CODER-20260101-001-slug"
-    assert is_done is False
-
-
-def test_extract_task_id_returns_id_and_done_for_x_marker() -> None:
-    """extract_task_id_from_queue_line returns (task_id, True) for '[x]' marker."""
-    result = extract_task_id_from_queue_line("- [x] CODER-20260101-001-slug")
-    assert result is not None
-    task_id, is_done = result
-    assert task_id == "CODER-20260101-001-slug"
-    assert is_done is True
+    assert task_id == expected_task_id
+    assert is_done is expected_is_done
 
 
 def test_extract_task_id_is_case_insensitive_for_x_marker() -> None:
@@ -249,15 +234,6 @@ def test_extract_task_id_is_case_insensitive_for_x_marker() -> None:
     assert result is not None
     _, is_done = result
     assert is_done is True
-
-
-def test_extract_task_id_handles_asterisk_prefix() -> None:
-    """extract_task_id_from_queue_line works with '* [ ] TASK-ID' format."""
-    result = extract_task_id_from_queue_line("* [ ] PM-20260101-003-make-plan")
-    assert result is not None
-    task_id, is_done = result
-    assert task_id == "PM-20260101-003-make-plan"
-    assert is_done is False
 
 
 def test_extract_task_id_returns_none_for_non_queue_line() -> None:

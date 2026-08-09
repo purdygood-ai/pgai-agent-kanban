@@ -399,6 +399,36 @@ Two interchangeable schedulers drive the continuous mode:
 
 ---
 
+## Verification Doctrine — the Loop Applied to Gates
+
+The kanban is a looped system: work in, verified output out, the loop
+continuing on new input or on the bugs the verifier files. Bugs are the
+healing mechanism, so the machinery blocks only for states the next
+iteration cannot absorb.
+
+- **Runner classes.** Gated runners run pre-flights in two classes:
+  breakage (syntax/compile/import — exit 1 before tests) and quality
+  (all lints — findings print, land in a machine-readable findings
+  file, and the run continues; exit code reflects tests and breakage
+  only).
+- **Findings lifecycle.** TESTER ingests the findings file; every
+  finding cites an open bug or TESTER files one. Green suites plus
+  quality findings map to ship-with-concerns; the release ships and
+  the next bundle heals.
+- **The census.** Every halting site in the shipped tree is
+  inventoried in docs/blocking-site-census.md and classified
+  BLOCK-WORTHY / CONVERT / AGENT-RESOLVABLE; a census lint
+  (quality-class, like everything else) keeps new gates honest. New
+  gates declare their class in a code comment and speak dual-channel.
+- **Dual-channel errors.** Every refusal emits error: (stable machine
+  key) / message: (stranger-readable cause) / remedy: (runnable next
+  step) — machine precision and human legibility, never one without
+  the other.
+- **The completion gate.** At done-claims it checks delivery only:
+  work merged (with branch-history evidence accepted when the feature
+  branch was already tidied), worktree clean. Wording concerns belong
+  to verification time, one loop later.
+
 ## Governance Stack
 
 Reading order; every agent reads top-down before processing a task. Each layer narrows scope.
