@@ -22,6 +22,10 @@ Design notes:
     by team/tests/conftest.py). No bare /tmp paths.
   - Each test builds its own forced-stale scratch CHANGELOG.md; no shared
     state or ordering dependency between tests.
+  - The gate and its printed regenerate command render with the release
+    render, which writes each Public ID it assigns into the ledger it reads,
+    so each test hands them a scratch copy of the committed bug-ledger
+    fixture under a scratch kanban root — never the operator's live ledger.
   - PGAI_AGENT_KANBAN_TEMP_DIR is pinned to a per-test scratch directory in
     every subprocess environment so the gate's own temp usage cannot depend
     on ambient environment state.
@@ -35,6 +39,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 
@@ -50,14 +55,8 @@ _LINT_SCRIPT = _TEAM_DIR / "scripts" / "lint_changelog_freshness.py"
 _CHANGELOG_ARTIFACT = _DEV_TREE_ROOT / "CHANGELOG.md"
 _RELEASE_NOTES_DIR = _DEV_TREE_ROOT / "release-notes"
 
-# The live kanban root is resolved from PGAI_AGENT_KANBAN_ROOT_PATH at module
-# import time, before the per-test autouse fixture in team/tests/conftest.py
-# redirects the env var to a sandboxed temp root.
-_LIVE_KANBAN_ROOT = pathlib.Path(
-    os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-    or str(pathlib.Path.home() / "pgai_agent_kanban")
-)
-_REAL_BUGS_DIR = _LIVE_KANBAN_ROOT / "projects" / "pgai-agent-kanban" / "bugs"
+# Committed bug-ledger fixture; each test runs the gate on a scratch copy.
+_FIXTURE_BUGS_DIR = _TEAM_DIR / "tests" / "fixtures" / "bug_ledger"
 
 # A numbered fix-command line, e.g. "  1. bash \"...\" pgai_agent_kanban... > ...".
 _NUMBERED_COMMAND_RE = re.compile(r"^\s*(\d+)\.\s+(.+)$", re.MULTILINE)
@@ -68,13 +67,20 @@ _NUMBERED_COMMAND_RE = re.compile(r"^\s*(\d+)\.\s+(.+)$", re.MULTILINE)
 _ANGLE_BRACKET_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][\w -]*>")
 
 
-def _skip_if_bugs_dir_missing() -> None:
-    """Skip the test when the live bugs directory is not present."""
-    if not _REAL_BUGS_DIR.exists():
-        pytest.skip(
-            f"Live kanban bugs directory not found: {_REAL_BUGS_DIR} "
-            "— live install not present in this environment."
-        )
+def _scratch_kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Return a scratch kanban root holding a copy of the committed fixture ledger.
+
+    The copy sits at ``<root>/projects/pgai-agent-kanban/bugs``; Public IDs the
+    gate's render or its printed regenerate command write land there.
+    """
+    root = tmp_path / "kanban_root"
+    shutil.copytree(_FIXTURE_BUGS_DIR, _scratch_bugs_dir(root))
+    return root
+
+
+def _scratch_bugs_dir(kanban_root: pathlib.Path) -> pathlib.Path:
+    """The project ledger directory under *kanban_root*."""
+    return kanban_root / "projects" / "pgai-agent-kanban" / "bugs"
 
 
 def _skip_if_published_missing() -> None:
@@ -112,29 +118,33 @@ def _force_stale_changelog(tmp_path: pathlib.Path) -> pathlib.Path:
     return scratch
 
 
-def _gate_subprocess_env(tmp_path: pathlib.Path) -> dict:
+def _gate_subprocess_env(tmp_path: pathlib.Path, kanban_root: pathlib.Path) -> dict:
     """Return a subprocess environment pinned to per-test scratch state.
 
     PGAI_AGENT_KANBAN_TEMP_DIR is pinned under tmp_path so the gate's own temp
     usage (_get_temp_root() in lint_changelog_freshness.py) cannot depend on
     ambient environment state (roles/TESTER.md Test Authoring Guidelines Anti-pattern 2).
+    PGAI_AGENT_KANBAN_ROOT_PATH is the scratch kanban root, never the live one.
     PGAI_LINT_CHANGELOG_MODE is explicitly absent so the gate runs in strict
     byte-compare mode regardless of which branch this worktree is on.
 
     Args:
-        tmp_path: pytest-provided temp directory for this test.
+        tmp_path:    pytest-provided temp directory for this test.
+        kanban_root: The scratch kanban root (see _scratch_kanban_root()).
 
     Returns:
         A copy of the current environment with the above overrides applied.
     """
     env = os.environ.copy()
     env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(tmp_path / "gate_temp_root")
-    env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(_LIVE_KANBAN_ROOT)
+    env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
     env.pop("PGAI_LINT_CHANGELOG_MODE", None)
     return env
 
 
-def _run_gate_cli(scratch_changelog: pathlib.Path, env: dict) -> subprocess.CompletedProcess:
+def _run_gate_cli(
+    scratch_changelog: pathlib.Path, bugs_dir: pathlib.Path, env: dict
+) -> subprocess.CompletedProcess:
     """Invoke the gate's real CLI entry point as a subprocess.
 
     This is the literal command a human operator (or a downstream script)
@@ -143,6 +153,7 @@ def _run_gate_cli(scratch_changelog: pathlib.Path, env: dict) -> subprocess.Comp
 
     Args:
         scratch_changelog: Path to the CHANGELOG.md artifact to check.
+        bugs_dir:           The scratch bug ledger the gate renders from.
         env:                Subprocess environment (see _gate_subprocess_env()).
 
     Returns:
@@ -155,7 +166,7 @@ def _run_gate_cli(scratch_changelog: pathlib.Path, env: dict) -> subprocess.Comp
             "--changelog",
             str(scratch_changelog),
             "--bugs-dir",
-            str(_REAL_BUGS_DIR),
+            str(bugs_dir),
         ],
         env=env,
         capture_output=True,
@@ -181,13 +192,14 @@ class TestChangelogFreshnessGateCliRecovery:
         angle-bracket placeholders — everything a stranger needs, with nothing
         left implicit.
         """
-        _skip_if_bugs_dir_missing()
         _skip_if_published_missing()
 
         scratch = _force_stale_changelog(tmp_path)
-        env = _gate_subprocess_env(tmp_path)
+        kanban_root = _scratch_kanban_root(tmp_path)
+        bugs_dir = _scratch_bugs_dir(kanban_root)
+        env = _gate_subprocess_env(tmp_path, kanban_root)
 
-        result = _run_gate_cli(scratch, env)
+        result = _run_gate_cli(scratch, bugs_dir, env)
         assert result.returncode != 0, (
             "Gate CLI subprocess exited 0 for a forced-stale scratch CHANGELOG.md.\n"
             f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
@@ -243,13 +255,14 @@ class TestChangelogFreshnessGateCliRecovery:
         captured subprocess stderr — this is the motivating end-to-end proof
         that the gate's own output is a complete recovery path.
         """
-        _skip_if_bugs_dir_missing()
         _skip_if_published_missing()
 
         scratch = _force_stale_changelog(tmp_path)
-        env = _gate_subprocess_env(tmp_path)
+        kanban_root = _scratch_kanban_root(tmp_path)
+        bugs_dir = _scratch_bugs_dir(kanban_root)
+        env = _gate_subprocess_env(tmp_path, kanban_root)
 
-        failing_result = _run_gate_cli(scratch, env)
+        failing_result = _run_gate_cli(scratch, bugs_dir, env)
         assert failing_result.returncode != 0, (
             "Gate CLI subprocess exited 0 for a forced-stale scratch CHANGELOG.md; "
             "cannot exercise recovery without a genuine failure.\n"
@@ -280,7 +293,7 @@ class TestChangelogFreshnessGateCliRecovery:
         # Independently re-invoke the gate's CLI (the same invocation shape as
         # the initial failing call) to prove the artifact is genuinely fresh,
         # not merely that the last printed command happened to exit 0.
-        recovered_result = _run_gate_cli(scratch, env)
+        recovered_result = _run_gate_cli(scratch, bugs_dir, env)
         assert recovered_result.returncode == 0, (
             "Gate CLI subprocess still exits non-zero against the scratch "
             "changelog path after running every printed remedy command verbatim.\n"

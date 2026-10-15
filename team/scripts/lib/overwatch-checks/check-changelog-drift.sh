@@ -218,9 +218,8 @@ _ccd_regenerate_changelog() {
         [[ -f "${_ccd_pp_helper}" ]] && source "${_ccd_pp_helper}"
     fi
 
-    # Regenerate.  PYTHONHASHSEED=0 ensures stable frozenset ordering across
-    # independent process invocations, matching the seed used when CHANGELOG.md
-    # was last committed.  PYTHONPATH is pre-set to team_dir so the caller-set
+    # Regenerate.  The render is hash-seed-independent (the writer sorts its
+    # heading sets); PYTHONHASHSEED=0 is kept as defense in depth.  PYTHONPATH is pre-set to team_dir so the caller-set
     # entry takes precedence in pp_run_ops's own-tree + KANBAN_ROOT composition.
     PYTHONHASHSEED=0 PYTHONPATH="${team_dir}" \
         pp_run_ops pgai_agent_kanban.cm.changelog_writer \

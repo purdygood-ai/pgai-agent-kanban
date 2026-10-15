@@ -5,15 +5,14 @@ Use the structure when it helps; skip sections that do not apply.
 
 CHANGELOG.md IS NOT A WRITER DELIVERABLE
 ========================================
-WRITER authors release-notes/vX.Y.Z.md ONLY. Do NOT edit CHANGELOG.md.
+WRITER authors release-notes/vX.Y.Z.md ONLY. Never hand-edit CHANGELOG.md.
 CHANGELOG.md is regenerated deterministically from this release-notes
-file and the bug ledger by:
-  - team/pgai_agent_kanban/cm/changelog_writer.py, or
-  - cm/release.sh Step 11b at release time.
-Hand-editing CHANGELOG.md bypasses the changelog writer's internal-
-identifier safety pass and desynchronizes its byte-exact rendering,
-which trips the CHANGELOG freshness gate and the internal-bug-
-identifier unit test. Write the notes; let CM regenerate the changelog.
+file and the bug ledger by team/pgai_agent_kanban/cm/changelog_writer.py,
+which CM runs only at release time (cm/release.sh Step 11b). A committed
+CHANGELOG.md that is stale on an RC branch is expected; no ticket renders
+it. Hand-editing CHANGELOG.md bypasses the changelog writer's internal-
+identifier safety pass and trips the internal-bug-identifier unit test.
+Write the notes; CM regenerates the changelog at release.
 
 The release-notes body must describe every resolved item by SUBSTANCE —
 what was wrong, drawn from the opening sentence of the bug's own Symptom

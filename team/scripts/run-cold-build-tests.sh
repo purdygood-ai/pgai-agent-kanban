@@ -40,6 +40,18 @@
 #   in-container smoke pass, is minutes of work, not the fast loop every
 #   CODER runs on every ticket.
 #
+# pytest arguments:
+#   python3 -m pytest tests/cold/ --capture=no [--verbose] </dev/null, run
+#   from team/. The arguments are defined once, in
+#   team/scripts/lib/cold_lane_pytest_args.sh (COLD_LANE_PYTEST_ARGS);
+#   --verbose is appended only when this script gets --verbose.
+#   --capture=no puts every test's stdout in the lane output, skipped and
+#   passed tests included: the per-pair "[cold-build] SKIP — <reason>"
+#   narration and "Image built successfully" lines are the evidence
+#   deep-verify's classifier reads to tell a built run from one that could
+#   not be attempted. stdin comes from /dev/null, as it does under pytest's
+#   default capture, so no test's subprocess can read the caller's terminal.
+#
 # pytest basetemp:
 #   Every invocation of this script claims its own pytest basetemp under
 #   ${PGAI_AGENT_KANBAN_TEMP_DIR}/pytest/, a directory named
@@ -131,6 +143,9 @@ source "$SCRIPT_DIR/lib/error_contract.sh"
 # shellcheck source=lib/container_tier.sh
 source "$SCRIPT_DIR/lib/container_tier.sh"
 
+# shellcheck source=lib/cold_lane_pytest_args.sh
+source "$SCRIPT_DIR/lib/cold_lane_pytest_args.sh"
+
 # --- Parse arguments (the container-tier flags --image and
 # --operator-approved are separated out by lib/container_tier.sh first) ---
 _RCB_ORIG_ARGS=("$@")
@@ -181,6 +196,13 @@ both docker-availability-gated the same way the cold-build sweep is.
 Not part of the fast loop: run-unit-tests.sh and run-integration-tests.sh
 do not collect this lane. Run it explicitly, or from a release-ritual step
 that has budgeted the wall-clock time for a cold, multi-engine sweep.
+
+pytest runs from team/ as:
+  python3 -m pytest ${COLD_LANE_PYTEST_ARGS[*]} [--verbose] </dev/null
+--capture=no prints every test's output, skipped and passed tests
+included, so each pair's "[cold-build] SKIP — <reason>" or "Image built
+successfully" line reaches the lane output that deep-verify classifies.
+The arguments are defined in scripts/lib/cold_lane_pytest_args.sh.
 
 Options:
   --image NAME         Build image NAME (repeatable), or --image all for every
@@ -285,12 +307,10 @@ _RCB_PYTEST_BASETEMP="$(gated_runner_pytest_basetemp cold)"
 export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:+${PYTEST_ADDOPTS} }--basetemp=${_RCB_PYTEST_BASETEMP}"
 
 # --- Build pytest arguments ---
-# Collects the whole tests/cold/ directory rather than naming each module --
-# a new expensive, docker-availability-gated test dropped into tests/cold/
-# joins this lane with no edit here.
-PYTEST_ARGS=(
-  "tests/cold/"
-)
+# COLD_LANE_PYTEST_ARGS (lib/cold_lane_pytest_args.sh) is the one definition
+# of what the lane collects and how it captures output; the header's
+# "pytest arguments" section says why each argument is there.
+PYTEST_ARGS=("${COLD_LANE_PYTEST_ARGS[@]}")
 if [[ "$VERBOSE" == "true" ]]; then
   PYTEST_ARGS+=("--verbose")
 fi
@@ -302,7 +322,9 @@ cd "$REPO_ROOT/team"
 echo "Running cold-build lane in $(pwd)/tests/cold/"
 _RCB_START_EPOCH=$(date +%s)
 set +e
-python3 -m pytest "${PYTEST_ARGS[@]}"
+# stdin from /dev/null: with capture off, pytest no longer points the
+# tests' stdin there itself.
+python3 -m pytest "${PYTEST_ARGS[@]}" </dev/null
 PYTEST_EXIT=$?
 set -e
 _RCB_END_EPOCH=$(date +%s)

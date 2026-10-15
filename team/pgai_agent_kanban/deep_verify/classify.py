@@ -11,8 +11,10 @@ another:
   2. failed-to-build   — the artefact failed to build (a tree defect).
   3. could-not-attempt — the build could not be attempted at all (an
                           environment gap: no engine, unreachable registry,
-                          missing toolchain) -- nothing about the tree was
-                          exercised, so nothing was learned about it.
+                          missing toolchain) -- nothing was learned about
+                          whether the images build. On exit 1 the record
+                          can still name a failing engine-free cold test,
+                          whose bug the run files.
 
 run-cold-build-tests.sh already discriminates cases 1-3 internally (see its
 own header comment and team/roles/TESTER.md "What distinguishes red from
@@ -273,7 +275,8 @@ def classify_cold_build_result(exit_code: int, output_text: str) -> Classificati
     tell which case it was records that ambiguity rather than guessing'.
     Guessing 'built' or 'failed-to-build' without evidence would be worse
     than admitting the ambiguity, because could-not-attempt is the one
-    verdict that already means 'nothing was learned about the tree'.
+    verdict that already means 'nothing was learned about whether the
+    images build'.
     """
     if exit_code == 2:
         return Classification(
@@ -384,8 +387,9 @@ def classify_cold_build_result(exit_code: int, output_text: str) -> Classificati
     # An exit code with no documented meaning in run-cold-build-tests.sh's
     # own contract (0/1/2). Recording this as could-not-attempt (rather than
     # guessing built or failed-to-build) is the honest choice: could-not-
-    # attempt already means "nothing was learned about the tree", which is
-    # exactly true here -- this classifier does not know what happened.
+    # attempt already means "nothing was learned about whether the images
+    # build", which is exactly true here -- this classifier does not know
+    # what happened.
     return Classification(
         VERDICT_COULD_NOT_ATTEMPT,
         f"run-cold-build-tests.sh exited {exit_code}, a code this classifier has "

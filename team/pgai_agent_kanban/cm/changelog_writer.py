@@ -56,6 +56,12 @@ Entry point:
     regenerate(repo_root, released_versions, published_manifest, bugs_dir,
                extra_notes_dir=None, published_changelog=CHECKED_IN_CHANGELOG) -> str
 
+CLI (the release render; prints the CHANGELOG to stdout and writes each
+Public ID it assigns back to its bug file, live or archived):
+    python3 -m pgai_agent_kanban.cm.changelog_writer REPO_ROOT BUGS_DIR [VERSION ...]
+    Versions are newest-first; omitted, they are discovered from
+    REPO_ROOT/release-notes/v*.md.
+
 Cleanup entry point:
     remove_bogus_public_ids(bugs_dir, published_manifest) -> list[pathlib.Path]
     Removes Public IDs from bug files whose ## Affects does not parse as a
@@ -147,6 +153,8 @@ except ImportError:
 from pgai_agent_kanban.archive.layout import CATEGORY_BUGS, archive_layout_for_category_dir  # noqa: E402
 from pgai_agent_kanban.lib.semver import version_sort_key as _parse_version  # noqa: E402
 from pgai_agent_kanban.task_status import read_section  # noqa: E402
+# The notes-file date rule, shared with the operator's full CHANGELOG rebuild.
+from pgai_agent_kanban.cm.release_notes_date import read_release_date  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -657,7 +665,9 @@ def parse_release_notes(version: str, notes_path: pathlib.Path) -> ReleaseEntry:
     """Parse a release-notes/vX.Y.Z.md file into a ReleaseEntry.
 
     Extracts:
-    - date from the **Release Date:** field
+    - date from the **Release Date:** field, or a **Date:** field when there
+      is none; with neither, the date is "" (rendered as "unknown") and one
+      warning naming notes_path goes to stderr
     - summary from ## Summary (first sentence)
     - implemented_lines from ## Features / ## What Shipped / ## Implemented
     - fixed_bug_ids from ## Bug Fixes / ## Bugs Resolved (BUG-NNNN references)
@@ -665,9 +675,8 @@ def parse_release_notes(version: str, notes_path: pathlib.Path) -> ReleaseEntry:
     """
     text = notes_path.read_text(encoding="utf-8")
 
-    # Extract release date
-    date_match = re.search(r"\*\*Release Date:\*\*\s*(\S+)", text)
-    date = date_match.group(1) if date_match else ""
+    # Extract release date (the rule lives in cm/release_notes_date.py)
+    date = read_release_date(text, notes_path)
 
     sections = _parse_markdown_sections(text)
 
@@ -767,60 +776,24 @@ def _bug_intersects_published(
     return False
 
 
-def _assign_public_id(
-    bug: BugRecord,
-    published: list[str],
-    counters: dict[str, int],
-) -> str:
-    """Determine the Public ID for a disclosable bug.
-
-    If the bug already has ## Public ID set in its file, return it as-is
-    (IDs are immutable once assigned).
-
-    Otherwise: find the earliest PUBLISHED version >= bug.affects, compute
-    the next counter for that anchor, assign it, write it back to the bug
-    file, and return the new ID.
-
-    counters is a mutable dict {anchor_version_no_v: max_counter_seen} that
-    the caller maintains across all bugs to track the next free counter.
-    """
-    if bug.public_id:
-        # Already assigned — extract the anchor and update the counter
-        # so future bugs in the same anchor get a higher number.
-        id_match = re.match(r"KI-(\d+\.\d+\.\d+)\.(\d+)$", bug.public_id)
-        if id_match:
-            anchor = id_match.group(1)
-            n = int(id_match.group(2))
-            if counters.get(anchor, 0) < n:
-                counters[anchor] = n
-        return bug.public_id
-
-    # Compute anchor: earliest PUBLISHED version >= bug.affects
-    anchor_with_v = _earliest_published_gte(bug.affects, published)
-    if not anchor_with_v:
-        # No published version is >= affects — should not reach here
-        # (caller already checked intersects_published)
-        return ""
-
-    anchor = anchor_with_v.lstrip("v")
-    next_n = counters.get(anchor, 0) + 1
-    counters[anchor] = next_n
-    new_id = f"KI-{anchor}.{next_n}"
-
-    # Persist the Public ID back to the bug file
-    _write_public_id_to_bug_file(bug.file_path, new_id)
-
-    return new_id
-
-
 def _write_public_id_to_bug_file(file_path: pathlib.Path, public_id: str) -> None:
     """Append or update the ## Public ID field in a bug file.
 
-    If ## Public ID section exists but is empty, fill it in.
-    If it does not exist, append the section at the end.
+    The file is rewritten only when :func:`_text_with_public_id` changes it.
     """
     text = file_path.read_text(encoding="utf-8")
+    new_text = _text_with_public_id(text, public_id)
+    if new_text != text:
+        file_path.write_text(new_text, encoding="utf-8")
 
+
+def _text_with_public_id(text: str, public_id: str) -> str:
+    """Return bug-file *text* with *public_id* in its ## Public ID section.
+
+    If ## Public ID section exists but is empty, fill it in.
+    If it does not exist, append the section at the end.
+    If it already holds a value, *text* is returned unchanged.
+    """
     # Check if ## Public ID section exists (possibly with content)
     section_pattern = re.compile(
         r"(^##\s+Public ID\s*$)([\s\S]*?)(?=^##\s+|\Z)",
@@ -855,12 +828,11 @@ def _write_public_id_to_bug_file(file_path: pathlib.Path, public_id: str) -> Non
                 before = text[:heading_end].rstrip("\n") + "\n"
                 after = text[heading_end:].lstrip("\n")
                 new_text = before + f"{public_id}\n" + (f"\n{after}" if after else "")
-            file_path.write_text(new_text, encoding="utf-8")
+            return new_text
         # else: already has content (should not happen if we only write once)
-    else:
-        # Section absent — append at end of file
-        new_text = text.rstrip("\n") + f"\n\n## Public ID\n{public_id}\n"
-        file_path.write_text(new_text, encoding="utf-8")
+        return text
+    # Section absent — append at end of file
+    return text.rstrip("\n") + f"\n\n## Public ID\n{public_id}\n"
 
 
 def remove_bogus_public_ids(
@@ -919,14 +891,24 @@ def _remove_public_id_from_bug_file(file_path: pathlib.Path) -> None:
     already has a blank ## Public ID is a no-op (no bytes change).
     """
     text = file_path.read_text(encoding="utf-8")
+    new_text = _text_without_public_id(text)
+    if new_text != text:
+        file_path.write_text(new_text, encoding="utf-8")
 
+
+def _text_without_public_id(text: str) -> str:
+    """Return bug-file *text* with the value of its ## Public ID section removed.
+
+    The heading and any HTML comment in the section stay; *text* comes back
+    unchanged when there is no section or no value to remove.
+    """
     section_pattern = re.compile(
         r"(^##\s+Public ID\s*\n)([\s\S]*?)(?=^##\s+|\Z)",
         re.MULTILINE,
     )
     match = section_pattern.search(text)
     if not match:
-        return  # No ## Public ID section — nothing to do.
+        return text  # No ## Public ID section — nothing to do.
 
     heading = match.group(1)
     body = match.group(2)
@@ -947,10 +929,23 @@ def _remove_public_id_from_bug_file(file_path: pathlib.Path) -> None:
 
     new_body = "".join(new_body_lines)
     if new_body == body:
-        return  # Already clean — byte-identical, no write needed.
+        return text  # Already clean — byte-identical.
 
-    new_text = text[: match.start()] + heading + new_body + text[match.end():]
-    file_path.write_text(new_text, encoding="utf-8")
+    return text[: match.start()] + heading + new_body + text[match.end():]
+
+
+def _known_issue_title(symptom: str) -> str:
+    """Return the title a Known Issues line renders for *symptom*.
+
+    A trailing sentence-ending period is dropped before the
+    "; affects ... · ..." suffix is appended — otherwise a symptom that is
+    itself a full sentence (e.g. "...one pane).") produces a ".;"
+    double-punctuation artifact once the suffix is concatenated.
+    """
+    title = symptom.rstrip()
+    if title.endswith("."):
+        title = title[:-1]
+    return title
 
 
 def _render_known_issue(
@@ -966,16 +961,7 @@ def _render_known_issue(
         KI-A.B.C.n — symptom; affects vA · open
         KI-A.B.C.n — symptom; affects vA · won't fix — reason
     """
-    # Normalize a trailing sentence-ending period off the symptom before
-    # appending the "; affects ... · ..." suffix below — otherwise a
-    # symptom that is itself a full sentence (e.g. "...one pane).")
-    # produces a ".;" double-punctuation artifact once the suffix is
-    # concatenated.
-    symptom = bug.symptom.rstrip()
-    if symptom.endswith("."):
-        symptom = symptom[:-1]
-
-    parts = [f"{public_id} — {symptom}"]
+    parts = [f"{public_id} — {_known_issue_title(bug.symptom)}"]
 
     # Affects clause
     affects_str = f"affects {bug.affects}"
@@ -1517,8 +1503,9 @@ def _main() -> None:
     Usage: python -m pgai_agent_kanban.cm.changelog_writer <repo_root> <bugs_dir> \\
                [version1 version2 ...]
 
-    A live project's bugs_dir brings its archived bugs with it (see the
-    module docstring).
+    This is the release render: a Public ID it assigns is written back to its
+    bug file. A live project's bugs_dir brings its archived bugs with it (see
+    the module docstring).
 
     Versions are newest-first. If none are provided, they are discovered by
     scanning release-notes/vX.Y.Z.md files in the repo.

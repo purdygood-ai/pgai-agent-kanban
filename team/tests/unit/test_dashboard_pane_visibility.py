@@ -47,7 +47,11 @@ from typing import Callable, Iterator, NamedTuple
 
 import pytest
 
-from tests.fixtures.binary_guard import narrate_binary_skip, try_resolve_binary
+from tests.fixtures.binary_guard import (
+    narrate_binary_skip,
+    teardown_private_tmux,
+    try_resolve_binary,
+)
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _DASHBOARD = _TEAM_DIR / "scripts" / "dashboard"
@@ -145,7 +149,7 @@ def dashboard(tmp_path: pathlib.Path) -> Iterator[Fixture]:
                    f"{shlex.quote(str(root))} {shlex.quote(session)} {shlex.quote(str(_DASHBOARD))}")
         yield fx
     finally:
-        guard.teardown(lambda path: subprocess.run([path, "-L", socket, "kill-server"], capture_output=True, timeout=10))
+        teardown_private_tmux(guard, socket)
 
 
 def _pane_id(fx: Fixture, window: str) -> str:

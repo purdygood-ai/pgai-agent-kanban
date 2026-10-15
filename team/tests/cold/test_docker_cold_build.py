@@ -503,11 +503,19 @@ def test_engine_unavailable_reports_false(monkeypatch: pytest.MonkeyPatch) -> No
     assert _engine_available("podman") is False
 
 
-def test_engine_absent_skip_reason_names_the_engine() -> None:
-    """A skip for an absent engine names that engine, not a generic reason."""
+def test_engine_absent_skip_reason_names_the_engine(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A skip for an absent engine names that engine, not a generic reason.
+
+    The narration line is captured, not printed: the lane runs with capture
+    off, and the deep-verify classifier reads every "[cold-build] SKIP"
+    line in its output as an (engine, flavor) pair that was skipped.
+    """
     with pytest.raises(pytest.skip.Exception) as exc_info:
         _narrate_skip("podman binary not found or podman unreachable")
     assert "podman" in str(exc_info.value)
+    assert "[cold-build] SKIP — podman" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

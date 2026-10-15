@@ -1,8 +1,8 @@
 # Dashboard
 
-The dashboard is a read-only tmux session that renders the whole kanban — every registered project's queues, task states, wake logs, schedule, git state and token spend — across fifteen windows. It reads state from disk and writes nothing back, so you can build it, kill it and rebuild it at any moment, including in the middle of a release.
+The dashboard is a read-only tmux session that renders the whole kanban — every registered project's queues, task states, wake logs, schedule, git state and token spend — across fourteen fixed windows plus one drill window per registered project. It reads state from disk and writes nothing back, so you can build it, kill it and rebuild it at any moment, including in the middle of a release.
 
-If you have never seen the board, read this document in order: **Start the board** puts it on screen, **Window tour** is the map, and **The fifteen windows, one at a time** says what each window is for and when you would go there. The two windows a new operator actually lives in are window 0 (`main`) and window 1 (`operator`); the other thirteen are places you visit when you have a specific question.
+If you have never seen the board, read this document in order: **Start the board** puts it on screen, **Window tour** is the map, and **The fourteen fixed windows and the per-project drill windows, one at a time** says what each window is for and when you would go there. The two windows a new operator actually lives in are window 0 (`main`) and window 1 (`operator`); the other twelve fixed windows, and the one drill window per registered project, are places you visit when you have a specific question.
 
 Per-pane detail — which script populates each region of each window, and the exact command that reproduces that region's output outside tmux — is a separate reference, `DASHBOARD-PANES.md`, beside this file. Both that document and the window tour below are generated from the same machine-readable layout census, so neither can drift from the session the dashboard actually builds. `DASHBOARD-PANES.md` ships in the repository checkout and is not copied into an installed kanban root; read it from the checkout.
 
@@ -72,7 +72,7 @@ Three things to read out of that table before moving on.
 
 **The pane counts are exact.** A window whose pane count does not match what you see on screen is a bug worth reporting, not a layout preference — the counts here are generated from the same file the session builder reads.
 
-## The fifteen windows, one at a time
+## The fourteen fixed windows and the per-project drill windows, one at a time
 
 What each window is for, in creation order. Everything here is orientation: the script behind each pane, and the standalone command that prints that pane's content without tmux, are in `DASHBOARD-PANES.md`.
 

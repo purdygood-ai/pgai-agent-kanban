@@ -29,20 +29,13 @@ For each script and each of the two flag spellings:
 
 What "only its usage header" means here
 ---------------------------------------
-Most dashboard scripts render ``--help`` from their own ``#`` comment
-lines, keeping the first N of them. N must end at the last line of the
-usage header; a count that runs past it prints the implementation
-comments that follow the header in the script body. In every such script
-the first comment below the header is a ``# shellcheck source=...``
-directive, so ``--help`` output that carries a line beginning
-``shellcheck `` is the signature of a slice widened past its header.
-
-The opposite direction is pinned too: a count smaller than the header
-cuts ``--help`` off partway through, often mid-sentence. For every script
-whose help arm renders that slice from ``grep '^#' "$0"``, ``--help`` must
-print at least as many lines as the leading ``#`` header block (shebang
-excluded) and must reach the header's last line. Together the two checks
-hold the slice to exactly the header.
+A script that renders ``--help`` from its own ``#`` comment lines must
+stop at the end of its usage header. In every such script the first
+comment below the header is a ``# shellcheck source=...`` directive, so
+``--help`` output that carries a line beginning ``shellcheck `` is the
+signature of help that ran past its header. That every header-rendered
+script prints exactly its leading comment block is pinned by
+test_header_rendered_help_matches_header.py.
 
 Isolation
 ---------
@@ -67,7 +60,6 @@ pipeline can never outlive the test.
 from __future__ import annotations
 
 import pathlib
-import re
 import subprocess
 import sys
 
@@ -101,51 +93,6 @@ def _discover_top_level_dashboard_scripts() -> list[pathlib.Path]:
 
 
 _DASHBOARD_SCRIPTS = _discover_top_level_dashboard_scripts()
-
-# A help arm that renders a fixed-count slice of the script's own '#'
-# lines: ``mapfile -t __help_lines < <(grep '^#' "$0" ...)`` followed by
-# ``printf '%s\n' "${__help_lines[@]:0:N}"``. Scripts with any other
-# renderer (create.sh's awk leading-block printer, for one) end at their
-# header by construction and are not selected. Whitespace is matched
-# loosely so a reformatted arm is still recognised.
-_GREP_RENDERED_HELP_RE = re.compile(
-    r"mapfile\s+-t\s+__help_lines\s*<\s*<\(\s*grep\s+'\^#'\s+\"\$0\""
-)
-_HELP_SLICE_RE = re.compile(r"__help_lines\[@\]:0:\d+")
-
-
-def _discover_slice_rendered_help_scripts() -> list[pathlib.Path]:
-    """Dashboard scripts whose ``--help`` prints a fixed-count slice of the
-    ``#`` lines that ``grep '^#' "$0"`` collects."""
-    selected = []
-    for script in _DASHBOARD_SCRIPTS:
-        source = script.read_text(encoding="utf-8")
-        if _GREP_RENDERED_HELP_RE.search(source) and _HELP_SLICE_RE.search(source):
-            selected.append(script)
-    return selected
-
-
-_SLICE_RENDERED_HELP_SCRIPTS = _discover_slice_rendered_help_scripts()
-
-
-def _leading_header_lines(script: pathlib.Path) -> list[str]:
-    """The script's leading ``#`` comment block as ``--help`` renders it.
-
-    Skips a first-line shebang, then takes consecutive lines starting with
-    ``#`` up to the first line that does not, stripping ``#`` and at most
-    one following space -- the same transform as the help arm's
-    ``sed 's/^# \\{0,1\\}//'``.
-    """
-    lines = script.read_text(encoding="utf-8").splitlines()
-    if lines and lines[0].startswith("#!"):
-        lines = lines[1:]
-    header = []
-    for line in lines:
-        if not line.startswith("#"):
-            break
-        header.append(re.sub(r"^# ?", "", line))
-    return header
-
 
 def _throwaway_root_env(root: pathlib.Path) -> dict[str, str]:
     """Subprocess environment confined to the throwaway kanban root *root*.
@@ -251,70 +198,10 @@ def test_dashboard_script_help_stops_at_its_usage_header(
     leaked = [line for line in result.stdout.splitlines() if line.startswith("shellcheck ")]
     assert not leaked, (
         f"{script.name} --help prints implementation comments from below its "
-        f"usage header: {leaked}. Fix: in the `-h|--help)` arm, set the slice "
-        f"count in `${{__help_lines[@]:0:N}}` to the number of '#' lines in the "
-        f"script's leading header block (shebang excluded), so the slice ends "
-        f"at the header's last line.\n--- stdout ---\n{result.stdout}"
-    )
-
-
-def test_slice_rendered_help_discovery_is_not_vacuous() -> None:
-    """The header-length check below is only meaningful if the selection
-    found the slice-rendered scripts. Guards against a regex drift that
-    leaves it vacuously green, and confirms create.sh (its own awk
-    renderer) is not swept in."""
-    names = {p.name for p in _SLICE_RENDERED_HELP_SCRIPTS}
-    assert len(names) >= 30, (
-        f"expected at least 30 dashboard scripts rendering --help as a "
-        f"`${{__help_lines[@]:0:N}}` slice of `grep '^#' \"$0\"`, found "
-        f"{len(names)}: {sorted(names)}. Fix: update _GREP_RENDERED_HELP_RE "
-        f"in {_THIS_FILE.name} to match the help arms' current mapfile line."
-    )
-    assert "logs.sh" in names, f"selection missed logs.sh: {sorted(names)}"
-    assert "create.sh" not in names, (
-        "create.sh renders --help with its own awk leading-block printer and "
-        "must not be held to the slice-count check"
-    )
-
-
-@pytest.mark.parametrize("script", _SLICE_RENDERED_HELP_SCRIPTS, ids=lambda p: p.name)
-def test_dashboard_script_help_reaches_the_end_of_its_usage_header(
-    script: pathlib.Path, tmp_path: pathlib.Path
-) -> None:
-    """``<script> --help`` prints at least as many lines as the script's
-    leading ``#`` header block and reaches its last line, so a slice count
-    smaller than the header cannot cut the usage text off partway."""
-    header = _leading_header_lines(script)
-    assert header, f"{script.name} has no leading '#' header block to render"
-
-    env = _throwaway_root_env(tmp_path / "kanban-root")
-    try:
-        result = run_dashboard_script(
-            ["bash", str(script), "--help"], env=env, timeout=_PER_SCRIPT_TIMEOUT_S
-        )
-    except subprocess.TimeoutExpired:
-        pytest.fail(
-            f"{script.name} --help did not exit within {_PER_SCRIPT_TIMEOUT_S}s; "
-            f"see test_dashboard_script_prints_usage_and_exits_zero_on_help_flag.",
-            pytrace=False,
-        )
-
-    printed = result.stdout.splitlines()
-    fix = (
-        f"Fix: in {script.name}'s `-h|--help)` arm, set the slice count in "
-        f"`${{__help_lines[@]:0:N}}` to {len(header)}, the number of '#' lines "
-        f"in its leading header block (shebang excluded)."
-    )
-    assert len(printed) >= len(header), (
-        f"{script.name} --help printed {len(printed)} lines but its usage "
-        f"header has {len(header)}; the help stops at "
-        f"{printed[-1] if printed else '(nothing)'!r} and drops "
-        f"{header[len(printed):]!r}. {fix}\n--- stdout ---\n{result.stdout}"
-    )
-    assert printed[len(header) - 1] == header[-1], (
-        f"{script.name} --help line {len(header)} is "
-        f"{printed[len(header) - 1]!r}, expected the header's last line "
-        f"{header[-1]!r}. {fix}\n--- stdout ---\n{result.stdout}"
+        f"usage header: {leaked}. Fix: in the `-h|--help)` arm, print the "
+        f"help with header_help_print \"${{BASH_SOURCE[0]}}\" from "
+        f"lib/header_help.sh, which stops at the header's last line."
+        f"\n--- stdout ---\n{result.stdout}"
     )
 
 

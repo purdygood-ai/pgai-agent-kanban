@@ -562,10 +562,10 @@ def test_unhalt_global_is_idempotent_when_halt_absent(tmp_path: Path) -> None:
 def test_deposit_intake_routes_bug_prefix_to_bugs_directory(tmp_path: Path) -> None:
     """deposit_intake copies BUG-* files into the bugs/ subdirectory."""
     project_root, ctx = _make_project_tree(tmp_path)
-    src = tmp_path / "BUG-0042.md"
+    src = tmp_path / "BUG-0042-routed.md"
     src.write_text("# Bug report\n", encoding="utf-8")
     dest = deposit_intake(ctx, "my-project", src)
-    assert dest == project_root / "bugs" / "BUG-0042.md"
+    assert dest == project_root / "bugs" / "BUG-0042-routed.md"
     assert dest.exists()
 
 
@@ -612,12 +612,12 @@ def test_deposit_intake_raises_ops_error_when_source_absent(tmp_path: Path) -> N
 def test_deposit_intake_raises_ops_error_when_target_already_exists(
     tmp_path: Path,
 ) -> None:
-    """deposit_intake raises OpsError (no clobber) when the target already exists."""
+    """deposit_intake raises OpsError (no clobber) when a PRIORITY-* target already exists."""
     project_root, ctx = _make_project_tree(tmp_path)
-    src = tmp_path / "BUG-0042.md"
+    src = tmp_path / "PRIORITY-0042.md"
     src.write_text("content\n", encoding="utf-8")
     # Pre-create the destination
-    (project_root / "bugs" / "BUG-0042.md").write_text("existing\n", encoding="utf-8")
+    (project_root / "priority" / "PRIORITY-0042.md").write_text("existing\n", encoding="utf-8")
     with pytest.raises(OpsError, match="no clobber"):
         deposit_intake(ctx, "my-project", src)
 
@@ -625,7 +625,7 @@ def test_deposit_intake_raises_ops_error_when_target_already_exists(
 def test_deposit_intake_returns_deposited_path(tmp_path: Path) -> None:
     """deposit_intake returns the Path of the deposited file on success."""
     project_root, ctx = _make_project_tree(tmp_path)
-    src = tmp_path / "BUG-0099.md"
+    src = tmp_path / "BUG-0099-returned-path.md"
     src.write_text("# Bug\n", encoding="utf-8")
     result = deposit_intake(ctx, "my-project", src)
     assert isinstance(result, pathlib.Path)
@@ -635,7 +635,7 @@ def test_deposit_intake_returns_deposited_path(tmp_path: Path) -> None:
 def test_deposit_intake_preserves_file_content(tmp_path: Path) -> None:
     """deposit_intake copies the source content verbatim to the destination."""
     project_root, ctx = _make_project_tree(tmp_path)
-    src = tmp_path / "BUG-0050.md"
+    src = tmp_path / "BUG-0050-preserved-content.md"
     content = "# Bug Title\n\n## Details\nsome detail\n"
     src.write_text(content, encoding="utf-8")
     dest = deposit_intake(ctx, "my-project", src)
@@ -684,15 +684,15 @@ def _copy2_then(callback):
 
 
 def test_deposit_intake_refuses_target_that_appears_after_precheck(tmp_path: Path) -> None:
-    """A target created after the pre-check passes is refused at placement, not overwritten.
+    """A PRIORITY-* target created after the pre-check passes is refused at placement, not overwritten.
 
     The pre-existing content survives byte-for-byte and the refusal is the
     same no-clobber OpsError the pre-check raises.
     """
     project_root, ctx = _make_project_tree(tmp_path)
-    src = tmp_path / "BUG-0060.md"
+    src = tmp_path / "PRIORITY-0060.md"
     src.write_text("late depositor\n", encoding="utf-8")
-    target = project_root / "bugs" / "BUG-0060.md"
+    target = project_root / "priority" / "PRIORITY-0060.md"
     winner_bytes = b"# already landed\n\nbinary-ish \x00 payload\n"
 
     def land_first() -> None:
@@ -710,38 +710,38 @@ def test_deposit_intake_refuses_target_that_appears_after_precheck(tmp_path: Pat
 def test_deposit_intake_leaves_no_temp_file_after_placement_refusal(tmp_path: Path) -> None:
     """The temp file is removed from the destination directory when placement is refused."""
     project_root, ctx = _make_project_tree(tmp_path)
-    src = tmp_path / "BUG-0061.md"
+    src = tmp_path / "PRIORITY-0061.md"
     src.write_text("late depositor\n", encoding="utf-8")
-    bugs_dir = project_root / "bugs"
+    priority_dir = project_root / "priority"
 
     def land_first() -> None:
-        (bugs_dir / "BUG-0061.md").write_text("first\n", encoding="utf-8")
+        (priority_dir / "PRIORITY-0061.md").write_text("first\n", encoding="utf-8")
 
     with patch("shutil.copy2", new=_copy2_then(land_first)):
         with pytest.raises(OpsError, match="no clobber"):
             deposit_intake(ctx, "my-project", src)
 
-    assert _temp_files_in(bugs_dir) == []
-    assert sorted(os.listdir(bugs_dir)) == ["BUG-0061.md"]
+    assert _temp_files_in(priority_dir) == []
+    assert sorted(os.listdir(priority_dir)) == ["PRIORITY-0061.md"]
 
 
 def test_deposit_intake_leaves_no_temp_file_after_success(tmp_path: Path) -> None:
-    """Only the deposited file remains in the destination directory after a successful deposit."""
+    """Only the deposited file and the claim record remain in bugs/ after a successful deposit."""
     project_root, ctx = _make_project_tree(tmp_path)
-    src = tmp_path / "BUG-0062.md"
+    src = tmp_path / "BUG-0062-no-temp-left.md"
     src.write_text("content\n", encoding="utf-8")
     bugs_dir = project_root / "bugs"
 
     dest = deposit_intake(ctx, "my-project", src)
 
     assert _temp_files_in(bugs_dir) == []
-    assert sorted(os.listdir(bugs_dir)) == ["BUG-0062.md"]
+    assert sorted(os.listdir(bugs_dir)) == [".bug-claims.log", "BUG-0062-no-temp-left.md"]
     assert dest.stat().st_nlink == 1, "the temp name must be unlinked after placement"
     assert dest.stat().st_mode & 0o777 == 0o644
 
 
 def test_deposit_intake_interleaved_depositors_first_placement_wins(tmp_path: Path) -> None:
-    """Two depositors of one basename yield exactly one exit 0 and one exit 3 via the CLI path.
+    """Two PRIORITY-* depositors of one basename yield one exit 0 and one exit 3 via the CLI path.
 
     Depositor A passes the pre-check first but is held before placement;
     depositor B runs to completion in that window and places its file.
@@ -750,13 +750,13 @@ def test_deposit_intake_interleaved_depositors_first_placement_wins(tmp_path: Pa
     ``_cli_main`` exercises the same exit-code mapping intake.sh relies on.
     """
     project_root, ctx = _make_project_tree(tmp_path)
-    src_a = tmp_path / "a" / "BUG-0063-same-name.md"
-    src_b = tmp_path / "b" / "BUG-0063-same-name.md"
+    src_a = tmp_path / "a" / "PRIORITY-0063-same-name.md"
+    src_b = tmp_path / "b" / "PRIORITY-0063-same-name.md"
     src_a.parent.mkdir()
     src_b.parent.mkdir()
     src_a.write_text("depositor A\n", encoding="utf-8")
     src_b.write_text("depositor B\n", encoding="utf-8")
-    bugs_dir = project_root / "bugs"
+    priority_dir = project_root / "priority"
     exit_codes: list[int] = []
 
     def depositor_b_runs_to_completion() -> None:
@@ -771,10 +771,10 @@ def test_deposit_intake_interleaved_depositors_first_placement_wins(tmp_path: Pa
 
     assert sorted(exit_codes) == [0, 3], f"expected one success and one no-clobber refusal, got {exit_codes}"
     assert exit_codes == [0, 3], "B (first to place) succeeds; A (held past the pre-check) is refused"
-    target = bugs_dir / "BUG-0063-same-name.md"
+    target = priority_dir / "PRIORITY-0063-same-name.md"
     assert target.read_text(encoding="utf-8") == "depositor B\n"
-    assert _temp_files_in(bugs_dir) == []
-    assert sorted(os.listdir(bugs_dir)) == ["BUG-0063-same-name.md"]
+    assert _temp_files_in(priority_dir) == []
+    assert sorted(os.listdir(priority_dir)) == ["PRIORITY-0063-same-name.md"]
 
 
 # ---------------------------------------------------------------------------

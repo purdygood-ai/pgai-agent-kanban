@@ -41,9 +41,10 @@
 # lane's exit code plus captured stdout+stderr onto exactly one of three
 # SOP verdict classes -- built, failed-to-build, could-not-attempt -- and
 # this script's own exit code says whether the run found anything wrong
-# with the tree: 0 for built AND could-not-attempt (nothing about the tree
-# is in question in either case), 1 for failed-to-build (a real tree
-# defect) and for a built or could-not-attempt verdict whose lane still
+# with the tree: 0 for built AND could-not-attempt when no cold test failed
+# (no image failed to build; for could-not-attempt nothing was learned about
+# whether the images build), 1 for failed-to-build (a real tree defect) and
+# for a built or could-not-attempt verdict whose lane still
 # exited 1 because a non-build cold test failed (the images built, or no
 # image could be built; either way a test did not pass). This mirrors
 # run-cold-build-tests.sh's own exit-code contract, which already treats

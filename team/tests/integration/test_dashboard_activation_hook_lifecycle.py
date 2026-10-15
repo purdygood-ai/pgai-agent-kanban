@@ -62,7 +62,11 @@ from typing import Iterator, NamedTuple
 
 import pytest
 
-from tests.fixtures.binary_guard import narrate_binary_skip, try_resolve_binary
+from tests.fixtures.binary_guard import (
+    narrate_binary_skip,
+    teardown_private_tmux,
+    try_resolve_binary,
+)
 from tests.fixtures.process_progress import (
     pane_process_death,
     proc_cpu_ticks,
@@ -88,6 +92,14 @@ _SENDER_BASENAME = "activation-hook-sender.sh"
 # What a stalled wait means for these tests: a hung step, never a verdict
 # on pane survival.
 _STALL_VERDICT = "it is hung, not slow; this is not a verdict on pane survival"
+
+# create.sh's all-armed handshake refuses once PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS
+# pass with no further pane arming (operator default 20). Forty panes on a
+# loaded host can take longer than that to arm their first one, which would
+# make host load the verdict of tests about pane survival. These tests set
+# the bound far above any contended run, so the handshake ends on every pane
+# arming; the bound is left only as a backstop for a pane that never arms.
+_ARM_STALL_BACKSTOP_SECONDS = 600
 
 
 class PrivateTmux(NamedTuple):
@@ -141,13 +153,7 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
         pt = PrivateTmux(real_tmux=real_tmux, socket_name=socket_name, env=env)
         yield pt
     finally:
-        guard.teardown(
-            lambda path: subprocess.run(
-                [path, "-L", socket_name, "kill-server"],
-                capture_output=True,
-                timeout=10,
-            )
-        )
+        teardown_private_tmux(guard, socket_name)
 
 
 def _count_panes(private_tmux: PrivateTmux) -> int | None:
@@ -196,6 +202,27 @@ def _run_create_sh(
                 proc.kill()
                 proc.wait()
     return log_path.read_text()
+
+
+def _dashboard_env(private_tmux: PrivateTmux, kanban_temp: pathlib.Path) -> dict[str, str]:
+    """The env create.sh, the senders and kill.sh run under: the private tmux
+    server, the repo as kanban root, a scratch temp dir, and the test-scoped
+    arm stall bound (_ARM_STALL_BACKSTOP_SECONDS)."""
+    env = dict(private_tmux.env)
+    env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(_REPO_ROOT)
+    env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(kanban_temp)
+    env["TERM"] = "xterm-256color"
+    env["PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS"] = str(_ARM_STALL_BACKSTOP_SECONDS)
+    return env
+
+
+def _assert_all_panes_armed(create_output: str) -> None:
+    """create.sh got past its all-armed handshake. With the test-scoped
+    bound, a refusal means no pane armed for _ARM_STALL_BACKSTOP_SECONDS."""
+    assert "dashboard_create.pane_arm_timeout" not in create_output, (
+        f"create.sh's all-armed handshake saw no pane arm for "
+        f"{_ARM_STALL_BACKSTOP_SECONDS}s -- {_STALL_VERDICT}:\n{create_output}"
+    )
 
 
 def _pane_processes(private_tmux: PrivateTmux, target: str, *, all_windows: bool) -> dict[str, tuple[int, str]]:
@@ -265,19 +292,14 @@ def test_thirty_immediate_window_switches_leave_every_pane_alive(
     kanban_temp = tmp_path / "kanban-temp"
     kanban_temp.mkdir()
 
-    env = dict(private_tmux.env)
-    env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(_REPO_ROOT)
-    env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(kanban_temp)
-    env["TERM"] = "xterm-256color"
+    env = _dashboard_env(private_tmux, kanban_temp)
 
     create_output = _run_create_sh(private_tmux, env, session, tmp_path)
     # A no-tty "open terminal failed" on the final exec-attach line is
     # expected and harmless headless -- the session was already created
     # detached, with the all-armed handshake and hook install already
     # complete, before that final line runs.
-    assert "dashboard_create.pane_arm_timeout" not in create_output, (
-        f"create.sh refused the all-armed handshake:\n{create_output}"
-    )
+    _assert_all_panes_armed(create_output)
 
     try:
         assert private_tmux.run("has-session", "-t", session).returncode == 0, (
@@ -391,15 +413,10 @@ def test_signaling_the_same_pane_twice_in_overlap_leaves_it_alive(
     kanban_temp = tmp_path / "kanban-temp"
     kanban_temp.mkdir()
 
-    env = dict(private_tmux.env)
-    env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(_REPO_ROOT)
-    env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(kanban_temp)
-    env["TERM"] = "xterm-256color"
+    env = _dashboard_env(private_tmux, kanban_temp)
 
     create_output = _run_create_sh(private_tmux, env, session, tmp_path)
-    assert "dashboard_create.pane_arm_timeout" not in create_output, (
-        f"create.sh refused the all-armed handshake:\n{create_output}"
-    )
+    _assert_all_panes_armed(create_output)
 
     try:
         assert private_tmux.run("has-session", "-t", session).returncode == 0, (

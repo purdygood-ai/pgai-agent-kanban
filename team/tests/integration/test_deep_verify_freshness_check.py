@@ -23,7 +23,7 @@ Coverage:
     remedy is the exact runnable command that produces a record.
   - A failed-to-build record and a could-not-attempt record refuse with
     two DIFFERENT messages; the could-not-attempt one says plainly that
-    nothing was learned about the tree.
+    nothing was learned about whether the images build.
   - A green record outside the freshness policy (wrong version and/or too
     old) refuses, stating both the policy and the record's actual
     mismatch/age.
@@ -270,7 +270,7 @@ def test_could_not_attempt_record_refuses_saying_nothing_was_learned(
 
     assert result.returncode != 0
     assert "freshness_gate.could_not_attempt" in result.stderr
-    assert "nothing was learned about the tree" in result.stderr
+    assert "nothing was learned about whether the images build" in result.stderr
     assert _snapshot(kanban_root, "demo") == before
 
 

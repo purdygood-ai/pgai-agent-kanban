@@ -13,7 +13,7 @@
 # failure aborts the runner immediately, before any quality-class lint runs.
 #
 # Quality class (never fatal): every other pre-flight lint -- provenance,
-# anti-pattern, orphan-test, help-presence, doc/CHANGELOG/ICD freshness,
+# anti-pattern, orphan-test, help-presence, doc/ICD freshness,
 # API-parity, and the rest.  Findings print in full, are recorded into a
 # machine-readable findings file, and the runner continues to pytest
 # regardless of the underlying lint's exit code.  This library provides the
@@ -339,9 +339,10 @@ gated_runner_assert_findings_claim() {
 # Both gated runners set a fixed, known family of variables ahead of their
 # pytest launch. Some stay exported through the pytest call (PYTEST_ADDOPTS,
 # the PGAI_* path/seam variables); others are deliberately local/unexported
-# or already unset again by the time pytest actually starts (KANBAN_ROOT,
-# PYTHONHASHSEED, PGAI_LINT_CHANGELOG_MODE -- all three scoped to the
-# CHANGELOG-freshness lint earlier in the same runner; GIT_GUARD_REAL_GIT
+# or already unset again by the time pytest actually starts (KANBAN_ROOT and
+# PYTHONHASHSEED -- both unset by each runner ahead of its later pre-flight
+# lints; PGAI_LINT_CHANGELOG_MODE -- read only by the operator-run
+# lint_changelog_freshness.py, which no runner sets; GIT_GUARD_REAL_GIT
 # and PGAI_GIT_GUARD_DEPTH -- both scrubbed by each runner's own
 # "Scrub the git-boundary-guard's own exported variables" block immediately
 # ahead of the pytest launch, so the guard's stub-git test fixtures are
@@ -491,6 +492,35 @@ gated_runner_pytest_basetemp_cleanup() {
   fi
   chmod -R u+w "$path" 2>/dev/null || true
   pgai_temp_cleanup "$path" || true
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# gated_runner_tmux_socket_sweep
+#
+#   Removes stale private tmux sockets that test runs left in the current
+#   user's tmux directory ($TMUX_TMPDIR/tmux-<uid>, /tmp when TMUX_TMPDIR is
+#   unset): only files named pgai-*, only sockets with no live server, and
+#   only ones at least a minute old, so a server another run is still
+#   starting is left alone. It never kills a server and never touches a
+#   socket under any other name. Prints one "[gated-runner]
+#   tmux_socket_sweep: ..." line. Wired into each runner's exit hook; like
+#   gated_runner_pytest_basetemp_cleanup it always returns 0, because a
+#   cleanup step must never change a runner's own exit code. The rules live
+#   in pgai_agent_kanban.testing.tmux_sockets.
+# ---------------------------------------------------------------------------
+gated_runner_tmux_socket_sweep() {
+  if ! declare -F pp_run_ops >/dev/null 2>&1; then
+    # shellcheck source=pp_run_ops.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/pp_run_ops.sh" 2>/dev/null || {
+      echo "[gated-runner] tmux_socket_sweep: skipped (pp_run_ops.sh not found beside gated_runner_lint.sh)"
+      return 0
+    }
+  fi
+  local line
+  line="$(pp_run_ops pgai_agent_kanban.testing.tmux_sockets sweep 2>&1)" \
+    || line="tmux_socket_sweep: skipped (${line:-the sweep exited non-zero})"
+  echo "[gated-runner] ${line}"
   return 0
 }
 

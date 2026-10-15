@@ -149,29 +149,41 @@ scheduling race between the reader exiting and the writer's next
 once in a while. A single successful run proves nothing about this
 shape.
 
-**Write it as drain, then slice.** Capture the extraction to end of
-input first, then take the slice locally:
+**Print a header with the shared helper.** A script whose help is its
+leading comment block calls `header_help_print` from
+`team/scripts/lib/header_help.sh`:
 
 ```bash
     -h|--help)
-      # Read the whole header via mapfile so grep/sed always finish writing
-      # before anything reads their output, then slice to the line limit
-      # locally -- head -N as a pipe stage can close its input early and
-      # SIGPIPE the writers under pipefail.
-      mapfile -t __help_lines < <(grep '^#' "$0" | sed 's/^# \{0,1\}//')
-      printf '%s\n' "${__help_lines[@]:0:40}"
+      # shellcheck source=lib/header_help.sh
+      source "$(dirname "${BASH_SOURCE[0]}")/lib/header_help.sh"
+      header_help_print "${BASH_SOURCE[0]}"
       exit 0
       ;;
 ```
 
-`mapfile` reading a process substitution always consumes its producer
-to EOF, so nothing downstream can close the pipe early, and the
-truncation that used to be a pipe stage becomes an array slice, which
-cannot signal anything. The extractor itself is free — `grep` piped
-into `sed`, or one `awk` — and the slice may be a line count or an
-offset found by scanning the captured lines for a marker such as the
-`Usage:` line. What the rule fixes is the order: capture all of it,
-then cut.
+A script one directory deeper, such as one under `team/scripts/dashboard/`,
+reaches the same `team/scripts/lib/header_help.sh` one level up:
+
+```bash
+      # shellcheck source=../lib/header_help.sh
+      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+```
+
+Inside the helper, one `awk` reads the script file and writes straight to
+stdout, so no pipe stage sits between extraction and output. It prints from after the shebang to
+the first non-comment line, strips the `# ` prefix and leaves out
+`# shellcheck` directives, so there is no line count to keep in step
+with the header.
+
+**Any other extraction drains, then slices.** Help text built some other
+way captures the extraction to end of input first, then narrows it
+locally. `mapfile` reading a process substitution always consumes its
+producer to EOF, so nothing downstream can close the pipe early, and an
+array slice cannot signal anything. Narrow by an offset found in the
+captured lines, such as the `Usage:` line, never by a hand-typed line
+count, which goes stale the moment the header changes. What the rule
+fixes is the order: capture all of it, then cut.
 
 **The rule is checkable by reading the script.** Look at the help
 branch and ask one question: can anything downstream of the extraction
@@ -179,10 +191,10 @@ stop before its input ends? If the text reaches stdout through a pipe
 whose final stage is `head`, an `awk` or `sed` that quits at a line
 count, or a `read` loop that breaks early, the help path does not
 comply — regardless of the status it returned the last time anyone ran
-it. A compliant help path holds the whole text in an array or variable
-between extraction and output; whatever narrows it works on that
-captured copy rather than on a live pipe, and the branch ends in an
-explicit `exit 0`.
+it. A compliant help path calls `header_help_print`, or holds the whole
+text in an array or variable between extraction and output; whatever
+narrows it works on that captured copy rather than on a live pipe, and
+the branch ends in an explicit `exit 0`.
 
 Apply this whether or not the script sets `pipefail` today. Written
 the compliant way, a help path cannot be broken by someone adding

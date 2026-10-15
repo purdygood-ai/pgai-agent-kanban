@@ -38,7 +38,7 @@ from typing import Iterator, NamedTuple
 
 import pytest
 
-from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.binary_guard import require_binary, teardown_private_tmux
 from tests.fixtures.process_progress import proc_start_time, require_procfs
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
@@ -111,11 +111,7 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
     try:
         yield PrivateTmux(guard.path, socket_name, env)
     finally:
-        guard.teardown(
-            lambda path: subprocess.run(
-                [path, "-L", socket_name, "kill-server"], capture_output=True, timeout=10
-            )
-        )
+        teardown_private_tmux(guard, socket_name, env=env)
 
 
 class _AttachedClient:

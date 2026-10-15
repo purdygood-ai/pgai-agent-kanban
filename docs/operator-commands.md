@@ -87,21 +87,35 @@ filename conventions):
 | `PRIORITY-*` | `projects/<name>/priority/` |
 | `vX.Y.Z-*.md` (version-prefixed) | `projects/<name>/requirements/` |
 
-**It is deliberately dumb: it routes, copies, and sets 644 — it does NOT
-validate the file's contents.** It does not assign numbers, check the
-internal heading against the filename, or verify the body. Content validation
-stays with the discovery pipeline exactly as before: a malformed file still
-routes here, then the pipeline rejects it and, if it keeps rejecting it,
-quarantines it into `projects/<name>/rejected/` (see
+**BUG-\* numbering.** A `BUG-*` draft's number is claimed atomically, with the
+same claim bug filers use, so no two bugs share a number. The name must follow
+the ledger filename contract — `BUG-NNNN-<slug>.md`, lower-case kebab slug, an
+optional `-YYYYMMDD-` after the number — or it is refused before anything is
+written. A free number is deposited as named. A taken one is deposited under
+the next free number above the highest in the ledger: the file is renamed, its
+`# BUG-NNNN-<slug>` title line and `**Bug ID:**` line are rewritten to match,
+and the printed `intake: deposited <path>` line names the new file.
+`PRIORITY-*` and requirements files are always deposited as named.
+
+**It does not validate the file's contents.** Beyond the `BUG-*` name and
+number, it does not check the internal heading against the filename or verify
+the body. Content validation stays with the discovery pipeline: a malformed
+file still routes here, then the pipeline rejects it and, if it keeps rejecting
+it, quarantines it into `projects/<name>/rejected/` (see
 [Quarantined intake](#quarantined-intake)). `intake.sh` neither duplicates nor
 pre-empts that.
 
-**Refusals.** `intake.sh` refuses — copying nothing — in two cases:
+**Refusals.** `intake.sh` refuses — copying nothing — when:
 
 - **Unroutable name.** The filename matches none of `BUG-*`, `PRIORITY-*`, or
   `vX.Y.Z-*` and cannot be routed.
-- **Existing target.** A file of the same name already exists in the
-  destination; `intake.sh` will not clobber an in-flight item.
+- **Malformed BUG name.** A `BUG-*` name breaks the ledger filename contract —
+  an uppercase letter or a dot in the slug, for example. The message carries
+  the text discovery prints for a malformed name; the remedy renames the draft
+  and re-runs `intake.sh`.
+- **Existing target.** A `PRIORITY-*` or requirements file of the same name
+  already exists in the destination; `intake.sh` will not clobber an in-flight
+  item.
 
 ---
 
@@ -1840,11 +1854,16 @@ $KANBAN_ROOT/scripts/cm/push-watchdog.sh --project my-app             # push
 
 Rebuilds a `CHANGELOG.md` from every `vX.Y.Z*.md` file in the kanban
 project directory's `projects/<name>/release-notes/`, newest version first,
-each release headed with its `**Release Date:**`. It writes
-`projects/<name>/CHANGELOG.md` unless `--output` names another path, and stops
-with an error when that `release-notes/` directory does not exist. It does not
-read or write the project's dev tree: the repository's own `CHANGELOG.md` is
-rendered by CM at release time.
+each release headed with its date. It writes `projects/<name>/CHANGELOG.md`
+unless `--output` names another path, and stops with an error when that
+`release-notes/` directory does not exist. It does not read or write the
+project's dev tree: the repository's own `CHANGELOG.md` is rendered by CM at
+release time through the changelog writer.
+
+This script and the release-time changelog writer share one date rule: each
+release's date is its `**Release Date:**` line, else its `**Date:**` line,
+else `unknown` with one warning to stderr naming the file. A notes file with
+neither line still renders; neither path fails over it.
 
 ```text
 Usage: regenerate-changelog.sh --project <name> [--output <path>] [--help]
@@ -2971,11 +2990,21 @@ Copy semantics:
   - Source file is NOT moved or deleted (copy only).
   - Deposited copy is always mode 644.
   - Copy is atomic (temp + link into place); discovery never sees a partial file.
-  - REFUSED if the target already exists (no clobber).
+  - PRIORITY-* and requirements: REFUSED if the target already exists
+    (no clobber).
 
-NOTE: intake.sh is a DUMB router. It does NOT validate file contents,
-assign numbers, or check headings. The discovery pipeline checks names
-afterwards and quarantines a file it keeps rejecting into
+BUG-* numbering:
+  - The name must be BUG-NNNN-<slug>.md (lower-case kebab slug, optional
+    -YYYYMMDD- after the number); any other BUG-* name is REFUSED (exit 2)
+    before anything is written.
+  - The number is claimed atomically. Free: deposited as named. Taken:
+    deposited as the next free number, with the '# BUG-NNNN-<slug>' title
+    line and '**Bug ID:**' line rewritten to match; the printed path
+    names the new file.
+
+NOTE: intake.sh does NOT validate file contents or check headings.
+The discovery pipeline checks names afterwards and quarantines a file
+it keeps rejecting into
 projects/<name>/rejected/ (legacy fallback: <intake>/.rejected/);
 list-rejected.sh and recover-rejected.sh find and restore it.
 
@@ -2986,8 +3015,9 @@ Examples:
 Exit codes:
   0  File deposited (prints the deposited path)
   1  Usage error, source file problem, or destination directory missing
-  2  Routing refused: filename does not match a known intake prefix
-  3  Target already exists (no clobber)
+  2  Refused: unknown intake prefix, not a bare file name, or a BUG-*
+     name off the ledger filename contract
+  3  PRIORITY-* or requirements target already exists (no clobber)
   4  Filesystem error during copy
 ```
 <!-- OPERATOR-VERBS-GENERATED:END verb=intake -->

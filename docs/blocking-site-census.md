@@ -2453,6 +2453,7 @@ team/pgai_agent_kanban/ops/write.py:ceiling-invalid-value-01 BLOCK-WORTHY
 team/pgai_agent_kanban/ops/write.py:switch-provider-unknown-01 BLOCK-WORTHY
 team/pgai_agent_kanban/ops/write.py:write-close-invalid-state-01 BLOCK-WORTHY
 team/pgai_agent_kanban/ops/write.py:write-intake-filename-not-bare-01 BLOCK-WORTHY
+team/pgai_agent_kanban/ops/write.py:write-intake-bug-name-malformed-01 BLOCK-WORTHY
 team/pgai_agent_kanban/ops/projects.py:projects-remove-active-rc-01 BLOCK-WORTHY
 team/pgai_agent_kanban/ops/projects.py:projects-remove-active-rc-invalid-01 BLOCK-WORTHY
 team/pgai_agent_kanban/ops/projects.py:projects-create-name-invalid-01 BLOCK-WORTHY
@@ -2799,6 +2800,7 @@ team/scripts/ship-rc.sh:ship-rc-env-bootstrap-01 BLOCK-WORTHY
 team/scripts/undefer.sh:undefer-project-required-01 BLOCK-WORTHY
 team/scripts/unhalt-global.sh:unhalt-global-kanban-root-missing-01 BLOCK-WORTHY
 team/scripts/unhalt-global.sh:unhalt-global-sentinel-remove-failed-01 BLOCK-WORTHY
+team/scripts/upgrade.sh:upgrade-dev-tree-older-01 BLOCK-WORTHY
 team/scripts/upgrade.sh:upgrade-partial-deposit-01 BLOCK-WORTHY
 team/scripts/upgrade.sh:upgrade-stamp-helper-missing-01 BLOCK-WORTHY
 team/scripts/verdict-report.sh:verdict-report-details-requires-project-01 BLOCK-WORTHY
@@ -2821,6 +2823,7 @@ team/scripts/cm/open-rc.sh:open-rc-git-remote-name-01 BLOCK-WORTHY
 team/scripts/init-project-git-repo.sh:init-project-git-repo-git-remote-name-01 BLOCK-WORTHY
 team/scripts/lib/refusal_ledger.sh:refusal-ledger-unregistered-project-02 CONVERT
 team/tests/conftest.py:tests-conftest-live-projects-leak-01 BLOCK-WORTHY
+team/scripts/lib/safe_overwrite.sh:safe-overwrite-crontab-backups-keep-01 BLOCK-WORTHY
 <!-- CENSUS-LOCATOR-INDEX-END -->
 
 ## Coverage statement

@@ -60,12 +60,9 @@ set -euo pipefail
 for __help_arg in "$@"; do
   case "$__help_arg" in
     -h|--help)
-      # Read the whole header via mapfile so grep/sed always finish writing
-      # before anything reads their output, then slice to the line limit
-      # locally -- head -N as a pipe stage can close its input early and
-      # SIGPIPE the writers under pipefail.
-      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
-      printf '%s\n' "${__help_lines[@]:0:53}"
+      # shellcheck source=../lib/header_help.sh
+      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+      header_help_print "${BASH_SOURCE[0]}"
       exit 0
       ;;
   esac

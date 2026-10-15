@@ -1241,3 +1241,23 @@ coverage = false
 # sign, unit or decimal point; leading zeros are dropped). Default when
 # absent or blank: 60
 pre_merge_affected_cap = 60
+
+
+# ---------------------------------------------------------------------------
+# [install] — install and upgrade settings
+# ---------------------------------------------------------------------------
+# Read by the crontab step of install.sh and upgrade.sh
+# (safe_overwrite_crontab in team/scripts/lib/safe_overwrite.sh, through
+# scripts/install-crontab.sh). Kanban-wide only.
+[install]
+
+# crontab_backups_keep: how many crontab backups to keep in $HOME. Before
+# the crontab step changes a crontab it saves the current one as
+# $HOME/.crontab.before-install-YYYYMMDD-HHMMSS.bak, unless the crontab is
+# byte-identical to the newest backup, which already holds it. Then only
+# the newest crontab_backups_keep of those files are kept and older ones
+# are deleted. Files you copied or renamed by hand are never deleted. A
+# value that is not a whole number of 1 or more is refused dual-channel,
+# naming the sed edit that fixes it, and the crontab is left unchanged.
+# Accepted: a whole number of 1 or more. Default: 10
+crontab_backups_keep = 10

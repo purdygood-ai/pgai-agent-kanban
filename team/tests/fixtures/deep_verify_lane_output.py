@@ -6,9 +6,17 @@ classifier, bug filer and deep-verify.sh tests.
 
 Each constant is the combined stdout+stderr shape the cold lane prints:
 pytest's progress lines, its FAILURES block, its short test summary and
-final counts, then the lane's own closing narration. Passing tests' output
-is captured by pytest and never printed, so an all-builds-passed run shows
-the build modules only as progress dots.
+final counts, then the lane's own closing narration.
+
+The lane runs pytest with --capture=no (COLD_LANE_PYTEST_ARGS in
+team/scripts/lib/cold_lane_pytest_args.sh), so whatever a test prints
+appears inline among the progress characters, whatever the test's outcome,
+and pytest prints no percentage column. The ENGINE_UNAVAILABLE_* fixtures
+for runs that collect tests follow that layout;
+tests/unit/test_cold_lane_output_evidence.py checks the lines the
+classifier reads from them against real pytest output. The other fixtures
+carry pytest's progress characters, failure and summary lines only, not
+the lines passing tests print.
 """
 
 from __future__ import annotations
@@ -113,7 +121,8 @@ ENGINE_UNAVAILABLE_ALL_SKIPPED_OUTPUT = (
 # tests/cold/: the image-build tests narrate-skip every (engine, flavor)
 # pair, while the engine-free cold modules still run. pytest does not exit
 # 5, so the lane prints no all-skipped marker and no pair prints
-# "Image built successfully".
+# "Image built successfully". Each narration line sits on its own line
+# among the progress characters, as pytest prints it with capture off.
 ENGINE_UNAVAILABLE_FAILING_TEST_FILE = "tests/cold/test_dashboard_operator_window.py"
 ENGINE_UNAVAILABLE_FAILING_TEST_ID = "test_create_sh_exists"
 ENGINE_UNAVAILABLE_FAILING_TEST_NODEID = (
@@ -126,26 +135,34 @@ ENGINE_UNAVAILABLE_SKIP_REASON = (
 
 
 def _engine_unavailable_progress(operator_window_progress: str) -> str:
-    """Progress lines and per-pair skip narration for an engine-less run;
+    """Progress lines and skip narration for an engine-less run;
     *operator_window_progress* is the dashboard-operator-window module's
-    result characters (its first test is the one the failing shape fails)."""
-    narration = "".join(
-        f"[cold-build] SKIP — {engine} binary not found or {engine} unreachable; "
+    result characters (its first test is the one the failing shape fails).
+
+    The image-build module's module-scoped (engine, flavor) fixture
+    narrates once per pair and skips that pair's three tests; its
+    engine-free tests pass and print nothing."""
+    pair_narration = "".join(
+        f"\n[cold-build] SKIP — {engine} binary not found or {engine} unreachable; "
         f"cold-build lane requires a working {engine} installation to exercise "
-        f"the {flavor} flavor under {engine}\n"
+        f"the {flavor} flavor under {engine}\nsss"
         for engine in ("docker", "podman")
         for flavor in ("debian", "rocky9")
     )
+    smoke_narration = (
+        "\n[dashboard-smoke-fixture] SKIP — docker binary not found on PATH; "
+        "this test requires docker\ns"
+    )
     return (
         _SESSION_HEADER.replace("collected 104 items", "collected 40 items")
-        + "tests/cold/test_container_shell_launcher.py ssss                     [ 10%]\n"
-        f"{ENGINE_UNAVAILABLE_FAILING_TEST_FILE} {operator_window_progress}"
-        "                   [ 30%]\n"
-        "tests/cold/test_dashboard_smoke_container.py ss                         [ 35%]\n"
-        "tests/cold/test_docker_build_fixture.py ..                              [ 40%]\n"
-        + narration
-        + "tests/cold/test_docker_cold_build.py ............sssssssssss          [ 92%]\n"
-        "tests/cold/test_strangers_path_check_harness.py ...                    [100%]\n"
+        + "tests/cold/test_container_shell_launcher.py sss\n"
+        f"{ENGINE_UNAVAILABLE_FAILING_TEST_FILE} {operator_window_progress}\n"
+        "tests/cold/test_dashboard_smoke_container.py "
+        + smoke_narration * 2
+        + "\ntests/cold/test_docker_build_fixture.py ..\n"
+        "tests/cold/test_docker_cold_build.py .........."
+        + pair_narration
+        + "\ntests/cold/test_strangers_path_check_harness.py ...\n"
         "\n"
     )
 
@@ -163,8 +180,7 @@ ENGINE_UNAVAILABLE_NON_BUILD_FAILURE_OUTPUT = (
     "\n"
     f"{ENGINE_UNAVAILABLE_FAILING_TEST_FILE}:438: AssertionError\n"
     "=========================== short test summary info ============================\n"
-    f"FAILED {ENGINE_UNAVAILABLE_FAILING_TEST_NODEID} - AssertionError: "
-    "team/scripts/dashboard/create.sh not fo...\n"
+    f"FAILED {ENGINE_UNAVAILABLE_FAILING_TEST_NODEID} - ...\n"
     "================== 1 failed, 22 passed, 17 skipped in 3.10s ===================\n"
     + _LANE_FAILED_TRAILER.replace("813s", "4s")
 )

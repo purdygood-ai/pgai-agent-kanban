@@ -181,11 +181,11 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.config import get_config
 from lib.workflow_loader import load_workflow, WorkflowError
-from lib.acceptance_policy import apply_acceptance_policy, format_policy_notes
 
 # pgai_agent_kanban package lives one level up from pm-agent/ (i.e. under team/).
 # Insert team/ onto sys.path so the import works from any caller working directory.
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from lib.acceptance_policy import apply_acceptance_policy, format_policy_notes
 from pgai_agent_kanban.lib import ini as _ini
 from pgai_agent_kanban.lib import project_cfg as _project_cfg
 from pgai_agent_kanban.cm.read_state_field import (
@@ -2114,7 +2114,7 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     notes = task.get("notes", "none")
 
     acceptance_criteria, constraints, notes = apply_targeted_test_policy(
-        task, task_id, role, acceptance_criteria, constraints, notes
+        task, task_id, role, acceptance_criteria, constraints, notes,
     )
 
     # Prose names RC branches the way the repository does: a bare

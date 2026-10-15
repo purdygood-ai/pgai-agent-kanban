@@ -32,8 +32,8 @@
 #   2. Confirm the push with the operator (skip with -y)
 #   2b. Safety check: if release-notes/<VERSION>.md has uncommitted WRITER polish
 #       that arrived after cm/release.sh ran, commit both the polish AND a fresh
-#       CHANGELOG.md regeneration together so the freshness gate stays green,
-#       then move the not-yet-published release tag onto that commit so the tag
+#       CHANGELOG.md regeneration together so the CHANGELOG.md on the tagged
+#       commit matches the release notes the tag carries, then move the not-yet-published release tag onto that commit so the tag
 #       carries the polished notes. It refuses, committing nothing, when HEAD is
 #       not the main branch, when the tag is not on main's tip or is already on
 #       the remote (moving it would change a published release), or when the
@@ -349,9 +349,10 @@ _BARE_VERSION="$(pp_strip_prefix_from_tag "$PROJECT_NAME" "$VERSION")"
 #
 # This step guards against the uncommon case where WRITER polish arrived AFTER
 # cm/release.sh ran (unexpected timing): if uncommitted changes to the release-notes
-# file are detected here, committing the polish alone would stale CHANGELOG.md and
-# re-arm the freshness gate failure. Instead, both the polish AND a fresh
-# CHANGELOG.md regeneration are committed together to keep the gate green.
+# file are detected here, committing the polish alone would leave the tagged
+# CHANGELOG.md behind the release notes the tag carries. Instead, both the polish
+# AND a fresh CHANGELOG.md regeneration are committed together so the two match
+# on the tagged commit.
 #
 # The case where CM already committed the polish (file is clean, commit is stranded
 # on local main, unpushed) is still handled: Step 2b is a no-op, and the
@@ -359,7 +360,7 @@ _BARE_VERSION="$(pp_strip_prefix_from_tag "$PROJECT_NAME" "$VERSION")"
 #
 # Four cases:
 #   - File modified (uncommitted working-tree changes after cm/release.sh) →
-#       commit polish + regenerate and commit CHANGELOG.md (freshness gate stays green)
+#       commit polish + regenerate and commit CHANGELOG.md (so it matches the tagged notes)
 #   - File already committed but not yet pushed  → Step 2b no-op; Step 3 pushes it
 #   - File unchanged from the committed state (no diff) → no-op
 #   - File missing entirely                             → log warning, continue
@@ -418,10 +419,11 @@ else
       exit 1
     fi
 
-    echo "  Committing polish and regenerating CHANGELOG.md together to keep the freshness gate green..."
+    echo "  Committing polish and regenerating CHANGELOG.md together so the tagged CHANGELOG.md matches the polished notes..."
     # Regenerate CHANGELOG.md from the polished notes so the committed artifact
-    # matches a fresh regeneration.  PYTHONHASHSEED=0 ensures stable frozenset
-    # iteration (same requirement as cm/release.sh Step 11b). The render goes
+    # matches a fresh regeneration.  The render is hash-seed-independent (the
+    # writer sorts its heading sets); PYTHONHASHSEED=0 is kept as defense in
+    # depth, as in cm/release.sh Step 11b. The render goes
     # to a scratch file beside CHANGELOG.md and replaces it only when the
     # writer succeeds; the notes are staged only after that.
     _cl_bugs_dir="${KANBAN_ROOT}/projects/${PROJECT_NAME}/bugs"
@@ -430,8 +432,9 @@ else
     }
     if ! pgai_atomic_write "$REPO_ROOT/CHANGELOG.md" _finalize_render_changelog; then
       # BLOCK-WORTHY (docs/blocking-site-census.md): committing the polish
-      # without a matching CHANGELOG.md would fail the freshness gate; the
-      # old CHANGELOG.md is left byte-for-byte and nothing is committed.
+      # without a matching CHANGELOG.md would tag a CHANGELOG.md that does not
+      # match the release notes the tag carries; the old CHANGELOG.md is left
+      # byte-for-byte and nothing is committed.
       pgai_emit_error_contract "cm-finalize-release.changelog-render-failed" \
         "Step 2b: regenerating CHANGELOG.md for ${VERSION} failed (the writer's own message is above); CHANGELOG.md is unchanged and the polish was not committed." \
         "PYTHONHASHSEED=0 scripts/lib/pp_run_ops.sh pgai_agent_kanban.cm.changelog_writer '${REPO_ROOT}' '${_cl_bugs_dir}' > /dev/null && scripts/cm/finalize-release.sh --project ${PROJECT_NAME} ${VERSION}" \

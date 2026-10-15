@@ -11,7 +11,8 @@ Public API
     get_open_bug_ids(bug_backlog_path)      -> set[str]
     update_bug_backlog_cache(bugs_dir, bug_backlog_path) -> None
     get_unbundled_bugs(bugs_dir, bug_backlog_path)       -> list[dict]
-    claim_next_bug_id(bugs_dir, slug, claimed_by=None) -> tuple[str, Path, Path]
+    claim_next_bug_id(bugs_dir, slug, claimed_by=None, preferred_num=None)
+                                            -> tuple[str, Path, Path]
     release_bug_id_claim(lock_path)         -> None
     detect_duplicate_bug_ids(bugs_dir)      -> list[int]
 """
@@ -30,7 +31,7 @@ from pathlib import Path
 # Matches BUG-NNNN-slug filenames. Excludes BUG-TEMPLATE and README.
 # This is intentionally the loose "looks like a bug file" pattern used to
 # enumerate candidates for the backlog cache — it is NOT the filing-time
-# gate. See _BUG_GATE_RE below for the strict pattern used by the
+# numbering rule. See _BUG_TAKEN_RE below for the rule used by the
 # high-water scan.
 _BUG_FILE_RE = re.compile(r'^(BUG-\d{4,}-.+)\.md$', re.IGNORECASE)
 
@@ -43,11 +44,22 @@ _CLAIM_LOCK_RE = re.compile(r'^\.claim-(\d{4,})\.lock$')
 # ---------------------------------------------------------------------------
 # Gate-valid BUG filename pattern, sourced from the single-source
 # ledger_filename_contract module shared with discovery.sh's scan-and-select
-# layer.  Used ONLY by _scan_highest_bug_num to decide which filenames may
-# participate in the high-water scan — a malformed name (date-first,
-# under/over-padded, or any other shape) must never poison the next-number
-# arithmetic.  _BUG_FILE_RE above stays loose on purpose: it drives backlog
-# cache enumeration, a separate concern from filing-time numbering safety.
+# layer.  The strict contract governs discovery and backlog enumeration; it
+# does NOT decide which numbers claim_next_bug_id treats as taken.
+#
+# The claim's "taken" rule is _BUG_TAKEN_RE below, imported from the same
+# contract module (ledger_taken_re) so the claim and discovery's remedy text
+# agree on the next free number: every entry in the bugs directory whose
+# name starts with BUG- followed by exactly four digits occupies that
+# number, whether or not the rest of the name passes the contract (a slug
+# with dots, uppercase letters or no .md suffix still holds its number), so
+# the claim never hands out a number a visible file already carries.
+# Exactly four digits keeps malformed shapes from poisoning the next-number
+# arithmetic: a date-first name (e.g. BUG-20260803-001-slug.md) has a fifth
+# digit after the first four, and an under-padded name (e.g. BUG-37-slug.md)
+# has fewer than four, so neither contributes a number.
+# _BUG_FILE_RE above stays loose on purpose: it drives backlog cache
+# enumeration, a separate concern from filing-time numbering safety.
 # ---------------------------------------------------------------------------
 
 
@@ -97,6 +109,12 @@ except ImportError:
 # "superseded" reads as wont-do). The package root is on sys.path by now
 # (see _resolve_ledger_filename_re above).
 from pgai_agent_kanban.lib.terminal_states import TERMINAL_STATES, canonical_state  # noqa: E402
+
+# Which names occupy a BUG number — the shared ledger "taken" rule (see the
+# block above _resolve_ledger_filename_re).  Group 1 is the four-digit number.
+from pgai_agent_kanban.lib.ledger_filename_contract import ledger_taken_re  # noqa: E402
+
+_BUG_TAKEN_RE = ledger_taken_re("BUG")
 
 
 def _carried_bug_files(bugs_dir: str) -> frozenset:
@@ -486,33 +504,34 @@ def get_unbundled_bugs(bugs_dir: str, bug_backlog_path: str) -> list:
 # ---------------------------------------------------------------------------
 
 def _scan_highest_bug_num(bugs_dir: Path) -> int:
-    """Scan bugs_dir for the highest numeric prefix across GATE-VALID
-    BUG-NNNN-*.md files and any active .claim-NNNN.lock files.  Returns 0 if
-    the directory is empty or contains no BUG-* files.
+    """Scan bugs_dir for the highest BUG number already taken, counting both
+    bug-file names and any active .claim-NNNN.lock files.  Returns 0 if the
+    directory is empty or holds no name that takes a number.
 
     Both committed bug files and in-flight claim lock files are considered so
     that a concurrent claimer who has locked but not yet written the final file
     is still visible.
 
-    Only filenames matching the strict ledger gate (_BUG_GATE_RE — exactly 4
-    digits, optional date segment immediately AFTER the number) participate
-    in the .md-file half of this scan.  A malformed name such as a
+    A name takes a number when it starts with ``BUG-`` followed by exactly
+    four digits and then a non-digit (_BUG_TAKEN_RE, the shared
+    ``ledger_taken_re`` rule from ledger_filename_contract).  The rest of the name
+    does not matter: a name that fails the strict ledger filename contract,
+    such as ``BUG-0002-v1.2.3-notes-count.md`` (e.g.), still occupies 0002,
+    so the claim never returns a number a file in the directory already
+    starts with.  Names without exactly four digits contribute nothing: a
     date-first ``BUG-20260803-001-*.md`` (e.g.) must never poison the
-    high-water mark by contributing its 8-digit "number": a looser
-    ``\\d{4,}`` prefix match would let ``highest`` jump from a legitimate
-    4-digit value to an 8-digit one and permanently break subsequent
-    numbering.  The 4-digit field is always parsed with ``int()`` (never
-    compared as a string).
+    high-water mark with its 8-digit date, and an under-padded
+    ``BUG-37-*.md`` (e.g.) carries no four-digit number at all.  The 4-digit field
+    is always parsed with ``int()`` (never compared as a string).
     """
     highest = 0
     for entry in bugs_dir.iterdir():
-        # Check BUG-NNNN-*.md files — gate-valid names only.
-        if _BUG_GATE_RE.match(entry.name):
-            m = _BUG_NUM_RE.match(entry.name)
-            if m:
-                n = int(m.group(1))
-                if n > highest:
-                    highest = n
+        # Names starting BUG-NNNN (exactly four digits) take their number.
+        m = _BUG_TAKEN_RE.match(entry.name)
+        if m:
+            n = int(m.group(1))
+            if n > highest:
+                highest = n
             continue
         # Check .claim-NNNN.lock files (in-flight claims from concurrent callers)
         m2 = _CLAIM_LOCK_RE.match(entry.name)
@@ -521,6 +540,44 @@ def _scan_highest_bug_num(bugs_dir: Path) -> int:
             if n > highest:
                 highest = n
     return highest
+
+
+def _bug_num_taken_by_name(bugs_dir: Path, num: int) -> bool:
+    """Return True when an entry other than a claim lock in bugs_dir takes
+    BUG number *num* (the shared ``ledger_taken_re`` rule, _BUG_TAKEN_RE).
+
+    ``claim_next_bug_id`` asks this after it has created the lock for a
+    number, so a file that landed between its scan and its lock is seen: a
+    claimer that wrote its file and released the same lock in that window
+    leaves no lock behind, only the file.
+    """
+    for entry in bugs_dir.iterdir():
+        m = _BUG_TAKEN_RE.match(entry.name)
+        if m and int(m.group(1)) == num:
+            return True
+    return False
+
+
+def _try_claim_num(bugs_path: Path, num: int) -> "Path | None":
+    """Claim BUG number *num* in bugs_path, or return None when it is taken.
+
+    Creates ``.claim-NNNN.lock`` with ``O_CREAT | O_EXCL`` (atomic on any
+    POSIX filesystem), then checks that no entry already carries the
+    number.  Returns the lock path on success; on failure leaves no lock of
+    its own behind.
+    """
+    lock_path = bugs_path / f".claim-{num:04d}.lock"
+    # os.open is used directly because pathlib.Path.open does not expose
+    # O_EXCL.  FileExistsError means another caller holds this number.
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        os.close(fd)
+    except FileExistsError:
+        return None
+    if _bug_num_taken_by_name(bugs_path, num):
+        release_bug_id_claim(lock_path)
+        return None
+    return lock_path
 
 
 def _record_bug_claim(bugs_path: Path, bug_id: str, claimed_by: str) -> None:
@@ -552,14 +609,25 @@ def _record_bug_claim(bugs_path: Path, bug_id: str, claimed_by: str) -> None:
         pass
 
 
-def claim_next_bug_id(bugs_dir: str, slug: str, claimed_by: str = None) -> tuple:
-    """Atomically claim the next available BUG-NNNN slot and return the claimed
-    bug file path along with a lock path that the caller must release.
+def claim_next_bug_id(
+    bugs_dir: str, slug: str, claimed_by: str = None, preferred_num: int = None
+) -> tuple:
+    """Atomically claim a free BUG-NNNN slot and return the claimed bug file
+    path along with a lock path that the caller must release.
+
+    By default the slot is the next one above the highest number taken.
+    With ``preferred_num`` the claim tries that number first and takes it
+    when it is free; when it is taken (a file carries it, or another caller
+    holds its lock) the claim falls back to the next free number above the
+    highest, exactly as without it.
 
     This function uses POSIX ``O_CREAT | O_EXCL`` semantics to create a
     ``.claim-NNNN.lock`` sentinel file, which is atomic on any POSIX filesystem.
     If two callers race, exactly one wins each numeric slot and the other
-    automatically increments to the next slot.
+    automatically increments to the next slot.  After creating the lock the
+    claim checks once more that no entry carries the number, so a file a
+    racing caller wrote (and whose lock it already released) between this
+    caller's scan and its lock is never handed out a second time.
 
     Workflow for the caller
     -----------------------
@@ -585,6 +653,8 @@ def claim_next_bug_id(bugs_dir: str, slug: str, claimed_by: str = None) -> tuple
     slug:
         Kebab-case slug for the bug file name, e.g. ``"my-new-bug"``.
         Do not include the ``BUG-NNNN-`` prefix or the ``.md`` extension.
+        Everything after ``BUG-NNNN-`` is kept as given, so a dated name's
+        ``YYYYMMDD-my-new-bug`` passes through unchanged.
     claimed_by:
         Identity of the claiming session, recorded verbatim into the
         durable provenance ledger (see ``_record_bug_claim``). When omitted
@@ -595,6 +665,10 @@ def claim_next_bug_id(bugs_dir: str, slug: str, claimed_by: str = None) -> tuple
         available -- an automated filer invoked outside any task session
         (a gated-runner hook, a cron-triggered sweep) should pass its own
         fixed identity here explicitly rather than relying on the fallback.
+    preferred_num:
+        The number to claim when it is free, e.g. ``10`` for ``BUG-0010``
+        (an integer from 1 to 9999).  ``None`` (the default) claims the
+        next number above the highest taken.
 
     Returns
     -------
@@ -610,6 +684,8 @@ def claim_next_bug_id(bugs_dir: str, slug: str, claimed_by: str = None) -> tuple
     ------
     FileNotFoundError
         If ``bugs_dir`` does not exist.
+    ValueError
+        If ``preferred_num`` is not an integer from 1 to 9999.
     RuntimeError
         If no free slot is found within ``_CLAIM_MAX_RETRIES`` attempts
         (indicates a serious filesystem or concurrency anomaly).
@@ -619,43 +695,55 @@ def claim_next_bug_id(bugs_dir: str, slug: str, claimed_by: str = None) -> tuple
         raise FileNotFoundError(
             f"claim_next_bug_id: bugs directory does not exist: {bugs_dir!r}"
         )
+    if preferred_num is not None and (
+        isinstance(preferred_num, bool)
+        or not isinstance(preferred_num, int)
+        or not 1 <= preferred_num <= 9999
+    ):
+        raise ValueError(
+            f"claim_next_bug_id: preferred_num must be an integer from 1 to 9999 "
+            f"(the NNNN of BUG-NNNN), got {preferred_num!r}"
+        )
 
-    for _attempt in range(_CLAIM_MAX_RETRIES):
-        # Compute the next candidate number from the current highest.
-        # We re-scan on every attempt so that we see files written by racing
-        # callers since the previous attempt.
-        candidate_num = _scan_highest_bug_num(bugs_path) + 1
-        bug_id = f"BUG-{candidate_num:04d}"
-        lock_path = bugs_path / f".claim-{candidate_num:04d}.lock"
-        bug_path = bugs_path / f"{bug_id}-{slug}.md"
+    claimed_num = None
+    lock_path = None
+    if preferred_num is not None:
+        lock_path = _try_claim_num(bugs_path, preferred_num)
+        if lock_path is not None:
+            claimed_num = preferred_num
 
-        # Atomically create the lock file.  O_CREAT|O_EXCL fails with
-        # FileExistsError if the file already exists — this is the collision
-        # guard.  os.open is used directly because pathlib.Path.open does not
-        # expose O_EXCL.
-        try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            os.close(fd)
-        except FileExistsError:
+    if claimed_num is None:
+        for _attempt in range(_CLAIM_MAX_RETRIES):
+            # Compute the next candidate number from the current highest.
+            # We re-scan on every attempt so that we see files written by
+            # racing callers since the previous attempt.
+            candidate_num = _scan_highest_bug_num(bugs_path) + 1
+            lock_path = _try_claim_num(bugs_path, candidate_num)
+            if lock_path is not None:
+                claimed_num = candidate_num
+                break
             # Another caller beat us to this slot.  Re-scan and try again.
-            continue
 
-        # Claim is ours. Record who claimed it before returning, so the
-        # claim is durably attributable even if the caller never gets as
-        # far as writing bug_path's content (see _record_bug_claim).
-        _claimant = claimed_by or os.environ.get(_TASK_ID_ENV_VAR) or "unknown"
-        _record_bug_claim(bugs_path, bug_id, _claimant)
+    if claimed_num is None:
+        raise RuntimeError(
+            f"claim_next_bug_id: could not claim a free BUG-NNNN slot after "
+            f"{_CLAIM_MAX_RETRIES} attempts in {bugs_dir!r}. "
+            f"Inspect the directory for stale .claim-*.lock files or excessive "
+            f"concurrent writers."
+        )
 
-        # Return immediately — do not write the bug file here.  The caller
-        # writes the content and then calls release_bug_id_claim().
-        return (bug_id, bug_path, lock_path)
+    bug_id = f"BUG-{claimed_num:04d}"
+    bug_path = bugs_path / f"{bug_id}-{slug}.md"
 
-    raise RuntimeError(
-        f"claim_next_bug_id: could not claim a free BUG-NNNN slot after "
-        f"{_CLAIM_MAX_RETRIES} attempts in {bugs_dir!r}. "
-        f"Inspect the directory for stale .claim-*.lock files or excessive "
-        f"concurrent writers."
-    )
+    # Claim is ours. Record who claimed it before returning, so the
+    # claim is durably attributable even if the caller never gets as
+    # far as writing bug_path's content (see _record_bug_claim).
+    _claimant = claimed_by or os.environ.get(_TASK_ID_ENV_VAR) or "unknown"
+    _record_bug_claim(bugs_path, bug_id, _claimant)
+
+    # Return immediately — do not write the bug file here.  The caller
+    # writes the content and then calls release_bug_id_claim().
+    return (bug_id, bug_path, lock_path)
 
 
 def release_bug_id_claim(lock_path) -> None:

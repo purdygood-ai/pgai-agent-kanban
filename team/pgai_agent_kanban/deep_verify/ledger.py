@@ -26,7 +26,10 @@ these from a cold-build lane run):
   failed-to-build    -- the artefact failed to build (a tree defect).
   could-not-attempt  -- the build could not be attempted (an environment
                          gap: no engine, unreachable registry, missing
-                         toolchain) -- nothing about the tree was exercised.
+                         toolchain) -- nothing was learned about whether
+                         the images build. An exit-1 record can still name
+                         a failing engine-free cold test whose bug the run
+                         filed.
 
 Two operations, both atomic (pgai_agent_kanban.lib.atomic_write: temp file
 in the same directory + fsync + os.replace):

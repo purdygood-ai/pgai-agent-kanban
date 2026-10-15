@@ -2,8 +2,14 @@
 """
 lint_changelog_freshness.py
 ===========================
-Pre-flight gate that asserts the checked-in CHANGELOG.md artifact is
+Operator check that asserts the checked-in CHANGELOG.md artifact is
 byte-identical to a fresh regeneration from the current codebase.
+
+An operator runs it by hand, for example after rendering CHANGELOG.md for a
+release produced outside the CM release scripts. The gated test runners
+(run-unit-tests.sh, run-integration-tests.sh) do not run it: CHANGELOG.md is
+rendered and committed at release time, so a committed copy that lags the
+release notes on an RC branch is expected and is not a test finding.
 
 How it works:
   1. Discovers all release-notes/vX.Y.Z.md files in the repo root.
@@ -19,7 +25,7 @@ How it works:
      refresh it.
 
 An empty or missing CHANGELOG.md is treated as stale (exit 1) — the
-artifact must be generated and committed before this gate passes.
+artifact must be generated and committed before this check passes.
 
 RC mode (PGAI_LINT_CHANGELOG_MODE=rc):
   When the env var PGAI_LINT_CHANGELOG_MODE is set to "rc" AND the current
@@ -79,32 +85,29 @@ RC mode (PGAI_LINT_CHANGELOG_MODE=rc):
   Categories 3, 4 and 5 represent one-time writer-rule migration drift:
   the checked-in CHANGELOG was committed under older writer rules, and the
   current writer no longer produces those patterns.  Allowing their removal
-  enables RC verification to pass without requiring a per-RC CHANGELOG
+  lets the check pass on an RC branch without a per-RC CHANGELOG
   regeneration; the next release's CHANGELOG commit will eliminate the drift.
 
   If all conditions hold, the gate exits 0.  Any other difference is a hard
   failure.
 
   The admission predicate does NOT rely on filesystem mtime (which is
-  unreliable — regeneration writes Public IDs back to bug files, updating
-  their mtime after each regeneration call).
+  unreliable — a bug file's mtime moves with every edit, including the
+  release render writing its Public ID back, so it does not say when the
+  bug was filed).
 
   RC mode NEVER applies on ai_main or other non-RC branches, even when
-  PGAI_LINT_CHANGELOG_MODE=rc is set in the environment.  The gate checks the
+  PGAI_LINT_CHANGELOG_MODE=rc is set in the environment.  The check reads the
   current git branch directly and enforces strict byte-compare on ai_main so
-  that writer-migration drift is caught before an RC opens rather than
-  surfacing at every RC verification.  The gated runners
-  (run-unit-tests.sh, run-integration-tests.sh) set PGAI_LINT_CHANGELOG_MODE=rc
-  automatically when the worktree HEAD is on an rc/* or ai_rc/* branch.
+  that writer-migration drift is reported there.  Nothing sets
+  PGAI_LINT_CHANGELOG_MODE for you: export it yourself when you run this
+  check on an rc/* or ai_rc/* branch.
   The default behaviour (strict byte-compare) is enforced when the variable
   is absent, set to any value other than "rc", or the branch is ai_main.
 
 Invariant: the committed CHANGELOG.md is always writer-produced -- rendered
-by the changelog_writer, never hand-edited -- and this gate enforces that
-invariant on every RC.
-
-Wired into both gated runners (run-unit-tests.sh and run-integration-tests.sh)
-as a pre-flight check, following the lint_icd_freshness pattern.
+by the changelog_writer, never hand-edited -- and this check confirms that
+invariant whenever an operator runs it.
 
 Usage:
     python3 team/scripts/lint_changelog_freshness.py [--changelog PATH]
@@ -148,17 +151,13 @@ Environment:
                                       drift is caught before an RC opens (fail-fast).
                                       Any other value (including absent) uses the
                                       default strict byte-compare.
-    PYTHONHASHSEED                   Must be set to 0 by the caller (gated
-                                      runners do this automatically) so that
-                                      changelog_writer's frozenset iteration
-                                      over section heading names is stable
-                                      across independent process invocations.
-                                      The committed CHANGELOG.md must also be
-                                      generated under PYTHONHASHSEED=0 to
-                                      ensure byte-identical comparison.
-                                      Without this, frozenset ordering varies
-                                      between Python processes, making the
-                                      byte-compare non-deterministic.
+    PYTHONHASHSEED                   Not required.  The render is
+                                      hash-seed-independent: changelog_writer
+                                      sorts its heading sets before iterating,
+                                      so any seed gives byte-identical output.
+                                      Setting PYTHONHASHSEED=0 (as the CM
+                                      release scripts do) is defense in depth
+                                      only.
 """
 
 from __future__ import annotations
@@ -909,7 +908,7 @@ def _is_rc_mode() -> bool:
     tolerance is suppressed unconditionally, even when the env var is set to
     "rc".  This ensures that writer-migration drift is caught on main before
     an RC opens (fail-fast), rather than being masked by RC-mode tolerance
-    at every RC verification.
+    whenever the check runs on an RC branch.
 
     Returns:
         True when both the env var is "rc" AND the current branch is rc/*.
@@ -1196,9 +1195,10 @@ def check_freshness(
             takes its place (Category 6).
         Any other difference is a hard failure.
 
-        This approach does NOT rely on filesystem mtime — bug files'
-        modification times are unreliable because regenerate() writes Public
-        IDs back to bug files, bumping their mtime.
+        This approach does NOT rely on filesystem mtime — a bug file's
+        modification time moves with every edit, including the release
+        render writing its Public ID back, so it does not say when the bug
+        was filed.
 
     Args:
         changelog_path: Path to the checked-in CHANGELOG.md artifact to verify.
@@ -1315,6 +1315,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="lint_changelog_freshness.py",
         description=(
+            "Operator check, run by hand: the gated test runners "
+            "(run-unit-tests.sh, run-integration-tests.sh) do not run it.  "
             "Assert that CHANGELOG.md is byte-identical to a fresh regeneration "
             "from the current codebase.  Exits 0 when fresh, 1 when stale or missing.\n"
             "\n"

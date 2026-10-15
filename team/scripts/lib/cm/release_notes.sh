@@ -250,7 +250,8 @@ cm_release_generate_notes() {
   # CHANGELOG.md — so the changelog_writer reads the polished notes as input.
   # This ordering ensures that after the release: (1) the polished notes are committed,
   # (2) CHANGELOG.md reflects those polished notes, and (3) the tag lands on that
-  # CHANGELOG commit, leaving the freshness gate green on the tip (tag == tip).
+  # CHANGELOG commit, so the committed CHANGELOG.md on the tagged commit matches
+  # the release notes the tag carries (tag == tip).
   #
   # Idempotency: git status --porcelain is empty when the file matches HEAD.
   # A re-run with no uncommitted polish produces no commit — this step is a no-op.
@@ -295,12 +296,11 @@ cm_release_generate_notes() {
   # Regenerates the full CHANGELOG.md from all release-notes/vX.Y.Z.md files and
   # the bug ledger via changelog_writer.py (newest release first). The writer is
   # the single source of truth; using it here keeps the released artifact
-  # byte-identical to what the freshness gate verifies.
+  # byte-identical to a fresh render of the release notes the tag carries.
   echo "[Step 11b] Updating CHANGELOG.md for ${ACTIVE_RC}..."
 
-  # Idempotency: always render a fresh changelog_writer buffer (PYTHONHASHSEED=0
-  # for deterministic heading order) and compare it byte-for-byte against the
-  # checked-in CHANGELOG.md.  Only skip regeneration when the two are byte-identical.
+  # Idempotency: always render a fresh changelog_writer buffer and compare it
+  # byte-for-byte against the checked-in CHANGELOG.md.  Only skip regeneration when the two are byte-identical.
   #
   # A heading-presence-only check (the prior approach) was insufficient: a
   # WRITER-authored section satisfies the heading check but diverges from the
@@ -318,8 +318,9 @@ cm_release_generate_notes() {
   # this point (see cm_release_cleanup_on_exit's own comment near the top of the script).
 
   # Render the canonical CHANGELOG.md to the temp buffer.
-  # PYTHONHASHSEED=0 ensures frozenset iteration over heading sets is stable
-  # across invocations so two runs on identical inputs are byte-identical.
+  # The render is hash-seed-independent: the writer sorts its heading sets, so
+  # two runs on identical inputs are byte-identical under any seed.
+  # PYTHONHASHSEED=0 is kept as defense in depth.
   # pp_run_ops sets PYTHONPATH to include the own-tree root and KANBAN_ROOT fallback.
   PYTHONHASHSEED=0 \
     pp_run_ops pgai_agent_kanban.cm.changelog_writer \

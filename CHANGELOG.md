@@ -6,6 +6,21 @@
 
 ---
 
+## v2.42.0 — 2026-10-15
+
+### Implemented
+None.
+
+### Fixed
+None
+
+### Known Issues
+None
+
+*Details: [release-notes/v2.42.0.md](release-notes/v2.42.0.md)*
+
+---
+
 ## v2.41.0 — 2026-10-15
 
 ### Implemented
@@ -14,7 +29,7 @@
 - **Ship by default, with a record.** HALT means "shipping would make things worse", not "the tester found something". Findings ship as known issues and become the next RC's bugs. Each project has a ship posture (`matrix` or `always`); `cm/release.sh --decide-only` previews the decision and `--force --reason` overrides it with a recorded reason.
 - **Low-severity bugs wait their turn.** Bugs at or below `deferred_bug_level` do not set the release tempo; they ride along when a more serious bug opens an RC.
 - **OVERWATCH clears blocks itself.** Blocked tasks carry a structured block record. OVERWATCH resolves the mechanical cases (timeouts, provider refusals, stale worktrees, merge-only gates) and writes a short diagnosis for the rest.
-- **Dashboard v2.** Fifteen windows plus one per project: an operator window with a shell, a schedule window with per-agent firings, metrics with time spent blocked, and a human-review window.
+- **Dashboard v2.** Fourteen fixed windows plus one drill window per registered project: an operator window with a shell, a schedule window with per-agent firings, metrics with time spent blocked, and a human-review window.
 - **Containers you can leave running.** `docker/build.sh <flavor>` builds the debian, rocky9 or claude-abliterated image (a custom Claude build for local LLMs). `container-up.sh`, `container-down.sh` (soft stop) and `container-status.sh` run the kanban detached in one named container.
 - **Finished work archives itself.** After each release, finished items beyond the newest 55 per category move to `archive/<project>/`, logged and restorable with `archive.sh --restore`.
 

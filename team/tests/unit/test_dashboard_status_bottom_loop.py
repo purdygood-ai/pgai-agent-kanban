@@ -40,7 +40,7 @@ from typing import Callable, Iterator, NamedTuple, Optional
 
 import pytest
 
-from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.binary_guard import require_binary, teardown_private_tmux
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
@@ -83,11 +83,7 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
     try:
         yield PrivateTmux(guard.path, socket_name, env)
     finally:
-        guard.teardown(
-            lambda path: subprocess.run(
-                [path, "-L", socket_name, "kill-server"], capture_output=True, timeout=10
-            )
-        )
+        teardown_private_tmux(guard, socket_name, env=env)
 
 
 def _counting_renderer(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:

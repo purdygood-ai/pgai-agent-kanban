@@ -8,7 +8,8 @@ invocations in its acceptance criteria and constraints are rewritten to
 targeted ``--files`` runs, the fixed targeted-test constraint is appended,
 each rewrite is narrated on stderr and recorded in ``## Notes``, and the
 fixed pre-merge criterion closes the acceptance criteria. TESTER and CM
-tickets render byte-identically to output without the policy.
+tickets render byte-identically to output without the policy. A ticket
+naming a shipped release-notes file gets nothing about CHANGELOG.
 
 Two layers:
   1. The real CLI entry point as a subprocess (as pm-agent.sh invokes it),
@@ -275,7 +276,7 @@ def test_tester_and_cm_readmes_are_byte_identical_to_output_without_policy(
 
     with_policy = _emit_plan(tmp_path / "with_policy", team_root)
 
-    def _no_policy(role, acceptance_criteria, constraints):
+    def _no_policy(role, acceptance_criteria, constraints, **_kwargs):
         return ap.PolicyResult(
             acceptance_criteria=list(acceptance_criteria or []),
             constraints=list(constraints or []),
@@ -320,8 +321,8 @@ def test_pre_merge_criterion_changes_only_coder_and_writer_readmes(
 
     real_policy = pm.apply_acceptance_policy
 
-    def _policy_without_pre_merge(role, acceptance_criteria, constraints):
-        result = real_policy(role, acceptance_criteria, constraints)
+    def _policy_without_pre_merge(role, acceptance_criteria, constraints, **kwargs):
+        result = real_policy(role, acceptance_criteria, constraints, **kwargs)
         return ap.PolicyResult(
             acceptance_criteria=[
                 c for c in result.acceptance_criteria if c != ap.PRE_MERGE_CRITERION
@@ -350,3 +351,80 @@ def test_pre_merge_criterion_changes_only_coder_and_writer_readmes(
                 f"{task_id} README changed under the pre-merge criterion"
             )
     assert {"CODER", "WRITER", "TESTER", "CM"} <= roles_seen
+
+
+# ---------------------------------------------------------------------------
+# Tickets naming shipped release notes get nothing about CHANGELOG
+# ---------------------------------------------------------------------------
+
+
+def _folder_by_slug(tasks_root: pathlib.Path, slug: str) -> pathlib.Path:
+    folders = [d for d in tasks_root.iterdir() if d.is_dir() and d.name.endswith(f"-{slug}")]
+    assert len(folders) == 1, f"expected one folder for {slug}, got {[f.name for f in folders]}"
+    return folders[0]
+
+
+def _prerequisites(folder: pathlib.Path) -> list:
+    body = _section((folder / "README.md").read_text(), "Prerequisites")
+    return [line[2:].strip() for line in body.splitlines() if line.startswith("- ")]
+
+
+def test_tickets_naming_shipped_release_notes_get_no_changelog_step_or_prerequisite(
+    tmp_path: pathlib.Path,
+) -> None:
+    """CODER and WRITER tickets whose Required Output and criteria name a
+    release-notes file older than the plan's target_version render exactly
+    as any other worker ticket: no CHANGELOG criterion, constraint, note or
+    narration, and no prerequisite beyond the RC-open bookend and their own
+    depends_on."""
+    team_root = tmp_path / "team_root"
+    team_root.mkdir()
+
+    coder = _plan_task(1, "fix-shipped-notes-bullet", "CODER",
+                       ["`release-notes/v2.41.0.md` names the right bug."],
+                       constraints=["Be careful."])
+    coder["required_output"] = "release-notes/v2.41.0.md with the corrected Fixed bullet."
+    writer = _plan_task(2, "correct-older-notes", "WRITER",
+                        ["The v2.40.0 notes read correctly."])
+    writer["required_output"] = "release-notes/v2.40.0.md with the corrected bullet."
+    follow_up = _plan_task(3, "correct-later-notes", "WRITER",
+                           ["The v2.41.3 notes read correctly."])
+    follow_up["required_output"] = "release-notes/v2.41.3.md with the corrected bullet."
+    follow_up["depends_on"] = [1]
+    tickets = [coder, writer, follow_up]
+    plan = {
+        "workflow_type": "release",
+        "target_version": "v2.41.5",
+        "test_required": "true",
+        "human_approval_required": "auto",
+        "project_name": "acceptance-policy-fixture",
+        "tasks": tickets,
+    }
+
+    result = _run_materialize(plan, team_root, tmp_path)
+    assert result.returncode == 0, f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+    assert "changelog" not in result.stderr.lower(), result.stderr
+
+    tasks_root = team_root / "tasks"
+    cm_open = [d.name for d in tasks_root.iterdir()
+               if d.is_dir() and d.name.startswith("CM-") and "open-rc" in d.name]
+    assert len(cm_open) == 1, cm_open
+    dirs = {t["sequence"]: _folder_by_slug(tasks_root, t["slug"]) for t in tickets}
+
+    for task in tickets:
+        folder = dirs[task["sequence"]]
+        readme = (folder / "README.md").read_text()
+        for heading in ("Acceptance Criteria", "Constraints", "Notes"):
+            assert "changelog" not in _section(readme, heading).lower(), (
+                f"{folder.name} ## {heading}:\n{readme}"
+            )
+        bullets = [
+            line[len("- [ ] "):] for line in _section(readme, "Acceptance Criteria").splitlines()
+            if line.startswith("- [ ] ")
+        ]
+        assert bullets == task["acceptance_criteria"] + [ap.PRE_MERGE_CRITERION], readme
+        own_depends = [dirs[seq].name for seq in task["depends_on"]]
+        assert sorted(_prerequisites(folder)) == sorted(cm_open + own_depends), folder.name
+
+    # Materializing writes no bug ledger.
+    assert not (team_root / "bugs").exists()

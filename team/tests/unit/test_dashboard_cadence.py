@@ -77,7 +77,11 @@ from typing import Callable, Iterator, NamedTuple
 
 import pytest
 
-from tests.fixtures.binary_guard import narrate_binary_skip, try_resolve_binary
+from tests.fixtures.binary_guard import (
+    narrate_binary_skip,
+    teardown_private_tmux,
+    try_resolve_binary,
+)
 
 # ---------------------------------------------------------------------------
 # Path resolution -- anchored to this file's location, matching every other
@@ -948,11 +952,7 @@ def private_tmux() -> Iterator[PrivateTmux]:
         pt = PrivateTmux(real_tmux=guard.path, socket_name=socket_name)
         yield pt
     finally:
-        guard.teardown(
-            lambda path: subprocess.run(
-                [path, "-L", socket_name, "kill-server"], capture_output=True, timeout=10
-            )
-        )
+        teardown_private_tmux(guard, socket_name)
 
 
 @contextlib.contextmanager

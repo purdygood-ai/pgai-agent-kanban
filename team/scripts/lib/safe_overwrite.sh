@@ -26,6 +26,8 @@
 # This keeps backups in a predictable, easily-findable location:
 #   ls $HOME/.crontab*          # find crontab backups
 #   ls $HOME/.CODER.md*         # find role file backups
+# Crontab backups are pruned to the newest [install] crontab_backups_keep
+# (default 10); see safe_overwrite_crontab.
 #
 # Crontab command seam
 # --------------------
@@ -61,7 +63,14 @@
 #     With force_overwrite="true" (an explicit tier) there is no prompt and
 #     nothing is replaced wholesale: only kanban-managed lines are rewritten
 #     (see merge_kanban_crontab) and every other line is kept.
-#     Backs up the existing crontab before any modification.
+#     Backs up the existing crontab before any modification, unless it is
+#     byte-identical to the newest backup, which already holds it. After the
+#     backup step only the newest [install] crontab_backups_keep backups
+#     (default 10, read from <managed_root>/kanban.cfg, else
+#     $PGAI_AGENT_KANBAN_ROOT_PATH/kanban.cfg) are kept; older ones are
+#     deleted. A count that is not a whole number of 1 or more is refused
+#     (error key safe_overwrite.invalid_crontab_backups_keep) and the
+#     crontab is left unchanged.
 #     On decline, prints recovery instructions.
 #
 #   merge_kanban_crontab <new_template> [managed_root]
@@ -364,6 +373,124 @@ backup_current_crontab() {
 }
 
 # ---------------------------------------------------------------------------
+# _safe_overwrite_crontab_backups
+#
+# Print the crontab backups in $HOME that this library wrote, one path per
+# line, oldest first. Only names of the exact form
+# .crontab.before-install-YYYYMMDD-HHMMSS.bak count, so a backup the
+# operator copied or renamed by hand is never compared against or pruned.
+# The timestamp is fixed-width, so name order is write order.
+# ---------------------------------------------------------------------------
+_safe_overwrite_crontab_backups() {
+    local _f _name
+    local -a _found=()
+    for _f in "${HOME}"/.crontab.before-install-*.bak; do
+        [[ -f "$_f" ]] || continue
+        _name="${_f##*/}"
+        [[ "$_name" =~ ^\.crontab\.before-install-[0-9]{8}-[0-9]{6}\.bak$ ]] || continue
+        _found+=("$_f")
+    done
+    [[ ${#_found[@]} -gt 0 ]] || return 0
+    printf '%s\n' "${_found[@]}" | LC_ALL=C sort
+}
+
+# ---------------------------------------------------------------------------
+# _safe_overwrite_crontab_backups_keep [kanban_root]
+#
+# Resolve [install] crontab_backups_keep from <kanban_root>/kanban.cfg
+# (<kanban_root> defaults to $PGAI_AGENT_KANBAN_ROOT_PATH) and print it as
+# plain decimal digits. Absent key, blank value or no kanban.cfg: prints the
+# default 10.
+#
+# Returns 0 with the count on stdout, or 1 with nothing on stdout and the
+# dual-channel refusal on stderr when the value is not a whole number of 1
+# or more.
+# ---------------------------------------------------------------------------
+_safe_overwrite_crontab_backups_keep() {
+    local _root="${1:-${PGAI_AGENT_KANBAN_ROOT_PATH:-}}"
+    local _cfg="${_root%/}/kanban.cfg"
+    local _value=""
+
+    if [[ -n "$_root" && -f "$_cfg" ]]; then
+        if ! declare -F read_ini >/dev/null 2>&1; then
+            # shellcheck source=ini_parser.sh
+            source "$(dirname "${BASH_SOURCE[0]}")/ini_parser.sh"
+        fi
+        _value="$(read_ini "$_cfg" install crontab_backups_keep "")" || _value=""
+    fi
+
+    if [[ -z "$_value" ]]; then
+        printf '10\n'
+        return 0
+    fi
+
+    # Drop leading zeros without arithmetic, which would read them as octal.
+    local _digits="${_value#"${_value%%[!0]*}"}"
+    if [[ ! "$_value" =~ ^[0-9]+$ || -z "$_digits" ]]; then
+        if ! declare -F pgai_emit_error_contract >/dev/null 2>&1; then
+            # shellcheck source=error_contract.sh
+            source "$(dirname "${BASH_SOURCE[0]}")/error_contract.sh"
+        fi
+        # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by
+        # design, gating a destructive step. The count decides how many
+        # crontab backups survive pruning; 0 would delete every one and a
+        # guessed number from 'abc' would delete backups nobody chose to
+        # lose, so the crontab step stops before it writes or deletes
+        # anything and the crontab is left unchanged. The remedy edits the
+        # key inside [install] alone.
+        pgai_emit_error_contract \
+            "safe_overwrite.invalid_crontab_backups_keep" \
+            "safe_overwrite.sh: [install] crontab_backups_keep='${_value}' in ${_cfg} is not an accepted value; it must be a whole number of 1 or more (default 10). The crontab was not changed and no backup was written or removed." \
+            "sed -i '/^[[:space:]]*\\[install\\][[:space:]]*\$/,/^[[:space:]]*\\[/ s/^[[:space:]]*crontab_backups_keep[[:space:]]*=.*/crontab_backups_keep = 10/' \"${_cfg}\""
+        # CENSUS-ANCHOR: safe-overwrite-crontab-backups-keep-01
+        return 1
+    fi
+
+    printf '%s\n' "$_digits"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _safe_overwrite_crontab_backup <backup_path> <reuse> [kanban_root]
+#
+# The backup step safe_overwrite_crontab runs before it modifies a crontab:
+#   1. Resolve [install] crontab_backups_keep; an invalid value is refused
+#      before anything is written or deleted.
+#   2. Write the current crontab to <backup_path>, unless <reuse> is "true":
+#      the crontab is byte-identical to the newest backup, which is
+#      <backup_path> itself, so no new file is written.
+#   3. Delete all but the newest crontab_backups_keep backups (see
+#      _safe_overwrite_crontab_backups for which files count).
+#
+# Returns 0 on success, 1 on a refused count or a failed backup write.
+# ---------------------------------------------------------------------------
+_safe_overwrite_crontab_backup() {
+    local _backup_path="$1"
+    local _reuse="${2:-false}"
+    local _root="${3:-}"
+    local _keep
+    _keep="$(_safe_overwrite_crontab_backups_keep "$_root")" || return 1
+
+    if [[ "$_reuse" == "true" ]]; then
+        printf 'Crontab unchanged since the newest backup; no new backup written: %s\n' "$_backup_path"
+    else
+        backup_current_crontab "$_backup_path" || return 1
+    fi
+
+    local -a _all=()
+    mapfile -t _all < <(_safe_overwrite_crontab_backups)
+    local _excess=$(( ${#_all[@]} - _keep ))
+    if [[ $_excess -gt 0 ]]; then
+        local _i _removed=0
+        for (( _i = 0; _i < _excess; _i++ )); do
+            rm -f -- "${_all[$_i]}" && _removed=$((_removed + 1))
+        done
+        printf 'Removed %s old crontab backup(s); kept the newest %s ([install] crontab_backups_keep).\n' "$_removed" "$_keep"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # merge_kanban_crontab <new_template> [managed_root] [commentary_file...]
 #
 # Reads the current crontab on stdin and prints the crontab to install on
@@ -503,7 +630,8 @@ merge_kanban_crontab() {
 #   $3  managed_root    — optional; the install root whose lines are
 #                         kanban-managed (see merge_kanban_crontab).  Without
 #                         it only a marked block with no root suffix is
-#                         treated as managed.
+#                         treated as managed.  Its kanban.cfg supplies
+#                         [install] crontab_backups_keep.
 #   $4… commentary_file — optional; passed through to merge_kanban_crontab
 #                         (the shipped tier templates, so commentary an
 #                         unmarked earlier install of another tier wrote is
@@ -511,8 +639,8 @@ merge_kanban_crontab() {
 #
 # Return codes:
 #   0  success (crontab installed, updated, or operator chose to skip cleanly)
-#   1  backup failure, or an unterminated managed block (aborts — does NOT
-#      install the new crontab)
+#   1  backup failure, a refused [install] crontab_backups_keep, or an
+#      unterminated managed block (aborts — does NOT install the new crontab)
 #   2  operator declined (recovery instructions printed)
 # ---------------------------------------------------------------------------
 safe_overwrite_crontab() {
@@ -561,6 +689,16 @@ safe_overwrite_crontab() {
     ts="$(date +%Y%m%d-%H%M%S)"
     local backup_file="${HOME}/.crontab.before-install-${ts}.bak"
 
+    # A crontab byte-identical to the newest backup is already preserved:
+    # name that backup instead of writing another copy of it.
+    local backup_reuse=false newest_backup=""
+    newest_backup="$(_safe_overwrite_crontab_backups | tail -n 1)"
+    if [[ -n "$current_crontab" && -n "$newest_backup" ]] \
+        && printf '%s\n' "$current_crontab" | cmp -s - "$newest_backup"; then
+        backup_file="$newest_backup"
+        backup_reuse=true
+    fi
+
     # ---- Forced: rewrite only the kanban-managed lines -------------------
     if [[ "$force_overwrite" == "true" ]]; then
         local merged merge_rc=0
@@ -580,7 +718,7 @@ safe_overwrite_crontab() {
 
         printf 'Tier override requested — rewriting kanban-managed lines only; every other crontab line is kept.\n'
         if [[ -n "$current_crontab" ]]; then
-            backup_current_crontab "$backup_file" || {
+            _safe_overwrite_crontab_backup "$backup_file" "$backup_reuse" "$managed_root" || {
                 printf 'safe_overwrite.sh: aborting — backup failed before crontab modification\n' >&2
                 return 1
             }
@@ -638,7 +776,7 @@ safe_overwrite_crontab() {
         case "${do_replace:-no}" in
             [yY]*|yes)
                 # Backup first.
-                backup_current_crontab "$backup_file" || {
+                _safe_overwrite_crontab_backup "$backup_file" "$backup_reuse" "$managed_root" || {
                     printf 'safe_overwrite.sh: aborting — backup failed before crontab modification\n' >&2
                     return 1
                 }
@@ -675,7 +813,7 @@ safe_overwrite_crontab() {
     case "${do_replace:-no}" in
         [yY]*|yes)
             # Backup first.
-            backup_current_crontab "$backup_file" || {
+            _safe_overwrite_crontab_backup "$backup_file" "$backup_reuse" "$managed_root" || {
                 printf 'safe_overwrite.sh: aborting — backup failed before crontab modification\n' >&2
                 return 1
             }

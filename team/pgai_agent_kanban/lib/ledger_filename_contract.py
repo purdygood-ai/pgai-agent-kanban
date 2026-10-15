@@ -35,17 +35,27 @@ weak models actually produce:
 A third class, **over-padded** (5+ digit numeric field), is diagnosed for
 completeness but has not been observed in production.
 
+Which numbers are *taken* is a separate, looser rule than the contract: any
+entry whose name starts with the prefix, a hyphen and exactly four digits
+followed by a non-digit holds that number, whether or not the rest of the
+name passes the contract (see :func:`ledger_taken_re`).  Both numbering
+consumers — :func:`next_free_number` here and the atomic BUG-ID claim in
+team/pm-agent/lib/bug_scanner.py — use it, so the remedy text and the claim
+never disagree about the next free number.
+
 Public API
 ----------
-    ledger_filename_re(prefix)                  -> re.Pattern[str]
+    ledger_filename_re(prefix, ignore_case=True) -> re.Pattern[str]
+    ledger_taken_re(prefix)                     -> re.Pattern[str]
     classify_defect(name, prefix)                -> str | None
     next_free_number(dir_path, prefix)           -> int
     build_remedy(name, prefix, dir_path)         -> str
 
-Structural guarantee: the filename pattern literal for BUG-/PRIORITY- ledger
-entries appears in exactly one place — this module.  Consumers import; they
-do not duplicate a local definition (the historical loose ``{4,}`` pattern
-this replaces is what let date-first names slip through the discovery gate).
+Structural guarantee: the filename pattern literal and the "taken" pattern
+for BUG-/PRIORITY- ledger entries each appear in exactly one place — this
+module.  Consumers import; they do not duplicate a local definition (the
+historical loose ``{4,}`` pattern this replaces is what let date-first names
+slip through the discovery gate).
 """
 
 from __future__ import annotations
@@ -81,19 +91,52 @@ def _normalize_prefix(prefix: str) -> str:
     return prefix.rstrip("-").upper()
 
 
-def ledger_filename_re(prefix: str) -> "re.Pattern[str]":
+def ledger_filename_re(prefix: str, *, ignore_case: bool = True) -> "re.Pattern[str]":
     """Return the compiled canonical filename regex for a ledger prefix.
 
     Args:
-        prefix: "BUG", "BUG-", "PRIORITY", or "PRIORITY-" (case-insensitive).
+        prefix:      "BUG", "BUG-", "PRIORITY", or "PRIORITY-" (case-insensitive).
+        ignore_case: True (the default, what discovery and the backlog scan
+                     use) accepts any letter case, so a file already in a
+                     ledger with an uppercase slug still passes.  False
+                     requires the upper-case prefix and a lower-case slug
+                     exactly as the canon spells them; intake uses it to
+                     refuse a new name before it is filed.
 
     Returns:
-        A compiled, case-insensitive regex matching exactly the canonical
+        A compiled regex matching exactly the canonical
         ``<PREFIX>-NNNN[-YYYYMMDD]-<slug>.md`` shape.
     """
     prefix_u = re.escape(_normalize_prefix(prefix))
     return re.compile(
         rf"^{prefix_u}-{_NUMBER_FIELD}(?:-{_DATE_FIELD})?-{_SLUG_FIELD}\.md$",
+        re.IGNORECASE if ignore_case else 0,
+    )
+
+
+def ledger_taken_re(prefix: str) -> "re.Pattern[str]":
+    """Return the compiled "number taken" regex for a ledger prefix.
+
+    A name takes a ledger number when it starts with the prefix, a hyphen,
+    exactly four digits and then a non-digit (or the end of the name).  The
+    rest of the name does not matter: ``BUG-0002-v1.2.3-notes-count.md`` (e.g.)
+    fails :func:`ledger_filename_re` yet still holds 0002, so no numbering
+    helper may hand that number out again.  Exactly four digits
+    keeps malformed shapes from poisoning the high-water mark: a date-first
+    name (``BUG-20260803-001-slug.md``, e.g.) has a fifth digit after the
+    first four, and an under-padded name (``BUG-37-slug.md``, e.g.) has
+    fewer than four, so neither takes a number.
+
+    Args:
+        prefix: "BUG", "BUG-", "PRIORITY", or "PRIORITY-" (case-insensitive).
+
+    Returns:
+        A compiled, case-insensitive regex for use with ``.match()``.  Group 1
+        is the four-digit number; parse it with ``int()``.
+    """
+    prefix_u = re.escape(_normalize_prefix(prefix))
+    return re.compile(
+        rf"^{prefix_u}-({_NUMBER_FIELD})(?![0-9])",
         re.IGNORECASE,
     )
 
@@ -134,15 +177,22 @@ def classify_defect(name: str, prefix: str) -> Optional[str]:
 
 
 def next_free_number(dir_path: Union[str, Path], prefix: str) -> int:
-    """Scan *dir_path* for gate-valid ``<prefix>-NNNN-*.md`` files and return
-    the next free sequence number.
+    """Scan *dir_path* for taken ``<prefix>-NNNN`` numbers and return the next
+    free sequence number.
 
-    Only filenames that pass :func:`ledger_filename_re` participate in the
-    scan — malformed names (date-first, under/over-padded, or any other
-    shape) are excluded so they cannot poison the high-water mark. The
-    4-digit field is always parsed with ``int()`` (never compared as a
-    string), so "0009" and "0036" in the same directory correctly yield 37,
-    not a lexical artifact.
+    A number is taken by the :func:`ledger_taken_re` rule: any entry whose
+    name starts with the prefix, a hyphen, exactly four digits and then a
+    non-digit holds that number, whether or not the rest of the name passes
+    :func:`ledger_filename_re`.  ``BUG-0002-v1.2.3-notes-count.md`` (e.g.)
+    therefore holds 0002, so the remedy never suggests a number a file in
+    the directory already carries.  Date-first, under-padded and
+    over-padded names have no exactly-four-digit field and contribute no
+    number, so they cannot poison the high-water mark.  The atomic BUG-ID
+    claim in team/pm-agent/lib/bug_scanner.py applies the same rule, so both
+    return the same next number for the same directory.  The 4-digit field
+    is always parsed with ``int()`` (never compared as a string), so "0009"
+    and "0036" in the same directory correctly yield 37, not a lexical
+    artifact.
 
     Args:
         dir_path: Directory to scan (bugs/ or priority/). Missing or
@@ -153,19 +203,13 @@ def next_free_number(dir_path: Union[str, Path], prefix: str) -> int:
     Returns:
         The next free 1-based sequence number (int, not zero-padded).
     """
-    prefix_u = _normalize_prefix(prefix)
-    pattern = ledger_filename_re(prefix)
-    num_re = re.compile(rf"^{re.escape(prefix_u)}-([0-9]{{4}})-", re.IGNORECASE)
+    taken_re = ledger_taken_re(prefix)
 
     highest = 0
     d = Path(dir_path)
     if d.is_dir():
         for entry in d.iterdir():
-            if not entry.is_file():
-                continue
-            if not pattern.match(entry.name):
-                continue
-            m = num_re.match(entry.name)
+            m = taken_re.match(entry.name)
             if not m:
                 continue
             n = int(m.group(1))
@@ -188,7 +232,8 @@ def build_remedy(name: str, prefix: str, dir_path: Union[str, Path]) -> str:
         prefix:   Ledger prefix ("BUG" or "PRIORITY", with or without
                   trailing "-").
         dir_path: Directory *name* was found in, used to compute the next
-                  free number from the directory's other gate-valid entries.
+                  free number from the numbers its entries already take
+                  (see :func:`next_free_number`).
 
     Returns:
         A one-line, human-actionable remedy string. Does not repeat *name*

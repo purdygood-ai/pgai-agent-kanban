@@ -5,11 +5,12 @@ Behavioral unit tests for team/pm-agent/lib/acceptance_policy.py.
 
 The policy rewrites full gated-runner invocations on CODER and WRITER
 tickets to targeted ``--files`` runs, appends one fixed constraint and one
-fixed pre-merge criterion, and leaves every other role untouched. The module performs no I/O, so these
-tests call it directly with plain lists.
+fixed pre-merge criterion, and leaves every other role untouched. The
+module performs no I/O, so these tests call it directly with plain lists.
 """
 
 from __future__ import annotations
+
 
 import pytest
 

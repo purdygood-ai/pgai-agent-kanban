@@ -27,8 +27,9 @@ This file tests:
         PRIORITY-NNNN-YYYYMMDD-<slug>.md are both accepted, byte-identical
         to today's behavior.
      d. A ledger containing 0009 and 0036 yields next free number 0037
-        (numeric, not lexical); a planted malformed file does not
-        participate in numbering.
+        (numeric, not lexical); a planted date-first or under-padded file
+        does not participate in numbering, while a contract-invalid name
+        that still starts with exactly four digits holds its number.
 
 Naming convention: describe the behavior under test, never the bug or
 ticket ID.
@@ -191,6 +192,70 @@ class TestLedgerFilenameContractModule:
         (d / "PRIORITY-20260803-001-date-first-bad.md").write_text("x", encoding="utf-8")
         assert mod.next_free_number(d, "PRIORITY") == 37
 
+    def test_number_held_by_contract_invalid_name_is_taken_by_remedy_and_claim(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A name that fails the contract still holds its four-digit number.
+
+        A dotted slug, e.g. BUG-0002-v1.2.3-notes-count.md, fails the
+        contract but visibly carries 0002; the date-first name carries none.
+        next_free_number, the remedy built from it and the atomic claim must
+        all name 0003 for the same directory contents.
+        """
+        mod = _import_ledger_module()
+        from pgai_agent_kanban.lib.bug_filing import import_bug_scanner
+
+        claim_next_bug_id, release_bug_id_claim = import_bug_scanner()
+        d = tmp_path / "bugs"
+        d.mkdir()
+        for name in (
+            "BUG-0001-first-bug.md",
+            "BUG-0002-v1.2.3-notes-count.md",
+            "BUG-20260803-001-slug.md",
+        ):
+            (d / name).write_text("## Status\nopen\n", encoding="utf-8")
+
+        assert mod.next_free_number(d, "BUG") == 3
+        remedy = mod.build_remedy("BUG-20260803-001-slug.md", "BUG", d)
+        assert "next free number is BUG-0003" in remedy, remedy
+
+        bug_id, _bug_path, lock_path = claim_next_bug_id(str(d), "probe-slug")
+        release_bug_id_claim(lock_path)
+        assert bug_id == "BUG-0003", bug_id
+
+    def test_next_free_number_counts_contract_invalid_name_for_any_prefix(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """The taken rule is prefix-general: a contract-invalid name with a
+        dotted slug, e.g. PRIORITY-0005-a.b.md, still holds 0005."""
+        mod = _import_ledger_module()
+        d = tmp_path / "priority"
+        d.mkdir()
+        (d / "PRIORITY-0005-a.b.md").write_text("x", encoding="utf-8")
+        assert mod.ledger_filename_re("PRIORITY").match("PRIORITY-0005-a.b.md") is None
+        assert mod.next_free_number(d, "PRIORITY") == 6
+
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            ("BUG-0002-v1.2.3-notes-count.md", 2),
+            ("BUG-0007", 7),
+            ("bug-0008-lower-case.md", 8),
+            ("BUG-0009-UPPER.txt", 9),
+            ("BUG-20260803-001-slug.md", None),
+            ("BUG-37-slug.md", None),
+            ("BUG-00042-over-padded.md", None),
+            ("PRIORITY-0003-other-prefix.md", None),
+        ],
+    )
+    def test_ledger_taken_re_takes_exactly_four_digit_prefixes(
+        self, name: str, expected: "int | None"
+    ) -> None:
+        mod = _import_ledger_module()
+        m = mod.ledger_taken_re("BUG-").match(name)
+        got = int(m.group(1)) if m else None
+        assert got == expected, f"{name!r}: expected {expected!r}, got {got!r}"
+
     def test_build_remedy_date_first_names_next_free_number(
         self, tmp_path: pathlib.Path
     ) -> None:
@@ -242,6 +307,23 @@ class TestSingleSourceStructural:
         assert "pgai_agent_kanban.lib.ledger_filename_contract" in module_text, (
             "pgai_agent_kanban.discovery.items must import from "
             "pgai_agent_kanban.lib.ledger_filename_contract."
+        )
+
+
+    def test_bug_claim_uses_the_shared_taken_rule(self) -> None:
+        """The atomic BUG-ID claim takes its "taken" rule from the contract
+        module rather than defining a local copy."""
+        mod = _import_ledger_module()
+        from pgai_agent_kanban.lib.bug_filing import load_bug_scanner
+
+        scanner = load_bug_scanner()
+        assert scanner._BUG_TAKEN_RE.pattern == mod.ledger_taken_re("BUG").pattern
+        scanner_text = (
+            _TEAM_DIR / "pm-agent" / "lib" / "bug_scanner.py"
+        ).read_text(encoding="utf-8")
+        assert "_BUG_TAKEN_RE = re.compile" not in scanner_text, (
+            "bug_scanner.py must import ledger_taken_re from "
+            "pgai_agent_kanban.lib.ledger_filename_contract, not compile its own."
         )
 
 

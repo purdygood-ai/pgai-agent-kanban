@@ -36,7 +36,11 @@ import uuid
 from typing import Iterator, NamedTuple
 
 import pytest
-from tests.fixtures.binary_guard import narrate_binary_skip, try_resolve_binary
+from tests.fixtures.binary_guard import (
+    narrate_binary_skip,
+    teardown_private_tmux,
+    try_resolve_binary,
+)
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _BOARD_WINDOW_SH = _TEAM_DIR / "scripts" / "dashboard" / "lib" / "board_window.sh"
@@ -100,13 +104,7 @@ def tmux_socket() -> Iterator[tuple[str, str]]:
             narrate_binary_skip("tmux", label="dashboard-board-window-geometry")
         yield guard.path, socket_name
     finally:
-        guard.teardown(
-            lambda path: subprocess.run(
-                [path, "-L", socket_name, "kill-server"],
-                capture_output=True,
-                timeout=10,
-            )
-        )
+        teardown_private_tmux(guard, socket_name)
 
 
 def _list_panes(real_tmux: str, socket_name: str, window: str) -> list[Pane]:

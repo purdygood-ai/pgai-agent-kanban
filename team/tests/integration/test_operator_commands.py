@@ -1478,25 +1478,25 @@ class TestIntakeCommand:
     def test_intake_refuses_to_clobber_existing_file(
         self, two_project_root: pathlib.Path, tmp_path: pathlib.Path
     ) -> None:
-        """intake.sh exits with code 3 when the target file already exists (no clobber).
+        """intake.sh exits with code 3 when a PRIORITY-* target already exists (no clobber).
 
         Depositing a file whose name already exists in the intake directory must
         be refused (exit 3).  The existing file must remain unchanged.
         """
         root = two_project_root
-        bugs_dir = root / "projects" / "project_a" / "bugs"
-        bugs_dir.mkdir(parents=True, exist_ok=True)
+        priority_dir = root / "projects" / "project_a" / "priority"
+        priority_dir.mkdir(parents=True, exist_ok=True)
 
         # Pre-create the target file.
-        existing_content = "# BUG-0201: already-exists\n\n## Status\nopen\n"
-        (bugs_dir / "BUG-0201-already-exists.md").write_text(
+        existing_content = "# PRIORITY-0201: already-exists\n\n## Status\nopen\n"
+        (priority_dir / "PRIORITY-0201-already-exists.md").write_text(
             existing_content, encoding="utf-8"
         )
 
         # Attempt to deposit another file with the same name.
-        staged_file = tmp_path / "BUG-0201-already-exists.md"
+        staged_file = tmp_path / "PRIORITY-0201-already-exists.md"
         staged_file.write_text(
-            "# BUG-0201: already-exists (new version)\n\n## Status\nopen\n",
+            "# PRIORITY-0201: already-exists (new version)\n\n## Status\nopen\n",
             encoding="utf-8",
         )
 
@@ -1511,7 +1511,7 @@ class TestIntakeCommand:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         # Existing file must be unchanged.
-        actual_content = (bugs_dir / "BUG-0201-already-exists.md").read_text(encoding="utf-8")
+        actual_content = (priority_dir / "PRIORITY-0201-already-exists.md").read_text(encoding="utf-8")
         assert actual_content == existing_content, (
             "intake.sh must not overwrite an existing file."
         )
@@ -1519,7 +1519,7 @@ class TestIntakeCommand:
     def test_intake_concurrent_depositors_of_one_basename_keep_first_landed_file(
         self, two_project_root: pathlib.Path, tmp_path: pathlib.Path
     ) -> None:
-        """Two intake.sh runs of one basename yield exactly one exit 0 and one exit 3.
+        """Two intake.sh runs of one PRIORITY-* basename yield one exit 0 and one exit 3.
 
         The interleaving is forced, not left to the scheduler: depositor A's
         Python child is held at the point between deposit_intake's pre-check
@@ -1530,16 +1530,16 @@ class TestIntakeCommand:
         must be what survives, and no deposit temp file may remain.
         """
         root = two_project_root
-        bugs_dir = root / "projects" / "project_a" / "bugs"
-        bugs_dir.mkdir(parents=True, exist_ok=True)
-        basename = "BUG-0203-same-basename.md"
+        priority_dir = root / "projects" / "project_a" / "priority"
+        priority_dir.mkdir(parents=True, exist_ok=True)
+        basename = "PRIORITY-0203-same-basename.md"
 
         staged_a = tmp_path / "depositor_a" / basename
         staged_b = tmp_path / "depositor_b" / basename
         staged_a.parent.mkdir()
         staged_b.parent.mkdir()
-        content_a = "# BUG-0203: depositor A\n\n## Status\nopen\n"
-        content_b = "# BUG-0203: depositor B\n\n## Status\nopen\n"
+        content_a = "# PRIORITY-0203: depositor A\n\n## Status\nopen\n"
+        content_b = "# PRIORITY-0203: depositor B\n\n## Status\nopen\n"
         staged_a.write_text(content_a, encoding="utf-8")
         staged_b.write_text(content_b, encoding="utf-8")
 
@@ -1621,11 +1621,11 @@ class TestIntakeCommand:
         assert "no clobber" in err_a, (
             f"depositor A's refusal must name the no-clobber contract.\nstderr: {err_a}"
         )
-        assert (bugs_dir / basename).read_text(encoding="utf-8") == content_b, (
+        assert (priority_dir / basename).read_text(encoding="utf-8") == content_b, (
             "the first file to land (depositor B's) must survive intact"
         )
         leftovers = sorted(
-            n for n in os.listdir(bugs_dir) if n.startswith(".deposit_intake_tmp_")
+            n for n in os.listdir(priority_dir) if n.startswith(".deposit_intake_tmp_")
         )
         assert leftovers == [], f"deposit temp files left behind: {leftovers}"
 

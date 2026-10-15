@@ -536,6 +536,19 @@
 #                                              Decimal digits only; leading
 #                                              zeros are normalised. Absent
 #                                              or blank = 60.)
+#
+# [install]  — install and upgrade settings. Kanban-wide only. NOT read by
+#              load_config() below; the crontab step reads it.
+#   crontab_backups_keep    OPTIONAL  10     (whole number of 1 or more —
+#                                              how many crontab backups in
+#                                              $HOME the crontab step keeps.
+#                                              Read by
+#                                              team/scripts/lib/safe_overwrite.sh
+#                                              via read_ini; an invalid
+#                                              value is refused dual-channel
+#                                              and the crontab is left
+#                                              unchanged. Absent or blank =
+#                                              10.)
 
 # ---------------------------------------------------------------------------
 # Bootstrap: ensure read_ini is available.
@@ -619,6 +632,7 @@ _CONFIG_LOADER_KNOWN_KEYS=(
     overwatch:leaked_listener_min_age_seconds
     archive:archive_count
     testing:workers testing:coverage testing:pre_merge_affected_cap
+    install:crontab_backups_keep
 )
 
 # ---------------------------------------------------------------------------

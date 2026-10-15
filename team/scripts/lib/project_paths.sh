@@ -65,15 +65,6 @@
 #                               default 'release' when absent or empty
 #   pp_branch_prefix  [name]  — optional branch name prefix from [project] branch_prefix;
 #                               returns empty string when key is absent or empty
-#   pp_rc_branch_prefix [name] — branch prefix for RC-branch DETECTION (not
-#                               construction): same configured value as
-#                               pp_branch_prefix, but falls back to
-#                               PP_RC_BRANCH_PREFIX_DEFAULT instead of "" when
-#                               project.cfg cannot be read at all, so RC-branch
-#                               detection agrees with
-#                               lint_changelog_freshness.py's
-#                               _resolve_branch_prefix() on an unconfigured
-#                               install
 #   pp_push_to_remote [name]  — echoes 'true' only when the shared push-decision
 #                               resolver (push_decision.sh) answers push: a
 #                               registered project whose own project.cfg names
@@ -1866,79 +1857,6 @@ pp_branch_prefix() {
         echo "project_paths.sh: pp_branch_prefix: invalid branch_prefix in config for project '${name}'" >&2
         return 1
     fi
-
-    echo "$raw"
-}
-
-# ---------------------------------------------------------------------------
-# PP_RC_BRANCH_PREFIX_DEFAULT
-# Fallback branch prefix used by pp_rc_branch_prefix ONLY when a project's
-# configuration cannot be read at all. Matches
-# lint_changelog_freshness.py's _DEFAULT_BRANCH_PREFIX so the shell gated
-# runners and the Python CHANGELOG lint agree on which branches count as
-# RC branches on an unconfigured install.
-# ---------------------------------------------------------------------------
-PP_RC_BRANCH_PREFIX_DEFAULT="ai_"
-
-# ---------------------------------------------------------------------------
-# pp_rc_branch_prefix [name]
-# Echoes the branch prefix to use when DETECTING whether the current branch
-# is an RC branch — used by the gated test runners and the CHANGELOG
-# freshness lint to decide whether to relax staleness checks for the
-# duration of a release. This is a different question from pp_branch_prefix
-# (branch/tag CONSTRUCTION), whose correct empty-string default must never
-# guess a prefix when creating a new branch or tag.
-#
-# Resolution:
-#   1. project.cfg is readable and its [project] section carries the
-#      branch_prefix key (even when the configured value is deliberately
-#      empty) — that configured value always wins, exactly like
-#      pp_branch_prefix.
-#   2. project.cfg cannot be read at all — missing project root, missing or
-#      unparsable project.cfg, or the key entirely absent from the
-#      [project] section — falls back to PP_RC_BRANCH_PREFIX_DEFAULT so an
-#      unconfigured install still recognises its default-prefixed RC
-#      branch, instead of silently losing RC-mode detection.
-#
-# This mirrors lint_changelog_freshness.py's _resolve_branch_prefix() so the
-# Python lint and the shell gated runners resolve the same RC-branch pattern
-# under the same kanban root.
-#
-# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then
-# PP_RC_BRANCH_PREFIX_DEFAULT (an unresolvable project name is itself a form
-# of "cannot be read at all").
-#
-# Example:
-#   pp_rc_branch_prefix "pgai-agent-kanban"  # -> "ai_" (project.cfg unreadable)
-#   pp_rc_branch_prefix "my-project"         # -> "" (project.cfg sets branch_prefix = "")
-# ---------------------------------------------------------------------------
-pp_rc_branch_prefix() {
-    local name
-    name="$(pp_require_project_context "${1:-}")" || { echo "$PP_RC_BRANCH_PREFIX_DEFAULT"; return 0; }
-    local project_root cfg_file
-    project_root="$(pp_project_root "$name" 2>/dev/null)" || { echo "$PP_RC_BRANCH_PREFIX_DEFAULT"; return 0; }
-    cfg_file="$(_pp_project_cfg_file "$project_root")"
-
-    [[ -n "$cfg_file" ]] || { echo "$PP_RC_BRANCH_PREFIX_DEFAULT"; return 0; }
-
-    # Sentinel default distinguishes "key absent from [project]" (fall back
-    # to PP_RC_BRANCH_PREFIX_DEFAULT) from "key present with an explicitly
-    # empty value" (respect the configured empty prefix). read_ini's FOUND:
-    # sentinel already makes this distinction internally; passing our own
-    # sentinel default surfaces it to this caller.
-    local _pp_sentinel="__pp_rc_branch_prefix_unset__"
-    local raw
-    raw="$(read_ini "$cfg_file" project branch_prefix "$_pp_sentinel")"
-
-    if [[ "$raw" == "$_pp_sentinel" ]]; then
-        echo "$PP_RC_BRANCH_PREFIX_DEFAULT"
-        return 0
-    fi
-
-    # Strip surrounding double-quotes so that `branch_prefix = ""` is treated
-    # as empty rather than as the 2-char string "".
-    raw="${raw%\"}"
-    raw="${raw#\"}"
 
     echo "$raw"
 }

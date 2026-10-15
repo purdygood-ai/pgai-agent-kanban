@@ -21,7 +21,10 @@ The fix drains the extraction through `mapfile` via process substitution
 -- which always reads its producer to EOF rather than closing early -- and
 slices the resulting array to the line-count limit locally with `printf`,
 so the upstream `grep`/`sed` always finish writing and no reader can close
-their pipe out from under them.
+their pipe out from under them. Scripts now print their header through
+`header_help_print` (team/scripts/lib/header_help.sh), where awk is the
+only writer and no internal pipe exists; the sweep covers those callers
+too, so the same exit-0 and no-shebang properties stay pinned.
 
 Test groups
 -----------
@@ -97,6 +100,13 @@ _OLD_HEAD_LIMIT = re.compile(
 )
 _NEW_MAPFILE_LIMIT = re.compile(r"mapfile -t __help_lines <")
 
+# The shared header printer's call on a non-comment line. Its callers print
+# the same leading comment block, so they owe the same exit-0 and
+# no-shebang properties the sweep checks.
+_HEADER_HELP_PRINT_CALL = re.compile(
+    r"^(?![ \t]*#)[^\n]*\bheader_help_print\b", re.MULTILINE
+)
+
 # Repeat count for the repaired-script sweep (Group 1). The fix removed the
 # scheduling race entirely -- the extraction now always drains to EOF before
 # anything reads it, so a repaired script's exit status is no longer
@@ -115,7 +125,8 @@ _SYNTHETIC_REPEAT_COUNT = 20
 def _discover_self_header_help_scripts() -> list[pathlib.Path]:
     """Every *.sh under team/scripts/ whose --help path extracts its own
     leading comment block via the shared convention AND applies a
-    line-count limit to it, in either the pre-repair or repaired shape.
+    line-count limit to it, in either the pre-repair or repaired shape,
+    plus every script that prints it through ``header_help_print``.
     Discovered by the construct rather than by a hardcoded path list, per
     the grep-zero sweep convention: a script adopting, repairing, or
     regressing the convention moves in, stays in, or is still caught by
@@ -126,6 +137,8 @@ def _discover_self_header_help_scripts() -> list[pathlib.Path]:
         if _SELF_HEADER_EXTRACTION.search(text) and (
             _OLD_HEAD_LIMIT.search(text) or _NEW_MAPFILE_LIMIT.search(text)
         ):
+            found.append(path)
+        elif _HEADER_HELP_PRINT_CALL.search(text):
             found.append(path)
     return found
 

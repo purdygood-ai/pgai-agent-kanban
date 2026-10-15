@@ -291,14 +291,15 @@ case "${_fc_result}" in
         ;;
     could_not_attempt)
         # BLOCK-WORTHY (roles/CODER.md, "Authoring a new gate"): a
-        # could-not-attempt verdict means nothing was learned about the
-        # tree at all (SOP-core.md, "Gates and Refusals" -- "Unusable
-        # build blocks; an unavailable build environment does not,"
-        # outcome 3) -- it can never satisfy promotion, regardless
-        # of how recently it ran.
+        # could-not-attempt verdict means nothing was learned about
+        # whether the images build (SOP-core.md, "Gates and Refusals" --
+        # "Unusable build blocks; an unavailable build environment does
+        # not," outcome 3); an exit-1 record can still name a failing
+        # engine-free cold test, whose bug that run filed. It can never
+        # satisfy promotion, regardless of how recently it ran.
         pgai_emit_error_contract \
             "freshness_gate.could_not_attempt" \
-            "the most recent deep-verify record for '${_fc_project}' (timestamp ${_fc_fields[timestamp]}) has Verdict=could-not-attempt: ${_fc_fields[detail]} -- nothing was learned about the tree, so this record can never satisfy promotion no matter how recent." \
+            "the most recent deep-verify record for '${_fc_project}' (timestamp ${_fc_fields[timestamp]}) has Verdict=could-not-attempt: ${_fc_fields[detail]} -- nothing was learned about whether the images build, so this record can never satisfy promotion no matter how recent (a failing engine-free cold test named in the detail is a separate finding, already filed by that run)." \
             "${_fc_rerun_cmd}  # on a host with a working container engine and reachable registries"
         # CENSUS-ANCHOR: deep-verify-freshness-check-05
         exit 1

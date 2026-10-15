@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import importlib.util
 import shlex
+import signal
 import sys
 from pathlib import Path
 
@@ -48,6 +49,19 @@ _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _AP_LINT = _SCRIPTS_DIR / "lint_test_anti_patterns.py"
 _SKIP_GATE = _SCRIPTS_DIR / "lint_skip_bug_gate.sh"
 _SCAN_MODULE_PATH = _SCRIPTS_DIR / "lib" / "skip_bug_citation_scan.py"
+
+# The skip gate's verdict is its exit code and output, never how long it
+# took. One --files run costs a fraction of a CPU second, but a contended
+# host can stretch its wall-clock time a hundredfold, so a tight wall-clock
+# limit makes host load the verdict. A runaway run is caught by CPU time
+# instead: ``ulimit -t`` gives every process in the invocation this many
+# CPU seconds, which host load does not consume, and a process over it is
+# killed by SIGXCPU.
+_SKIP_GATE_CPU_SECONDS = 20
+# Backstop for a run that blocks without using CPU, so a wedged gate fails
+# the test instead of hanging the suite. It sits far above any contended
+# run of a sub-second job and plays no part in a run that finishes.
+_SKIP_GATE_HANG_BACKSTOP_SECONDS = 900
 
 
 def _import_scan_module():
@@ -140,13 +154,29 @@ def _run_ap_lint(tmp_path: Path, *args: str):
 
 
 def _run_skip_gate(tmp_path: Path, bugs_dir: Path, *args: str, cwd: Path | None = None):
+    """Run lint_skip_bug_gate.sh under a CPU-time budget and return its result.
+
+    Fails the calling test with a named cause when the lint was killed for
+    exceeding _SKIP_GATE_CPU_SECONDS, so a runaway lint is never mistaken
+    for an ordinary exit code.
+    """
     quoted = " ".join(shlex.quote(a) for a in args)
-    return run_bash(
+    result = run_bash(
         tmp_path,
+        f"ulimit -t {_SKIP_GATE_CPU_SECONDS}\n"
         f"bash {shlex.quote(str(_SKIP_GATE))} {quoted} "
         f"--bugs-dir {shlex.quote(str(bugs_dir))}",
         cwd=cwd,
+        timeout=_SKIP_GATE_HANG_BACKSTOP_SECONDS,
     )
+    killed_for_cpu = (-signal.SIGXCPU, 128 + signal.SIGXCPU)
+    assert result.returncode not in killed_for_cpu, (
+        f"lint_skip_bug_gate.sh used more than {_SKIP_GATE_CPU_SECONDS} CPU "
+        f"seconds (exit {result.returncode}, SIGXCPU) for args {list(args)}; "
+        "a --files run normally needs well under one.\n"
+        + result.stdout + result.stderr
+    )
+    return result
 
 
 def _bugs_dir_with_filed_citation(tmp_path: Path) -> Path:

@@ -33,7 +33,6 @@ team/scripts/lib/wake_readme_meta.sh	3	27
 team/scripts/lib/wake_task_id_gate.sh	2	75
 team/scripts/lint_governance_byte_budgets.sh	1	22
 team/scripts/migrate/bug-status-done.sh	1	130
-team/scripts/regenerate-changelog.sh	1	76
 team/scripts/release-state.sh	1	41
 team/scripts/retire-empty-bundles.sh	1	34
 team/scripts/verify-test-order-independence.sh	1	40

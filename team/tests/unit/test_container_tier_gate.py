@@ -311,7 +311,7 @@ def test_image_debian_selects_only_debian(tmp_path: pathlib.Path) -> None:
     sandbox.use_python3_stand_in()
     result = sandbox.run(_COLD_RUNNER, ["--image", "debian"], PGAI_CONTAINER_TIER="1")
     assert result.returncode == 0, _detail(result)
-    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ images=debian"
+    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ --capture=no images=debian"
     assert sandbox.engine_calls() == ""
 
 
@@ -320,7 +320,7 @@ def test_image_all_selects_every_manifest_image(tmp_path: pathlib.Path) -> None:
     sandbox.use_python3_stand_in()
     result = sandbox.run(_COLD_RUNNER, ["--image", "all"], PGAI_CONTAINER_TIER="1")
     assert result.returncode == 0, _detail(result)
-    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ images=debian rocky9"
+    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ --capture=no images=debian rocky9"
 
 
 def test_repeated_image_flags_select_each_named_image_in_manifest_order(tmp_path: pathlib.Path) -> None:
@@ -330,7 +330,7 @@ def test_repeated_image_flags_select_each_named_image_in_manifest_order(tmp_path
         _COLD_RUNNER, ["--image", "rocky9", "--image=debian"], PGAI_CONTAINER_TIER="1"
     )
     assert result.returncode == 0, _detail(result)
-    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ images=debian rocky9"
+    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ --capture=no images=debian rocky9"
 
 
 def test_no_image_flag_and_no_cfg_default_lists_the_images_and_builds_nothing(tmp_path: pathlib.Path) -> None:
@@ -352,7 +352,7 @@ def test_cfg_default_selects_images_when_no_flag_is_given(tmp_path: pathlib.Path
     sandbox.set_cfg_images("rocky9")
     result = sandbox.run(_COLD_RUNNER, [], PGAI_CONTAINER_TIER="1")
     assert result.returncode == 0, _detail(result)
-    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ images=rocky9"
+    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ --capture=no images=rocky9"
 
 
 def test_image_flag_overrides_the_cfg_default(tmp_path: pathlib.Path) -> None:
@@ -361,7 +361,7 @@ def test_image_flag_overrides_the_cfg_default(tmp_path: pathlib.Path) -> None:
     sandbox.set_cfg_images("rocky9")
     result = sandbox.run(_COLD_RUNNER, ["--image", "debian"], PGAI_CONTAINER_TIER="1")
     assert result.returncode == 0, _detail(result)
-    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ images=debian"
+    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ --capture=no images=debian"
 
 
 def test_selection_inherited_from_a_parent_harness_applies_without_a_flag(tmp_path: pathlib.Path) -> None:
@@ -373,7 +373,7 @@ def test_selection_inherited_from_a_parent_harness_applies_without_a_flag(tmp_pa
     sandbox.set_cfg_images("debian")
     result = sandbox.run(_COLD_RUNNER, [], PGAI_CONTAINER_TIER="1", PGAI_CONTAINER_IMAGES="rocky9")
     assert result.returncode == 0, _detail(result)
-    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ images=rocky9"
+    assert sandbox.recorded().strip() == "pytest-launched tests/cold/ --capture=no images=rocky9"
 
 
 @pytest.mark.parametrize("name,script,args", _HARNESSES, ids=_HARNESS_IDS)
@@ -462,7 +462,7 @@ def test_nested_harness_run_is_recorded_once_by_the_outer_session(tmp_path: path
         PGAI_DEEP_VERIFY_COLD_LANE_CMD=str(_COLD_RUNNER),
     )
     assert result.returncode == 0, _detail(result)
-    assert "pytest-launched tests/cold/ images=debian" in sandbox.recorded()
+    assert "pytest-launched tests/cold/ --capture=no images=debian" in sandbox.recorded()
     events = [line.split()[1] for line in sandbox.docker_use_lines()]
     assert events == ["START", "FINISH"], sandbox.docker_use_lines()
 

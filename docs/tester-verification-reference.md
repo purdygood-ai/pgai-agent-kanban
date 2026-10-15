@@ -20,7 +20,7 @@ named pointer keeps it reachable without spending that headroom.
 | Running the gated suites | Steps 5a and 5b |
 | Deep-verify freshness reporting, in full | Step 5d |
 | Report format the tooling reads | Step 9, "The finding heading and these `**Field:** value` lines" |
-| Filing a Path C bug or priority | Step 10, "The document shapes" |
+| Filing a Path C bug | Step 10, "The document shapes" |
 | Aggregating lint-class findings into one filing | Step 10, "One lint class is one related thing" |
 | Anti-patterns to avoid | "Anti-Patterns to Avoid" |
 | Autonomous criterion expectations | Step 6.12 and "Autonomous Criterion Expectations" |
@@ -148,7 +148,7 @@ What this step produces is one mandatory report section, `## Deep-Verify Freshne
 
 **Where the answer comes from.** The per-project ledger at `$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<project-name>/deep-verify-ledger.md` — append-only kanban process state, a sibling of `release-state.md`, never committed into a dev tree. Read it through the one reader every consumer calls, `deep_verify_ledger_read_latest` in `team/scripts/lib/deep_verify_ledger.sh`; never parse the markdown yourself and never re-derive a verdict from raw lane output. On success it prints one `key=value` line per field — `found`, `timestamp`, `project`, `version`, `commit`, `verdict`, `detail`. A bare `found=false` is its own signal for "never deep-verified." **A non-zero return is not "never run"**: the ledger exists but is malformed, and it takes Form C.
 
-**The verdict vocabulary is exactly three values**, used verbatim — never paraphrased, never translated into `PASS`/`FAIL`. `built` (the artefact built), `failed-to-build` (it did not — a defect in the tree), `could-not-attempt` (never attempted: no engine, unreachable registry, missing toolchain, so nothing about the tree was exercised). These map one-to-one onto the three build outcomes in `SOP-core.md` ("Gates and Refusals"), the canon for what each is worth.
+**The verdict vocabulary is exactly three values**, used verbatim — never paraphrased, never translated into `PASS`/`FAIL`. `built` (the artefact built), `failed-to-build` (it did not — a defect in the tree), `could-not-attempt` (never attempted: no engine, unreachable registry, missing toolchain, so nothing was learned about whether the images build; an exit-1 record can still name a failing engine-free cold test, whose bug that run filed). These map one-to-one onto the three build outcomes in `SOP-core.md` ("Gates and Refusals"), the canon for what each is worth.
 
 **The line's exact shape.** Write it as the entire body of the section — one line, no bullet, no heading beneath it: the literal prefix `deep-verify: `, then `key=value` tokens in fixed order, then a space-em-dash-space separator, then one plain-language sentence. Three forms, selected by what the reader returned:
 
@@ -330,14 +330,14 @@ Nothing at report level is derived from the findings.
 
 ---
 
-## Filing a Path C bug or priority
+## Filing a Path C bug
 
 Named from Step 10 of `team/roles/TESTER.md`, which carries the filing
 decision — which path, which filename, how the ID is claimed. This
 section carries the two document shapes: the header block every filing
 opens with, and the section list each type must contain.
 
-**Required headers, in this order, at the top of the file.** A bug carries the block below; a priority carries the same plus `## Target Version` reading `auto` — **mandatory, never a `vX.Y.Z` literal**, because Path C output is framework-authored and the ship version is computed by discovery at bundle time.
+**Required headers, in this order, at the top of the file.** A bug carries the block below.
 
 ```
 **Filed By:** TESTER (autonomous Path C) — <one plain sentence of what was wrong>
@@ -355,9 +355,9 @@ open
 **Filed By:** TESTER (autonomous Path C) — the per-project debug-log fix never actually ran because the provider wake scripts override it with the old global path.
 ```
 
-Apply the same shape to every `Filed By` line you write — bugs, priorities, and any `Filed By` line inside `report.md`.
+Apply the same shape to every `Filed By` line you write — bugs and any `Filed By` line inside `report.md`.
 
-**Required sections, after the headers, in this order.** A **bug**: `## Symptom` (what was observed), `## Expected` (what should have happened), `## Reproduction` (numbered steps including environment), `## Fix` or `## Files Involved` (the concrete files and, if known, the change — speculation is welcome, this is hand-off context for CODER), `## Acceptance` (testable assertions proving the fix), `## Severity` (exactly one of `critical`, `high`, `medium`, `low`). A **priority**: `## Summary`, `## Goals`, `## Scope` (in and out), `## Acceptance Criteria` (a checklist matching the gap entries), `## Risk Assessment` (level and rationale). Copy the structure of `bugs/templates/BUG-TEMPLATE.md` or `priority/templates/PRIORITY-TEMPLATE.md`; those sections are the minimum.
+**Required sections, after the headers, in this order.** A **bug**: `## Symptom` (what was observed), `## Expected` (what should have happened), `## Reproduction` (numbered steps including environment), `## Fix` or `## Files Involved` (the concrete files and, if known, the change — speculation is welcome, this is hand-off context for CODER), `## Acceptance` (testable assertions proving the fix), `## Severity` (exactly one of `critical`, `high`, `medium`, `low`). Copy the structure of `bugs/templates/BUG-TEMPLATE.md`; those sections are the minimum.
 
 **Where the current template lives.** The current bug template is the installed `$KANBAN_ROOT/templates/project/<workflow_type>/BUG-TEMPLATE.md` (`release/` for a release project), with the priority and requirements templates beside it. The project's `bugs/templates/BUG-TEMPLATE.md` is a copy that install and upgrade refresh from that set, together with the project's `priority/templates/PRIORITY-TEMPLATE.md` and `requirements/templates/REQUIREMENTS-TEMPLATE.md`, so filing from the project copy gives you the current structure. A project copy that differed from the installed template, whether an older release's template or an operator's edit, is kept beside it as `<file>.<UTC timestamp>.bak` and then overwritten. Copy from the `.md` file, never from a `.bak`: the backup is the previous copy, not the current template. `docs/OPERATIONS.md` ("Seeded intake templates on install and upgrade") covers the refresh in full.
 

@@ -14,6 +14,15 @@
 #   v[0-9]*.md  -> projects/<name>/requirements/
 #   (any other) -> REFUSED with a clear message; nothing is copied
 #
+# BUG-* drafts claim their number atomically (the same O_EXCL claim bug
+# filers use).  The name must follow the ledger filename contract,
+# BUG-NNNN-<slug>.md (lower-case kebab slug, optional -YYYYMMDD- after the
+# number), or it is refused (exit 2) before anything is written.  A free
+# number is deposited as named; a taken one is deposited as the next free
+# number, with the file's "# BUG-NNNN-<slug>" title line and "**Bug ID:**"
+# line rewritten to match, and the new name is what the one stdout line
+# prints.
+#
 # Thin delegator: all mutation logic lives in deposit_intake() in
 # pgai_agent_kanban.ops.write (Python).  This script does only argument
 # parsing, project-root resolution, invocation via the Python module,
@@ -22,8 +31,9 @@
 # Exit codes:
 #   0   File deposited successfully; prints the deposited path.
 #   1   Usage error, source file problem, or destination directory missing.
-#   2   Routing refused: filename does not match a known intake prefix.
-#   3   Target already exists (no clobber).
+#   2   Refused: filename does not match a known intake prefix, is not a bare
+#       file name, or is a BUG-* name off the ledger filename contract.
+#   3   PRIORITY-* or requirements target already exists (no clobber).
 #   4   Filesystem error during copy.
 
 set -euo pipefail
@@ -74,11 +84,21 @@ _intake_usage() {
         "  - Source file is NOT moved or deleted (copy only)." \
         "  - Deposited copy is always mode 644." \
         "  - Copy is atomic (temp + link into place); discovery never sees a partial file." \
-        "  - REFUSED if the target already exists (no clobber)." \
+        "  - PRIORITY-* and requirements: REFUSED if the target already exists" \
+        "    (no clobber)." \
         "" \
-        "NOTE: intake.sh is a DUMB router. It does NOT validate file contents," \
-        "assign numbers, or check headings. The discovery pipeline checks names" \
-        "afterwards and quarantines a file it keeps rejecting into" \
+        "BUG-* numbering:" \
+        "  - The name must be BUG-NNNN-<slug>.md (lower-case kebab slug, optional" \
+        "    -YYYYMMDD- after the number); any other BUG-* name is REFUSED (exit 2)" \
+        "    before anything is written." \
+        "  - The number is claimed atomically. Free: deposited as named. Taken:" \
+        "    deposited as the next free number, with the '# BUG-NNNN-<slug>' title" \
+        "    line and '**Bug ID:**' line rewritten to match; the printed path" \
+        "    names the new file." \
+        "" \
+        "NOTE: intake.sh does NOT validate file contents or check headings." \
+        "The discovery pipeline checks names afterwards and quarantines a file" \
+        "it keeps rejecting into" \
         "projects/<name>/rejected/ (legacy fallback: <intake>/.rejected/);" \
         "list-rejected.sh and recover-rejected.sh find and restore it." \
         "" \
@@ -89,8 +109,9 @@ _intake_usage() {
         "Exit codes:" \
         "  0  File deposited (prints the deposited path)" \
         "  1  Usage error, source file problem, or destination directory missing" \
-        "  2  Routing refused: filename does not match a known intake prefix" \
-        "  3  Target already exists (no clobber)" \
+        "  2  Refused: unknown intake prefix, not a bare file name, or a BUG-*" \
+        "     name off the ledger filename contract" \
+        "  3  PRIORITY-* or requirements target already exists (no clobber)" \
         "  4  Filesystem error during copy"
 }
 
@@ -209,11 +230,11 @@ case "${_intake_rc}" in
         exit 1
         ;;
     2)
-        # Routing refused — stderr already printed by the Python module.
+        # Refused (routing or BUG-* name) — stderr already printed by the Python module.
         exit 2
         ;;
     3)
-        # Target exists (no clobber) — stderr already printed by the Python module.
+        # PRIORITY-*/requirements target exists (no clobber) — stderr already printed.
         exit 3
         ;;
     4)

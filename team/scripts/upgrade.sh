@@ -8,7 +8,8 @@
 # --------------------------------
 # When invoked WITHOUT --phase2 (the normal operator invocation), this script
 # acts as the PHASE 1 BOOTSTRAP: it parses args, validates the dev tree,
-# creates the pre-upgrade backup tarball, probes the dev-tree's upgrade.sh
+# applies the no-argument forward-only check (see VERSION below), creates
+# the pre-upgrade backup tarball, probes the dev-tree's upgrade.sh
 # (bash -n syntax check and --phase2 support check), then hands off execution
 # via exec to <dev_tree>/team/scripts/upgrade.sh with --phase2 and the
 # versioned protocol flags.  Phase 1 performs NO deposit, NO config changes,
@@ -59,15 +60,24 @@
 #   There is no --force override for direction: --force only controls
 #   per-file overwrite prompts during deposit, never which way time moves.
 #   Omit VERSION to upgrade using whatever the dev tree currently has
-#   checked out, exactly as before this argument existed (the default,
-#   back-compatible path).
+#   checked out (the default path). The forward-only rule then takes its
+#   no-argument form: the dev tree's version (its committed VERSION file,
+#   or else `git describe` against the release tag pattern) must not be
+#   OLDER than the installed VERSION, or the upgrade is refused before the
+#   backup and before anything is deposited, naming both versions. An
+#   EQUAL version is allowed (re-upgrading the same release). When either
+#   version cannot be determined the run proceeds with a warning. Both
+#   phases apply this check, so it holds even when the dev tree's own
+#   upgrade.sh is an older release without it.
 #
 # OPTIONS:
 #   --force                Overwrite changed managed files without prompting.
 #                          Without it, a run that leaves any changed item
 #                          undeposited stops before the VERSION stamp and
 #                          migrations and exits non-zero (see PARTIAL DEPOSIT).
-#   --no-backup            Skip the pre-upgrade backup (advanced; not recommended).
+#                          With it, orphaned files are also moved aside
+#                          (see ORPHAN SWEEP).
+#   --no-backup           Skip the pre-upgrade backup (advanced; not recommended).
 #   --wake-tier small|medium|large|none
 #                          Rewrite the crontab's kanban-managed lines for this
 #                          tier (other cron lines are kept; none = leave the
@@ -142,6 +152,22 @@
 #   differs (an older release's template or an operator edit) is kept beside
 #   itself as <file>.<UTC timestamp>.bak and then overwritten, with one line
 #   naming the project, file and backup. No other project file is written.
+#
+# ORPHAN SWEEP (after the deposit and the retirement step):
+#   Phase 2 lists every file under the directories it deposited into (the
+#   team/ directories such as scripts/, roles/, workflows/, and the docs/
+#   entries named in team/config/docs-manifest.txt) that the deposited tree
+#   does not contain, for example a file left behind by an older release.
+#   Without --force each orphan is reported by relative path and left in
+#   place. With --force each one is moved, never deleted, to
+#   retired/<UTC-ts>/<relative-path>, the same graveyard the retirement step
+#   uses in the same run; restore by moving it back. The summary prints an
+#   "Orphans:" line with the count. Never scanned or moved: anything outside
+#   those directories, the protected set (including projects/), Python
+#   bytecode caches, files install.sh generates into them
+#   (scripts/cron-suggested.txt), and an operator's own plugin directories
+#   (workflows/<name>/ and templates/project/<name>/ whose <name> the
+#   deposited tree does not ship).
 #
 # BACKUP:
 #   A tarball of the whole kanban root is created before any change, excluding
@@ -295,6 +321,154 @@ _upg_resolve_branch_prefix() {
 }
 
 # ---------------------------------------------------------------------------
+# _upg_tree_version <tree> [<branch_prefix>]
+#
+# Echoes the release version <tree> would deposit, with the same precedence
+# stamp_version_files applies when it writes VERSION: the tree's committed
+# VERSION file when present, otherwise the nearest release tag `git describe`
+# reaches (matched with git_describe_tag_pattern, tag prefix stripped, so
+# "ai_v2.4.0" reads as "v2.4.0"). Echoes "" when neither exists -- a tree
+# with no VERSION file that is not a git checkout, or has no release tag.
+# ---------------------------------------------------------------------------
+_upg_tree_version() {
+  local tree="${1:-}"
+  local prefix="${2:-}"
+  local version=""
+
+  if [[ -f "$tree/VERSION" ]]; then
+    version="$(tr -d '[:space:]' < "$tree/VERSION" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$version" && -e "$tree/.git" ]] \
+      && declare -f git_describe_tag_pattern >/dev/null 2>&1; then
+    local -a patterns
+    if [[ -n "$prefix" ]]; then
+      patterns=("$(git_describe_tag_pattern "$prefix")")
+    else
+      # Prefix unknown: prefer a prefixed release tag, then the bare shape.
+      patterns=("$(git_describe_tag_pattern '*_')" "$(git_describe_tag_pattern "")")
+    fi
+    local pattern tag=""
+    for pattern in "${patterns[@]}"; do
+      tag="$(git -C "$tree" describe --tags --abbrev=0 --match "$pattern" 2>/dev/null || true)"
+      [[ -n "$tag" ]] && break
+    done
+    if [[ "$tag" =~ ^.*_(v[0-9].*)$ ]]; then
+      tag="${BASH_REMATCH[1]}"
+    fi
+    version="$tag"
+  fi
+
+  printf '%s' "$version"
+}
+
+# ---------------------------------------------------------------------------
+# _upg_noarg_forward_only_check
+#
+# The forward-only rule for an upgrade run WITHOUT a version argument. Such a
+# run deposits whatever DEV_TREE has checked out, so it refuses -- before
+# the backup and before anything is deposited -- when that tree's version
+# (see _upg_tree_version) is OLDER than the live install's VERSION file.
+# An EQUAL version is allowed: re-upgrading from the same release is the
+# normal way to re-lay it. (A version-targeted run refuses equal versions
+# too; that rule lives in the PHASE 2 DISPATCH block.)
+#
+# Ordering goes through semver_lt from this script's own lib/semver.sh,
+# never a string compare. When either version is unknown -- no installed
+# VERSION file, or a dev tree with neither a VERSION file nor a reachable
+# release tag -- or is not version-shaped, there is nothing to compare: the
+# check narrates why and allows the run, as a no-argument upgrade always did.
+#
+# Called from both phases: phase 1 (the installed script) runs it before the
+# backup and the handoff, so it holds even when the dev tree's own
+# upgrade.sh predates it; phase 2 (the script that deposits) runs it again.
+# Reads DEV_TREE, KANBAN_ROOT, FORCE_UPGRADE, WAKE_TIER and the
+# ADD_*_AGENTS flags.
+# ---------------------------------------------------------------------------
+_upg_noarg_forward_only_check() {
+  local lib_dir
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+
+  # git_describe_tag_pattern, for a dev tree that carries no VERSION file.
+  if ! declare -f git_describe_tag_pattern >/dev/null 2>&1 \
+      && [[ -f "$lib_dir/version_stamp.sh" ]]; then
+    # shellcheck source=lib/version_stamp.sh
+    source "$lib_dir/version_stamp.sh"
+  fi
+
+  local prefix dev_version installed_version=""
+  prefix="$(_upg_resolve_branch_prefix)"
+  dev_version="$(_upg_tree_version "$DEV_TREE" "$prefix")"
+  if [[ -f "$KANBAN_ROOT/VERSION" ]]; then
+    installed_version="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
+  fi
+
+  local version_shape='^v?[0-9]+\.[0-9]+'
+  if [[ -z "$installed_version" ]]; then
+    info "Forward-only check: no installed VERSION at $KANBAN_ROOT/VERSION; nothing to compare."
+    return 0
+  fi
+  if [[ -z "$dev_version" ]]; then
+    warn "Forward-only check skipped: the dev tree's version could not be determined (no VERSION file and no release tag reachable in $DEV_TREE)."
+    return 0
+  fi
+  if [[ ! "$installed_version" =~ $version_shape || ! "$dev_version" =~ $version_shape ]]; then
+    warn "Forward-only check skipped: cannot order dev tree version '${dev_version}' against installed version '${installed_version}' (not vX.Y.Z-shaped)."
+    return 0
+  fi
+
+  # shellcheck source=lib/semver.sh
+  source "$lib_dir/semver.sh"
+
+  if semver_lt "$dev_version" "$installed_version"; then
+    local checkout="" rerun remedy
+    if [[ -e "$DEV_TREE/.git" ]]; then
+      checkout="$(git -C "$DEV_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+      case "$checkout" in
+        "")   ;;
+        HEAD) checkout=" (detached HEAD)" ;;
+        *)    checkout=" (branch ${checkout})" ;;
+      esac
+    fi
+    rerun="PGAI_AGENT_KANBAN_ROOT_PATH='${KANBAN_ROOT}' '${KANBAN_ROOT}/scripts/upgrade.sh'"
+    if [[ -e "$DEV_TREE/.git" ]]; then
+      # The project's main branch carries the newest release. When the
+      # registered prefix names no such branch here (no projects.cfg, or a
+      # different project registered first), use a prefixed main branch the
+      # dev tree does have.
+      local main_branch="${prefix}main" candidate=""
+      if ! git -C "$DEV_TREE" rev-parse --verify --quiet "refs/heads/${main_branch}" >/dev/null 2>&1; then
+        candidate="$(git -C "$DEV_TREE" for-each-ref --format='%(refname:short)' 'refs/heads/*_main' 2>/dev/null | head -n1 || true)"
+        [[ -n "$candidate" ]] && main_branch="$candidate"
+      fi
+      remedy="git -C '${DEV_TREE}' checkout ${main_branch} && ${rerun} --dev-tree '${DEV_TREE}'"
+    else
+      # No checkout to switch: replace the tree with a fresh clone.
+      remedy="git clone https://github.com/purdygood-ai/pgai-agent-kanban.git '${HOME}/pgai-agent-kanban-src' && ${rerun} --dev-tree '${HOME}/pgai-agent-kanban-src'"
+    fi
+    [[ -n "$WAKE_TIER" ]] && remedy+=" --wake-tier ${WAKE_TIER}"
+    [[ "$ADD_CLAUDE_AGENTS" == "true" ]] && remedy+=" --add-claude-agents"
+    [[ "$ADD_CODEX_AGENTS" == "true" ]] && remedy+=" --add-codex-agents"
+    [[ "$FORCE_UPGRADE" == "true" ]] && remedy+=" --force"
+
+    # shellcheck source=lib/error_contract.sh
+    source "$lib_dir/error_contract.sh"
+    # BLOCK-WORTHY (docs/blocking-site-census.md): depositing an older tree
+    # over a newer install corrupts it -- files the older release lacks stay
+    # at the newer version beside downgraded ones, a mixed install that
+    # breaks scripts at run time.
+    pgai_emit_error_contract \
+      "upgrade.dev-tree-older-than-installed" \
+      "The dev tree ${DEV_TREE}${checkout} is at ${dev_version}, older than the installed version ${installed_version} at ${KANBAN_ROOT}. Without a version argument upgrade.sh deposits whatever the dev tree has checked out, and it never moves an installation backwards. Nothing has been deposited and ${KANBAN_ROOT} is unchanged. Check out the branch you meant to upgrade from, or pass an explicit release tag newer than ${installed_version} (upgrade.sh vX.Y.Z). A deliberate downgrade is a fresh install: install.sh ${dev_version} --force." \
+      "${remedy}"
+    # CENSUS-ANCHOR: upgrade-dev-tree-older-01
+    exit 1
+  fi
+
+  info "Forward-only check (no version argument): dev tree ${dev_version}, installed ${installed_version}: OK"
+}
+
+# ---------------------------------------------------------------------------
 # PROTECTED SET — single explicit manifest
 #
 # Items listed here are NEVER overwritten during an upgrade.  Any addition
@@ -419,6 +593,19 @@ templates/project/<workflow_type>/ set. A copy that differs is kept as
 <file>.<UTC timestamp>.bak beside itself, then overwritten, with one line
 naming the project and file; the rest of projects/ stays protected.
 
+Orphan sweep: after the deposit, phase 2 reports every file under the
+directories it deposited into (the team/ directories such as scripts/,
+roles/ and workflows/, and the docs/ entries named in the docs manifest) that
+the deposited tree does not contain, such as a file an older release left
+behind. Without --force each one is listed by relative path and left in
+place. With --force each one is moved, never deleted, to
+retired/<UTC timestamp>/<relative path>, the same graveyard the retirement
+step uses; restore it by moving it back. The summary's "Orphans:" line gives
+the count. Never touched: anything outside those directories, protected files
+and projects/, Python bytecode caches, scripts/cron-suggested.txt (generated
+by install.sh), and your own plugin directories under workflows/<name>/ or
+templates/project/<name>/ when the deposited tree has no <name> there.
+
 Version-targeted upgrade (forward-only):
   Pass an optional positional VERSION argument to upgrade TO a specific
   released tag's tree, instead of whatever the dev tree currently has
@@ -450,15 +637,23 @@ Version-targeted upgrade (forward-only):
   There is no --force override for direction -- --force only controls
   per-file overwrite prompts during deposit, never which way time moves.
 
-  Omit VERSION entirely to upgrade using whatever the dev tree currently has
-  checked out (the default, back-compatible path).
+No version argument (forward-only):
+  Omit VERSION to upgrade using whatever the dev tree currently has checked
+  out (the default path). The dev tree's version (its committed VERSION file,
+  or else the nearest release tag) must not be OLDER than the installed
+  VERSION: an older dev tree is refused before the backup and before anything
+  is deposited, naming both versions and a re-run command. An EQUAL version
+  is allowed, so re-upgrading the same release still works. If either version
+  cannot be determined the upgrade proceeds with a warning.
 
 OPTIONS:
   --force                 Overwrite changed managed files without prompting.
                           Without it, a run that leaves any changed item
                           undeposited stops before the VERSION stamp and
-                          migrations and exits non-zero.
-  --no-backup             Skip the pre-upgrade backup (advanced; not recommended).
+                          migrations and exits non-zero. With it, orphaned
+                          files are moved aside to retired/<UTC timestamp>/
+                          instead of only being reported (see Orphan sweep).
+  --no-backup           Skip the pre-upgrade backup (advanced; not recommended).
   --wake-tier small|medium|large|none
                           Rewrite the crontab's kanban-managed lines for this tier;
                           every other crontab line is kept (none = leave it alone).
@@ -711,10 +906,13 @@ if [[ "$_PHASE2_MODE" == "true" ]]; then
   # is no --force override for direction; --force only controls per-file
   # overwrite prompts during deposit.
   #
-  # No-argument back-compat: REQUESTED_VERSION empty means this entire
-  # block is a no-op — DEV_TREE keeps pointing at the checked-out dev tree
-  # exactly as it always has, and upgrade.sh behaves byte-identically to
-  # before this argument existed.
+  # No version argument: REQUESTED_VERSION empty means DEV_TREE keeps
+  # pointing at the checked-out dev tree, and the forward-only rule takes
+  # its no-argument form (_upg_noarg_forward_only_check): the checked-out
+  # tree's version must not be OLDER than the installed one, while an EQUAL
+  # version is allowed as a re-upgrade of the same release. Phase 1 already
+  # ran the same check before the handoff; running it again here makes it
+  # hold in the phase that deposits.
   # -------------------------------------------------------------------------
   _UPG_TARGET_VERSION=""
   _UPG_RESOLVED_TAG=""
@@ -810,6 +1008,8 @@ if [[ "$_PHASE2_MODE" == "true" ]]; then
     # script now reads from the resolved tag's tree instead of the
     # checked-out dev tree — see block comment above.
     DEV_TREE="$_UPG_CLEAN_SRC_WORKTREE"
+  else
+    _upg_noarg_forward_only_check
   fi
 
   # Fall through to the upgrade body below — tier detection, deposit,
@@ -817,11 +1017,13 @@ if [[ "$_PHASE2_MODE" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# PHASE 1 ONLY: precondition check, backup, dev-tree validation, exec handoff.
+# PHASE 1 ONLY: precondition check, dev-tree validation, no-argument
+# forward-only check, backup, exec handoff.
 #
 # These steps run when upgrade.sh is invoked normally (no --phase2).  They
-# are the full phase-1 bootstrap: validate the install, back it up, probe
-# the dev-tree script, and exec into it as phase 2.  Phase 2 (the actual
+# are the full phase-1 bootstrap: validate the install and the dev tree,
+# refuse a no-argument downgrade, back up, probe the dev-tree script, and
+# exec into it as phase 2.  Phase 2 (the actual
 # upgrade body) runs the rest of this file; these steps are skipped there.
 # ---------------------------------------------------------------------------
 if [[ "$_PHASE2_MODE" != "true" ]]; then
@@ -861,6 +1063,57 @@ fi
 unset _looks_like_install
 
 ok "Install target found: $KANBAN_ROOT"
+
+# ---------------------------------------------------------------------------
+# Verify dev tree path (needed to locate install.sh and subagents/).
+# ---------------------------------------------------------------------------
+DEV_TREE="${PGAI_DEV_TREE_PATH:-}"
+if [[ -z "$DEV_TREE" ]]; then
+  # Fallback: upgrade.sh may itself live in the dev tree.
+  # team/scripts/upgrade.sh → repo root is two levels up.
+  # BASH_SOURCE[0] is always the installed upgrade.sh in phase 1.
+  _candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)" || true
+  if [[ -f "${_candidate}/install.sh" ]]; then
+    DEV_TREE="$_candidate"
+    info "Dev tree inferred from script location: $DEV_TREE"
+  fi
+  unset _candidate
+fi
+
+if [[ -z "$DEV_TREE" ]]; then
+  err "dev_tree_path not configured."
+  err "Set PGAI_DEV_TREE_PATH or [paths] dev_tree_path in $KANBAN_ROOT/kanban.cfg,"
+  err "or use --dev-tree PATH."
+  exit 1
+fi
+
+if [[ ! -d "$DEV_TREE" ]]; then
+  err "Dev tree not found at: $DEV_TREE"
+  exit 1
+fi
+
+# install.sh must exist in the dev tree.
+INSTALL_SH="$DEV_TREE/install.sh"
+if [[ ! -f "$INSTALL_SH" ]]; then
+  err "install.sh not found at: $INSTALL_SH"
+  err "Ensure the dev tree path is correct (--dev-tree PATH or kanban.cfg [paths] dev_tree_path)."
+  exit 1
+fi
+
+ok "Dev tree: $DEV_TREE"
+
+# ---------------------------------------------------------------------------
+# NO-ARGUMENT FORWARD-ONLY CHECK (before the backup and the handoff).
+#
+# A run without a version argument deposits whatever the dev tree has checked
+# out. The installed script refuses a dev tree OLDER than the installed
+# VERSION here, because the phase-2 script it would hand off to is the dev
+# tree's own copy -- an older release that may not carry this check at all.
+# A version-targeted run is checked in the phase-2 dispatch block instead.
+# ---------------------------------------------------------------------------
+if [[ -z "$REQUESTED_VERSION" ]]; then
+  _upg_noarg_forward_only_check
+fi
 
 # ---------------------------------------------------------------------------
 # PRE-UPGRADE BACKUP
@@ -912,44 +1165,6 @@ if [[ "$DO_BACKUP" == "true" ]]; then
 else
   warn "Skipping backup (--no-backup specified).  No recovery tarball will be available."
 fi
-
-# ---------------------------------------------------------------------------
-# Verify dev tree path (needed to locate install.sh and subagents/).
-# ---------------------------------------------------------------------------
-DEV_TREE="${PGAI_DEV_TREE_PATH:-}"
-if [[ -z "$DEV_TREE" ]]; then
-  # Fallback: upgrade.sh may itself live in the dev tree.
-  # team/scripts/upgrade.sh → repo root is two levels up.
-  # BASH_SOURCE[0] is always the installed upgrade.sh in phase 1.
-  _candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)" || true
-  if [[ -f "${_candidate}/install.sh" ]]; then
-    DEV_TREE="$_candidate"
-    info "Dev tree inferred from script location: $DEV_TREE"
-  fi
-  unset _candidate
-fi
-
-if [[ -z "$DEV_TREE" ]]; then
-  err "dev_tree_path not configured."
-  err "Set PGAI_DEV_TREE_PATH or [paths] dev_tree_path in $KANBAN_ROOT/kanban.cfg,"
-  err "or use --dev-tree PATH."
-  exit 1
-fi
-
-if [[ ! -d "$DEV_TREE" ]]; then
-  err "Dev tree not found at: $DEV_TREE"
-  exit 1
-fi
-
-# install.sh must exist in the dev tree.
-INSTALL_SH="$DEV_TREE/install.sh"
-if [[ ! -f "$INSTALL_SH" ]]; then
-  err "install.sh not found at: $INSTALL_SH"
-  err "Ensure the dev tree path is correct (--dev-tree PATH or kanban.cfg [paths] dev_tree_path)."
-  exit 1
-fi
-
-ok "Dev tree: $DEV_TREE"
 
 # ---------------------------------------------------------------------------
 # PHASE 1 BOOTSTRAP: probe and exec handoff to the dev-tree upgrade.sh.
@@ -1178,20 +1393,36 @@ fi
 _DEPOSIT_BULK_CHOICE=""
 _DEPOSIT_SKIPPED=()
 
+# Python bytecode and test caches: they differ between any two trees that ran
+# Python, so neither the directory-current check below nor the orphan sweep
+# after the deposit treats them as content. Names are matched as globs
+# against a single path component.
+_UPG_CACHE_NAMES=(__pycache__ '*.pyc' .pytest_cache)
+
+# Kanban-root-relative directories the deposit below laid down from the
+# source tree (filled in by the deposit loops), and the docs/ manifest
+# entries it deposited. The orphan sweep scans exactly these.
+_UPG_DEPOSITED_DIRS=()
+_UPG_DEPOSITED_DOCS=()
+
 # _deposit_dir_is_current <src-dir> <dst-dir>
 #
 # Returns 0 when depositing <src-dir> onto <dst-dir> would change nothing:
 # every file under <src-dir> exists under <dst-dir> with identical content.
 # Files only present under <dst-dir> are ignored (the deposit copies over and
-# never deletes), as are Python bytecode caches, which differ between any two
-# trees that ran Python. Returns 1 on any difference, or when diff is not
+# never deletes; the orphan sweep reports them), as are the caches named in
+# _UPG_CACHE_NAMES. Returns 1 on any difference, or when diff is not
 # available (the item is then treated as differing, as before).
 _deposit_dir_is_current() {
   local src="$1" dst="$2"
   [[ -d "$src" && -d "$dst" ]] || return 1
   command -v diff >/dev/null 2>&1 || return 1
-  local _report _rc=0
-  _report="$(LC_ALL=C diff -rq -x __pycache__ -x '*.pyc' -x .pytest_cache "$src" "$dst" 2>&1)" || _rc=$?
+  local _report _rc=0 _cache_name
+  local -a _excludes=()
+  for _cache_name in "${_UPG_CACHE_NAMES[@]}"; do
+    _excludes+=(-x "$_cache_name")
+  done
+  _report="$(LC_ALL=C diff -rq "${_excludes[@]}" "$src" "$dst" 2>&1)" || _rc=$?
   [[ "$_rc" -le 1 ]] || return 1
   # Only "Only in <dst...>" lines are acceptable: extra files at the root.
   local _line
@@ -1287,6 +1518,9 @@ for item in README.md DIRECTIVES.md OVERVIEW.md SOP-core.md roles scripts pm-age
   src="${DEV_TREE}/team/$item"
   [[ -e "$src" ]] || { warn "Source missing (skipping): team/$item"; continue; }
   deposit_item "$src" "$item" "team/$item"
+  if [[ -d "$src" ]] && ! _is_protected_path "$item"; then
+    _UPG_DEPOSITED_DIRS+=("$item")
+  fi
 done
 
 # ---------------------------------------------------------------------------
@@ -1318,6 +1552,7 @@ for doc_item in "${DOCS_TO_DEPOSIT[@]}"; do
   src="${DEV_TREE}/docs/${doc_item}"
   [[ -e "$src" ]] || { warn "Source missing (skipping): docs/$doc_item"; continue; }
   deposit_item "$src" "docs/$doc_item" "docs/$doc_item"
+  _UPG_DEPOSITED_DOCS+=("${doc_item%/}")
 done
 unset doc_item DOCS_MANIFEST DOCS_TO_DEPOSIT doc_line
 
@@ -2033,6 +2268,22 @@ _RETIRED_TS="$(date -u +%Y%m%dT%H%M%SZ)"
 _RETIRED_COUNT=0
 _RETIRED_DEST_LABEL=""
 
+# _upg_move_aside <kanban-root-relative-path>
+#
+# Moves $KANBAN_ROOT/<path> to $KANBAN_ROOT/retired/$_RETIRED_TS/<path>,
+# creating the parent directories, so it is restored by moving it back. The
+# one move both the retirement step and the orphan sweep use, so a single
+# restore procedure covers both. Never deletes and never overwrites: returns
+# 1, moving nothing, when the destination already exists or the move fails.
+_upg_move_aside() {
+  local rel="$1"
+  local dst="${KANBAN_ROOT}/retired/${_RETIRED_TS}/${rel}"
+  [[ -e "$dst" || -L "$dst" ]] && return 1
+  mkdir -p "$(dirname "$dst")" || return 1
+  mv -- "${KANBAN_ROOT}/${rel}" "$dst" || return 1
+  return 0
+}
+
 if [[ -f "$_RETIRED_MANIFEST" ]]; then
   # Hygiene pre-check: abort if the manifest is malformed.
   if [[ -f "$_RETIRED_LINT_SH" ]]; then
@@ -2055,17 +2306,164 @@ if [[ -f "$_RETIRED_MANIFEST" ]]; then
 
     _ret_src="${KANBAN_ROOT}/${_ret_line}"
     if [[ -f "$_ret_src" ]]; then
-      _ret_dst_dir="${KANBAN_ROOT}/retired/${_RETIRED_TS}/$(dirname "$_ret_line")"
-      mkdir -p "$_ret_dst_dir"
-      mv -- "$_ret_src" "${KANBAN_ROOT}/retired/${_RETIRED_TS}/${_ret_line}"
-      warn "Retired: ${_ret_line} -> retired/${_RETIRED_TS}/${_ret_line} (restore by moving back)"
-      _RETIRED_COUNT=$(( _RETIRED_COUNT + 1 ))
-      _RETIRED_DEST_LABEL="retired/${_RETIRED_TS}/"
+      if _upg_move_aside "$_ret_line"; then
+        warn "Retired: ${_ret_line} -> retired/${_RETIRED_TS}/${_ret_line} (restore by moving back)"
+        _RETIRED_COUNT=$(( _RETIRED_COUNT + 1 ))
+        _RETIRED_DEST_LABEL="retired/${_RETIRED_TS}/"
+      else
+        warn "Not retired (left in place): ${_ret_line} -- retired/${_RETIRED_TS}/${_ret_line} already exists or the move failed"
+      fi
     fi
   done < "$_RETIRED_MANIFEST"
 fi
 
-unset _RETIRED_MANIFEST _RETIRED_LINT_SH _RETIRED_TS _ret_line _ret_src _ret_dst_dir
+unset _RETIRED_MANIFEST _RETIRED_LINT_SH _ret_line _ret_src
+
+# ---------------------------------------------------------------------------
+# Orphan sweep: report, and with --force move aside, every file under the
+# directories this run deposited into that the deposited tree lacks.
+#
+# The deposit copies over and never deletes, so a file an older release
+# shipped -- or one a mis-deploy of an older tree laid down -- stays behind
+# once the tree no longer has it, beside files that do not match it. The
+# retirement manifest above lists only files the framework retired on
+# purpose; this sweep catches the rest.
+#
+# Scanned: each directory in _UPG_DEPOSITED_DIRS (the team/ directories the
+# deposit loop laid down) and docs/ when the docs manifest deposited
+# anything there. A scanned file is in the deposited tree when its source
+# path exists: $DEV_TREE/team/<path>, or for docs/ a path at or under a
+# deposited manifest entry that exists under $DEV_TREE/docs/.
+#
+# Never an orphan (see _upg_orphan_exempt): the protected set, the caches in
+# _UPG_CACHE_NAMES, the files install.sh generates into a deposited
+# directory, and an operator's own plugin directory -- a <name>/ under one of
+# _UPG_OPERATOR_PLUGIN_ROOTS that the deposited tree does not ship, which
+# docs/public-contract.md guarantees survives upgrade.sh --force.
+#
+# Without --force each orphan is narrated and left in place; with --force it
+# is moved by _upg_move_aside into the same retired/<UTC-ts>/ graveyard as
+# the retirement step. Either way the run carries on and exits 0: an orphan
+# is reported, never a reason to fail the upgrade (not a gate).
+# ---------------------------------------------------------------------------
+_UPG_GENERATED_FILES=(
+  "scripts/cron-suggested.txt"   # install.sh renders it from cron-suggested.template.txt
+)
+_UPG_OPERATOR_PLUGIN_ROOTS=(
+  "workflows"
+  "templates/project"
+)
+_ORPHAN_COUNT=0
+_ORPHAN_MOVED=0
+_ORPHAN_KEPT=()
+
+# _upg_source_path <kanban-root-relative-path>
+#
+# Echoes the source-tree path the deposit lays <path> down from:
+# $DEV_TREE/docs/<rest> for a docs/ path, $DEV_TREE/team/<path> otherwise.
+_upg_source_path() {
+  local rel="$1"
+  if [[ "$rel" == docs/* ]]; then
+    printf '%s\n' "${DEV_TREE}/${rel}"
+  else
+    printf '%s\n' "${DEV_TREE}/team/${rel}"
+  fi
+}
+
+# _upg_in_deposited_tree <kanban-root-relative-path>
+#
+# Returns 0 when the deposited tree contains <path>. A docs/ path counts only
+# when a deposited docs manifest entry is the path itself or one of its
+# parent directories, since docs/ is deposited entry by entry.
+_upg_in_deposited_tree() {
+  local rel="$1" src entry
+  src="$(_upg_source_path "$rel")"
+  [[ -e "$src" || -L "$src" ]] || return 1
+  [[ "$rel" == docs/* ]] || return 0
+  for entry in "${_UPG_DEPOSITED_DOCS[@]+"${_UPG_DEPOSITED_DOCS[@]}"}"; do
+    [[ "$rel" == "docs/${entry}" || "$rel" == "docs/${entry}/"* ]] && return 0
+  done
+  return 1
+}
+
+# _upg_orphan_exempt <kanban-root-relative-path>
+#
+# Returns 0 when <path> is never treated as an orphan, whatever the deposited
+# tree holds: a protected path, a file install.sh generates, or a file inside
+# an operator plugin directory the deposited tree does not ship.
+_upg_orphan_exempt() {
+  local rel="$1" generated plugin_root rest name
+  _is_protected_path "$rel" && return 0
+  for generated in "${_UPG_GENERATED_FILES[@]}"; do
+    [[ "$rel" == "$generated" ]] && return 0
+  done
+  for plugin_root in "${_UPG_OPERATOR_PLUGIN_ROOTS[@]}"; do
+    [[ "$rel" == "${plugin_root}/"*/* ]] || continue
+    rest="${rel#"${plugin_root}/"}"
+    name="${rest%%/*}"
+    [[ -e "$(_upg_source_path "${plugin_root}/${name}")" ]] || return 0
+  done
+  return 1
+}
+
+_upg_sweep_roots=("${_UPG_DEPOSITED_DIRS[@]+"${_UPG_DEPOSITED_DIRS[@]}"}")
+[[ ${#_UPG_DEPOSITED_DOCS[@]} -gt 0 ]] && _upg_sweep_roots+=("docs")
+_upg_prune_expr=()
+for _upg_cache_name in "${_UPG_CACHE_NAMES[@]}"; do
+  [[ ${#_upg_prune_expr[@]} -gt 0 ]] && _upg_prune_expr+=(-o)
+  _upg_prune_expr+=(-name "$_upg_cache_name")
+done
+
+info ""
+info "Checking deposited directories for files the deposited tree does not contain..."
+for _upg_sweep_root in "${_upg_sweep_roots[@]+"${_upg_sweep_roots[@]}"}"; do
+  _upg_sweep_dir="${KANBAN_ROOT}/${_upg_sweep_root}"
+  # A symlinked or missing directory is not scanned: what it points at is
+  # not a tree this run laid down.
+  [[ -d "$_upg_sweep_dir" && ! -L "$_upg_sweep_dir" ]] || continue
+  while IFS= read -r -d '' _upg_orphan_path; do
+    _upg_orphan_rel="${_upg_orphan_path#"${KANBAN_ROOT}/"}"
+    _upg_orphan_exempt "$_upg_orphan_rel" && continue
+    _upg_in_deposited_tree "$_upg_orphan_rel" && continue
+    _ORPHAN_COUNT=$(( _ORPHAN_COUNT + 1 ))
+    if [[ "$FORCE_UPGRADE" != "true" ]]; then
+      warn "Orphan (left in place): ${_upg_orphan_rel} -- not in the deposited tree"
+      _ORPHAN_KEPT+=("$_upg_orphan_rel")
+    elif _upg_move_aside "$_upg_orphan_rel"; then
+      warn "Orphan moved aside: ${_upg_orphan_rel} -> retired/${_RETIRED_TS}/${_upg_orphan_rel} (restore by moving back)"
+      _ORPHAN_MOVED=$(( _ORPHAN_MOVED + 1 ))
+    else
+      warn "Orphan (left in place): ${_upg_orphan_rel} -- retired/${_RETIRED_TS}/${_upg_orphan_rel} already exists or the move failed"
+      _ORPHAN_KEPT+=("$_upg_orphan_rel")
+    fi
+  done < <(find "$_upg_sweep_dir" \( "${_upg_prune_expr[@]}" \) -prune \
+             -o \( -type f -o -type l \) -print0 2>/dev/null | LC_ALL=C sort -z)
+done
+
+if [[ "$_ORPHAN_COUNT" -eq 0 ]]; then
+  info "No orphaned files: every file in the deposited directories is in the deposited tree."
+elif [[ ${#_ORPHAN_KEPT[@]} -gt 0 ]]; then
+  # Remedy: a no-argument re-run with --force moves them; a version-targeted
+  # run cannot be repeated at the same version, so name the move by hand.
+  _upg_first_kept="${_ORPHAN_KEPT[0]}"
+  if [[ "$FORCE_UPGRADE" != "true" && -z "$REQUESTED_VERSION" ]]; then
+    _upg_orphan_remedy="PGAI_AGENT_KANBAN_ROOT_PATH='${KANBAN_ROOT}' '${KANBAN_ROOT}/scripts/upgrade.sh' --dev-tree '${_UPG_ORIGINAL_DEV_TREE:-$DEV_TREE}'"
+    [[ -n "$WAKE_TIER" ]] && _upg_orphan_remedy+=" --wake-tier ${WAKE_TIER}"
+    _upg_orphan_remedy+=" --force"
+    warn "${#_ORPHAN_KEPT[@]} orphaned file(s) left in place. To move them aside to retired/<UTC timestamp>/, re-run with --force: ${_upg_orphan_remedy}"
+  else
+    # $ts is expanded by the operator's shell when the line is pasted, not here.
+    # shellcheck disable=SC2016
+    printf -v _upg_orphan_remedy \
+      'ts="$(date -u +%%Y%%m%%dT%%H%%M%%SZ)" && mkdir -p %q/retired/"$ts"/%q && mv -- %q %q/retired/"$ts"/%q' \
+      "$KANBAN_ROOT" "$(dirname "$_upg_first_kept")" "${KANBAN_ROOT}/${_upg_first_kept}" \
+      "$KANBAN_ROOT" "$_upg_first_kept"
+    warn "${#_ORPHAN_KEPT[@]} orphaned file(s) left in place. Move each one aside by hand, for example: ${_upg_orphan_remedy}"
+  fi
+  unset _upg_first_kept _upg_orphan_remedy
+fi
+unset _upg_sweep_roots _upg_sweep_root _upg_sweep_dir _upg_orphan_path _upg_orphan_rel
+unset _upg_prune_expr _upg_cache_name _UPG_GENERATED_FILES _UPG_OPERATOR_PLUGIN_ROOTS
 
 # ---------------------------------------------------------------------------
 # Success summary
@@ -2095,6 +2493,15 @@ if [[ "$_RETIRED_COUNT" -gt 0 ]]; then
 else
   echo "  Retired:           none"
 fi
+if [[ "$_ORPHAN_COUNT" -eq 0 ]]; then
+  echo "  Orphans:           none"
+elif [[ ${#_ORPHAN_KEPT[@]} -eq 0 ]]; then
+  echo "  Orphans:           ${_ORPHAN_MOVED} file(s) moved aside -> retired/${_RETIRED_TS}/"
+elif [[ "$_ORPHAN_MOVED" -gt 0 ]]; then
+  echo "  Orphans:           ${_ORPHAN_COUNT} file(s); ${_ORPHAN_MOVED} moved aside -> retired/${_RETIRED_TS}/, ${#_ORPHAN_KEPT[@]} left in place"
+else
+  echo "  Orphans:           ${_ORPHAN_COUNT} file(s) left in place (not in the deposited tree; --force moves them aside)"
+fi
 echo ""
 echo "${C_BOLD}Protected (preserved):${C_RESET}"
 echo "  kanban.cfg, projects.cfg, secrets, shell-env, claude-env, pseudocron.env"
@@ -2116,7 +2523,8 @@ echo ""
 echo "See $KANBAN_ROOT/README.md for post-upgrade notes."
 echo ""
 
-unset _RETIRED_COUNT _RETIRED_DEST_LABEL _WRAPPER_SUMMARY_LINES _wrapper_line
+unset _RETIRED_COUNT _RETIRED_DEST_LABEL _RETIRED_TS _WRAPPER_SUMMARY_LINES _wrapper_line
+unset _ORPHAN_COUNT _ORPHAN_MOVED _ORPHAN_KEPT
 unset _UPG_DETECTED_TIER _UPG_PSEUDOCRON_TIER
 
 exit 0

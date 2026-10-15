@@ -109,6 +109,14 @@ Observations, edge cases, or quality signals noticed during verification that we
 
 ---
 
+## Suggestions
+
+Enhancements, design changes and features the code was never asked to provide, one sentence each, for the operator to read. Nothing here is filed. `None.` when empty.
+
+- `<suggestion>`
+
+---
+
 ## Code Coverage
 
 Python code coverage, when collected. Coverage is opt-in: the Step 5a certification runs do not use `--coverage`, and a separate run with it is optional. This section is informational only — it does not feed the Recommendation, the Systemic Risk rating, or the PASS / SHIP-WITH-CONCERNS decision. `coverage unavailable` and `not collected` are both valid values: when coverage was not run, `pytest-cov` is absent, or the measurement failed, record that and move on. It is never a finding or a blocker.

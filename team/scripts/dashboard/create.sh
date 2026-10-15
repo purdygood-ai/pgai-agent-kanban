@@ -247,49 +247,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      # Read only the file's LEADING comment block (the header, terminated
-      # by the first non-'#' line — "set -euo pipefail" below) via awk,
-      # skipping the '#!' shebang line; awk reads to EOF of its own
-      # accord rather than being closed early by a downstream `head`.
-      # The header comment block runs well past 30 lines (window-layout diagrams and per-window design
-      # notes) with the Usage:/Flags:/Environment/Requirements block near
-      # its end, so a fixed line-count slice either misses that block
-      # entirely or, printed unbounded, would spill into every OTHER
-      # inline '#' comment in the rest of the file (grep '^#' "$0" alone
-      # matches those too) — awk's own `next`/`exit` pair stops reading
-      # at the header's last line, so neither failure mode is possible.
-      # Ignoring SIGPIPE for the final print (and swallowing its exit
-      # status) covers a caller piping OUR stdout into a reader that
-      # itself closes early (e.g. `--help | head -1`) — that must not
-      # turn into a fatal signal for us either.
-      #
-      # --help shows the two-line script description plus everything
-      # from the "Usage:" line onward (Flags, Environment variables,
-      # Requirements), found by that literal marker rather than a
-      # hardcoded line count so a future header edit that adds or
-      # removes layout prose ahead of it can never push the block back
-      # out of --help's reach.
-      trap '' PIPE
-      mapfile -t __help_lines < <(awk '
-        /^#!/ { next }
-        /^#/ { line = $0; sub(/^# ?/, "", line); print line; next }
-        { exit }
-      ' "$0")
-      __help_usage_start=-1
-      for __help_i in "${!__help_lines[@]}"; do
-        if [[ "${__help_lines[$__help_i]}" == "Usage:" ]]; then
-          __help_usage_start=$__help_i
-          break
-        fi
-      done
-      if [[ $__help_usage_start -ge 0 ]]; then
-        printf '%s\n' "${__help_lines[@]:0:2}"
-        printf '%s\n' "${__help_lines[@]:$__help_usage_start}"
-      else
-        # No "Usage:" marker found at all (a malformed header) — fall
-        # back to the full header block rather than printing nothing.
-        printf '%s\n' "${__help_lines[@]}"
-      fi || true
+      # The whole leading header is the usage text: description, layout
+      # notes, then the Usage:/Flags:/Environment/Requirements block.
+      # shellcheck source=../lib/header_help.sh
+      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+      header_help_print "${BASH_SOURCE[0]}"
       exit 0
       ;;
     *)

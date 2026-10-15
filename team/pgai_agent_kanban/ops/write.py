@@ -76,9 +76,14 @@ Functions:
 
     deposit_intake(ctx, project, file_path)
         Copy a staged intake file into the correct project intake directory,
-        routing by filename prefix.  Atomic and no-clobber: temp+chmod, then
-        hard-link the temp file to the target (fails if the target exists)
-        and unlink the temp.  Returns the deposited Path on success.
+        routing by filename prefix.  Atomic: temp+chmod, then hard-link the
+        temp file to the target and unlink the temp.  A BUG-* draft claims
+        its number atomically (claim_next_bug_id): deposited as named when
+        the number is free, renumbered to the next free number -- title and
+        **Bug ID:** lines rewritten -- when it is taken; a BUG-* name that
+        fails the ledger filename contract is refused before anything is
+        written.  PRIORITY-* and requirements deposits are no-clobber (fail
+        if the target exists).  Returns the deposited Path on success.
 
     close_item(ctx, project, key, state="done", note="", dry_run=False)
         Set the terminal state on a task or intake item identified by key.
@@ -177,7 +182,9 @@ For set_version_ceiling: 2 the project has no project.cfg, 1 every other refusal
 For switch_provider: 1 for every refusal (an unrecognized provider -- the
     dual-channel block on stderr -- a CLI missing from PATH, no kanban.cfg, no
     [providers] active key, a write failure); the confirmation goes to stdout.
-For deposit_intake: 2 routing refused, 3 target exists, 4 filesystem error.
+For deposit_intake: 2 routing refused (including a BUG-* name that fails the ledger
+    filename contract), 3 target exists (PRIORITY-* and requirements only),
+    4 filesystem error.
 For close_item/wontdo_item/delete_item: 2 ambiguous key, 3 not found, 4 state mutation failed,
     2 (delete) guard refused.
 For reset_item: 2 WORKING state refusal, ambiguous key, or stale-worktree refusal (no --force);
@@ -218,6 +225,11 @@ from pgai_agent_kanban.lib.filename_contract import (
     INTAKE_FILENAME_NOT_BARE,
     IntakeFilenameRefused,
     intake_destination,
+)
+from pgai_agent_kanban.lib.ledger_filename_contract import (
+    build_remedy as _ledger_build_remedy,
+    ledger_filename_re as _ledger_filename_re,
+    next_free_number as _ledger_next_free_number,
 )
 from pgai_agent_kanban.lib.md_fields import read_field as _read_md_field
 from pgai_agent_kanban.lib.sentinel_provenance import record_sentinel_write
@@ -1021,14 +1033,206 @@ def route_intake_name(project: str, file_path: "Path | str") -> str:
 # deposit_intake
 # ---------------------------------------------------------------------------
 
+# Machine key: a BUG-* intake name that fails the ledger filename contract.
+INTAKE_BUG_NAME_MALFORMED = "intake.bug_filename_malformed"
+
+# Identity deposit_intake records in bugs/.bug-claims.log for each number it
+# claims (claim_next_bug_id's claimed_by).
+_INTAKE_CLAIMANT = "intake"
+
+# How many times a BUG-* deposit re-claims after its placement found the
+# claimed name already taken by a writer that bypassed the claim.
+_BUG_PLACEMENT_ATTEMPTS = 16
+
+_INTAKE_TEMP_PREFIX = ".deposit_intake_tmp_"
+
+# The bug identifier on a draft's title line and **Bug ID:** line:
+# BUG-NNNN, optionally followed by a date and a kebab slug.  Read liberally
+# (any letter case, any spacing); rewritten to the deposited name's stem.
+_BUG_ID_TOKEN = r"BUG-[0-9]{4}(?:-[A-Za-z0-9][A-Za-z0-9-]*)?"
+_BUG_TITLE_LINE_RE = re.compile(
+    rf"^([ \t]*#[ \t]+){_BUG_ID_TOKEN}", re.MULTILINE | re.IGNORECASE
+)
+_BUG_ID_LINE_RE = re.compile(
+    rf"^([ \t]*\*\*[ \t]*Bug[ \t]+ID[ \t]*:[ \t]*\*\*[ \t]*){_BUG_ID_TOKEN}",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _suggest_bug_name(name: str, bugs_dir: Path) -> str:
+    """Return a contract-valid ``BUG-NNNN-<slug>.md`` near *name*.
+
+    Keeps the name's own four-digit number when it has one (the claim
+    renumbers it if it is taken), otherwise uses the next free number; the
+    slug is the rest of the name lower-cased, with every run of characters
+    outside ``[a-z0-9]`` turned into one hyphen.  Used only to make a
+    refusal's remedy runnable.
+    """
+    stem = name[:-3] if name.lower().endswith(".md") else name
+    rest = stem[len("BUG-"):]
+    m = re.match(r"([0-9]{4})(?:-|$)", rest)
+    number = int(m.group(1)) if m else 0
+    if number == 0:
+        number = _ledger_next_free_number(bugs_dir, "BUG")
+    words = re.sub(r"^(?:[0-9]+(?:-|$))+", "", rest)
+    slug = re.sub(r"[^a-z0-9]+", "-", words.lower()).strip("-") or "example"
+    return f"BUG-{number:04d}-{slug}.md"
+
+
+def _refuse_malformed_bug_name(project: str, src: Path, bugs_dir: Path) -> None:
+    """Refuse a BUG-* staged name that fails the ledger filename contract.
+
+    The contract is ``ledger_filename_re("BUG")`` read case-sensitively, so
+    an uppercase slug is refused here even though discovery's
+    case-insensitive read of files already filed accepts one.  The message
+    carries the shared contract's own text (``build_remedy``, what discovery
+    prints when it rejects a name); the remedy renames the staged draft to a
+    valid name and re-runs intake.sh on it.  Nothing has been claimed or
+    written when this raises.
+
+    Raises:
+        Refused: dual-channel, ``intake.bug_filename_malformed``.
+    """
+    name = src.name
+    if _ledger_filename_re("BUG", ignore_case=False).match(name):
+        return
+    reason = _ledger_build_remedy(name, "BUG", bugs_dir)
+    renamed = src.with_name(_suggest_bug_name(name, bugs_dir))
+    remedy = (
+        "Rename the staged draft to the ledger filename contract, then re-run intake: "
+        + shlex.join(["mv", str(src), str(renamed)])
+        + " && "
+        + shlex.join(["intake.sh", "--project", project, str(renamed)])
+    )
+    # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by design --
+    # a BUG-* name off the contract carries no number the claim can take and
+    # is one discovery would reject. Refused before any claim or write.
+    # CENSUS-ANCHOR: write-intake-bug-name-malformed-01
+    raise Refused(format_error_contract(
+        INTAKE_BUG_NAME_MALFORMED, f"intake.sh: refusing {name}: {reason}", remedy))
+
+
+def _renumber_bug_text(data: bytes, stem: str) -> bytes:
+    """Return *data* with its bug title line and **Bug ID:** line naming *stem*.
+
+    Rewrites the identifier on the first ``# BUG-NNNN...`` heading line and
+    on the first ``**Bug ID:** BUG-NNNN...`` line to *stem* (the deposited
+    file name without ``.md``).  Every other byte is unchanged; bytes that
+    are not valid UTF-8 pass through as they were.
+    """
+    text = data.decode("utf-8", "surrogateescape")
+    text = _BUG_TITLE_LINE_RE.sub(lambda m: m.group(1) + stem, text, count=1)
+    text = _BUG_ID_LINE_RE.sub(lambda m: m.group(1) + stem, text, count=1)
+    return text.encode("utf-8", "surrogateescape")
+
+
+def _unlink_quietly(path: "Path | None") -> None:
+    """Remove *path* when it exists; a failure to remove is ignored."""
+    if path is None:
+        return
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def _deposit_bug(src: Path, bugs_dir: Path) -> Path:
+    """Deposit a contract-valid BUG-* draft under a number claimed atomically.
+
+    Claims the draft's own number with ``claim_next_bug_id`` (the one
+    O_EXCL claim, loaded from this tree's pm-agent/lib/bug_scanner.py by
+    ``lib.bug_filing``): when it is free the draft is placed byte-identical
+    under its own name; when it is taken the claim hands out the next free
+    number, the file is named for it and its title and **Bug ID:** lines are
+    rewritten to match.  The claim lock is held until the file is in place
+    and released on every path, so a concurrent depositor never takes the
+    same number.  Placement is a hard link, so a name that a writer
+    bypassing the claim created meanwhile is never replaced: the deposit
+    claims again instead.
+
+    Returns:
+        The deposited path.
+
+    Raises:
+        OpsError: The claim helper cannot be loaded.
+        IoError:  A filesystem error, or no number could be claimed.
+    """
+    name = src.name
+    original_stem = name[:-len(".md")]
+    number = int(name[len("BUG-"):len("BUG-NNNN")])
+    slug = name[len("BUG-NNNN-"):-len(".md")]
+    # Imported here, not at module level: lib.bug_filing imports
+    # task_status, which imports this package while it initialises.
+    from pgai_agent_kanban.lib.bug_filing import import_bug_scanner
+
+    try:
+        claim_next_bug_id, release_bug_id_claim = import_bug_scanner()
+    except ImportError as exc:
+        raise OpsError(f"deposit_intake: cannot load the BUG number claim: {exc}") from exc
+
+    preferred: "int | None" = number or None
+    tmp_path: "Path | None" = None
+    original: bytes = b""
+    try:
+        for _attempt in range(_BUG_PLACEMENT_ATTEMPTS):
+            try:
+                _bug_id, bug_path, lock_path = claim_next_bug_id(
+                    str(bugs_dir), slug, claimed_by=_INTAKE_CLAIMANT, preferred_num=preferred
+                )
+            except (RuntimeError, OSError) as exc:
+                raise IoError(f"deposit_intake: cannot claim a BUG number in {bugs_dir}: {exc}") from exc
+            try:
+                if tmp_path is None:
+                    fd, tmp_str = tempfile.mkstemp(prefix=_INTAKE_TEMP_PREFIX, dir=bugs_dir)
+                    tmp_path = Path(tmp_str)
+                    os.close(fd)
+                    try:
+                        shutil.copy2(src, tmp_path)
+                        tmp_path.chmod(0o644)
+                        original = tmp_path.read_bytes()
+                    except OSError as exc:
+                        raise IoError(
+                            f"deposit_intake: failed to copy {src} to {bugs_dir}: {exc}"
+                        ) from exc
+                deposited_stem = bug_path.name[:-len(".md")]
+                if deposited_stem != original_stem:
+                    try:
+                        tmp_path.write_bytes(_renumber_bug_text(original, deposited_stem))
+                    except OSError as exc:
+                        raise IoError(
+                            f"deposit_intake: failed to renumber {tmp_path}: {exc}"
+                        ) from exc
+                try:
+                    os.link(tmp_path, bug_path)
+                except FileExistsError:
+                    # Written meanwhile by something that did not claim the
+                    # number: leave it intact and claim the next free one.
+                    preferred = None
+                    continue
+                except OSError as exc:
+                    raise IoError(
+                        f"deposit_intake: failed to link temp file to target {bug_path}: {exc}"
+                    ) from exc
+                return bug_path
+            finally:
+                release_bug_id_claim(lock_path)
+        raise IoError(
+            f"deposit_intake: every BUG number claimed for {name} was taken at placement "
+            f"after {_BUG_PLACEMENT_ATTEMPTS} attempts; inspect {bugs_dir} for a writer "
+            "that files bugs without claiming a number"
+        )
+    finally:
+        _unlink_quietly(tmp_path)
+
 
 def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Path:
     """Copy a staged intake file into the correct project intake directory.
 
     Routes purely by the basename of ``file_path`` (case-sensitive prefix
-    match).  This is a dumb router: it does not validate file contents,
-    assign numbers, or check headings.  Content validation is the
-    discovery pipeline's responsibility.
+    match).  It does not validate file contents or check headings; content
+    validation is the discovery pipeline's responsibility.  A BUG-* draft
+    is the one deposit that may be renamed: its number is claimed so no two
+    bugs ever share one.
 
     Routing rules (case-sensitive, matched against the basename by
     ``lib.filename_contract.intake_destination``, the check the operator
@@ -1041,17 +1245,34 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
     URL-encoded separator or a NUL) is refused first, dual-channel
     (``intake.filename_not_bare``), whatever its prefix.
 
+    BUG-* drafts:
+        - The name must pass the ledger filename contract
+          (``BUG-NNNN[-YYYYMMDD]-<slug>.md``, lower-case kebab slug);
+          otherwise it is refused dual-channel
+          (``intake.bug_filename_malformed``) with the contract's own
+          malformed-name text, before any claim or write.
+        - The number is claimed atomically (``claim_next_bug_id`` with the
+          draft's own number preferred).  Free: the draft is deposited
+          byte-identical under its own name.  Taken: it is deposited as the
+          next free number, ``BUG-MMMM-<slug>.md``, with its ``# BUG-...``
+          title line and ``**Bug ID:**`` line rewritten to name it; every
+          other byte is unchanged.  The returned path names the file.
+        - The claim's lock (``.claim-NNNN.lock``) is removed on every path
+          and the claim is recorded in ``bugs/.bug-claims.log``.
+
+    PRIORITY-* and requirements deposits are no-clobber: a target that
+    exists at the pre-check, or appears before placement, is left intact
+    and the deposit raises the no-clobber ``OpsError``.
+
     Copy semantics:
         - Source is never moved or deleted.  Copy semantics only.
         - Atomic: write to a temp file in the destination directory (same
           filesystem, so the placement is a single directory-entry
           operation), chmod 644, then hard-link the temp file to the target
           and unlink the temp.  Discovery never sees a partial file.
-        - No clobber at placement, not only at the pre-check: ``link(2)``
-          fails with ``EEXIST`` when the target already exists, so a target
-          that appears between the pre-check and the placement is left
-          intact and the deposit raises the same no-clobber ``OpsError``
-          the pre-check raises.  ``rename(2)`` would silently replace it.
+        - ``link(2)`` fails with ``EEXIST`` when the target already exists,
+          so placement never replaces a file; ``rename(2)`` would silently
+          replace it.
         - The temp file is removed on every path: unlinked after a
           successful link, and cleaned up before the error propagates on a
           refused or failed one.
@@ -1070,10 +1291,12 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
         OpsError:  If the project root does not exist, the source file is
                    missing or not a regular file, or the destination
                    directory does not exist.
-        Refused:   If the basename is not a bare file name, or does not
-                   match any known intake prefix.  Nothing is copied.
-        OpsError:  If the target already exists (no clobber), whether it was
-                   present at the pre-check or appeared before placement.
+        Refused:   If the basename is not a bare file name, does not
+                   match any known intake prefix, or is a BUG-* name that
+                   fails the ledger filename contract.  Nothing is copied.
+        OpsError:  If a PRIORITY-* or requirements target already exists
+                   (no clobber), whether it was present at the pre-check or
+                   appeared before placement.
         IoError:   If a filesystem error occurs during copy or placement.
     """
     src = Path(file_path)
@@ -1107,6 +1330,11 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
             f"deposit_intake: destination directory does not exist: {dest_dir}"
         )
 
+    # --- BUG-*: contract-checked name, atomically claimed number ---
+    if dest_subdir == "bugs":
+        _refuse_malformed_bug_name(project, src, dest_dir)
+        return _deposit_bug(src, dest_dir)
+
     target = dest_dir / basename
 
     # --- Guard: no clobber ---
@@ -1125,7 +1353,7 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
     # moment of placement and not only at the pre-check.
     tmp_path: Path | None = None
     try:
-        fd, tmp_str = tempfile.mkstemp(prefix=".deposit_intake_tmp_", dir=dest_dir)
+        fd, tmp_str = tempfile.mkstemp(prefix=_INTAKE_TEMP_PREFIX, dir=dest_dir)
         tmp_path = Path(tmp_str)
         os.close(fd)
 
@@ -3338,6 +3566,15 @@ def _cli_main(argv: list[str] | None = None) -> int:
             deposited = deposit_intake(ctx, project, file_path)
             # Print the deposited path to stdout (Seam 1: bash wrapper captures this).
             print(deposited)
+            if deposited.name != file_path.name:
+                # A BUG-* draft whose number was taken: say so on stderr, so
+                # stdout stays the one deposited-path line.
+                print(
+                    f"deposit_intake: {file_path.name[:len('BUG-NNNN')]} is already taken;"
+                    f" deposited as {deposited.name} with its title and **Bug ID:** lines"
+                    " renumbered",
+                    file=sys.stderr,
+                )
 
         elif verb == "close_item":
             if len(rest) < 2:

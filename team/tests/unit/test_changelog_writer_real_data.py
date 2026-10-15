@@ -212,7 +212,7 @@ class TestRealDataChangelog:
 
         # Extract the v1.0.0 entry
         entry_match = re.search(
-            r"## v1\.0\.0.*?(?=\n## v|\Z)", content, re.DOTALL
+            r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE
         )
         assert entry_match is not None, "v1.0.0 entry not found in regenerated CHANGELOG"
         entry_text = entry_match.group(0)
@@ -246,7 +246,7 @@ class TestRealDataChangelog:
 
         # Extract the v1.0.0 entry
         entry_match = re.search(
-            r"## v1\.0\.0.*?(?=\n## v|\Z)", content, re.DOTALL
+            r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE
         )
         assert entry_match is not None, "v1.0.0 entry not found in regenerated CHANGELOG"
         entry_text = entry_match.group(0)
@@ -385,7 +385,7 @@ class TestRealDataChangelog:
 
         # Extract the v1.0.0 entry's Known Issues section.
         entry_match = re.search(
-            r"## v1\.0\.0.*?(?=\n## v|\Z)", content, re.DOTALL
+            r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE
         )
         assert entry_match is not None, "v1.0.0 entry not found in regenerated CHANGELOG"
         entry_text = entry_match.group(0)

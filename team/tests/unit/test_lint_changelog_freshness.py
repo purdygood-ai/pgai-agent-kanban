@@ -6,10 +6,11 @@ Tests cover:
   1. **Positive (fresh tree)**: invoke lint_changelog_freshness.py as a subprocess
      with PYTHONHASHSEED=0 (belt-and-braces; see class docstring) and assert it
      exits 0.  This proves the gate exits 0 when the artifact is up-to-date.
-     The subprocess invocation is required to match the execution context of the
-     gated runners.  changelog_writer sorts heading collections alphabetically
-     before iteration (``sorted(_IMPLEMENTED_HEADINGS)`` / ``sorted(_FIXED_HEADINGS)``),
-     so output is hash-seed-independent.  The PYTHONHASHSEED=0 env setting is kept
+     The subprocess invocation matches how an operator runs the check by hand
+     (a fresh interpreter, the lint's own CLI).  changelog_writer sorts heading
+     collections alphabetically before iteration
+     (``sorted(_IMPLEMENTED_HEADINGS)`` / ``sorted(_FIXED_HEADINGS)``), so
+     output is hash-seed-independent.  The PYTHONHASHSEED=0 env setting is kept
      for defense-in-depth; it is no longer the mechanism responsible for ordering.
 
   2. **Behavioral negative (stale artifact)**: copy CHANGELOG.md to a scratch
@@ -31,7 +32,7 @@ Tests cover:
      tokens, no placeholder strings, entry count equals release-notes file count,
      and KI-1.0.0.1 renders under the v1.0.0 entry.
 
-  7. **RC-mode tolerance**: a fixture that copies the real bugs dir to a temp
+  7. **RC-mode tolerance**: a fixture that copies the committed fixture ledger to a temp
      location, adds a post-CHANGELOG-commit fake bug file, and asserts that
      check_freshness() passes in RC mode (PGAI_LINT_CHANGELOG_MODE=rc) and
      fails in normal mode (no env var).  Also asserts that a genuine
@@ -58,6 +59,10 @@ Tests cover:
      removals, non-KI or already-published additions); check_freshness()
      passes that fixture in RC mode and reports it stale, unchanged, in
      strict mode.
+
+The lint renders with the release render, which writes each Public ID it
+assigns back to its bug file, so every test that runs it hands it a scratch
+copy of the committed bug-ledger fixture — never the operator's live ledger.
 
 All temp paths use pytest's tmp_path (redirected to the framework temp root
 by conftest.py when PGAI_AGENT_KANBAN_TEMP_DIR is set).  No bare /tmp paths.
@@ -103,33 +108,17 @@ _LINT_SCRIPT = _SCRIPTS_DIR / "lint_changelog_freshness.py"
 _CHANGELOG_ARTIFACT = _DEV_TREE_ROOT / "CHANGELOG.md"
 _RELEASE_NOTES_DIR = _DEV_TREE_ROOT / "release-notes"
 
-# The live kanban root is resolved from PGAI_AGENT_KANBAN_ROOT_PATH at
-# import time, before conftest's autouse fixture redirects the env var.
-# _REAL_BUGS_DIR intentionally still resolves the operator's live bug
-# ledger — it backs the gate-mechanics tests below (byte-compare behavior,
-# remedy-block formatting, RC-mode drift-removal tolerance) that exercise
-# the PRODUCTION gate's own default resolution path against whatever the
-# live environment currently holds, tolerant of it being empty.  None of
-# those tests hardcode assumptions about specific bug content -- they
-# assert gate behavior that holds regardless of ledger content, so they
-# are not reads that depend on a specific ledger snapshot.  A bug filed
-# against the live ledger mid-suite-run cannot perturb any of these tests:
-# the byte-compare/remedy-block cases force a mutated, guaranteed-stale
-# scratch artifact (staleness holds regardless of ledger content), and the
-# RC-mode cases tolerate new KI additions by design.
-_LIVE_KANBAN_ROOT = pathlib.Path(
-    os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-    or str(pathlib.Path.home() / "pgai_agent_kanban")
-)
-_REAL_BUGS_DIR = _LIVE_KANBAN_ROOT / "projects" / "pgai-agent-kanban" / "bugs"
-
 # Committed bug-ledger fixture — used by the tests that assert specific
 # KI-1.0.0.x disclosure CONTENT. Holds one record per published
 # KI-1.0.0.x identifier, recovered verbatim from the c2d8056 CHANGELOG.md
-# render.  Unlike _REAL_BUGS_DIR above, this path is committed to the tree
-# and its content never varies by machine or by what the operator's live
-# ledger currently contains.
+# render.  The path is committed to the tree and its content never varies
+# by machine or by what the operator's live ledger currently contains.  A
+# test that runs the lint copies it first (_scratch_bugs_dir below): the
+# lint's render writes any Public ID it assigns into the ledger it reads.
 _FIXTURE_BUGS_DIR = _TEAM_DIR / "tests" / "fixtures" / "bug_ledger"
+
+# The project whose ledger the lint resolves by default under a kanban root.
+_PROJECT_NAME = "pgai-agent-kanban"
 
 
 def _import_lint_module():
@@ -155,15 +144,6 @@ def _import_lint_module():
 _lint = _import_lint_module()
 
 
-def _skip_if_bugs_dir_missing() -> None:
-    """Skip the test when the live bugs directory is not present."""
-    if not _REAL_BUGS_DIR.exists():
-        pytest.skip(
-            f"Live kanban bugs directory not found: {_REAL_BUGS_DIR} "
-            "— live install not present in this environment."
-        )
-
-
 def _skip_if_published_missing() -> None:
     """Skip the test when release-notes/PUBLISHED is absent.
 
@@ -182,17 +162,66 @@ def _skip_if_published_missing() -> None:
         )
 
 
+def _scratch_kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Return a scratch kanban root holding a copy of the committed fixture ledger.
+
+    The copy sits where the lint resolves a project's ledger by default
+    (``<root>/projects/pgai-agent-kanban/bugs``), so a subprocess pointed at
+    this root through PGAI_AGENT_KANBAN_ROOT_PATH reads it without
+    ``--bugs-dir``.  Public IDs the lint's render writes land in the copy.
+    """
+    root = tmp_path / "kanban_root"
+    shutil.copytree(_FIXTURE_BUGS_DIR, root / "projects" / _PROJECT_NAME / "bugs")
+    return root
+
+
+def _scratch_bugs_dir(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Return a scratch copy of the committed fixture ledger (see _scratch_kanban_root)."""
+    return _scratch_kanban_root(tmp_path) / "projects" / _PROJECT_NAME / "bugs"
+
+
+def _render_scratch_changelog(
+    bugs_dir: pathlib.Path, path: pathlib.Path
+) -> pathlib.Path:
+    """Write the CHANGELOG.md a release render of *bugs_dir* produces to *path*.
+
+    Renders the dev tree's release notes and PUBLISHED manifest with
+    *bugs_dir* as the ledger and nothing published, so the gate run against
+    the same ledger finds *path* fresh.
+
+    Returns:
+        *path*.
+    """
+    versions = sorted(
+        (p.stem for p in _RELEASE_NOTES_DIR.glob("v*.md")),
+        key=_changelog_writer._parse_version,
+        reverse=True,
+    )
+    content = _changelog_writer.regenerate(
+        _DEV_TREE_ROOT,
+        versions,
+        _changelog_writer.load_published_manifest(_DEV_TREE_ROOT),
+        bugs_dir,
+        published_changelog=None,
+    )
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
 # ---------------------------------------------------------------------------
-# Positive tests (subprocess-based to mirror gated runner invocation)
+# Positive tests (subprocess-based to mirror an operator's direct invocation)
 # ---------------------------------------------------------------------------
 
 
 class TestChangelogFreshnessPositive:
-    """Fresh tree: gate exits 0 when the artifact is up-to-date.
+    """Fresh artifact: gate exits 0 when the artifact is up-to-date.
 
     The positive tests invoke the gate via subprocess rather than calling
-    check_freshness() directly.  This mirrors the invocation used by the gated
-    runners (run-unit-tests.sh, run-integration-tests.sh).
+    check_freshness() directly, with no ``--bugs-dir``: the gate resolves the
+    ledger from PGAI_AGENT_KANBAN_ROOT_PATH, which points at a scratch kanban
+    root holding a copy of the committed fixture ledger (never the operator's
+    live root).  The artifact checked is a scratch CHANGELOG.md rendered from
+    that same ledger.
 
     PYTHONHASHSEED=0 is set in the subprocess environment as belt-and-braces, but
     it is no longer the mechanism responsible for deterministic heading order.
@@ -201,80 +230,63 @@ class TestChangelogFreshnessPositive:
     guarantees a stable, hash-seed-independent iteration order.  The env setting is
     retained for defense-in-depth but does not affect correctness.
 
-    PGAI_LINT_CHANGELOG_MODE=rc is set in the subprocess environment to mirror the
-    gated runner's invocation on RC and detached-HEAD worktrees (an earlier defect / an earlier defect).
-    On RC branches the live bug ledger may have BUG-NNNN files filed after the last
-    CHANGELOG.md commit; RC mode tolerates those post-commit KI additions so the gate
-    exits 0.  These positive tests verify the gate-passes-when-fresh contract, which
-    on an RC worktree IS the RC-mode contract.  A companion negative test below
-    (test_gate_exits_1_without_rc_mode_when_bugs_dir_has_post_commit_entries) locks
-    in the tolerance-mode gate by asserting that omitting the env var fails when the
-    live bugs dir has entries newer than the committed CHANGELOG.
+    PGAI_LINT_CHANGELOG_MODE=rc is set for the two passing cases, the mode an RC
+    worktree runs the gate in.  A companion negative test
+    (test_gate_exits_1_without_rc_mode_when_bugs_dir_has_post_commit_entries)
+    files a new bug into the scratch ledger after the render and asserts that
+    strict mode then fails.
     """
 
-    def test_fresh_artifact_exits_0(self) -> None:
-        """Gate subprocess exits 0 for the committed CHANGELOG.md.
-
-        The committed CHANGELOG.md was regenerated via changelog_writer.
-        Re-running the gate in RC mode must exit 0: either the artifact is
-        byte-identical to a fresh regeneration, or the only differences are
-        new KI entries added post-commit (an earlier defect tolerance window).
-        Determinism comes from sorted() over the heading collections in
-        changelog_writer.py, not from the PYTHONHASHSEED setting.
-
-        PGAI_LINT_CHANGELOG_MODE=rc is set to mirror the gated runner's invocation
-        on RC worktrees (an earlier defect fix).
-        """
-        _skip_if_bugs_dir_missing()
-        _skip_if_published_missing()
-
+    @staticmethod
+    def _run_gate(
+        kanban_root: pathlib.Path, changelog: pathlib.Path, rc_mode: bool
+    ) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["PYTHONHASHSEED"] = "0"
-        env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(_LIVE_KANBAN_ROOT)
-        env["PGAI_LINT_CHANGELOG_MODE"] = "rc"
-
-        result = subprocess.run(
-            [sys.executable, str(_LINT_SCRIPT)],
+        env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
+        if rc_mode:
+            env["PGAI_LINT_CHANGELOG_MODE"] = "rc"
+        else:
+            env.pop("PGAI_LINT_CHANGELOG_MODE", None)
+        return subprocess.run(
+            [sys.executable, str(_LINT_SCRIPT), "--changelog", str(changelog)],
             env=env,
             capture_output=True,
             text=True,
             cwd=str(_TEAM_DIR),
         )
-        assert result.returncode == 0, (
-            "Gate subprocess exited with non-zero code for the committed CHANGELOG.md "
-            "(RC mode active).\n"
-            f"stdout: {result.stdout!r}\n"
-            f"stderr: {result.stderr!r}\n"
-            "In RC mode the gate must exit 0 when the artifact is fresh or the only "
-            "differences are post-commit KI additions.  "
-            "Regenerate CHANGELOG.md via: python3 -m pgai_agent_kanban.cm.changelog_writer <repo_root> <bugs_dir>"
+
+    def test_fresh_artifact_exits_0(self, tmp_path: pathlib.Path) -> None:
+        """Gate subprocess exits 0 for a CHANGELOG.md rendered from its own ledger."""
+        _skip_if_published_missing()
+        root = _scratch_kanban_root(tmp_path)
+        changelog = _render_scratch_changelog(
+            root / "projects" / _PROJECT_NAME / "bugs", tmp_path / "CHANGELOG.md"
         )
 
-    def test_fresh_artifact_prints_ok_message(self) -> None:
+        result = self._run_gate(root, changelog, rc_mode=True)
+
+        assert result.returncode == 0, (
+            "Gate subprocess exited non-zero for a CHANGELOG.md rendered from the "
+            "ledger it was checked against (RC mode active).\n"
+            f"stdout: {result.stdout!r}\n"
+            f"stderr: {result.stderr!r}"
+        )
+
+    def test_fresh_artifact_prints_ok_message(self, tmp_path: pathlib.Path) -> None:
         """Gate subprocess prints 'ok' confirmation when the artifact is fresh.
 
         Verifies that the gate emits a positive confirmation message to stdout
-        rather than silently succeeding — this message appears in runner output
-        and lets operators see the gate ran.
-
-        PGAI_LINT_CHANGELOG_MODE=rc is set to mirror the gated runner's invocation
-        on RC worktrees (an earlier defect fix).
+        rather than silently succeeding, so an operator can see the gate ran.
         """
-        _skip_if_bugs_dir_missing()
         _skip_if_published_missing()
-
-        env = os.environ.copy()
-        env["PYTHONHASHSEED"] = "0"
-        env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(_LIVE_KANBAN_ROOT)
-        env["PGAI_LINT_CHANGELOG_MODE"] = "rc"
-
-        result = subprocess.run(
-            [sys.executable, str(_LINT_SCRIPT)],
-            env=env,
-            capture_output=True,
-            text=True,
-            cwd=str(_TEAM_DIR),
+        root = _scratch_kanban_root(tmp_path)
+        changelog = _render_scratch_changelog(
+            root / "projects" / _PROJECT_NAME / "bugs", tmp_path / "CHANGELOG.md"
         )
+
+        result = self._run_gate(root, changelog, rc_mode=True)
+
         assert "ok" in result.stdout.lower() or "fresh" in result.stdout.lower(), (
             f"Gate subprocess did not print a positive confirmation to stdout "
             f"(RC mode active).\n"
@@ -284,71 +296,35 @@ class TestChangelogFreshnessPositive:
         )
 
     def test_gate_exits_1_without_rc_mode_when_bugs_dir_has_post_commit_entries(
-        self,
+        self, tmp_path: pathlib.Path
     ) -> None:
-        """Gate subprocess exits 1 in normal mode when the live bugs dir has post-commit entries.
+        """Gate subprocess exits 1 in strict mode when the ledger gained a bug after the render.
 
-        Verifies that the tolerance-mode gate is real: omitting
-        PGAI_LINT_CHANGELOG_MODE=rc while the live bugs dir contains BUG-NNNN
-        entries filed after the last CHANGELOG.md commit causes the lint subprocess
-        to exit 1.
-
-        The test invokes the lint subprocess WITHOUT PGAI_LINT_CHANGELOG_MODE so
-        that the gate runs in strict byte-compare mode.  When the committed
-        CHANGELOG.md is stale relative to the live bug ledger (even by only
-        post-commit KI additions), normal mode must exit 1.
-
-        Skip conditions:
-          - Live bugs dir is missing (environment not set up).
-          - release-notes/PUBLISHED is absent (regeneration not meaningful).
-          - The gate exits 0 even in normal mode: this means the committed
-            CHANGELOG.md is byte-identical to a fresh regeneration (no post-commit
-            bugs were filed), so there is no tolerance gap to detect.  The test
-            skips rather than giving a misleading failure.
-
-        This test locks in Acceptance criterion #4 from an earlier defect.
+        The scratch CHANGELOG.md is rendered first; a disclosable bug is then
+        filed into the scratch ledger, so a fresh render adds its Known Issues
+        line.  Without PGAI_LINT_CHANGELOG_MODE=rc the gate byte-compares and
+        must exit 1, naming the artifact stale.
         """
-        _skip_if_bugs_dir_missing()
         _skip_if_published_missing()
-
-        # Run in NORMAL mode (no PGAI_LINT_CHANGELOG_MODE=rc).
-        env = os.environ.copy()
-        env["PYTHONHASHSEED"] = "0"
-        env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(_LIVE_KANBAN_ROOT)
-        env.pop("PGAI_LINT_CHANGELOG_MODE", None)
-
-        result = subprocess.run(
-            [sys.executable, str(_LINT_SCRIPT)],
-            env=env,
-            capture_output=True,
-            text=True,
-            cwd=str(_TEAM_DIR),
+        root = _scratch_kanban_root(tmp_path)
+        bugs_dir = root / "projects" / _PROJECT_NAME / "bugs"
+        changelog = _render_scratch_changelog(bugs_dir, tmp_path / "CHANGELOG.md")
+        (bugs_dir / "BUG-9999-test-rc-mode-tolerance-fixture.md").write_text(
+            TestRCModeTolerance._SYNTHETIC_BUG_CONTENT, encoding="utf-8"
         )
 
-        if result.returncode == 0:
-            # The CHANGELOG is byte-identical to a fresh regeneration: no
-            # post-commit bugs exist.  Skip — there is no tolerance gap to
-            # verify on this worktree at this moment.
-            pytest.skip(
-                "Gate exits 0 in normal mode: committed CHANGELOG.md is byte-identical "
-                "to a fresh regeneration (no post-commit bug entries in the live ledger). "
-                "Tolerance-mode gate cannot be exercised on this worktree right now."
-            )
+        result = self._run_gate(root, changelog, rc_mode=False)
 
         assert result.returncode == 1, (
-            "Gate subprocess exited with unexpected code in normal mode "
-            f"(expected 0 or 1, got {result.returncode}).\n"
+            "Gate subprocess did not exit 1 in strict mode for a ledger that gained "
+            "a disclosable bug after the artifact was rendered.\n"
             f"stdout: {result.stdout!r}\n"
             f"stderr: {result.stderr!r}"
         )
-        # returncode == 1 here: the live bugs dir has post-commit BUG-NNNN entries
-        # that cause the regenerated CHANGELOG to differ from the checked-in artifact.
-        # Normal mode rejects this; RC mode (test_fresh_artifact_exits_0) tolerates it.
         assert "stale" in result.stderr.lower(), (
-            "Gate subprocess exited 1 in normal mode but stderr does not contain 'stale'.\n"
+            "Gate subprocess exited 1 in strict mode but stderr does not contain 'stale'.\n"
             f"stdout: {result.stdout!r}\n"
-            f"stderr: {result.stderr!r}\n"
-            "Expected 'stale' in the error message naming the staleness condition."
+            f"stderr: {result.stderr!r}"
         )
 
 
@@ -383,7 +359,7 @@ class TestChangelogFreshnessBehavioralNegative:
             tmp_path:  pytest-provided temp directory (routed to framework temp root).
             capsys:    pytest capture fixture for inspecting stderr.
         """
-        _skip_if_bugs_dir_missing()
+        bugs_dir = _scratch_bugs_dir(tmp_path)
         _skip_if_published_missing()
 
         # Create a byte-modified scratch artifact.
@@ -398,7 +374,7 @@ class TestChangelogFreshnessBehavioralNegative:
 
         result = _lint.check_freshness(
             changelog_path=scratch,
-            bugs_dir=_REAL_BUGS_DIR,
+            bugs_dir=bugs_dir,
         )
         assert result is False, (
             "check_freshness() returned True for a byte-modified artifact.\n"
@@ -419,7 +395,7 @@ class TestChangelogFreshnessBehavioralNegative:
             tmp_path:  pytest-provided temp directory.
             capsys:    pytest capture fixture for inspecting stderr.
         """
-        _skip_if_bugs_dir_missing()
+        bugs_dir = _scratch_bugs_dir(tmp_path)
         _skip_if_published_missing()
 
         original_bytes = _CHANGELOG_ARTIFACT.read_bytes()
@@ -429,7 +405,7 @@ class TestChangelogFreshnessBehavioralNegative:
 
         _lint.check_freshness(
             changelog_path=scratch,
-            bugs_dir=_REAL_BUGS_DIR,
+            bugs_dir=bugs_dir,
         )
         captured = capsys.readouterr()
         err = captured.err
@@ -458,7 +434,7 @@ class TestChangelogFreshnessBehavioralNegative:
             tmp_path:  pytest-provided temp directory.
             capsys:    pytest capture fixture for inspecting stderr.
         """
-        _skip_if_bugs_dir_missing()
+        bugs_dir = _scratch_bugs_dir(tmp_path)
         _skip_if_published_missing()
 
         absent = tmp_path / "nonexistent_changelog.md"
@@ -466,7 +442,7 @@ class TestChangelogFreshnessBehavioralNegative:
 
         result = _lint.check_freshness(
             changelog_path=absent,
-            bugs_dir=_REAL_BUGS_DIR,
+            bugs_dir=bugs_dir,
         )
         assert result is False, (
             "check_freshness() returned True for a nonexistent artifact path.\n"
@@ -542,14 +518,14 @@ class TestChangelogFreshnessRemedyBlock:
              site-specific value (repo_root, bugs_dir, changelog_path) is
              already substituted with its derived actual value.
         """
-        _skip_if_bugs_dir_missing()
+        bugs_dir = _scratch_bugs_dir(tmp_path)
         _skip_if_published_missing()
 
         scratch = self._force_stale_changelog(tmp_path)
 
         result = _lint.check_freshness(
             changelog_path=scratch,
-            bugs_dir=_REAL_BUGS_DIR,
+            bugs_dir=bugs_dir,
         )
         assert result is False, "Forced-stale scratch CHANGELOG did not fail the gate."
 
@@ -612,14 +588,14 @@ class TestChangelogFreshnessRemedyBlock:
         it proves the literal printed text is runnable, not just that the
         underlying mechanism works.
         """
-        _skip_if_bugs_dir_missing()
+        bugs_dir = _scratch_bugs_dir(tmp_path)
         _skip_if_published_missing()
 
         scratch = self._force_stale_changelog(tmp_path)
 
         result = _lint.check_freshness(
             changelog_path=scratch,
-            bugs_dir=_REAL_BUGS_DIR,
+            bugs_dir=bugs_dir,
         )
         assert result is False, "Forced-stale scratch CHANGELOG did not fail the gate."
 
@@ -651,12 +627,54 @@ class TestChangelogFreshnessRemedyBlock:
         # against the now-regenerated scratch file for belt-and-braces.
         recheck = _lint.check_freshness(
             changelog_path=scratch,
-            bugs_dir=_REAL_BUGS_DIR,
+            bugs_dir=bugs_dir,
         )
         assert recheck is True, (
             "check_freshness() still returns False against the scratch changelog_path "
             "after running every printed remedy command verbatim.\n"
             f"Commands run: {[c[1] for c in commands]!r}"
+        )
+
+
+class TestRemedyRegenerateCommand:
+    """The printed regenerate command is the writer's release render, verbatim."""
+
+    def test_regenerate_command_is_the_release_render_with_no_placeholder(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        changelog = tmp_path / "CHANGELOG.md"
+        bugs_dir = tmp_path / "bugs"
+
+        regen_cmd, _ = _lint._build_remedy_commands(changelog, bugs_dir)
+
+        pp_run_ops = _TEAM_DIR / "scripts" / "lib" / "pp_run_ops.sh"
+        assert regen_cmd == (
+            f'bash "{pp_run_ops}" pgai_agent_kanban.cm.changelog_writer '
+            f'"{_DEV_TREE_ROOT}" "{bugs_dir}" > "{changelog}"'
+        )
+        assert _ANGLE_BRACKET_PLACEHOLDER_RE.findall(regen_cmd) == [], regen_cmd
+
+    def test_lint_render_writes_the_assigned_public_id_into_the_ledger_it_reads(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The lint renders exactly as a release does, writing back the IDs it assigns.
+
+        This is why every test here hands the lint a scratch ledger.
+        """
+        _skip_if_published_missing()
+        bugs_dir = _scratch_bugs_dir(tmp_path)
+        changelog = _render_scratch_changelog(bugs_dir, tmp_path / "CHANGELOG.md")
+        new_bug = bugs_dir / "BUG-9999-test-rc-mode-tolerance-fixture.md"
+        new_bug.write_text(TestRCModeTolerance._SYNTHETIC_BUG_CONTENT, encoding="utf-8")
+        assert _changelog_writer.parse_bug_file(new_bug).public_id == ""
+
+        _lint.check_freshness(changelog_path=changelog, bugs_dir=bugs_dir)
+        capsys.readouterr()
+
+        assigned = _changelog_writer.parse_bug_file(new_bug).public_id
+        assert re.fullmatch(r"KI-1\.0\.0\.\d+", assigned), (
+            f"the lint's render must write a KI-1.0.0.N Public ID into the new bug "
+            f"file, as the release render does; got {assigned!r}"
         )
 
 
@@ -842,8 +860,12 @@ class TestChangelogContentGates:
         scratch = tmp_path / "CHANGELOG.md"
         scratch.write_text(content, encoding="utf-8")
 
-        # Extract the v1.0.0 entry (from ## v1.0.0 to the next ## v or end of file)
-        entry_match = re.search(r"## v1\.0\.0.*?(?=\n## v|\Z)", content, re.DOTALL)
+        # Extract the v1.0.0 entry (from its "## v1.0.0" heading line to the
+        # next "## v" heading or end of file). Anchored to a line start: a
+        # release-notes bullet may quote "## v1.0.0" mid-line.
+        entry_match = re.search(
+            r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE
+        )
         assert (
             entry_match is not None
         ), f"v1.0.0 entry not found in fixture-regenerated CHANGELOG:\n{content}"
@@ -895,9 +917,10 @@ class TestRCModeTolerance:
     exercise: the one synthetic post-RC addition.
 
     RC-mode tolerance uses a diff-based predicate (_diff_is_rc_tolerable) rather
-    than filesystem mtime.  This avoids the mtime-reliability problem: regenerate()
-    writes Public IDs back to bug files, bumping their mtime, making filesystem
-    mtime unreliable as an indicator of when a bug was filed.
+    than filesystem mtime.  This avoids the mtime-reliability problem: a bug
+    file's mtime moves with every edit, including the release render writing
+    its Public ID back, making filesystem mtime unreliable as an indicator of
+    when a bug was filed.
 
     The diff predicate accepts a diff only when:
       (a) no lines are removed from the checked-in artifact,
@@ -1147,35 +1170,34 @@ test-fixture
         additions (e.g., a line appended that is not a new KI entry) must fail
         even in RC mode.  This verifies that RC-mode tolerance is bounded.
 
-        The test appends a non-KI line to a scratch copy of the CHANGELOG and
-        passes it to check_freshness in RC mode with the REAL bugs dir.  The
-        regeneration matches the real (unmodified) CHANGELOG, but the scratch
-        has an extra non-KI line that is NOT in the regeneration — causing a
-        "removal" in the diff (the extra line is in checked-in but not in
-        regenerated).  _diff_is_rc_tolerable() rejects this because condition
-        (a) requires no removed lines.
+        The test renders a scratch CHANGELOG from a scratch copy of the
+        fixture ledger, appends a non-KI line, and passes it to
+        check_freshness in RC mode with that same ledger.  The regeneration
+        matches the unmodified render, but the scratch has an extra non-KI
+        line that is NOT in the regeneration — causing a "removal" in the
+        diff (the extra line is in checked-in but not in regenerated).
+        _diff_is_rc_tolerable() rejects this because condition (a) requires
+        no removed lines.
 
         Args:
             tmp_path:  pytest-provided temp directory.
             capsys:    pytest capture fixture for inspecting output.
         """
-        _skip_if_bugs_dir_missing()
         _skip_if_published_missing()
+        bugs_dir = _scratch_bugs_dir(tmp_path)
 
-        # Append a non-KI line to a scratch copy of the checked-in CHANGELOG.
-        original_bytes = _CHANGELOG_ARTIFACT.read_bytes()
-        assert len(original_bytes) > 0, "Real CHANGELOG.md is empty — test cannot run"
-        mutated = original_bytes + b"\n# STALE MARKER FROM GENUINE EDIT\n"
-        scratch = tmp_path / "mutated_changelog.md"
-        scratch.write_bytes(mutated)
+        # Append a non-KI line to a CHANGELOG rendered from the scratch ledger.
+        scratch = _render_scratch_changelog(bugs_dir, tmp_path / "mutated_changelog.md")
+        with scratch.open("a", encoding="utf-8") as fh:
+            fh.write("\n# STALE MARKER FROM GENUINE EDIT\n")
 
-        # Run in RC mode with the REAL bugs dir.
+        # Run in RC mode against the ledger the scratch CHANGELOG was rendered from.
         prev_mode = os.environ.get("PGAI_LINT_CHANGELOG_MODE", "")
         os.environ["PGAI_LINT_CHANGELOG_MODE"] = "rc"
         try:
             result = _lint.check_freshness(
                 changelog_path=scratch,
-                bugs_dir=_REAL_BUGS_DIR,
+                bugs_dir=bugs_dir,
             )
         finally:
             if prev_mode:
@@ -1215,8 +1237,9 @@ test-fixture
              ever touching the real tree.  The version uses a plain semver form
              so _RELEASE_HEADING_RE matches it and the new-release-section
              tolerance clause can fire.
-          2. Call check_freshness in RC mode with the real bugs dir and the REAL
-             checked-in CHANGELOG.md (which does not have this section).
+          2. Call check_freshness in RC mode against a scratch CHANGELOG.md
+             rendered from a scratch copy of the fixture ledger without the
+             overlay (so it does not have this section), with that ledger.
           3. Assert the gate passes — the new-release-section tolerance fires.
           4. Assert the success message mentions the tolerance clause.
 
@@ -1233,11 +1256,12 @@ test-fixture
                        lives under.
             capsys:    pytest capture fixture for inspecting output.
         """
-        _skip_if_bugs_dir_missing()
         _skip_if_published_missing()
+        bugs_dir = _scratch_bugs_dir(tmp_path)
+        changelog = _render_scratch_changelog(bugs_dir, tmp_path / "CHANGELOG.md")
 
         # Create a synthetic release-notes file whose version does not appear in
-        # the committed CHANGELOG.md, under an overlay directory of its own
+        # the scratch CHANGELOG.md, under an overlay directory of its own
         # (never the real release-notes/ directory).  Use a version that sorts
         # HIGHER than the current highest entry so it ends up at the top of the
         # regeneration, matching the real-world new-release-section pattern.
@@ -1257,7 +1281,7 @@ test-fixture
             encoding="utf-8",
         )
 
-        # Run in RC mode with the real bugs dir.  Patch _current_git_branch so
+        # Run in RC mode with the scratch ledger.  Patch _current_git_branch so
         # the branch-aware check in _is_rc_mode() treats this as an RC branch
         # regardless of the actual worktree branch (which may be ai_feature/*
         # during development).
@@ -1268,8 +1292,8 @@ test-fixture
                 _lint, "_current_git_branch", return_value="ai_rc/v1.23.10"
             ):
                 result = _lint.check_freshness(
-                    changelog_path=_CHANGELOG_ARTIFACT,
-                    bugs_dir=_REAL_BUGS_DIR,
+                    changelog_path=changelog,
+                    bugs_dir=bugs_dir,
                     extra_release_notes_dir=extra_release_notes_dir,
                 )
         finally:
@@ -1455,7 +1479,7 @@ class TestWriterMigrationDriftTolerance:
         When PGAI_LINT_CHANGELOG_MODE=rc is set but the current git branch is
         ai_main (not rc/* or ai_rc/*), RC-mode tolerance must be suppressed.
         This is the fail-fast-on-ai_main behaviour: drift is caught before an
-        RC opens rather than being masked at every RC verification.
+        RC opens rather than being masked whenever the check runs on an RC branch.
 
         The test monkeypatches _current_git_branch to return 'ai_main' and sets
         PGAI_LINT_CHANGELOG_MODE=rc, then asserts _is_rc_mode() returns False.
@@ -1502,8 +1526,8 @@ class TestWriterMigrationDriftTolerance:
     ) -> None:
         """_is_rc_mode() returns False when env var is absent, even on an rc/* branch.
 
-        If the operator runs the lint directly (without the gated runner setting
-        PGAI_LINT_CHANGELOG_MODE=rc), RC-mode tolerance must not activate, even
+        If the operator runs the lint without setting
+        PGAI_LINT_CHANGELOG_MODE=rc, RC-mode tolerance must not activate, even
         when the branch is rc/*.  This preserves strict byte-compare for direct
         invocations.
         """

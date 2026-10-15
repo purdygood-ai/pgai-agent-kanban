@@ -33,12 +33,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/dashboard_window_census.sh"
 
 _usage() {
-  # Read the whole header via mapfile so grep/sed always finish writing
-  # before anything reads their output, then slice to the line limit
-  # locally -- head -N as a pipe stage can close its input early and
-  # SIGPIPE the writers under pipefail.
-  mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
-  printf '%s\n' "${__help_lines[@]:0:26}"
+  # shellcheck source=../lib/header_help.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+  header_help_print "${BASH_SOURCE[0]}"
 }
 
 if [[ $# -eq 0 ]]; then

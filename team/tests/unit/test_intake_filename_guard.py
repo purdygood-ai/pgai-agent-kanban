@@ -122,7 +122,7 @@ def test_climbing_source_path_deposits_the_bare_name_inside_the_project(tmp_path
     dest = ops_write.deposit_intake(ctx, _PROJECT, tmp_path / "staging" / "sub" / ".." / "BUG-0001-x.md")
 
     assert dest == project / "bugs" / "BUG-0001-x.md"
-    assert _deposited(project) == [project / "bugs" / "BUG-0001-x.md"]
+    assert _deposited(project) == [project / "bugs" / ".bug-claims.log", project / "bugs" / "BUG-0001-x.md"]
 
 
 # ---------------------------------------------------------------------------

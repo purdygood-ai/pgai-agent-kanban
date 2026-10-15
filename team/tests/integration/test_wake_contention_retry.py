@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import time
@@ -536,6 +537,21 @@ def _run_contended_wake(kanban_root: pathlib.Path, target: str, extra_env: dict 
     return output
 
 
+def _lines_reporting_lock_wait_seconds(output: str, project: str, seconds: int) -> list[str]:
+    """Return the wake log lines for *project* that report lock_wait_seconds
+    equal to *seconds*.
+
+    Every lock-wait outcome the wake narrates while a nonzero budget governs
+    carries ``lock_wait_seconds=<N>``: the wait-started and still-held lines
+    when the hook ran, and the no-wait-left line when the first contended
+    attempt used the whole budget. Under a budget of 0 the wake logs none of
+    them. The value must end at a non-digit, so 2 never matches 20.
+    """
+    value = re.compile(rf"lock_wait_seconds={seconds}(?!\d)")
+    prefix = f"project {project}: "
+    return [line for line in output.splitlines() if prefix in line and value.search(line)]
+
+
 def test_inherited_lock_wait_seconds_does_not_override_the_sandbox_cfg(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -565,18 +581,23 @@ def test_lock_wait_seconds_set_for_the_wake_overrides_the_sandbox_cfg(
 ) -> None:
     """LOCK_WAIT_SECONDS handed to the wake on purpose is the operator
     override: it outranks the sandbox kanban.cfg's lock_wait_seconds = 0,
-    so the wake waits that long for the wake-chain holder before deferring."""
+    so the wake spends that budget on the wake-chain holder before deferring.
+
+    How the wake narrates the budget depends on how long the first contended
+    attempt takes, which the host's load decides: with budget left it logs
+    the wait-started and still-held lines; with the budget already spent it
+    logs the no-wait-left line on the retry pass. The verdict reads only the
+    lock_wait_seconds value those lines carry, so either path passes and a
+    wake that obeyed the cfg's 0 (which logs none of them) fails."""
     target = "operator-override"
     kanban_root = _build_kanban_root(tmp_path, [target])
 
     output = _run_contended_wake(kanban_root, target, extra_env={"LOCK_WAIT_SECONDS": "2"})
 
-    assert f"project {target}: waiting up to 2s for the repo lock held by wake chain" in output, (
-        f"Expected the wake to wait the overriding 2 s budget.\noutput:\n{output}"
-    )
-    assert "(lock_wait_seconds=2," in output, (
-        f"Expected the wait line to report the overriding value.\noutput:\n{output}"
-    )
-    assert f"project {target}: repo lock still held after waiting" in output, (
-        f"Expected the wait to end at its budget with the holder still present.\noutput:\n{output}"
+    assert _lines_reporting_lock_wait_seconds(output, target, 2), (
+        f"Expected a project {target} lock-wait line reporting lock_wait_seconds=2 -- "
+        "'waiting up to ...', 'repo lock still held after waiting ...' or "
+        "'no repo-lock wait left this firing ...'. Without one, the LOCK_WAIT_SECONDS=2 "
+        "set for the wake did not outrank the sandbox kanban.cfg's "
+        f"lock_wait_seconds = 0.\noutput:\n{output}"
     )

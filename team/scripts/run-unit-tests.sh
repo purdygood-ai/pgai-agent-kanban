@@ -202,6 +202,14 @@
 # scratch-tests sweep is green-only, so a failing test's scratch survives
 # for debugging.
 #
+# Stale tmux sockets: on every exit, targeted and pre-merge runs included,
+# the runner removes private tmux sockets that test runs left behind --
+# only pgai-* files in the current user's tmux directory
+# ($TMUX_TMPDIR/tmux-<uid>, /tmp when TMUX_TMPDIR is unset) that have no
+# live server and are at least a minute old. It never kills a server and
+# prints one "[gated-runner] tmux_socket_sweep: ..." line
+# (gated_runner_tmux_socket_sweep in team/scripts/lib/gated_runner_lint.sh).
+#
 # Configuration:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: $HOME/pgai_agent_kanban)
 
@@ -371,10 +379,12 @@ fi
 _ru_targeted_on_exit() {
   gated_runner_write_targeted_exit_file "$_RU_TARGETED_EXIT_FILE" "${1:-0}"
   gated_runner_pytest_basetemp_cleanup "${_RUT_PYTEST_BASETEMP:-}"
+  gated_runner_tmux_socket_sweep
 }
 _ru_pre_merge_on_exit() {
   gated_runner_write_targeted_exit_file "$_RU_PRE_MERGE_EXIT_FILE" "${1:-0}"
   gated_runner_pytest_basetemp_cleanup "${_RUT_PYTEST_BASETEMP:-}"
+  gated_runner_tmux_socket_sweep
 }
 _ru_write_findings_on_exit() {
   gated_runner_write_findings_file "$_RU_FINDINGS_FILE" "run-unit-tests.sh"
@@ -391,8 +401,8 @@ _ru_write_findings_on_exit() {
     # for that class. Runs on every exit path this hook covers, including a
     # failing pytest run, so a hygiene finding surfaces even when the suite
     # itself is red. KANBAN_ROOT is scoped locally to this one call because
-    # the branch-prefix resolution later in this script unsets it once that
-    # resolution is done; pp_bugs_dir needs it to resolve the project's own
+    # this script unsets it ahead of its later pre-flight lints and pytest;
+    # pp_bugs_dir needs it to resolve the project's own
     # bugs/ directory. Never allowed to affect this runner's own exit code:
     # wired into an autonomous, non-blocking gated runner
     # (team/SOP-core.md "Verification never stops the line for quality"), so
@@ -414,6 +424,7 @@ _ru_write_findings_on_exit() {
   # until that claim has happened, which the helper treats as a no-op; the
   # helper never affects this runner's own exit code.
   gated_runner_pytest_basetemp_cleanup "${_RUT_PYTEST_BASETEMP:-}"
+  gated_runner_tmux_socket_sweep
 }
 if [[ "$_RU_HELP_ONLY" == "true" ]]; then
   : # help invocation: no exit hook, nothing written on exit
@@ -1222,51 +1233,12 @@ echo "Running dashboard tmux format-job lint..."
 gated_runner_run_quality_lint "dashboard_tmux_format_jobs" -- \
   python3 scripts/dashboard/lint_tmux_format_jobs.py
 
-# CHANGELOG freshness gate: asserts that CHANGELOG.md is byte-identical to
-# a fresh regeneration from the current codebase via changelog_writer.
-#
-# RC-mode tolerance: when the worktree HEAD is on an rc/* branch, bare or
-# prefixed with this project's own configured branch_prefix,
-# PGAI_LINT_CHANGELOG_MODE=rc is set so the lint tolerates CHANGELOG
-# staleness caused only by BUG-NNNN files filed after the CHANGELOG.md
-# commit.  PYTHONHASHSEED=0 pins changelog_writer's frozenset iteration
-# order so the gate's regeneration is byte-identical across invocations.
-#
-# The RC-branch pattern is built from the project's OWN configured
-# branch_prefix, resolved through pp_rc_branch_prefix (team/scripts/lib/
-# project_paths.sh) -- the same [project] branch_prefix source
-# pp_prefix_branch resolves -- with the bare "rc/" alternative always
-# present alongside it. pp_rc_branch_prefix falls back to its own shipped
-# default only when this install's project.cfg cannot be read at all,
-# mirroring lint_changelog_freshness.py's _resolve_branch_prefix() so the
-# two halves agree on an unconfigured install instead of the
-# shell side silently losing RC-mode detection. The project whose prefix
-# is read is resolved via PGAI_PROJECT_NAME rather than a literal path, so
-# the site is not hardcoded to one project.
-# shellcheck source=lib/project_paths.sh
-source "${SCRIPT_DIR}/lib/project_paths.sh"
-KANBAN_ROOT="$TEAM_ROOT"
-_RU_PROJECT_NAME="${PGAI_PROJECT_NAME:-pgai-agent-kanban}"
-_RU_BRANCH_PREFIX="$(pp_rc_branch_prefix "$_RU_PROJECT_NAME")"
-_RU_RC_BRANCH_RE='^(rc/'
-[[ -n "$_RU_BRANCH_PREFIX" ]] && _RU_RC_BRANCH_RE+="|${_RU_BRANCH_PREFIX}rc/"
-_RU_RC_BRANCH_RE+=')'
-_RU_CURRENT_BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
-if [[ -z "$_RU_CURRENT_BRANCH" ]]; then
-  # Detached HEAD — check if it is at a commit reachable from an rc/* branch.
-  _RU_CURRENT_BRANCH="$(git -C "$REPO_ROOT" branch --format='%(refname:short)' \
-    --points-at HEAD 2>/dev/null | grep -E "$_RU_RC_BRANCH_RE" | head -1 || true)"
-fi
-export PYTHONHASHSEED=0
-export PGAI_LINT_CHANGELOG_MODE=""
-if [[ "$_RU_CURRENT_BRANCH" =~ $_RU_RC_BRANCH_RE ]]; then
-  export PGAI_LINT_CHANGELOG_MODE="rc"
-fi
-unset _RU_CURRENT_BRANCH _RU_BRANCH_PREFIX _RU_RC_BRANCH_RE _RU_PROJECT_NAME KANBAN_ROOT
-echo "Running CHANGELOG freshness gate..."
-gated_runner_run_quality_lint "changelog_freshness" -- \
-  python3 scripts/lint_changelog_freshness.py
-unset PYTHONHASHSEED PGAI_LINT_CHANGELOG_MODE
+# Hold KANBAN_ROOT and PYTHONHASHSEED unset for the rest of the run, so a
+# value the operator's shell exports (KANBAN_ROOT from shell-env, most
+# often) reaches neither the lints below nor pytest, and the replay line
+# forces both absent with `env -u` (gated_runner_replay_command,
+# team/scripts/lib/gated_runner_lint.sh).
+unset KANBAN_ROOT PYTHONHASHSEED
 
 # Doc-truth lint: every command a document cites (README.md, HOW_TO.md,
 # ARCHITECTURE.md, docs/docker.md, and the docs-manifest.txt-derived

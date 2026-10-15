@@ -228,6 +228,8 @@ A severity rating is an input the release decision computes from, so two verifie
 - **medium** — incorrect, but a workaround exists or nothing depends on the broken path yet.
 - **low** — cosmetic or minor.
 
+**Rate the behaviour, not the test.** A failing test is evidence; the finding is what it shows about a running system. A test that fails for a cause inside the test itself — timing, host load, environment — is `low`, whatever colour the suite turned.
+
 This rubric rates a finding that exists; whether a check was entitled to block at all is "Blocking Severity: only real damage blocks" above.
 
 Severity says how bad a finding is; two further fields, read only on a finding whose own `Systemic Risk` is `high`, say what shipping it costs. **Regression** is `yes` when this RC's own work introduced it, `no` when it predates this RC. **Integrity** is `breakage` or `destructive` for a suite breakage or a destructive-path failure, `none` for neither. An absent or unrecognized value in either reads as `unknown`. Which combinations ship and which stop is `roles/CM.md`; the report fields are `roles/TESTER.md`.

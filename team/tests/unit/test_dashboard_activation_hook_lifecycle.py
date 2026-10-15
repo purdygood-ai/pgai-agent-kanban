@@ -71,7 +71,11 @@ from typing import Iterator, NamedTuple
 
 import pytest
 
-from tests.fixtures.binary_guard import narrate_binary_skip, try_resolve_binary
+from tests.fixtures.binary_guard import (
+    narrate_binary_skip,
+    teardown_private_tmux,
+    try_resolve_binary,
+)
 from tests.fixtures.process_progress import (
     pane_process_death,
     proc_start_time,
@@ -148,11 +152,13 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
         pt = PrivateTmux(real_tmux=real_tmux, socket_name=socket_name, env=env)
         yield pt
     finally:
-        guard.teardown(
-            lambda path: run_until_exit(
+        teardown_private_tmux(
+            guard,
+            socket_name,
+            kill=lambda path: run_until_exit(
                 [path, "-L", socket_name, "kill-server"],
                 cmdline_marker=socket_name,
-            )
+            ),
         )
 
 

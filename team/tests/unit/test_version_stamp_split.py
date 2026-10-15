@@ -141,6 +141,7 @@ _REAL_TEMP_SH = _LIB_DIR / "temp.sh"
 _REAL_VERSION_STAMP_SH = _LIB_DIR / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _LIB_DIR / "subagent_deploy.sh"
 _REAL_SCRIPT_COMMON_SH = _LIB_DIR / "script_common.sh"
+_REAL_SEMVER_SH = _LIB_DIR / "semver.sh"
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +513,7 @@ def _populate_upgrade_sandbox(kanban_root: pathlib.Path, dev_tree: pathlib.Path)
         _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
         _REAL_SCRIPT_COMMON_SH,
+        _REAL_SEMVER_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, installed_lib / lib_src.name)
@@ -553,6 +555,7 @@ def _populate_upgrade_sandbox(kanban_root: pathlib.Path, dev_tree: pathlib.Path)
         _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
         _REAL_SCRIPT_COMMON_SH,
+        _REAL_SEMVER_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_lib / lib_src.name)

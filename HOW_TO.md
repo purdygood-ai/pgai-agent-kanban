@@ -683,10 +683,9 @@ lists before you set or keep one.
 The Key Registry declares every key `kanban.cfg` carries, with its default,
 but the tables above are not the whole of the file. The keys below are read
 directly by the one component that owns them, at the moment that component
-runs, rather than by the loader on every wake. They are real, they work, and
-this reference deliberately does not restate their defaults — the registry
-entry and the owning surface named beside each one are where they are
-documented.
+runs, rather than by the loader on every wake. They are real and they work;
+the registry entry and the owning surface named beside each one are where
+they are documented in full.
 
 - `[dashboard]` `snapshot_ttl_seconds` — the per-tick render snapshot cache's
   staleness bound. Owned by `kanban.cfg_example`'s own `[dashboard]` block.
@@ -702,6 +701,14 @@ documented.
   budgets. Owned by `kanban.cfg_example`'s `[governance]` block.
 - `[api]` `host` and `port` — the operator REST API's loopback bind address and
   port. Owned by [docs/operator-api.md](docs/operator-api.md).
+- `[install]` `crontab_backups_keep` — how many timestamped crontab backups
+  (`$HOME/.crontab.before-install-YYYYMMDD-HHMMSS.bak`) the crontab step of
+  `install.sh` and `upgrade.sh` keeps; older ones are deleted, and copies you
+  renamed by hand are never touched. Accepted: a whole number of 1 or more.
+  Default `10` when absent or blank. Any other value, `0` included, is refused
+  (error key `safe_overwrite.invalid_crontab_backups_keep`) before any backup
+  is written or deleted, and the crontab is left unchanged. Kanban-wide only.
+  Owned by `kanban.cfg_example`'s `[install]` block.
 
 The per-project keys in each project's own `project.cfg` — the `[project]`,
 `[versioning]`, `[hooks]` and `[debug]` sections — are not in this registry,
@@ -1106,7 +1113,8 @@ scripts/dashboard/kill.sh       # tear the session down (e.g. before upgrades)
 
 (Standard tmux detach — `Ctrl-b d` — also works.)
 
-Fifteen windows, in the order the session builds them. The window list and
+Fourteen fixed windows plus one drill window per registered project, in the
+order the session builds them. The window list and
 each window's pane layout are declared once, machine-readably, in
 `team/config/dashboard_windows.census`; the guided tour and the per-window
 pane tables are generated from that file into
@@ -1416,7 +1424,7 @@ is breakage (syntax/compile) or a test failure — never a lint.
 scripts/halt-global.sh           # or HALT-AFTER and wait
 scripts/dashboard/kill.sh
 cd ~/develop/pgai-agent-kanban && git pull
-$KANBAN_ROOT/scripts/upgrade.sh  # backs up, checks out latest tag, installs
+$KANBAN_ROOT/scripts/upgrade.sh  # refuses an older checkout, backs up, installs the checkout
 scripts/unhalt-global.sh
 scripts/dashboard/create.sh
 ```
@@ -1459,9 +1467,28 @@ section 1.1):
 ./install.sh v2.1.0 --force    # fresh install of an older tag: the sanctioned downgrade
 ```
 
-Omit the version argument to upgrade using whatever the dev tree currently has
-checked out; that is the default. On success the summary
-narrates the move, for example `upgraded v2.1.0 -> v2.2.0 (from tag v2.2.0)`.
+On success the summary narrates the move, for example
+`upgraded v2.1.0 -> v2.2.0 (from tag v2.2.0)`.
+
+**Upgrading without a version argument (forward-only).** Omit the version
+argument to upgrade using whatever the dev tree currently has checked out;
+that is the default. The forward-only rule still applies, measured against
+the checkout's version: its committed `VERSION` file, or else the nearest
+release tag `git describe` reaches.
+
+- **Checkout older than the installed version** — refused before the backup
+  and before anything is deposited, with error key
+  `upgrade.dev-tree-older-than-installed`. The message names both versions;
+  the remedy line checks out the dev tree's main branch and re-runs the
+  upgrade with the same flags. Passing an explicit newer tag also works.
+- **Checkout equal to the installed version** — allowed, so re-upgrading the
+  release you already run works as before.
+- **Either version unknown or not `vX.Y.Z`-shaped** (no installed `VERSION`,
+  or a dev tree with no `VERSION` file and no reachable release tag) — the
+  upgrade proceeds with a warning.
+
+Both phases run the check, so it holds even when the dev tree's own
+`upgrade.sh` is an older release that lacks it.
 
 **Two-phase upgrade model.** The command above is all an operator
 runs. Under the hood `upgrade.sh` works in **two phases**: the installed
@@ -1471,7 +1498,8 @@ installed.
 
 - **Phase 1 — bootstrap** (the *installed* `scripts/upgrade.sh` when
   invoked without `--phase2`). Parses operator args; resolves and
-  validates `<dev_tree>`; creates the pre-upgrade backup tarball;
+  validates `<dev_tree>`; without a version argument, refuses a
+  checkout older than the install; creates the pre-upgrade backup tarball;
   runs `bash -n` on `<dev_tree>/team/scripts/upgrade.sh`; probes it
   for `--phase2` support; then `exec`s into it as phase 2. **Phase 1
   performs no deposit, no config changes, and no crontab work.** It
@@ -1505,14 +1533,35 @@ restore a retired file, move the graveyard copy back to its original
 relative path — e.g. a retired
 `$KANBAN_ROOT/retired/20260707T143000Z/workflows/release.yaml` is restored
 with `mv "$KANBAN_ROOT/retired/20260707T143000Z/workflows/release.yaml"
-"$KANBAN_ROOT/workflows/release.yaml"`. **Operator-authored content is
-untouchable by construction**: the manifest is a strict allow-list of exact
-relative paths, so any file whose path is not named in
-`retired-files.txt` — custom workflow plugin dirs, wrappers, local
-edits — is byte-preserved by construction and never enters the graveyard.
-Manifest entries whose paths are absent from the live root are silent
-no-ops (fresh installs, already-cleaned installs). The graveyard plus the
-pre-upgrade backup tarball give you two independent recovery layers.
+"$KANBAN_ROOT/workflows/release.yaml"`. **The manifest is a strict
+allow-list** of exact relative paths: the retirement step moves no file
+whose path `retired-files.txt` does not name. Manifest entries whose paths
+are absent from the live root are silent no-ops (fresh installs,
+already-cleaned installs). The graveyard plus the pre-upgrade backup tarball
+give you two independent recovery layers.
+
+**Orphan sweep.** After the retirement step, `upgrade.sh` lists every file
+under the directories it deposited into (shipped directories such as
+`scripts/`, `roles/` and `workflows/`, and the `docs/` entries in the docs
+manifest) that the deposited tree does not contain — for example a file an
+older release, or an older checkout deployed by mistake, left behind.
+
+- **Without `--force`** each one prints as `Orphan (left in place): <path>`
+  and stays where it is. The report ends with a re-run command that adds
+  `--force`; after a version-targeted run, which cannot be repeated at the
+  same version, it prints a `mv` command instead.
+- **With `--force`** each one is moved, never deleted, to
+  `$KANBAN_ROOT/retired/<UTC-ts>/<relative-path>`, the same graveyard the
+  retirement step uses. Restore it by moving it back.
+
+The summary's `Orphans:` line gives the count. An orphan never fails the
+upgrade. Never scanned or moved: anything outside the deposited directories,
+protected files and `projects/`, Python bytecode caches,
+`scripts/cron-suggested.txt` (generated by `install.sh`), and your own plugin
+directories under `workflows/<name>/` or `templates/project/<name>/` when the
+deposited tree ships no `<name>` there. Any other file you added inside a
+deposited directory, such as a custom script in `scripts/`, is an orphan, and
+`--force` moves it to the graveyard.
 
 **Phase 1 fail-loud: "Manual bootstrap: cp … scripts/ then retry".**
 The phase-1 bootstrap refuses to hand off when the dev-tree

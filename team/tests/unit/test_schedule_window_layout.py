@@ -46,7 +46,11 @@ from typing import Callable, Iterator, NamedTuple
 
 import pytest
 
-from tests.fixtures.binary_guard import narrate_binary_skip, try_resolve_binary
+from tests.fixtures.binary_guard import (
+    narrate_binary_skip,
+    teardown_private_tmux,
+    try_resolve_binary,
+)
 from tests.fixtures.process_progress import require_procfs, run_until_exit
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
@@ -255,8 +259,13 @@ def dashboard(tmp_path: pathlib.Path, pgai_tests_temp_dir: pathlib.Path) -> Iter
 
         yield _Dashboard(guard.path, socket, session, env)
     finally:
-        guard.teardown(
-            lambda path: run_until_exit([path, "-L", socket, "kill-server"], env=env or None, cmdline_marker=socket)
+        teardown_private_tmux(
+            guard,
+            socket,
+            env=env or None,
+            kill=lambda path: run_until_exit(
+                [path, "-L", socket, "kill-server"], env=env or None, cmdline_marker=socket
+            ),
         )
         shutil.rmtree(tmux_tmpdir, ignore_errors=True)
 

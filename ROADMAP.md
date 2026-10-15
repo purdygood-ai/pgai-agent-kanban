@@ -1,6 +1,6 @@
 # Roadmap
 
-**Current public release: v2.41.0** — a generic software shop in a
+**Current public release: v2.42.0** — a generic software shop in a
 box: six pipeline agents plus the OVERWATCH self-monitor, the Loop
 doctrine and blocking-site census, quality findings filed as bugs
 instead of stops, dual-channel errors, autonomous resolution of known

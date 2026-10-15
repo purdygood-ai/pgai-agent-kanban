@@ -15,7 +15,7 @@ Test areas:
   - claim_next_bug_id()         — atomic claiming
   - release_bug_id_claim()      — lock removal
   - detect_duplicate_bug_ids()  — collision detection
-  - _scan_highest_bug_num()     — gate-valid-only numeric high-water scan
+  - _scan_highest_bug_num()     — numeric high-water scan over taken BUG-NNNN prefixes
 """
 
 from __future__ import annotations
@@ -581,15 +581,16 @@ def test_resolve_bugs_dir_uses_project_root_env(
 
 
 # ---------------------------------------------------------------------------
-# _scan_highest_bug_num() — gate-valid-only numeric high-water scan
+# _scan_highest_bug_num() — numeric high-water scan over taken BUG-NNNN prefixes
 # ---------------------------------------------------------------------------
 #
-# A malformed filename (date-first, under-padded, or otherwise) must never
-# participate in the high-water scan that claim_next_bug_id relies on.  The
-# defect this guards against: a looser "4 or more digits" prefix match would
-# read a date-first filename's 8-digit date as if it were the sequence
-# number, jumping the high-water mark from a legitimate 4-digit value to an
-# 8-digit one and permanently breaking subsequent numbering.
+# Any name starting BUG- followed by exactly four digits takes that number,
+# even when the rest of the name fails the ledger filename contract.  Names
+# without exactly four digits (date-first, under-padded) never participate:
+# a looser "4 or more digits" prefix match would read a date-first
+# filename's 8-digit date as if it were the sequence number, jumping the
+# high-water mark from a legitimate 4-digit value to an 8-digit one and
+# permanently breaking subsequent numbering.
 
 
 def test_scan_highest_bug_num_ignores_date_first_filename(
@@ -597,7 +598,7 @@ def test_scan_highest_bug_num_ignores_date_first_filename(
 ) -> None:
     """A date-first filename does not poison the high-water scan.
 
-    Without the gate-valid filter, a filename shaped like
+    Without the exactly-four-digits rule, a filename shaped like
     BUG-<8-digit-date>-<seq>-<slug>.md would be misread as claiming an
     8-digit sequence number, jumping the high-water mark far beyond any
     legitimate value.
@@ -674,3 +675,25 @@ def test_claim_next_bug_id_recovers_correct_next_id_with_malformed_file_present(
         assert bug_path == bugs_dir / "BUG-0037-next-slot.md"
     finally:
         release_bug_id_claim(lock_path)
+
+
+def test_claim_next_bug_id_skips_number_held_by_contract_invalid_name(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A name that fails the ledger filename contract still occupies its number.
+
+    A slug with dots (e.g. BUG-0002-v1.2.3-notes-count.md) fails the strict
+    contract, yet the four-digit prefix is visibly taken; the claim must move
+    past that number rather than hand it out a second time.
+    """
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    (bugs_dir / "BUG-0001-first-bug.md").write_text("## Status\nopen\n", encoding="utf-8")
+    (bugs_dir / "BUG-0002-v1.2.3-notes-count.md").write_text(
+        "## Status\nopen\n", encoding="utf-8"
+    )
+    bug_id, bug_path, lock_path = claim_next_bug_id(str(bugs_dir), "probe-slug")
+    release_bug_id_claim(lock_path)
+    assert bug_id == "BUG-0003", bug_id
+    assert bug_path == bugs_dir / "BUG-0003-probe-slug.md"
+    assert not lock_path.exists()

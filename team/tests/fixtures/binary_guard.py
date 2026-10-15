@@ -71,6 +71,22 @@ always resolved by the time `.teardown()` can be called on it -- the same
 for a fixture that wants to defer the skip decision past the point where
 setup would otherwise need to raise.
 
+PRIVATE TMUX SERVERS
+--------------------
+A fixture that starts a private tmux server (``tmux -L <name>``) tears it
+down with teardown_private_tmux(), which stops the server and removes its
+socket file, whatever the test's outcome -- a stopped server leaves the
+file behind otherwise:
+
+    def some_fixture():
+        guard = try_resolve_binary("tmux")
+        socket_name = f"pgai-test-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        try:
+            ...
+            yield something
+        finally:
+            teardown_private_tmux(guard, socket_name, env=env)
+
 DOCKER'S SECOND FAILURE MODE: AN UNREACHABLE DAEMON
 ----------------------------------------------------
 A container-engine binary being on PATH does not mean the engine is usable
@@ -102,6 +118,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Callable, NoReturn, Optional
 
@@ -255,3 +272,49 @@ def require_docker_daemon(engine: str = "docker", label: str = "docker") -> Bina
     if not docker_daemon_reachable(engine):
         narrate_daemon_unreachable_skip(engine, label)
     return guard
+
+
+def teardown_private_tmux(
+    guard: BinaryGuard,
+    socket_name: str,
+    *,
+    env: Optional[Mapping[str, str]] = None,
+    kill: Optional[Callable[[str], object]] = None,
+) -> None:
+    """Stop a private tmux server (``tmux -L <socket_name>``) and remove its
+    socket file -- the one teardown every private-tmux fixture shares.
+
+    A no-op when *guard* never resolved tmux (setup skipped before a server
+    could exist), so a fixture's finally block may call it unconditionally.
+    Otherwise it runs ``kill(guard.path)`` -- by default
+    ``tmux -L <socket_name> kill-server`` under *env* -- and then, in a
+    finally, deletes the socket file at
+    ``$TMUX_TMPDIR/tmux-<uid>/<socket_name>`` as *env* resolves it
+    (pgai_agent_kanban.testing.tmux_sockets.socket_path). A stopped tmux
+    server leaves that file behind; deleting it here is what keeps a run,
+    passing, failing or erroring, from adding one per test.
+
+    *env* must be the environment the server was started under (its
+    ``TMUX_TMPDIR`` decides where the socket lives); None means this
+    process's environment. Pass *kill* when the fixture stops its server
+    another way (``run_until_exit`` with a cmdline marker, say); it gets the
+    tmux path. An exception from *kill* still propagates -- after the socket
+    file is gone.
+    """
+    from pgai_agent_kanban.testing.tmux_sockets import socket_path
+
+    def _kill_and_unlink(path: str) -> None:
+        try:
+            if kill is not None:
+                kill(path)
+            else:
+                subprocess.run(
+                    [path, "-L", socket_name, "kill-server"],
+                    capture_output=True,
+                    timeout=10,
+                    env=None if env is None else dict(env),
+                )
+        finally:
+            socket_path(socket_name, env).unlink(missing_ok=True)
+
+    guard.teardown(_kill_and_unlink)

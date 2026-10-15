@@ -38,7 +38,7 @@ already covers it — team/roles/TESTER.md's own "cites an OPEN bug" rule
 exact SET of (engine, flavor) pairs a run's captured output names as
 failing, recorded in each filed bug's "## Deep-Verify Pairs" section (one
 `engine/flavor` line per pair — not part of the standard BUG-TEMPLATE.md
-shape, but additive: TESTER.md's own Path C-B template note establishes
+shape, but additive: TESTER.md's own Path C template note establishes
 that "additional sections... may be added if useful" beyond the required
 minimum). A later run whose failing-pair set exactly matches an existing
 open/running bug's recorded set cites that bug's BUG-NNNN id instead of

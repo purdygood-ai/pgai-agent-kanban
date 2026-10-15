@@ -406,7 +406,7 @@ What turning it on buys: a bad-fix regression halt is recycled within the hour i
 An entry is one line, under the `## Entries` heading:
 
 ```
-- 2026-09-15: ai_main was rebased to v2.23.1 as a hindsight experiment; the old lineage is preserved on last_run_ai_main, so ai_rc/v2.23.1 diverging from ai_main is deliberate.
+- 2026-03-02: main was rebased to v1.4.0 as a hindsight experiment; the old lineage is preserved on pre_rebase_main, so rc/v1.4.0 diverging from main is deliberate.
 ```
 
 Six rules govern whether that line is read at all. They are all mechanical, and a line that breaks any of them is dropped whole and silently — never parsed as a partial entry:
@@ -420,7 +420,7 @@ Six rules govern whether that line is read at all. They are all mechanical, and 
 
 A well-formed entry is still only *half* of what Lane B needs. It has to pass two different tests on its way to a shipped release, and they are not the same rule — an entry can pass one and fail the other, so it is worth being able to tell them apart.
 
-**Test 1 — the classifier's identifier test: does this entry explain this block?** OVERWATCH collects every identifier-shaped token in the block's evidence — every `BUG-NNNN` id in every TESTER finding body, every `vX.Y.Z` version, every slash-qualified ref such as `ai_rc/v2.23.1`, and every underscore-compound name such as `last_run_ai_main` — plus the RC's own target version, RC branch, and base branch, and requires **all** of them to appear verbatim somewhere in a single declaration. This is a containment test: the declaration has to *contain* every token, and it is expected to say more besides — the explanation around the identifiers is the point of writing the entry. A thematically similar sentence that does not name the specific version, branch, and bug ids does not match, and a block with no identifier-shaped evidence at all never matches anything.
+**Test 1 — the classifier's identifier test: does this entry explain this block?** OVERWATCH collects every identifier-shaped token in the block's evidence — every `BUG-NNNN` id in every TESTER finding body, every `vX.Y.Z` version, every slash-qualified ref such as `rc/v1.4.0`, and every underscore-compound name such as `pre_rebase_main` — plus the RC's own target version, RC branch, and base branch, and requires **all** of them to appear verbatim somewhere in a single declaration. This is a containment test: the declaration has to *contain* every token, and it is expected to say more besides — the explanation around the identifiers is the point of writing the entry. A thematically similar sentence that does not name the specific version, branch, and bug ids does not match, and a block with no identifier-shaped evidence at all never matches anything.
 
 In practice that means: open the TESTER report the halt cites, and write your declaration so it names, spelled exactly as they are spelled there, the version, the RC branch, the base branch, and every bug id the findings mention. Then explain why that state is deliberate. Write it as a statement you are prepared to stand behind — the text is recorded verbatim as the release's `--reason` in `release-state.md`, so it is the sentence a reader six months from now will hold you to.
 
@@ -436,8 +436,8 @@ Every classification — including Lane C, where nothing was executed — append
 
 ```
 ## OVERWATCH Decision
-Timestamp: 2026-09-15T04:12:33Z
-Version: v2.23.1
+Timestamp: 2026-03-02T16:40:00Z
+Version: v1.4.0
 Lane: C
 Evidence:
 - /home/op/pgai_agent_kanban/projects/<name>/HALT
@@ -445,7 +445,7 @@ Evidence:
 - /home/op/pgai_agent_kanban/projects/<name>/INTENT.md
 Verbs Run:
 - Needs Human raised (existing default — no new mechanism)
-Outcome: OVERWATCH read: v2.23.1 is HALTed and classifies as Lane C — ...
+Outcome: OVERWATCH read: v1.4.0 is HALTed and classifies as Lane C — ...
 ```
 
 Read it in this order. **Lane** tells you what OVERWATCH thought the block was: `A` a bad-fix regression, `B` a state you had declared, `C` everything else. **Verbs Run** is the complete list of what it actually did — for Lane C it is one line saying Needs Human was raised, and nothing was touched. **Evidence** names the files it read, so you can check its reasoning against the same sources. **Outcome** is the plain-language result; on Lane C it is the one-paragraph read naming the cause and your options, which is the fastest orientation you will get on a halt you did not watch happen.
@@ -456,7 +456,7 @@ A Lane A decision recorded against a bundle OVERWATCH already recycled once does
 
 Two live surfaces read the same two files, so they cannot disagree with each other.
 
-`why.sh` keeps the `HALTED` verdict and exit code `5` throughout — nothing can be dequeued either way — and only the cause and remedy change. While a lane is executing, the line reads `OVERWATCH resolving (lane A, attempt 1) for v2.23.1` and the remedy tells you to wait. Once the lane finishes, the line reports the recorded decision instead, but only while that decision's own version still matches the project's current `Active RC`, so a decision about a since-shipped RC is never presented as an explanation of a later halt.
+`why.sh` keeps the `HALTED` verdict and exit code `5` throughout — nothing can be dequeued either way — and only the cause and remedy change. While a lane is executing, the line reads `OVERWATCH resolving (lane A, attempt 1) for v1.4.0` and the remedy tells you to wait. Once the lane finishes, the line reports the recorded decision instead, but only while that decision's own version still matches the project's current `Active RC`, so a decision about a since-shipped RC is never presented as an explanation of a later halt.
 
 The dashboard's attention window shows the same two states, per project: a cyan `resolving` entry while a lane runs, or a `decision` entry summarising the last decision — the latter only while the project's HALT is still present and the versions still match. An in-progress resolution always wins over a recorded one, and neither is rendered in the red reserved for needs-human blocks, because neither is waiting on you yet.
 
@@ -798,7 +798,7 @@ per-project drill bar resolves that project's own posture and counts only its
 own bugs.
 
 **Each deferred bug card** in the BUGS column carries the same `✋` glyph as a
-suffix after its id — `BUG-0348 ✋`, a single space, no glyph before the id —
+suffix after its id — `BUG-NNNN ✋`, a single space, no glyph before the id —
 so every card's id stays left-aligned in one column whether or not it carries
 a glyph. The segment and the cards cannot disagree about which bugs are
 waiting: both come from one resolver and one severity comparison, the same
@@ -972,7 +972,7 @@ printed. What each one asks for:
 |---|---|---|
 | `freshness_gate.no_record` | The tier has never run for this project. Silence is not a pass. | Run the lane, then re-run the check. |
 | `freshness_gate.failed_to_build` | The last record is a tree defect. | Let the loop fix the build, re-run the lane against the fixed tree, re-run the check. Do not promote over it. |
-| `freshness_gate.could_not_attempt` | The last record learned nothing about the tree. | Re-run the lane on a host with a working container engine and reachable registries. |
+| `freshness_gate.could_not_attempt` | The last record learned nothing about whether the images build. An exit-1 record can still name a failing engine-free cold test; that run already filed its bug. | Re-run the lane on a host with a working container engine and reachable registries. |
 | `freshness_gate.stale_record` | Green, but for a different version, or past the window, or both. The message names which. | Re-run the lane against the tree being promoted. |
 | `freshness_gate.ledger_unreadable` | The ledger exists but its most recent record does not parse. | Repair or remove the malformed record by hand, then re-run the lane. |
 | `freshness_gate.unregistered_project` | The `--project` name is not in `projects.cfg`. | Correct the name. |
@@ -1005,9 +1005,17 @@ The previous repo-level `team/release-state.md` has been removed entirely. The o
 
 `CHANGELOG.md` is regenerated in full at every release as a projection of two sources of truth — the per-release notes files and the bug ledger — so historical entries update themselves whenever a bug's `## Affects` or `## Fixed In` fields change. Known Issues are disclosed only for bugs that existed in a PUBLISHED release (a version listed in `release-notes/PUBLISHED`), so internal-only bugs born and fixed between public tags are never surfaced in the changelog. Public IDs (`KI-<version>.<counter>`) are sticky citations: assigned once at first disclosure, persisted on the bug file, and never renumbered — the writer reads them back rather than recomputing them, so any KI reference ever made stays valid. A missing `release-notes/PUBLISHED` manifest is a fail-loud generator error, not a silent empty state — see [promotion-playbook.md](promotion-playbook.md) for the operator step that maintains the manifest after a public tag push.
 
+### When `CHANGELOG.md` is rendered
+
+`CHANGELOG.md` is rendered and committed only at release. `team/scripts/cm/release.sh` renders it (Step 11b) and commits it before it tags; `team/scripts/cm/finalize-release.sh` renders it again only when it commits release-notes polish that arrived after `release.sh` ran. The release render writes each Public ID it assigns back to the bug's file.
+
+Nothing renders it on an RC. A committed `CHANGELOG.md` that is stale on an RC branch — after a ticket edits a shipped `release-notes/vX.Y.Z.md`, for example — is expected and harmless: the release render brings it current. The gated test runners do not check it.
+
+`team/scripts/lint_changelog_freshness.py` is an operator check, run by hand: it exits 0 when the committed file matches a fresh render and 1 when it is stale or missing. It renders through the same writer, so it too writes any Public ID it assigns back to the bug files.
+
 ### Releases produced outside `cm/release.sh`
 
-`team/scripts/cm/release.sh` renders `CHANGELOG.md` and commits it before it tags. A release produced any other way, such as an operator hand patch, must do the same by hand. Otherwise the tag ships a changelog with no section for its own release, and `team/scripts/lint_changelog_freshness.py` reports the file stale on the main branch and on every feature branch cut after it.
+A release produced any other way than `team/scripts/cm/release.sh`, such as an operator hand patch, must render and commit `CHANGELOG.md` by hand before it tags. Otherwise the tag ships a changelog with no section for its own release.
 
 After the release notes for the new version are committed and before you tag, run from the dev-tree root:
 
@@ -1019,7 +1027,7 @@ git add CHANGELOG.md
 git commit -m "Update CHANGELOG.md for vX.Y.Z"
 ```
 
-These are the two commands `lint_changelog_freshness.py` prints under its `To fix:` heading when it finds the file stale; it prints them with your absolute paths filled in. Use the bugs directory of the project you are releasing, and its version in the commit message. The lint must exit 0 before you commit. Never edit the rendered file by hand: the writer owns it, and a hand edit trips the same lint.
+This is the release render, the same one `release.sh` runs. Use the bugs directory of the project you are releasing, and its version in the commit message. The lint must exit 0 before you commit. Never edit the rendered file by hand: the writer owns it, and a hand edit trips the same lint.
 
 ## Manual Hotfixes During In-Flight RC
 
@@ -1029,7 +1037,7 @@ This section states the project's policy on direct commits to an in-flight RC br
 
 When a bug is filed against an in-flight RC (typically by TESTER, triggering a halt), the canonical sequence is:
 
-1. **TESTER files the bug** in `projects/<name>/bugs/` and, in the autonomous Path C case, writes a priority requirements document targeting the next patch.
+1. **TESTER files the bug** in `projects/<name>/bugs/`.
 2. **PM bundles the bug** into a priority requirements document at next wake and marks it `[x]` in `bug_backlog.md`.
 3. **PM decomposes** that document into one or more fix tickets via the PM 3-Path Decision Tree.
 4. **CODER (or WRITER) implements the fix** on a feature branch, commits, merges `--no-ff` into the RC branch, and deletes the feature branch.
@@ -2373,7 +2381,7 @@ Use `team/scripts/cm/cancel-rc.sh` in these situations:
 - **Wrong RC version opened** — `team/scripts/cm/open-rc.sh` was run with the wrong version number and the error must be undone before starting over.
 - **RC branch became inconsistent** — partial failures or manual edits left the project's `release-state.md` or the branch in a state that cannot be recovered automatically.
 
-Do NOT use `team/scripts/cm/cancel-rc.sh` for minor gaps. TESTER writes priority requirements documents for the next patch release when gaps are small enough to fix without abandoning the current RC.
+Do NOT use `team/scripts/cm/cancel-rc.sh` for minor gaps. TESTER files bugs for gaps small enough to fix without abandoning the current RC; discovery bundles them into the next patch release.
 
 ### Usage
 
@@ -3209,6 +3217,13 @@ Before any modification, the existing crontab is written to
 new crontab is installed, so a mid-flight failure leaves the original untouched and
 recoverable via `crontab $HOME/.crontab.before-install-*.bak`.
 
+An unchanged crontab writes no new backup: when the current crontab is byte-identical to
+the newest backup, that backup already holds it and the run names it as the backup. After the backup
+step only the newest `[install] crontab_backups_keep` backups are kept (default `10`) and
+older ones are deleted; a backup you renamed by hand is never touched. A value that is not
+a whole number of 1 or more is refused (`safe_overwrite.invalid_crontab_backups_keep`)
+before anything is written or deleted, and the crontab is left unchanged.
+
 After the install attempt completes, a sanity check runs: if the active crontab is empty
 or absent, `install.sh` prints a loud warning and recovery instructions. An empty crontab
 is the failure signature of the original incident, so it is now an explicit checked
@@ -3259,7 +3274,7 @@ find them with shell globs:
 Examples of operator-side recovery:
 
 ```bash
-# Find every backup install.sh has ever made for the crontab
+# Find the crontab backups install.sh has kept (the newest crontab_backups_keep)
 ls -lt $HOME/.crontab.before-install-*.bak
 
 # Restore the most recent crontab backup
@@ -3273,8 +3288,9 @@ cp ~/.claude/agents/WRITER.md.before-install-20260519-130050.bak \
    ~/.claude/agents/WRITER.md
 ```
 
-Backups are never auto-purged by `install.sh`. They accumulate under `$HOME` and
-`~/.{provider}/agents/`; the operator removes them when they are no longer wanted.
+Crontab backups are pruned to the newest `[install] crontab_backups_keep` (default `10`),
+and an unchanged crontab adds none. Role-file backups are never auto-purged: they
+accumulate under `~/.{provider}/agents/` until the operator removes them.
 
 ### Recovery when prompts are declined
 
