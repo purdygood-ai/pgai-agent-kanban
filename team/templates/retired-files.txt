@@ -1,3 +1,15 @@
 # retired in v1.3.0 (pipeline-in-plugin)
 workflows/release.yaml
 workflows/document.yaml
+
+# retired in v2.10.0 (SOP.md split into SOP-core.md + per-role procedure)
+SOP.md
+
+# retired in v2.26.3 (defer/undefer verbs superseded the defer-low-bugs pair;
+# release-locks.sh and dashboard/agent-metrics.sh are the live copies)
+scripts/defer-low-bugs.sh
+scripts/undefer-low-bugs.sh
+scripts/release_locks.sh
+scripts/agent-metrics.sh
+scripts/lib/defer_low_bugs.sh
+pgai_agent_kanban/api/tests/test_defer_low_bugs.py

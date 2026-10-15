@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dashboard-visibility.sh
+# visibility.sh
 # Visibility window renderer implementing the middle-position-active algorithm.
 #
 # Renders a single agent queue column using the middle-position-active layout:
@@ -9,12 +9,12 @@
 #   - Closed items (DONE / WONT-DO / BLOCKED) fill the slots below.
 #
 # This script is a thin dispatch layer. The rendering algorithm lives in
-# dashboard-column-render.sh (queue subcommand) so that both the tmux watch
+# dashboard/column-render.sh (queue subcommand) so that both the tmux watch
 # panes and --no-tmux mode share one implementation.
 #
 # Usage:
-#   dashboard-visibility.sh queue <backlog_file> [rows] [width] [--label LABEL] [--kanban-root <path>]
-#   dashboard-visibility.sh input <dir> <cache_file> [rows] [width] [--label LABEL] [--kanban-root <path>]
+#   visibility.sh queue <backlog_file> [rows] [width] [--label LABEL] [--kanban-root <path>]
+#   visibility.sh input <dir> <cache_file> [rows] [width] [--label LABEL] [--kanban-root <path>]
 #
 # Arguments (queue mode):
 #   <backlog_file>  Absolute path to an agent backlog file (e.g. coder_backlog.md).
@@ -61,10 +61,27 @@
 #   status colors, and the projects.cfg override flow.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:60}"
+      exit 0
+      ;;
+  esac
+done
+
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Delegate entirely to dashboard-column-render.sh which holds the algorithm.
+# Delegate entirely to dashboard/column-render.sh which holds the algorithm.
 exec "${SCRIPT_DIR}/column-render.sh" "$@"

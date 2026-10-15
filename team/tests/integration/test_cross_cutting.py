@@ -24,7 +24,7 @@ Design notes:
     paths appear in this file.
   - Each test is self-contained and produces no state visible to other tests.
   - Test names describe the behavioral guarantee, not the bug ID or gate label
-    that motivated them (SOP.md Anti-pattern 6).
+    that motivated them (roles/TESTER.md Anti-pattern 6).
   - Discovery is invoked via _run_discovery(), a thin subprocess wrapper that
     sources the discovery library against the caller's temp tree and calls
     discovery_run_pipeline for the named project.
@@ -495,7 +495,7 @@ class TestPerRepoLockContention:
         protocol declines to act and returns sentinel 4, preventing OVERWATCH
         from modifying state while an agent is mid-flight.
 
-        Regression coverage for BUG-0105: the project used here ("project_a")
+        Regression coverage: the project used here ("project_a")
         is deliberately NOT named "pgai-kanban" — OVERWATCH must resolve the
         SAME lock path (via pp_repo_lock_path, the single shared helper) that
         a wake dispatcher would hold for this project, not a hardcoded
@@ -509,7 +509,7 @@ class TestPerRepoLockContention:
 
         # Resolve the lock path the SAME way both wake dispatch and OVERWATCH
         # do: via pp_repo_lock_path. This is the string-compare-equal check
-        # from BUG-0105's acceptance criteria — the fixture does not hardcode
+        # -- the fixture does not hardcode
         # "repo-wake-<anything>.lock" itself.
         resolve_lock_path_script = textwrap.dedent(f"""\
             #!/usr/bin/env bash
@@ -537,18 +537,23 @@ class TestPerRepoLockContention:
             f"'{project_name}': {lock_file}"
         )
         lock_file.parent.mkdir(parents=True, exist_ok=True)
-        lock_file.touch()
 
-        # Hold the lock in a background process.
+        # Hold the lock in a background process, the same way every production
+        # holder does: through pgai_lock_acquire, recording its own live pid,
+        # not a bare flock. A bare flock with no provenance record is exactly
+        # the shape the stale-lock reaper (lock_provenance.sh) is correct to
+        # reap on sight, which would make this fixture race its own reaper
+        # instead of exercising genuine contention.
         holder_script = textwrap.dedent(f"""\
             #!/usr/bin/env bash
+            source "{_SCRIPTS_LIB}/lock_provenance.sh"
             READY_FILE="{root}/locks/ow-holder-ready"
             DONE_FILE="{root}/locks/ow-holder-done"
-            exec 9>"{lock_file}"
-            flock -x 9
+            fd=""
+            pgai_lock_acquire "{lock_file}" writer "$$" "some-op" TASK-9 fd
             touch "$READY_FILE"
             while [[ ! -f "$DONE_FILE" ]]; do sleep 0.05; done
-            exec 9>&-
+            pgai_lock_release "{lock_file}" "$fd"
         """)
 
         holder = subprocess.Popen(

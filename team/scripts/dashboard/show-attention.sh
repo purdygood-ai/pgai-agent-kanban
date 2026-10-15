@@ -9,7 +9,7 @@
 #   │                                                                          │
 #   │ ▶ CLAUDE-CM-YYYYMMDD-NNN-release-vX-Y-Z                                  │
 #   │   Blocked since: 14:23:18 (2m ago)                                       │
-#   │   Reason: cm-release.sh exited 1 at Step 4 ...                           │
+#   │   Reason: cm/release.sh exited 1 at Step 4 ...                           │
 #   │   Next step: Update main's release-state.md ...                         │
 #   └─────────────────────────────────────────────────────────────────────────┘
 #
@@ -19,13 +19,30 @@
 #   (no blocked tasks — system running normally)
 #
 # Usage:
-#   show-attention.sh [--kanban-root <path>]
+#   show-attention.sh [--kanban-root <path>] [-h|--help]
 #
-# Auto-refresh is handled by the caller (dashboard-create.sh uses watch -n N).
+# Auto-refresh is handled by the caller (dashboard/create.sh uses watch -n N).
 #
 # Environment:
 #   NO_COLOR=1 — disables all ANSI codes
 #   TERM=dumb  — disables all ANSI codes
+
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:27}"
+      exit 0
+      ;;
+  esac
+done
 
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
@@ -41,6 +58,8 @@ source "${SCRIPT_DIR}/../lib/project_paths.sh"
 source "${SCRIPT_DIR}/../lib/projects.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
 
 # --- Pass through args ---
 DATA_ARGS=("$@")
@@ -72,22 +91,7 @@ if [[ "${TERM:-}" == "dumb" ]] || [[ "${NO_COLOR:-}" == "1" ]]; then
   USE_COLOR=false
 fi
 
-ansi_code() {
-  local color="$1"
-  if [[ "$USE_COLOR" != "true" ]]; then echo ""; return; fi
-  case "$color" in
-    red)     echo $'\033[0;31m' ;;
-    green)   echo $'\033[0;32m' ;;
-    yellow)  echo $'\033[0;33m' ;;
-    cyan)    echo $'\033[0;36m' ;;
-    white)   echo $'\033[0;37m' ;;
-    bold)    echo $'\033[1m' ;;
-    dim)     echo $'\033[2m' ;;
-    reset)   echo $'\033[0m' ;;
-    *)       echo "" ;;
-  esac
-}
-
+# ansi_code() is defined in lib/script_common.sh (sourced above).
 RESET="$(ansi_code reset)"
 C_BOLD="$(ansi_code bold)"
 C_DIM="$(ansi_code dim)"
@@ -120,18 +124,19 @@ if [[ ${#_sha_task_roots[@]} -eq 0 ]]; then
     _sha_task_roots=("")
 fi
 for _sha_tasks_dir in "${_sha_task_roots[@]}"; do
-python3 - "${_sha_tasks_dir}" "$USE_COLOR" <<'PY'
+python3 - "${_sha_tasks_dir}" "$USE_COLOR" \
+    "$RESET" "$C_RED" "$C_BOLD" "$C_DIM" "$C_CYAN" "$C_YELLOW" \
+    <<'PY'
 import os, re, sys, pathlib, time
 
 tasks_root = pathlib.Path(sys.argv[1])
 use_color  = sys.argv[2].lower() == "true"
 
-RESET  = "\033[0m" if use_color else ""
-C_RED  = "\033[0;31m" if use_color else ""
-C_BOLD = "\033[1m" if use_color else ""
-C_DIM  = "\033[2m" if use_color else ""
-C_CYAN = "\033[0;36m" if use_color else ""
-C_YEL  = "\033[0;33m" if use_color else ""
+# RESET/C_RED/C_BOLD/C_DIM/C_CYAN/C_YEL are already the single-sourced
+# escapes (or "" in NO_COLOR mode) computed by the bash caller via
+# ansi_code() (team/scripts/lib/script_common.sh) -- threaded through argv
+# rather than a second hand-transcribed copy of the same escape table.
+RESET, C_RED, C_BOLD, C_DIM, C_CYAN, C_YEL = sys.argv[3:9]
 ARROW  = "\u25b6" if use_color else ">"
 
 def read_field(text, heading):

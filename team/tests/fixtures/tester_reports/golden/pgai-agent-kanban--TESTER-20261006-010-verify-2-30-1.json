@@ -1,0 +1,37 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified RC v2.30.1 (`ai_rc/v2.30.1` @ 3de8d49d) against the bug bundle `requirements/v2.30.1-bugfix-bundle-20261006.md`: five headline bugs (BUG-0558, BUG-0560, BUG-0561, BUG-0564, BUG-0565) and seven hygiene ride-alongs (BUG-0555, BUG-0556, BUG-0557, BUG-0559, BUG-0562, BUG-0563, BUG-0566). Each bundled bug's own Acceptance section was the spec. All 12 items are addressed and meet their acceptance. Where a fix prevents something, the original failure was reproduced against `ai_main` extracted to scratch and shown fixed on the RC (BUG-0555, 0556, 0564, 0565). The bundle's compile and bash-syntax criteria pass across the whole tree. Integration gated runner: exit 0 (855 passed). Unit gated runner: exit 1, with exactly one failure: a repo-wide invariant test broken by four bare `python3 -m` calls that this RC's inline-Python port introduced (Finding 1, BUG-0567, medium). Runtime behaviour at those call sites is intact, but the red unit runner means this RC cannot be `PASS`. One quality-class lint (`engine_size_dupe`) was filed as BUG-0568 and does not affect the recommendation.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "pp_run_ops sweep invariant broken by four new bare python3 -m invocations",
+      "heading": "Finding 1: pp_run_ops sweep invariant broken by four new bare python3 -m invocations",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the class can recur: CODER tickets are limited to targeted `--files` runs, so repo-wide invariant tests only run at TESTER time)\n**Regression:** yes\n**Integrity:** none\n**Filed As:** BUG-0567 (Path C-A)\n\n`tests/unit/test_pp_run_ops_sweep.py::test_no_bare_python3_module_invocations_outside_exemptions` fails in the gated unit run:\n\n```\nAssertionError: Sweep invariant violated — 4 bare 'python3 -m pgai_agent_kanban' invocation(s) found outside the exemption list:\n    team/scripts/api-server.sh:296:if ! _API_PORT=\"$(python3 -m pgai_agent_kanban.api.config port)\" ...\n    team/scripts/api-server.sh:303:        \"Run the resolver to see its error: ... python3 -m pgai_agent_kanban.api.config port\"\n    team/scripts/dashboard/lib/halt_scope.sh:268:    PYTHONPATH=\"$_dhd_token_team\" python3 -m pgai_agent_kanban.halt_after.describe describe \"$_dhd_event\" ...\n    team/scripts/lib/cm/release_halt_after_spend.sh:94:  desc=\"$(PYTHONPATH=\"${kanban_root}...\" python3 -m pgai_agent_kanban.halt_after.describe \\\n```\n\nNone of these lines exist on `ai_main` (the base had `python3 -c` / heredoc forms there, which the sweep does not flag). They come from commit `b65fc861` (\"Move one-line and short inline Python out of thirteen scripts\", CODER-20261006-007), which turned inline Python into `python3 -m` calls instead of `pp_run_ops` calls. CODER-007's ticket constraint said \"bash reaches Python through pp_run_ops\", and its status records the deviation as Instruction Conflict 4, but the sweep test was not run. Runtime behaviour is intact: every site sets `PYTHONPATH` to its own package root, so the calls resolve. The defect is that the RC breaks an existing repo-wide invariant and turns the gated unit runner red. That alone denies a `PASS`. Rated medium per SOP-core \"Rating a Finding\": incorrect, but nothing at runtime is broken. Fix: route the three call sites through `pp_run_ops` (the remedy string at api-server.sh:303 should match), or, if explicit `PYTHONPATH` is deliberate, add each file to `_EXEMPT_SUFFIXES` in the test with a rationale comment.\n\n- `team/scripts/run-integration-tests.sh --coverage` → **INTEGRATION_EXIT=0**. Parallel lane `855 passed, 1 skipped` in 484 s; serial lane collected 0 (exit 5, combined as 0); `bare_tmp_cleanliness: OK`, `listener_cleanliness: OK`, `sentinel_leak: OK`; \"Integration tests PASSED\". Covers the end-to-end cancel-rc tests named by CODER-20261006-006 for BUG-0564.\n- PASS precondition (Step 8): not met, because `UNIT_EXIT=1`.",
+      "filed_as": "BUG-0567",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the class can recur: CODER tickets are limited to targeted `--files` runs, so repo-wide invariant tests only run at TESTER time)",
+        "regression": "yes",
+        "integrity": "none",
+        "filed_as": "BUG-0567 (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

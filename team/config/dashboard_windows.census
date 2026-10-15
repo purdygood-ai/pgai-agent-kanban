@@ -1,0 +1,240 @@
+# team/config/dashboard_windows.census
+#
+# Single source of truth for the tmux dashboard's window and pane layout.
+# team/scripts/dashboard/create.sh is what actually BUILDS the session;
+# this file is what DESCRIBES it, machine-readably, so the description can
+# never quietly drift from the build. Everything derived from the board
+# shape — create.sh's "Window order" comment block, docs/DASHBOARD-PANES.md's
+# per-window tables, and the pytest suite's window/pane expectations — reads
+# THIS file through one reader per language (team/scripts/lib/
+# dashboard_window_census.sh for bash, team/pgai_agent_kanban/dashboard/
+# window_census.py for Python) instead of hand-transcribing the window list.
+# team/scripts/dashboard/generate_window_docs.py renders the derived
+# surfaces from this file and, in --check mode, refuses when a derived
+# surface disagrees with what this file says the board looks like.
+#
+# Format: tab-separated values, one record per data line. Order is
+# significant — windows appear in tmux creation order, and each window's
+# pane records appear in tmux pane-index order directly after it.
+#
+# Parse rule: a line is a DATA line only when its first tab-delimited field
+# is exactly "W" or "P". Every other line — blank, or starting with
+# anything else, including this header block — is a comment and MUST be
+# ignored by readers. '#' is used for comments here purely by convention
+# (matching team/config/default_palette.txt); readers must not special-case
+# '#' itself, only the "first field is W or P" rule.
+#
+# W (window) record — 5 fields after the sigil:
+#   W  <tmux_index>  <name>  <variant>  <pane_count>
+#
+#   tmux_index  0-based tmux window index, in the order create.sh's
+#               `tmux new-session` / `tmux new-window` calls run. No
+#               base-index override exists in create.sh (verified: no
+#               `base-index` setting anywhere in the tree), so this is the
+#               literal index `tmux list-windows` reports.
+#   name        The tmux window name create.sh passes to -n / -s. The
+#               per-project drill windows are dynamic (one is created per
+#               projects.cfg entry, renamed to "drill-N: <project>" after
+#               creation) — both drill records use the literal placeholder
+#               name "drill-N" rather than a real project-specific name.
+#   variant     "-" for windows with exactly one layout. The drill window
+#               has two mutually exclusive layouts selected by the
+#               project's workflow_type (create.sh reads
+#               [project] workflow_type from each project's project.cfg):
+#               "release" (5 panes, shared by the release and feature
+#               workflow types) and "document" (2 panes). Both drill
+#               variants share tmux_index 14 — real installs place drill-1,
+#               drill-2, ... at indices 14, 15, ... depending on how many
+#               projects are registered; this census describes the
+#               PER-WINDOW pane template, not a specific installation's
+#               project count.
+#   pane_count  Number of P records that must follow for this window.
+#               generate_window_docs.py --check treats a mismatch between
+#               this count and the number of P records actually present as
+#               a malformed census (refuses loud; never silently truncates
+#               or pads the pane list).
+#
+# P (pane) record — 6 fields after the sigil, immediately following its
+# window's W record (each P record followed by its C record, below):
+#   P  <tmux_index>  <variant>  <pane_seq>  <position>  <script>  <standalone_cmd>
+#
+#   tmux_index    Must match the W record's tmux_index directly above it.
+#   variant       Must match the W record's variant directly above it.
+#   pane_seq      0-based tmux pane index within the window (the number
+#                 after the "." in a `session:window.pane` tmux target).
+#   position      Human-readable position/size label — the same text
+#                 docs/DASHBOARD-PANES.md's "Pane position" column carries
+#                 (e.g. "Top (HEADER, ~11%)"). Free text; not machine-
+#                 parsed beyond being one TSV field.
+#   script        The script (relative to team/scripts/dashboard/) that
+#                 populates the pane, or a parenthesized note for panes no
+#                 script populates (an interactive shell).
+#   standalone_cmd The exact command an operator runs from a plain shell to
+#                 reproduce the pane's output once, outside tmux. "N/A --
+#                 ..." for panes with no standalone equivalent.
+#
+# C (cadence) record — 5 fields after the sigil, directly after the P
+# record it describes; every P record has exactly one:
+#   C  <tmux_index>  <variant>  <pane_seq>  <cadence>  <when_hidden>
+#
+#   tmux_index,   Identify the pane, exactly as in its P record.
+#   variant,
+#   pane_seq
+#   cadence       How often the pane refreshes while visible: a whole
+#                 number of seconds; "refresh" for [dashboard]
+#                 refresh_seconds (default 5); "stream" for a renderer
+#                 that never returns, run under cadence-loop.sh --stream
+#                 (visibility re-checked every refresh_seconds); "-" for
+#                 a pane with no refresh loop (an interactive shell).
+#   when_hidden   What the pane does while it is not visible (its window
+#                 is not active, or no client is attached): "pause" -- it
+#                 does no work (no renders; a stream is stopped) -- or
+#                 "always-on" -- it keeps refreshing. "always-on" is
+#                 reserved for the one status surface in window 0 and is
+#                 accepted nowhere else. A pane with no refresh loop
+#                 declares "pause": it does nothing on its own.
+#   team/scripts/dashboard/lint_pane_refresh_cadence.py checks that every
+#   pane declares one of the two (via window_census.py's
+#   pane_hidden_declaration_findings), and lib/cadence.sh is what makes a
+#   "pause" pane pause.
+#
+# Reading in bash:
+#   while IFS=$'\t' read -r kind a b c d e f; do
+#       [[ "$kind" == "W" || "$kind" == "P" ]] || continue
+#       # W: a=tmux_index b=name       c=variant d=pane_count
+#       # P: a=tmux_index b=variant    c=pane_seq d=position e=script f=standalone_cmd
+#   done < team/config/dashboard_windows.census
+#
+# Reading in Python: see team/pgai_agent_kanban/dashboard/window_census.py
+# (load_census()) -- do not hand-parse this file a second time.
+#
+# Do not duplicate this list elsewhere. Consumers read this file; they do
+# not hand-transcribe the window/pane list into create.sh comments, docs, or
+# test fixtures.
+
+
+W	0	main	-	4
+P	0	-	0	Top (HEADER, ~11%, floored to fit the full cron roster)	show-multi.sh	show-multi.sh --mode header --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	0	-	0	refresh	pause
+P	0	-	1	Bottom (LOGS, ~40%)	logs.sh	logs.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --stdout
+C	0	-	1	stream	pause
+P	0	-	2	Middle (PROGRESS, full width of left column)	show-multi.sh	show-multi.sh --mode progress --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	0	-	2	refresh	pause
+P	0	-	3	Right (QUEUES, ~25% of window, full height)	show-multi.sh	show-multi.sh --mode queues --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	0	-	3	refresh	pause
+
+W	1	operator	-	10
+P	1	-	0	Top-left, board input col 0 of 3 (BUGS)	column-render.sh	column-render.sh input none none 13 29 --label BUGS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	1	-	0	refresh	pause
+P	1	-	1	Top-left, board input col 1 of 3 (PRIORITIES)	column-render.sh	column-render.sh input none none 13 29 --label PRIORITIES --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	1	-	1	refresh	pause
+P	1	-	2	Top-left, board input col 2 of 3 (REQUIREMENTS)	column-render.sh	column-render.sh input none none 13 29 --label REQUIREMENTS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	1	-	2	refresh	pause
+P	1	-	3	Top-right, board queue col 0 of 5 (PM)	column-render.sh	column-render.sh queue none 13 26 --label PM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	1	-	3	refresh	pause
+P	1	-	4	Top-right, board queue col 1 of 5 (CODER)	column-render.sh	column-render.sh queue none 13 26 --label CODER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	1	-	4	refresh	pause
+P	1	-	5	Top-right, board queue col 2 of 5 (WRITER)	column-render.sh	column-render.sh queue none 13 26 --label WRITER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	1	-	5	refresh	pause
+P	1	-	6	Top-right, board queue col 3 of 5 (TESTER)	column-render.sh	column-render.sh queue none 13 26 --label TESTER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	1	-	6	refresh	pause
+P	1	-	7	Top-right, board queue col 4 of 5 (CM)	column-render.sh	column-render.sh queue none 13 26 --label CM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	1	-	7	refresh	pause
+P	1	-	8	Middle (15% height, floor, min 3 rows, full width, between board and legend) — interactive cmdline shell	(interactive bash, kanban shell-env sourced)	N/A -- interactive shell (cd $PGAI_AGENT_KANBAN_ROOT_PATH; source shell-env if present)
+C	1	-	8	-	pause
+P	1	-	9	Bottom (LEGEND, 1 row)	legend-render.sh	legend-render.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	1	-	9	refresh	pause
+
+W	2	visibility	-	9
+P	2	-	0	left-col-0 (BUGS)	column-render.sh	column-render.sh input none none 13 29 --label BUGS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	2	-	0	refresh	pause
+P	2	-	1	left-col-1 (PRIORITIES)	column-render.sh	column-render.sh input none none 13 29 --label PRIORITIES --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	2	-	1	refresh	pause
+P	2	-	2	left-col-2 (REQUIREMENTS)	column-render.sh	column-render.sh input none none 13 29 --label REQUIREMENTS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	2	-	2	refresh	pause
+P	2	-	3	right-col-0 (PM queue)	column-render.sh	column-render.sh queue none 13 26 --label PM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	2	-	3	refresh	pause
+P	2	-	4	right-col-1 (CODER queue)	column-render.sh	column-render.sh queue none 13 26 --label CODER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	2	-	4	refresh	pause
+P	2	-	5	right-col-2 (WRITER queue)	column-render.sh	column-render.sh queue none 13 26 --label WRITER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	2	-	5	refresh	pause
+P	2	-	6	right-col-3 (TESTER queue)	column-render.sh	column-render.sh queue none 13 26 --label TESTER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	2	-	6	refresh	pause
+P	2	-	7	right-col-4 (CM queue)	column-render.sh	column-render.sh queue none 13 26 --label CM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects
+C	2	-	7	refresh	pause
+P	2	-	8	Bottom (LEGEND, 1 row)	legend-render.sh	legend-render.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	2	-	8	refresh	pause
+
+W	3	attention	-	1
+P	3	-	0	single	attention.sh	attention.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	3	-	0	refresh	pause
+
+W	4	schedule	-	2
+P	4	-	0	Top band (full width, one row per roster agent plus its header, re-applied on resize and client attach) — per-agent LAST FIRED / LAST RESULT / NEXT status	status-band.sh	status-band.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	4	-	0	refresh	pause
+P	4	-	1	Bottom band (full width, remaining height; shrinks first when the window is short) — merged, chronologic, signal-only wake-log event stream across every agent	event-band.sh	event-band.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	4	-	1	refresh	pause
+
+W	5	git	-	2
+P	5	-	0	Left (~65%, git status)	git-status.sh	PGAI_DEV_TREE_PATH=$PGAI_DEV_TREE_PATH git-status.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	5	-	0	10	pause
+P	5	-	1	Right (~35%, recent tags)	git-recent-tags.sh	PGAI_DEV_TREE_PATH=$PGAI_DEV_TREE_PATH git-recent-tags.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	5	-	1	10	pause
+
+W	6	metadata	-	1
+P	6	-	0	single	metadata.sh	metadata.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	6	-	0	10	pause
+
+W	7	rc-metrics	-	2
+P	7	-	0	Left (today + current RC)	metrics.sh	metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	7	-	0	refresh	pause
+P	7	-	1	Right (history.csv)	show-metrics.sh	show-metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	7	-	1	refresh	pause
+
+W	8	agent-metrics	-	2
+P	8	-	0	Left (~50%, live table: newest 10 shipped RCs)	agent-metrics.sh	agent-metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	8	-	0	refresh	pause
+P	8	-	1	Right (~50%, full-history report: every shipped RC)	agent-metrics.sh	agent-metrics.sh --all --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	8	-	1	refresh	pause
+
+W	9	logs	-	1
+P	9	-	0	single	logs.sh	logs.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --stdout
+C	9	-	0	stream	pause
+
+W	10	debug-logs	-	1
+P	10	-	0	single	debug-logs.sh	debug-logs.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --stdout
+C	10	-	0	stream	pause
+
+W	11	training-logs	-	1
+P	11	-	0	single	training-logs.sh	PGAI_REASONING_TRACE=1 training-logs.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	11	-	0	30	pause
+
+W	12	terminal	-	2
+P	12	-	0	Left (~40%, live logs)	logs.sh	logs.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --stdout
+C	12	-	0	stream	pause
+P	12	-	1	Right (~60%, interactive shell at $KANBAN_ROOT)	(interactive bash)	N/A -- interactive shell
+C	12	-	1	-	pause
+
+W	13	human-review	-	2
+P	13	-	0	Left (~65%, Approvals)	human-review.sh	human-review.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	13	-	0	refresh	pause
+P	13	-	1	Right (~35%, Auto-Resolutions)	auto-resolutions.sh	auto-resolutions.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	13	-	1	refresh	pause
+
+W	14	drill-N	release	5
+P	14	release	0	Top (HEADER, ~11%)	show-header.sh	show-header.sh --project <name> --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	14	release	0	refresh	pause
+P	14	release	1	Bottom (LOGS, ~40%)	logs.sh	logs.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --stdout
+C	14	release	1	stream	pause
+P	14	release	2	Middle-left (QUEUES, ~30% of middle row)	show-queues.sh	show-queues.sh --project <name> --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	14	release	2	refresh	pause
+P	14	release	3	Middle-center (PROGRESS, ~45% of middle row)	show-progress.sh	show-progress.sh --project <name> --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	14	release	3	refresh	pause
+P	14	release	4	Middle-right (CRON, ~25% of middle row)	next-cron-firings.sh	next-cron-firings.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	14	release	4	refresh	pause
+
+W	14	drill-N	document	2
+P	14	document	0	Top (~55%, artifact library + pipeline progress)	show-document-drill.sh	show-document-drill.sh --project <name> --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+C	14	document	0	refresh	pause
+P	14	document	1	Bottom (~45%, shared log stream)	logs.sh	logs.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --stdout
+C	14	document	1	stream	pause

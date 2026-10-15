@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # install.sh
-# Install pgai-agent-kanban into the user's home directory and
-# copy the subagents into Claude Code's agents directory.
+# Install pgai-agent-kanban into the user's home directory and, on request
+# (--add-claude-agents / --add-codex-agents), copy the subagents into each
+# provider's agents directory.
 #
 # This is the FRESH-INSTALL path only. It lays down a complete kanban tree
 # from the team/ source directory, seeds default configs, ensures runtime
@@ -9,19 +10,30 @@
 #
 # If the install target already looks like an existing kanban installation,
 # install.sh refuses and directs the operator to upgrade.sh instead.
+# It also refuses, before depositing anything, a source tree that has no
+# team/scripts/lib/version_stamp.sh (the helper that writes VERSION).
+#
+# Seeded intake templates:
+#   With --force over an existing install, every registered project's seeded
+#   BUG-, PRIORITY- and REQUIREMENTS-TEMPLATE.md copies are refreshed from the
+#   installed templates/project/<workflow_type>/ set. A copy that differs is
+#   backed up beside itself as <file>.<UTC timestamp>.bak before it is
+#   overwritten. See "Refresh registered projects' seeded intake templates".
 #
 # Subagent management:
 #   The list of subagents to install is read from subagents/MANIFEST.txt (one
 #   agent name per line; blank lines and # comments are ignored). The installer
 #   tracks previously-installed agents in $KANBAN_ROOT/.installed-subagents so
 #   that agents removed from the manifest are cleaned up on subsequent installs.
-#   Non-kanban agent files in ~/.claude/agents/ are NEVER deleted — only agents
-#   that this installer previously wrote (as recorded in .installed-subagents).
+#   Wrappers go to $CLAUDE_CONFIG_DIR/agents/ for Claude Code (default
+#   ~/.claude/agents/) and ~/.codex/agents/ for Codex. Non-kanban agent files
+#   in those directories are NEVER deleted — only agents that this installer
+#   previously wrote (as recorded in .installed-subagents).
 #
 # Prerequisites:
 #   - bash 4+          (macOS ships bash 3; install bash via Homebrew if needed)
 #   - git              (required to clone/update the repo)
-#   - Python 3.10+     (required for pm_materialize.py and pm_status.py)
+#   - Python 3.12+     (the wake scripts refuse to start on an older interpreter)
 #   - pytest           (required for run-unit-tests.sh and run-integration-tests.sh)
 #                      install: pip install pytest --break-system-packages
 #   - claude CLI       (Claude Code; install from https://claude.com/claude-code)
@@ -34,6 +46,7 @@
 #   ./install.sh --force                       # overwrite without prompting (clean reinstall)
 #   ./install.sh --dry-run                     # show what would happen, do nothing
 #   ./install.sh --wake-tier large             # install with large tier
+#   ./install.sh --wake-tier none              # install no OS crontab (as --no-system-cron)
 #   ./install.sh --stamp-version v9.9.9        # write VERSION verbatim, bypass git resolution
 #
 # NOTE: This script does NOT support --upgrade. To upgrade an existing
@@ -42,7 +55,9 @@
 # Environment:
 #   PGAI_AGENT_KANBAN_ROOT_PATH          # override install location (canonical)
 #   CLAUDE_CONFIG_DIR                    # override Claude Code config dir
-#                                        # (defaults to $HOME/.claude)
+#                                        # (defaults to $HOME/.claude); with
+#                                        # --add-claude-agents, wrappers go to
+#                                        # $CLAUDE_CONFIG_DIR/agents/
 #
 # Upstream: https://github.com/purdygood-ai/pgai-agent-kanban.git
 
@@ -112,15 +127,25 @@ REQUESTED_VERSION=""  # non-empty = optional positional VERSION argument (e.g. "
                        # currently checked out. See "Version-targeted install" below.
 _print_install_usage() {
   cat <<EOF
-Usage: ./install.sh [VERSION] [--force] [--dry-run] [--wake-tier small|medium|large]
+Usage: ./install.sh [VERSION] [--force] [--dry-run] [--wake-tier small|medium|large|none]
 
-Installs pgai-agent-kanban into your home directory and copies
-the subagents into Claude Code's agents directory.
+Installs pgai-agent-kanban into your home directory and, with
+--add-claude-agents / --add-codex-agents, copies the subagents into each
+provider's agents directory (see those options below).
 
 This is the FRESH-INSTALL path only.  If the install target already exists,
 install.sh refuses with a "use upgrade.sh" message.  Use --force to bypass
 the existence guard for a clean reinstall (e.g., after manually removing the
 target directory).
+
+Seeded intake templates:
+  Every registered project's bugs/templates/BUG-TEMPLATE.md,
+  priority/templates/PRIORITY-TEMPLATE.md and
+  requirements/templates/REQUIREMENTS-TEMPLATE.md are refreshed from the
+  installed templates/project/<workflow_type>/ set (relevant with --force
+  over an existing install). A copy that differs is kept as
+  <file>.<UTC timestamp>.bak beside itself, then overwritten, with one line
+  naming the project and file. Nothing else under projects/ is touched.
 
 Version-targeted install:
   Pass an optional positional VERSION argument to lay down a specific
@@ -167,11 +192,14 @@ Wake cadence tier:
 
     medium  Every 2 minutes with sub-minute sleep stagger.
             Hardware assumption: 2-4 cores / 8-16 GB RAM, dedicated or semi-dedicated host.
-            Operators upgrading from pre-v0.48.3 who want the old cadence should pass
-            --wake-tier medium explicitly.
+            Pass --wake-tier medium explicitly to run a 2-minute cadence instead.
 
     large   Every minute with pipeline-ordered sub-minute stagger.
             Hardware assumption: 8+ cores / 16+ GB RAM, dedicated high-throughput host.
+
+    none    Install no OS crontab; the same as --no-system-cron (see below).
+            The pseudocron config is still installed, at the default tier (small).
+            Accepted for parity with upgrade.sh --wake-tier none.
 
   To change the tier after installation, re-run:
     \$KANBAN_ROOT/scripts/install-crontab.sh --wake-tier <tier>
@@ -190,17 +218,19 @@ Options:
                          it only controls per-file overwrite behavior during deposit.
   --dry-run              Show what would be installed without writing anything;
                          does NOT modify \$KANBAN_ROOT/.installed-subagents
-  --add-claude-agents    Deploy provider-agent wrappers to ~/.claude/agents/.
-                         Without this flag, NOTHING is written under ~/.claude (no files, no directory
-                         creation, no prompts). Use on machines where the Claude Code CLI is installed.
+  --add-claude-agents    Deploy provider-agent wrappers to \$CLAUDE_CONFIG_DIR/agents/
+                         (default ~/.claude/agents/). Without this flag, NOTHING is written there
+                         (no files, no directory creation, no prompts). Use on machines where the
+                         Claude Code CLI is installed.
   --add-codex-agents     Deploy provider-agent wrappers to ~/.codex/agents/.
                          Without this flag, NOTHING is written under ~/.codex (no files, no directory
                          creation, no prompts). Use on machines where the Codex CLI is installed.
-                         Note: --add-claude-agents --add-codex-agents together reproduce the pre-v0.58.2
-                         default behavior of deploying wrappers to both providers. Existing users who
-                         want agent refresh on upgrade must now pass the relevant flag(s) explicitly.
-  --wake-tier <tier>     Select wake cadence tier: small (default), medium, or large.
-                         Applies to both OS crontab and pseudocron. See "Wake cadence tier" above.
+                         Note: pass --add-claude-agents --add-codex-agents together to deploy wrappers
+                         to both providers. A re-run refreshes agents only for the provider flag(s)
+                         it is given.
+  --wake-tier <tier>     Select wake cadence tier: small (default), medium, large, or none.
+                         Applies to both OS crontab and pseudocron. none installs no OS
+                         crontab, as --no-system-cron does. See "Wake cadence tier" above.
                          Also accepted as --wake-tier=<tier>.
   --no-system-cron       Skip OS crontab installation (pseudocron config is still installed).
                          Use for Docker / cron-less / customer-site deployments.
@@ -215,7 +245,8 @@ Deprecated flags (still accepted; emit a deprecation notice to stderr):
 Environment variables:
   PGAI_AGENT_KANBAN_ROOT_PATH          Where to install — canonical name
                                         Default: \$HOME/pgai_agent_kanban
-  CLAUDE_CONFIG_DIR                     Claude Code config dir (default: \$HOME/.claude)
+  CLAUDE_CONFIG_DIR                     Claude Code config dir (default: \$HOME/.claude);
+                                        --add-claude-agents deploys to its agents/ subdirectory
 EOF
 }
 
@@ -228,7 +259,7 @@ argparse_parse --value-flags "wake-tier crontab-tier stamp-version" -- "$@"
 
 # Emit clear errors for value-taking flags given with no value.
 if argparse_missing "wake-tier"; then
-  err "--wake-tier requires a value (small, medium, or large)."
+  err "--wake-tier requires a value (small, medium, large, or none)."
   exit 1
 fi
 if argparse_missing "crontab-tier"; then
@@ -307,8 +338,14 @@ if argparse_has "wake-tier"; then
   WAKE_TIER="${ARGPARSE_FLAGS[wake-tier]}"
   case "$WAKE_TIER" in
     small|medium|large) ;;
+    none)
+      # No OS crontab, exactly as --no-system-cron. The pseudocron config
+      # (inert until pseudocron.py is started) keeps the default tier.
+      NO_SYSTEM_CRON=true
+      WAKE_TIER="small"
+      ;;
     *)
-      err "Invalid wake tier '${WAKE_TIER}'. Choose: small, medium, or large."
+      err "Invalid wake tier '${WAKE_TIER}'. Choose: small, medium, large, or none."
       exit 1
       ;;
   esac
@@ -342,8 +379,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 # When REQUESTED_VERSION is non-empty (operator ran e.g. "./install.sh
 # v2.1.0" or "./install.sh ai_v2.1.0"), resolve it against SCRIPT_DIR's own
-# git tags via the shared team/scripts/lib/version_resolve.sh mechanism
-# (built in the prerequisite ticket), materialize that tag's tree into a
+# git tags via the shared team/scripts/lib/version_resolve.sh mechanism,
+# materialize that tag's tree into a
 # throwaway DETACHED worktree, and redirect SCRIPT_DIR to point at that
 # worktree for the REST of this script.  Every "$SCRIPT_DIR" reference below
 # this point (the team/ tree copy loop, subagent manifest and templates,
@@ -365,8 +402,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # and install.sh behaves exactly as it did before this argument existed.
 # ---------------------------------------------------------------------------
 REPO_SOURCE_DIR="$SCRIPT_DIR"
+# The exact tag a version-targeted install lays down (e.g. "ai_v2.33.0");
+# empty for a checkout install.  The VERSION_DETAIL stamp at the end of this
+# script names it directly, since no project (and so no branch prefix) is
+# registered yet on a fresh install.
+INSTALLED_TAG=""
 if [[ -n "$REQUESTED_VERSION" ]]; then
-  if [[ ! -d "$REPO_SOURCE_DIR/.git" ]]; then
+  # Any git checkout qualifies: a clone's .git is a directory, a linked
+  # worktree's .git is a pointer file, and tag resolution works through
+  # either (same -e test as stamp_version_files and upgrade.sh).  Only a
+  # tree with no .git at all reaches this refusal.
+  if [[ ! -e "$REPO_SOURCE_DIR/.git" ]]; then
     err "ERROR: a version argument was given ('${REQUESTED_VERSION}') but '${REPO_SOURCE_DIR}' is not a git checkout (no .git found)."
     err "Version-targeted install requires a git checkout of the pgai-agent-kanban repo so the requested tag can be resolved."
     err "Fix: run install.sh from a git clone of the repo, or omit the version argument to install from this tree as-is."
@@ -446,6 +492,7 @@ if [[ -n "$REQUESTED_VERSION" ]]; then
   # Redirect SCRIPT_DIR: every "$SCRIPT_DIR" reference for the rest of this
   # script now reads from the resolved tag's tree instead of REPO_SOURCE_DIR.
   SCRIPT_DIR="$_INSTALL_CLEAN_SRC"
+  INSTALLED_TAG="$_INSTALL_RESOLVED_TAG"
   unset _INSTALL_RESOLVED_TAG _INSTALL_CLEAN_SRC
 fi
 
@@ -468,12 +515,9 @@ fi
 PGAI_AGENT_KANBAN_ROOT_PATH="$KANBAN_ROOT"
 export PGAI_AGENT_KANBAN_ROOT_PATH
 
-CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-AGENTS_DIR="${CLAUDE_DIR}/agents"
-
 info "Source repo: $SCRIPT_DIR"
 info "Install target: $KANBAN_ROOT"
-info "Provider wrappers: ~/.{claude,codex}/agents/ (per kanban.cfg [providers] available)"
+info "Provider wrappers: \$CLAUDE_CONFIG_DIR/agents/ (default ~/.claude/agents/), ~/.codex/agents/ (per kanban.cfg [providers] available)"
 info ""
 
 # ---------------------------------------------------------------------------
@@ -542,7 +586,7 @@ fi
 
 if ! command -v python3 >/dev/null 2>&1; then
   err "python3 not found in PATH"
-  err "Please install Python 3.10+ before continuing"
+  err "Please install Python 3.12+ before continuing"
   exit 1
 fi
 
@@ -550,9 +594,9 @@ PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.versi
 PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
 PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
 
-if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 10 ]]; then
-  warn "Python $PY_VERSION detected — version 3.10+ is recommended"
-  warn "pm_materialize.py and pm_status.py may not work correctly"
+if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 12 ]]; then
+  warn "Python $PY_VERSION detected — version 3.12+ is required"
+  warn "the wake scripts refuse to start on Python older than 3.12"
   warn "Consider activating a newer Python in your bashrc"
 else
   ok "Python $PY_VERSION OK"
@@ -582,6 +626,44 @@ if ! python3 -c 'import yaml' >/dev/null 2>&1; then
 else
   ok "pyyaml found"
 fi
+
+# The source tree must carry the shared version-stamp helper.
+#
+# The VERSION stamp at the end of this script calls stamp_version_files,
+# defined only in the source tree's team/scripts/lib/version_stamp.sh. A tree
+# without that file (a damaged or hand-assembled copy) is refused here,
+# before the first file is laid down, so the root is never left holding a
+# deposited tree with no VERSION written. upgrade.sh refuses the same tree
+# the same way. The helper is sourced here, once, for the stamp step.
+#
+# The remedy depends on where SCRIPT_DIR came from: a version-targeted
+# install reads a tag's tree, so the fix is to install from the checked-out
+# tree instead; a git checkout can restore the file from HEAD; a tree with no
+# .git (an archive export or tarball) is replaced by a fresh clone.
+_INSTALL_STAMP_LIB="${SCRIPT_DIR}/team/scripts/lib/version_stamp.sh"
+if [[ ! -f "$_INSTALL_STAMP_LIB" ]]; then
+  if [[ -n "$INSTALLED_TAG" ]]; then
+    _install_stamp_remedy="'${REPO_SOURCE_DIR}/install.sh'"
+  elif [[ -e "${SCRIPT_DIR}/.git" ]]; then
+    _install_stamp_remedy="git -C '${SCRIPT_DIR}' checkout HEAD -- team/scripts/lib/version_stamp.sh && '${SCRIPT_DIR}/install.sh'"
+  else
+    _install_stamp_remedy="git clone https://github.com/purdygood-ai/pgai-agent-kanban.git '${HOME}/pgai-agent-kanban-src' && '${HOME}/pgai-agent-kanban-src/install.sh'"
+  fi
+  # shellcheck source=team/scripts/lib/error_contract.sh
+  source "${_INSTALL_SCRIPT_DIR}/team/scripts/lib/error_contract.sh"
+  # BLOCK-WORTHY (docs/blocking-site-census.md): depositing a tree that
+  # cannot stamp its own VERSION leaves a half-written install -- every file
+  # laid down, no VERSION -- a state-corrupting partial install.
+  pgai_emit_error_contract \
+    "install.stamp-helper-missing" \
+    "The source tree ${SCRIPT_DIR} has no version-stamp helper at ${_INSTALL_STAMP_LIB}; without it the install cannot write VERSION after depositing. Nothing has been deposited and ${KANBAN_ROOT} is unchanged." \
+    "${_install_stamp_remedy}"
+  # CENSUS-ANCHOR: install-stamp-helper-missing-01
+  exit 1
+fi
+# shellcheck source=team/scripts/lib/version_stamp.sh
+source "$_INSTALL_STAMP_LIB"
+unset _INSTALL_STAMP_LIB
 
 info ""
 
@@ -687,7 +769,8 @@ if [[ "$DRY_RUN" != "true" ]]; then
 
   # --- Seed kanban.cfg from template (no-clobber) ---
   # kanban.cfg is the single source of truth for framework operational settings.
-  # As of v0.28.0, the template lives at the kanban-tree root as kanban.cfg_example.
+  # The template lives at the kanban-tree root as kanban.cfg_example; it is copied
+  # only when kanban.cfg is absent, so an existing kanban.cfg is never rewritten.
   _kanban_cfg_template="${SCRIPT_DIR}/kanban.cfg_example"
   if [[ ! -f "$KANBAN_ROOT/kanban.cfg" ]]; then
     if [[ -f "$_kanban_cfg_template" ]]; then
@@ -700,18 +783,37 @@ if [[ "$DRY_RUN" != "true" ]]; then
     info "kanban.cfg already exists — skipping template copy"
   fi
   unset _kanban_cfg_template
+
+  # --- Seed claude-env from template (no-clobber) ---
+  # claude-env holds runtime tuning the installed `claude` binary reads. A
+  # template nobody has is a template nobody uses, so — like kanban.cfg above,
+  # and unlike shell-env/secrets below (deliberately opt-in; PATH and OAuth
+  # tokens are personal) — claude-env is auto-seeded from claude-env_example
+  # on a fresh install. Create-if-absent only: an existing claude-env (from a
+  # prior install or an operator's own edits) is never touched.
+  _claude_env_template="${SCRIPT_DIR}/claude-env_example"
+  if [[ ! -f "$KANBAN_ROOT/claude-env" ]]; then
+    if [[ -f "$_claude_env_template" ]]; then
+      cp "$_claude_env_template" "$KANBAN_ROOT/claude-env"
+      ok "Initialized: claude-env (from claude-env_example)"
+    else
+      warn "Source missing (skipping): claude-env_example — claude-env not initialized"
+    fi
+  else
+    info "claude-env already exists — skipping template copy"
+  fi
+  unset _claude_env_template
 fi
 
 # --- Install kanban tree ---
 info "Installing kanban tree to $KANBAN_ROOT..."
 
 # Copy each item from team/ into the kanban root.
-# NOTE: a top-level team/release-state.md file is no longer part of the
-# installed tree; release state moved to a per-project schema. Runtime
-# release state lives exclusively at:
+# NOTE: release state is per-project; no top-level release-state.md is
+# installed. Runtime release state lives exclusively at:
 #   $KANBAN_ROOT/projects/<name>/release-state.md
 # That file tracks only in-flight RC state; Last Released is derived from git tags.
-for item in README.md DIRECTIVES.md OVERVIEW.md SOP.md roles scripts pm-agent workflows pgai_agent_kanban halt_after templates demos config; do
+for item in README.md DIRECTIVES.md OVERVIEW.md SOP-core.md roles scripts pm-agent workflows pgai_agent_kanban halt_after templates demos config read-order; do
   src="$SCRIPT_DIR/team/$item"
   dst="$KANBAN_ROOT/$item"
 
@@ -723,12 +825,63 @@ for item in README.md DIRECTIVES.md OVERVIEW.md SOP.md roles scripts pm-agent wo
   install_path "$src" "$dst" "team/$item"
 done
 
-# Copy the v0.28.0 example template files (but not as the active files — leave that to the user).
+# --- Install the docs/ reference set the governance files above cite ---
+# docs/ is a repository-root directory, not a team/ subdirectory, so it is
+# never touched by the team/ item loop above -- that loop resolves each word
+# against $SCRIPT_DIR/team/ and a "docs" entry there would resolve to a path
+# that does not exist.
+#
+# The list of documents delivered, and the rule for what belongs on it, live
+# in one shared manifest that team/scripts/upgrade.sh reads too — see
+# team/config/docs-manifest.txt. Neither script keeps its own copy.
+DOCS_MANIFEST="$SCRIPT_DIR/team/config/docs-manifest.txt"
+if [[ ! -f "$DOCS_MANIFEST" ]]; then
+  err "Docs manifest not found at $DOCS_MANIFEST"
+  err "This file is required and ships with the kanban repo."
+  exit 1
+fi
+
+DOCS_TO_INSTALL=()
+while IFS= read -r doc_line; do
+  doc_line="${doc_line%%#*}"
+  doc_line="${doc_line#"${doc_line%%[![:space:]]*}"}"
+  doc_line="${doc_line%"${doc_line##*[![:space:]]}"}"
+  [[ -z "$doc_line" ]] && continue
+  DOCS_TO_INSTALL+=("$doc_line")
+done < "$DOCS_MANIFEST"
+
+if [[ ${#DOCS_TO_INSTALL[@]} -eq 0 ]]; then
+  err "Docs manifest at $DOCS_MANIFEST is empty or contains only comments"
+  err "At least one docs/ path is required."
+  exit 1
+fi
+
+for doc_item in "${DOCS_TO_INSTALL[@]}"; do
+  src="$SCRIPT_DIR/docs/$doc_item"
+  dst="$KANBAN_ROOT/docs/$doc_item"
+
+  if [[ ! -e "$src" ]]; then
+    warn "Source missing (skipping): $src"
+    continue
+  fi
+
+  install_path "$src" "$dst" "docs/$doc_item"
+done
+unset doc_item DOCS_MANIFEST DOCS_TO_INSTALL doc_line
+
+# Copy the example template files (but not as the active files — leave that to the user).
 # kanban.cfg_example is the consolidated INI config template.
 # shell-env_example and secrets_example replace the deprecated bashrc.
 # projects.cfg_example and project.cfg_example are the registry / per-project templates.
-for example in kanban.cfg_example shell-env_example secrets_example projects.cfg_example project.cfg_example; do
+# project.cfg_example is published from team/config/project.cfg_example, the
+# one copy of its text: the team/ copy above already installs it as
+# config/project.cfg_example, which create-project.sh and add-project.sh
+# render each new project.cfg from (the repository-root name is a link to it).
+# claude-env_example is the Claude CLI runtime-tuning template (see the
+# header comment in claude-env_example itself for what it configures).
+for example in kanban.cfg_example shell-env_example secrets_example projects.cfg_example project.cfg_example claude-env_example; do
   src="$SCRIPT_DIR/$example"
+  [[ "$example" == "project.cfg_example" ]] && src="$SCRIPT_DIR/team/config/project.cfg_example"
   dst="$KANBAN_ROOT/$example"
 
   if [[ ! -e "$src" ]]; then
@@ -744,25 +897,29 @@ done
 #   cp shell-env_example shell-env
 #   cp secrets_example secrets && chmod 600 secrets
 #
-# In contrast, kanban.cfg IS auto-seeded (see "Seed kanban.cfg from template"
-# block earlier in install.sh) because the framework needs it to read tunables.
+# In contrast, kanban.cfg and claude-env ARE auto-seeded (see "Seed kanban.cfg
+# from template" and "Seed claude-env from template" blocks earlier in
+# install.sh) — the framework needs kanban.cfg to read tunables, and a
+# claude-env template nobody has is a template nobody uses. Both are
+# create-if-absent only: an existing file is never overwritten by either
+# seed block.
 
 # Make sure runtime directories exist.
-# As of v0.18.0, per-project runtime state lives under projects/<name>/.
-# As of v0.18.4, kanban-root-scoped runtime dirs are also seeded here:
+# Per-project runtime state lives under projects/<name>/.
+# Kanban-root-scoped runtime dirs are seeded here:
 #   $KANBAN_ROOT/logs/   — cron job logs (one per agent, shared across projects)
 #   $KANBAN_ROOT/locks/  — per-agent and per-repo flock files (cross-project)
-# As of v0.53.0, per-project log subdirs are seeded for every project in projects.cfg.
+# Per-project log subdirs are seeded for every project in projects.cfg (below).
 if [[ "$DRY_RUN" != "true" ]]; then
   # Kanban-root-scoped runtime dirs.
   #   logs/                 — cron-<agent>.log redirects and CM push logs
-  #   logs/agents/          — per-firing wake batch logs (v0.27.2+)
-  #   logs/debug/           — per-agent verbose progress logs (v0.27.3+, kanban-wide)
+  #   logs/agents/          — per-firing wake batch logs
+  #   logs/debug/           — per-agent verbose progress logs (kanban-wide)
   #                           Written when PGAI_VERBOSE_MODE=1; one file per agent
   #                           (coder.log, pm.log, ...) across all projects. Lines
   #                           self-identify via [<task_id>] prefix.
   #   logs/debug/archive/   — daily-rotated debug logs (managed by cleanup.sh)
-  #   logs/training/<role>/ — reasoning-trace corpus (v0.27.3+, kanban-wide)
+  #   logs/training/<role>/ — reasoning-trace corpus (kanban-wide)
   #                           Copied here when PGAI_REASONING_TRACE=1 after a task
   #                           reaches DONE; downstream PO-training corpus.
   #   locks/                — flock files
@@ -829,7 +986,7 @@ if [[ "$DRY_RUN" != "true" ]]; then
     warn "Source missing (skipping): team/scripts/po-agent.sh"
   fi
 
-  # Install cm-cancel-rc.sh into the live kanban scripts directory with executable bit
+  # Install cm/cancel-rc.sh into the live kanban scripts directory with executable bit
   if [[ -f "$SCRIPT_DIR/team/scripts/cm/cancel-rc.sh" ]]; then
     mkdir -p "$KANBAN_ROOT/scripts"
     cp "$SCRIPT_DIR/team/scripts/cm/cancel-rc.sh" "$KANBAN_ROOT/scripts/cm/cancel-rc.sh"
@@ -840,7 +997,7 @@ if [[ "$DRY_RUN" != "true" ]]; then
   fi
 
   # Install the CM origin-push recovery script
-  # (PreToolUse hook blocks push to main/tags inside cm-release.sh)
+  # (PreToolUse hook blocks push to main/tags inside cm/release.sh)
   _cm_recovery_name="push-""watch""dog"".sh"
   _pw_src="$SCRIPT_DIR/team/scripts/cm/${_cm_recovery_name}"
   _pw_dst="$KANBAN_ROOT/scripts/cm/${_cm_recovery_name}"
@@ -854,7 +1011,7 @@ if [[ "$DRY_RUN" != "true" ]]; then
   fi
   unset _cm_recovery_name _pw_src _pw_dst
 
-  # Install cm-open-doc.sh into the live kanban scripts directory with executable bit
+  # Install cm/open-doc.sh into the live kanban scripts directory with executable bit
   if [[ -f "$SCRIPT_DIR/team/scripts/cm/open-doc.sh" ]]; then
     mkdir -p "$KANBAN_ROOT/scripts"
     cp "$SCRIPT_DIR/team/scripts/cm/open-doc.sh" "$KANBAN_ROOT/scripts/cm/open-doc.sh"
@@ -864,7 +1021,7 @@ if [[ "$DRY_RUN" != "true" ]]; then
     warn "Source missing (skipping): team/scripts/cm/open-doc.sh"
   fi
 
-  # Install cm-finalize.sh into the live kanban scripts directory with executable bit
+  # Install cm/finalize.sh into the live kanban scripts directory with executable bit
   if [[ -f "$SCRIPT_DIR/team/scripts/cm/finalize.sh" ]]; then
     mkdir -p "$KANBAN_ROOT/scripts"
     cp "$SCRIPT_DIR/team/scripts/cm/finalize.sh" "$KANBAN_ROOT/scripts/cm/finalize.sh"
@@ -874,15 +1031,15 @@ if [[ "$DRY_RUN" != "true" ]]; then
     warn "Source missing (skipping): team/scripts/cm/finalize.sh"
   fi
 
-  # Install v0.20.0 operator scripts: project lifecycle management
-  for v020_script in create-project.sh remove-project.sh add-project.sh export-project.sh import-project.sh; do
-    if [[ -f "$SCRIPT_DIR/team/scripts/${v020_script}" ]]; then
+  # Install the project lifecycle management operator scripts
+  for lifecycle_script in create-project.sh remove-project.sh add-project.sh export-project.sh import-project.sh; do
+    if [[ -f "$SCRIPT_DIR/team/scripts/${lifecycle_script}" ]]; then
       mkdir -p "$KANBAN_ROOT/scripts"
-      cp "$SCRIPT_DIR/team/scripts/${v020_script}" "$KANBAN_ROOT/scripts/${v020_script}"
-      chmod +x "$KANBAN_ROOT/scripts/${v020_script}"
-      ok "Installed: scripts/${v020_script}"
+      cp "$SCRIPT_DIR/team/scripts/${lifecycle_script}" "$KANBAN_ROOT/scripts/${lifecycle_script}"
+      chmod +x "$KANBAN_ROOT/scripts/${lifecycle_script}"
+      ok "Installed: scripts/${lifecycle_script}"
     else
-      warn "Source missing (skipping): team/scripts/${v020_script}"
+      warn "Source missing (skipping): team/scripts/${lifecycle_script}"
     fi
   done
 
@@ -978,7 +1135,8 @@ fi
 #   - DRY_RUN=true prints intentions without touching the filesystem.
 #   - projects/<name>/logs/ is assumed to already exist (seeded by create-project.sh);
 #     this pass only adds the two subtrees.
-#   - logs/training/ is reserved for v0.54.0 and stays empty in this RC.
+#   - logs/training/<role>/ receives each finished task's reasoning trace
+#     (written by the wake when tracing is on); this pass only creates it.
 _projects_cfg_file="${KANBAN_ROOT}/projects.cfg"
 if [[ -f "$_projects_cfg_file" ]]; then
   while IFS= read -r _pname; do
@@ -1008,14 +1166,48 @@ else
 fi
 unset _projects_cfg_file _pname _plog_dir
 
+# --- Refresh registered projects' seeded intake templates ---
+# Every registered project's bugs/templates/BUG-TEMPLATE.md,
+# priority/templates/PRIORITY-TEMPLATE.md and
+# requirements/templates/REQUIREMENTS-TEMPLATE.md are brought in line with
+# the templates/project/<workflow_type>/ set just installed (the same source
+# create-project.sh seeds from). Matters when install.sh --force runs over an
+# existing install; on a fresh install no project is registered yet and the
+# step prints one no-op line.
+#   - A byte-identical copy is left alone; a missing one is seeded.
+#   - A differing copy -- an older release's template or an operator edit,
+#     which the refresh cannot tell apart -- is kept beside it as
+#     <file>.<UTC timestamp>.bak, then overwritten; one line names the
+#     project, the file and the backup.
+#   - Nothing else under projects/ is written.
+# The installed scripts/lib/pp_run_ops.sh runs the installed
+# pgai_agent_kanban.ops module with PYTHONPATH cleared, so templates are read
+# from $KANBAN_ROOT only, never from this source tree. A failure warns and the
+# install carries on: a stale template copy is a quality issue, not a broken
+# install.
+if [[ "$DRY_RUN" == "true" ]]; then
+  info "[dry-run] would refresh seeded intake templates of every registered project from the installed templates"
+elif [[ -f "$KANBAN_ROOT/scripts/lib/pp_run_ops.sh" ]]; then
+  if ! PYTHONPATH="" bash "$KANBAN_ROOT/scripts/lib/pp_run_ops.sh" pgai_agent_kanban.ops \
+      refresh_seeded_templates --kanban-root="$KANBAN_ROOT"; then
+    warn "Seeded template refresh reported problems (see the lines above); other projects were still refreshed."
+    warn "Re-run it after fixing the cause: bash \"$KANBAN_ROOT/scripts/lib/pp_run_ops.sh\" pgai_agent_kanban.ops refresh_seeded_templates --kanban-root=\"$KANBAN_ROOT\""
+  fi
+else
+  warn "Seeded template refresh skipped: $KANBAN_ROOT/scripts/lib/pp_run_ops.sh not installed"
+fi
+
 info ""
 
-# --- Install provider-agent wrappers (multi-provider, v0.27.1+) ---
+# --- Install provider-agent wrappers (multi-provider) ---
 # These are the lowercase provider-agent wrapper files from subagents/*.md
 # (cm.md, coder.md, pm.md, po.md, tester.md, writer.md, and others).
 #
-# They are deployed to ~/.{provider}/agents/ for EACH configured provider —
+# They are deployed to each configured provider's agents directory —
 # claude, codex, and any others listed in kanban.cfg [providers] available.
+# provider_agents_dir (team/scripts/lib/subagent_deploy.sh) names it:
+# $CLAUDE_CONFIG_DIR/agents/ for claude (default ~/.claude/agents/), and
+# ~/.{provider}/agents/ for every other provider.
 # These are the generic agent contracts the LLM provider invokes; the
 # kanban-specific role bodies (uppercase team/roles/*.md -> $KANBAN_ROOT/roles/)
 # are shared across all providers and are deployed via the team/ tree copy
@@ -1027,7 +1219,7 @@ info ""
 #
 # Per-provider behavior:
 #   - CLI detection: provider binary not on PATH → skip with warning.
-#   - Directory creation: ~/.{provider}/agents/ absent → always created via
+#   - Directory creation: the agents directory absent → always created via
 #     mkdir -p (ensure_provider_agents_dir in
 #     team/scripts/lib/subagent_deploy.sh) before any wrapper is copied;
 #     --dry-run reports the pending creation without writing; creation
@@ -1177,7 +1369,7 @@ for _provider in $_subagent_providers; do
     continue
   fi
 
-  _provider_agents_dir="$HOME/.${_provider}/agents"
+  _provider_agents_dir="$(provider_agents_dir "$_provider")"
 
   # Directory creation: always ensured before deploying wrappers — a missing
   # target directory must never silently no-op the deploy. See
@@ -1280,7 +1472,7 @@ unset _subagent_safe_overwrite_available _ANY_PROVIDER_FLAG_SET
 
 info ""
 
-# --- Scheduler hooks (v0.58.0+) ---
+# --- Scheduler hooks ---
 #
 # Two independent scheduler axes:
 #   1. OS crontab  — install-crontab.sh   — skipped when NO_SYSTEM_CRON=true
@@ -1338,7 +1530,7 @@ unset _kanban_root_real _system_tmp_real _pgai_temp_real
 # Hook 1: OS crontab — via install-crontab.sh
 #
 # Skipped when:
-#   - NO_SYSTEM_CRON is true (--no-system-cron flag or deprecated --tier=none)
+#   - NO_SYSTEM_CRON is true (--no-system-cron, --wake-tier none, or deprecated --crontab-tier=none)
 #   - DRY_RUN is true — prints an informational note
 #   - KANBAN_ROOT is under a temp/test directory (temp-target guard)
 #   - crontab binary is not available — CI / non-interactive environments
@@ -1347,7 +1539,7 @@ unset _kanban_root_real _system_tmp_real _pgai_temp_real
 _INSTALL_CRONTAB_SH="$KANBAN_ROOT/scripts/install-crontab.sh"
 
 if [[ "$NO_SYSTEM_CRON" == "true" ]]; then
-  info "Crontab: skipped — --no-system-cron set (cron-less / Docker deployment)."
+  info "Crontab: skipped — --no-system-cron or --wake-tier none set (cron-less / Docker deployment)."
   info "pseudocron will be installed below for use with team/scripts/pseudocron.py."
 elif [[ "$DRY_RUN" == "true" ]]; then
   info "[dry-run] would install crontab (tier: ${WAKE_TIER}) via install-crontab.sh --wake-tier=${WAKE_TIER}"
@@ -1533,17 +1725,22 @@ echo ""
 #   - VERSION comes from the source tree's committed VERSION file when present.
 #     The committed file IS the identity; no git-describe rewrite occurs.
 #   - VERSION_DETAIL (full describe + deposit SHA) is always tool-written as
-#     deployment provenance; it is not committed.
+#     deployment provenance; it is not committed.  It is written whenever the
+#     source tree is a git checkout (a .git directory or a linked worktree's
+#     .git pointer file).  From a tree with no .git none is written and any
+#     earlier one is removed, so the closing line names VERSION_DETAIL only
+#     when this run wrote it.
+#   - A version-targeted install passes the tag it resolved (INSTALLED_TAG),
+#     so VERSION_DETAIL starts with that tag (e.g. "ai_v2.33.0  deposit-sha=...")
+#     rather than whatever bare-"v" tag a prefix-less describe would find.
 #
 # Override path (--stamp-version STRING):
 #   - VERSION is written verbatim from the explicit value.
-#   - VERSION_DETAIL is NOT written.
-_INSTALL_STAMP_LIB="${SCRIPT_DIR}/team/scripts/lib/version_stamp.sh"
-if [[ -f "$_INSTALL_STAMP_LIB" ]]; then
-  # shellcheck source=team/scripts/lib/version_stamp.sh
-  source "$_INSTALL_STAMP_LIB"
-fi
-unset _INSTALL_STAMP_LIB
+#   - VERSION_DETAIL is NOT written, and any earlier one is removed, so no
+#     VERSION_DETAIL names a deposit other than the stamped one.
+#
+# The helper was sourced during the preflight checks; a source tree without
+# it is refused there, before anything is deposited.
 
 if [[ "$DRY_RUN" != "true" ]]; then
   if [[ -n "$STAMP_VERSION" ]]; then
@@ -1553,9 +1750,14 @@ if [[ "$DRY_RUN" != "true" ]]; then
     ok "Wrote VERSION: $STAMP_VERSION -> $KANBAN_ROOT/VERSION"
   else
     # Normal deposit: copy committed VERSION (when present) and write VERSION_DETAIL.
-    stamp_version_files "$SCRIPT_DIR" "$KANBAN_ROOT"
+    stamp_version_files "$SCRIPT_DIR" "$KANBAN_ROOT" "" "" "$INSTALLED_TAG"
     _INSTALL_CLEAN_TAG="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
-    ok "VERSION: ${_INSTALL_CLEAN_TAG} (from source tree; detail in VERSION_DETAIL)"
+    # The helper leaves VERSION_DETAIL in place only when it wrote it.
+    if [[ -f "$KANBAN_ROOT/VERSION_DETAIL" ]]; then
+      ok "VERSION: ${_INSTALL_CLEAN_TAG} (from source tree; detail in VERSION_DETAIL)"
+    else
+      ok "VERSION: ${_INSTALL_CLEAN_TAG} (from source tree; not a git checkout, so no VERSION_DETAIL)"
+    fi
     unset _INSTALL_CLEAN_TAG
   fi
 fi

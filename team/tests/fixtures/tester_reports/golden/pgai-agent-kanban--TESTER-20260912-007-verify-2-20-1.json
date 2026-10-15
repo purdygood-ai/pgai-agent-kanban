@@ -1,0 +1,155 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "This RC bundles four medium-severity bugs, all fallout from the previous\nrelease wiring the shared project-name resolver in front of the operator\nverbs. All four are substantively fixed, and each fix was demonstrated\nbehaviourally rather than read: the `project_resolve.not_found` remedy now\nbranches on an empty registry and names a runnable command; the dead\n`deep_verify.unregistered_project` gate is gone from the script, from its\ncensus anchor and from the Locator Index together; the stale prose\nassertion in the deep-verify integration test now keys on the stable\nmachine key; `show-queues` and `verify-rc-state` resolve their project\nargument and refuse dual-channel instead of rendering a zeroed board; and\n`halt-global`, `unhalt-global` and `wake-now` speak the dual-channel\ncontract across nine new refusal sites, each with a census anchor that\nreconciles. Both gated runners exited 0.\n\nVerification nonetheless found three defects that the bundle's own\nacceptance criteria reach. One is a behavioural regression this RC\nintroduced: the new `halt_global.kanban_root_missing` and\n`unhalt_global.kanban_root_missing` refusals *create the very directory\nthey declare missing*, because the shared emitter records every refusal\ninto a per-project ledger under that root. A second identical invocation of\n`halt-global.sh` then succeeds and writes the fleet-wide HALT sentinel into\na directory that is not a kanban root, reporting that all projects will\nstop when none will. The other two findings are a factually-false\n`NotApplicable` reason left behind in the shipped verb fixture matrix, and\na residual install shape on which `show-queues` still paints a board of\nzeros for an unknown project. All three are small, isolated, filed via\nPath C, and heal on the next loop. Nothing here stops an operator using the\nsystem.\n\n**Recommendation: SHIP-WITH-CONCERNS.**\n\n---",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "the global-halt \"root does not exist\" refusal creates the root, and the next identical run halts a directory that is not a kanban root",
+      "heading": "Finding 1: the global-halt \"root does not exist\" refusal creates the root, and the next identical run halts a directory that is not a kanban root",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a real defect that ships and gets fixed next iteration; it cannot reach the autonomous chain, which never invokes these verbs with a bad root, but it makes a fleet-wide stop signal report success while doing nothing)\n**Regression:** yes (this RC introduced it; on `ai_main` both guards used a bare `printf ... >&2` and created nothing)\n**Integrity Damage:** no (no existing state is lost or corrupted — the sentinel and the fabricated tree are new paths outside any real kanban root)\n**Filed As:** BUG-0256 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nThis RC converted `halt-global.sh` and `unhalt-global.sh` to\n`pgai_emit_error_contract`. That emitter also records each refusal into\n`<KANBAN_ROOT>/projects/<project>/refusal-ledger.md`, creating the parent\ndirectories on the way. Two of the four converted sites fire *because*\n`KANBAN_ROOT` does not exist — so emitting the refusal materialises the\ndirectory the refusal just declared absent.\n\nObserved, with `PGAI_PROJECT_NAME` set (which the framework's own wake\nscripts export):\n\n```\n$ PGAI_AGENT_KANBAN_ROOT_PATH=/tmp/.../absent-B bash team/scripts/halt-global.sh\nerror:   halt_global.kanban_root_missing\nmessage: halt-global.sh: KANBAN_ROOT does not exist or is not a directory: /tmp/.../absent-B.\nremedy:  Set PGAI_AGENT_KANBAN_ROOT_PATH to an existing kanban root, or create /tmp/.../absent-B first.\n   (exit 1)\n\n$ find /tmp/.../absent-B\n/tmp/.../absent-B\n/tmp/.../absent-B/projects\n/tmp/.../absent-B/projects/pgai-agent-kanban\n/tmp/.../absent-B/projects/pgai-agent-kanban/refusal-ledger.md\n\n$ PGAI_AGENT_KANBAN_ROOT_PATH=/tmp/.../absent-B bash team/scripts/halt-global.sh\nglobal HALT set: /tmp/.../absent-B/HALT — all projects will stop at next wake\n   (exit 0)\n```\n\nThe second invocation is byte-identical to the first with an unchanged\nenvironment. It reports the fleet-wide stop as set, in a directory the\nfirst invocation said was not a kanban root. No chain agent reads that\nsentinel; the real kanban root has no `HALT` and the chain keeps running.\n`unhalt-global.sh` shares the first half; its second-invocation\nconsequence is milder (\"no global HALT was set\", exit 0, against a\ndirectory it invented).\n\nNegative control: with `env -u PGAI_PROJECT_NAME`, the ledger write is\nskipped by design, nothing is created, and both invocations refuse\nidentically. The defect is therefore environment-dependent — and the\nenvironment in which it bites is the framework's own.\n\nBoth the original failure mode and the new normal case were exercised: the\nfour other converted sites (`halt_global.sentinel_create_failed`,\n`unhalt_global.sentinel_remove_failed`, and the `unhalt-global` root guard\nagainst a truly absent root) all behave correctly, and the nine `wake-now`\nand `verify-rc-state` conversions are unaffected because their refusals do\nnot fire on the absence of the root.",
+      "filed_as": "BUG-0256",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no (no existing state is lost or corrupted — the sentinel and the fabricated tree are new paths outside any real kanban root)"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a real defect that ships and gets fixed next iteration; it cannot reach the autonomous chain, which never invokes these verbs with a bad root, but it makes a fleet-wide stop signal report success while doing nothing)",
+        "regression": "yes (this RC introduced it; on `ai_main` both guards used a bare `printf ... >&2` and created nothing)",
+        "filed_as": "BUG-0256 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "the verb fixture matrix records a REST-parity exemption reason that this RC made false, and its docstring now contradicts its own table",
+      "heading": "Finding 2: the verb fixture matrix records a REST-parity exemption reason that this RC made false, and its docstring now contradicts its own table",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (hygiene; confined to one test file's recorded prose, no behaviour affected)\n**Regression:** yes (the reason text was true before this RC and was falsified by this RC's own dual-channel conversion)\n**Integrity Damage:** no\n**Filed As:** BUG-0257 (Path C-A)\n\n`team/tests/unit/test_verb_fixture_matrix.py` exists so that every\nexemption carries \"a named, verified reason rather than a silent omission\"\n— its own words. Two of those reasons are now wrong.\n`_REST_PARITY_SCENARIOS` still gives `show-queues` and `verify-rc-state`\nthe `_NO_REST_PARITY_NO_KEY` reason, which asserts the verb \"has no\nCLI-reachable dual-channel refusal to compare (see the dual-channel\ncolumn's own reason for this verb)\". Both clauses were falsified by this\nsame RC: both verbs gained a CLI-reachable `project_resolve.not_found`\nrefusal, and both `_DUAL_CHANNEL_SCENARIOS` entries were flipped from\n`NotApplicable` to a real `DualChannelCase`, so there is no longer a\ndual-channel \"reason\" to go and read.\n\nThe RC introduced `_NO_REST_PARITY_OUT_OF_SCOPE` for exactly this\nsituation and applied it to `halt-global`, `unhalt-global` and `wake-now`,\nbut did not backfill the two read verbs. The module docstring compounds it,\nstating that \"the three that take no `--project` flag at all (halt-global,\nunhalt-global, wake-now) remain `NotApplicable` in\n`_REST_PARITY_SCENARIOS` only\" — an exhaustive-sounding claim, when five\nverbs are still `NotApplicable` there.\n\nNo test fails: the matrix asserts that a reason is present, not that it is\ntrue, so the inaccuracy is invisible to the suite. The implementing task\nrecorded the first half honestly in its own completion note; it is filed\nhere so it is tracked in the ledger rather than left in a task folder.",
+      "filed_as": "BUG-0257",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (hygiene; confined to one test file's recorded prose, no behaviour affected)",
+        "regression": "yes (the reason text was true before this RC and was falsified by this RC's own dual-channel conversion)",
+        "filed_as": "BUG-0257 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "`show-queues` still renders a board of zeros for an unknown project on a kanban root that has no `projects.cfg`",
+      "heading": "Finding 3: `show-queues` still renders a board of zeros for an unknown project on a kanban root that has no `projects.cfg`",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (an install with no project registry is already uninitialised; the healthy path is fixed)\n**Regression:** no (the behaviour predates this RC — it is BUG-0252's original defect surviving on one path, via `pp_resolve_project_name`'s documented pass-through when `projects.cfg` is absent, which this RC did not change)\n**Integrity Damage:** no\n**Filed As:** BUG-0258 (Path C-A)\n\nBUG-0252's acceptance criterion 2 is written without qualification:\n`show-queues.sh --project <unregistered-name>` must exit non-zero with a\ndual-channel refusal and render no board. On a root that has a\n`projects.cfg` it now does. On a root with none, `pp_resolve_project_name`\npasses the candidate through unchanged by documented design, and the\noriginal defect survives intact:\n\n```\n$ PGAI_AGENT_KANBAN_ROOT_PATH=/tmp/.../nocfg bash team/scripts/dashboard/show-queues.sh \\\n    --kanban-root /tmp/.../nocfg --project bogus-name\nActive provider: claude\npm:     0/0\ncoder:  0/0\nwriter: 0/0\ntester: 0/0\ncm:     0/0\n   (exit 0)\n```\n\nThe same invocation against a root whose `projects.cfg` exists but is empty\nrefuses correctly with `project_resolve.not_found` and exit 1. So the\nbehaviour turns on whether the registry file is present, not on whether the\nname is real. `verify-rc-state.sh` does not share the gap — its own\n`verify_rc_state.project_directory_missing` backstop refuses on that path,\nwhich is exactly why the RC added it.\n\nPM's decomposition named this residual in advance, so it is a consciously\nscoped-out remainder rather than a miss. It is filed because BUG-0252 will\nbe closed by this release and nothing would otherwise track the remaining\npath.",
+      "filed_as": "BUG-0258",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (an install with no project registry is already uninitialised; the healthy path is fixed)",
+        "regression": "no (the behaviour predates this RC — it is BUG-0252's original defect surviving on one path, via `pp_resolve_project_name`'s documented pass-through when `projects.cfg` is absent, which this RC did not change)",
+        "filed_as": "BUG-0258 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "the four bundled bugs' behavioural fixes, verified by triggering each original failure mode",
+      "heading": "Finding 4: the four bundled bugs' behavioural fixes, verified by triggering each original failure mode",
+      "level": 3,
+      "body": "**Category:** pass\n\nEvery bug in the bundle was verified by reproducing its original symptom\nagainst this RC and confirming the new behaviour, not by reading the diff.\nThe empty-registry remedy, the registered-names remedy, the prefix and\nexact-name resolution on both read verbs, the unknown-name refusals, the\nremoval of the dead `deep-verify-01` gate and its index entry, and all nine\nnew dual-channel refusal sites were each exercised directly. Details are in\nthe four per-bug acceptance tables above.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "census reconciliation and gate-authoring compliance for 14 new anchors",
+      "heading": "Finding 5: census reconciliation and gate-authoring compliance for 14 new anchors",
+      "level": 3,
+      "body": "**Category:** pass\n\n`lint_gate_census_compliance.py` exits 0 with 0 offenders across 35 files\nand 150 exempted anchored sites. Each of the 14 anchors this RC adds was\nalso checked by hand: marker present exactly once in its own file, Locator\nIndex entry present exactly once, classes agreeing. The removed\n`deep-verify-01` anchor and its index line went in the same change, as the\nnew-gate rule requires.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "structural and constraint checks",
+      "heading": "Finding 6: structural and constraint checks",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll six changed scripts pass `bash -n` and retain `set -euo pipefail`; all\nfive changed Python files pass `py_compile`; no secrets, no provenance\ntokens, and no placeholder skip annotations were introduced. The\ndocumentation-layer change (`docs/operator-commands.md`) was read in full\nand matches observed behaviour on both verbs, including the exit-code\nlines.\n\n---",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

@@ -34,7 +34,25 @@ hierarchy.  This file adds only what is specific to the integration scope:
                         and stops it in a finally block, asserting the port is
                         free before returning.  Never binds port 8300.
 
-Integration test contract (from SOP.md):
+  Re-exported helpers (plain functions/dataclass, not pytest fixtures):
+
+  - require_binary, try_resolve_binary, BinaryGuard — the shared external-
+                        binary availability guard; from
+                        tests/fixtures/binary_guard.py.  Resolves a named
+                        binary (e.g. "tmux") to an absolute path or performs
+                        a narrated pytest.skip naming the binary and the
+                        reason.  BinaryGuard.teardown() gates a fixture's
+                        teardown step on whether setup actually resolved the
+                        binary, so a finally block is safe to run
+                        unconditionally even when setup skipped first.
+
+  - require_docker_daemon — the docker-specific extension of the same
+                        guard; resolves "docker" (or a named engine) AND
+                        confirms its daemon answers, skipping with a
+                        reason that names whichever of the two facts
+                        (binary absent vs. daemon unreachable) is false.
+
+Integration test contract (from roles/TESTER.md):
   - Integration tests do NOT mock the integration points.  They stand up real
     temporary kanban trees (via the fixtures above) and exercise actual flows
     (wake-script behavior, discovery, the RC lifecycle, operator commands) end
@@ -42,7 +60,7 @@ Integration test contract (from SOP.md):
   - All scratch contained under pytest's tmp_path or the framework temp root
     (PGAI_AGENT_KANBAN_TEMP_DIR).  No bare /tmp paths.  No HOME paths.
   - Test names describe behavior, never bug IDs, version numbers, or scaffolding
-    labels (SOP.md Anti-pattern 6).
+    labels (roles/TESTER.md Anti-pattern 6).
   - No order dependence across tests (passes under pytest-randomly).
 """
 
@@ -58,3 +76,7 @@ from __future__ import annotations
 from tests.fixtures.installed_root import installed_root  # noqa: F401
 from tests.fixtures.two_project import two_project_root  # noqa: F401
 from tests.fixtures.api_server import api_server  # noqa: F401
+from tests.fixtures.binary_guard import BinaryGuard  # noqa: F401
+from tests.fixtures.binary_guard import require_binary  # noqa: F401
+from tests.fixtures.binary_guard import require_docker_daemon  # noqa: F401
+from tests.fixtures.binary_guard import try_resolve_binary  # noqa: F401

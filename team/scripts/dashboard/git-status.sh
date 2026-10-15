@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# dashboard-git-status.sh
+# git-status.sh
 # Prints a multi-section git status view for all registered release-workflow projects.
 #
-# Designed to run under `watch -n 10 dashboard-git-status.sh` in the
-# tmux `git` window created by dashboard-create.sh.
+# Designed to run under `watch -n 10 git-status.sh` in the
+# tmux `git` window created by dashboard/create.sh.
 #
 # For each registered project whose workflow_type is "release" (or "feature"),
 # a labeled section is rendered showing:
-#   1. Dev tree path + current branch + sync-with-origin status
+#   1. Dev tree path + current branch + sync status against the project's
+#      remote (project.cfg [project] git_remote_name, origin when absent or
+#      blank) for the current branch and <branch_prefix>main
 #   2. Uncommitted changes summary (staged + unstaged counts)
 #   3. In-flight rc/* branches (filtered by branch_prefix when configured)
 #   4. Recent commits on main (top 5)
@@ -21,12 +23,12 @@
 #
 # All git data rendered by this script comes from the local dev tree only.
 # No git subcommand invoked here ever reaches the network (no fetch, pull,
-# push, clone, or ls-remote) — including the origin sync comparison, which
-# reads the already-resolved local origin/<branch> remote-tracking ref
-# rather than contacting origin.
+# push, clone, or ls-remote) — including the remote sync comparison, which
+# reads the already-resolved local <remote>/<branch> remote-tracking ref
+# rather than contacting the remote.
 #
 # Usage:
-#   dashboard-git-status.sh [--kanban-root <path>] [--project <name>]
+#   git-status.sh [--kanban-root <path>] [--project <name>]
 #
 # Options:
 #   --kanban-root <path>  Override the kanban root (default: $PGAI_AGENT_KANBAN_ROOT_PATH)
@@ -63,7 +65,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//'
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:44}"
       exit 0
       ;;
     *)
@@ -89,6 +96,10 @@ source "${LIB_DIR}/project_paths.sh"
 # Source projects lib for projects_cfg_list.
 # shellcheck source=../lib/projects.sh
 source "${LIB_DIR}/projects.sh"
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh).
+# shellcheck source=../lib/script_common.sh
+source "${LIB_DIR}/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # ANSI color support (honor NO_COLOR and TERM=dumb)
@@ -98,42 +109,23 @@ if [[ -n "${NO_COLOR:-}" ]] || [[ "${TERM:-}" == "dumb" ]]; then
   USE_COLOR=false
 fi
 
-c() {
-  # c <color-name> — emit ANSI code or empty string
-  if [[ "$USE_COLOR" != "true" ]]; then echo ""; return; fi
-  case "$1" in
-    bold)    printf '\033[1m' ;;
-    dim)     printf '\033[2m' ;;
-    reset)   printf '\033[0m' ;;
-    cyan)    printf '\033[0;36m' ;;
-    green)   printf '\033[0;32m' ;;
-    yellow)  printf '\033[0;33m' ;;
-    red)     printf '\033[0;31m' ;;
-    blue)    printf '\033[0;34m' ;;
-    white)   printf '\033[0;37m' ;;
-    magenta) printf '\033[0;35m' ;;
-    *)       printf '' ;;
-  esac
-}
-
-RESET="$(c reset)"
-BOLD="$(c bold)"
-DIM="$(c dim)"
-CYAN="$(c cyan)"
-GREEN="$(c green)"
-YELLOW="$(c yellow)"
-RED="$(c red)"
-MAGENTA="$(c magenta)"
+RESET="$(ansi_code reset)"
+BOLD="$(ansi_code bold)"
+DIM="$(ansi_code dim)"
+CYAN="$(ansi_code cyan)"
+GREEN="$(ansi_code green)"
+YELLOW="$(ansi_code yellow)"
+RED="$(ansi_code red)"
+MAGENTA="$(ansi_code magenta)"
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-section_header() {
-  local title="$1"
-  printf '%s%s%s\n' "${CYAN}${BOLD}" "$title" "$RESET"
-  printf '%s%s%s\n' "$DIM" "$(printf '─%.0s' {1..60})" "$RESET"
-}
+# section_header --rule <title>: title over a dim 60-char rule
+# (lib/dashboard_common.sh).
+# shellcheck source=../lib/dashboard_common.sh
+source "${LIB_DIR}/dashboard_common.sh"
 
 project_header() {
   local proj_name="$1"
@@ -148,14 +140,19 @@ project_header() {
 }
 
 # ---------------------------------------------------------------------------
-# render_project_git_status <project_name> <dev_tree> <branch_prefix>
+# render_project_git_status <project_name> <dev_tree> <branch_prefix> <remote>
 # Renders the full git status for one project. Gracefully degrades when
 # the dev tree is missing or not a git repo — prints a warning and returns 0.
+# <remote> is the project's git remote (pp_git_remote_name); empty when its
+# git_remote_name is invalid, which renders a one-line note in place of the
+# sync status.
 # ---------------------------------------------------------------------------
 render_project_git_status() {
   local proj_name="$1"
   local dev_tree="$2"
   local branch_prefix="$3"
+  local remote="${4:-}"
+  local main_branch="${branch_prefix}main"
 
   # RC branch list pattern: ${PREFIX}rc/* or rc/* when prefix is empty.
   local rc_pattern="${branch_prefix}rc/*"
@@ -195,31 +192,35 @@ render_project_git_status() {
   # -------------------------------------------------------------------------
   # Section 1: Current branch + sync status
   # -------------------------------------------------------------------------
-  section_header "Branch"
+  section_header --rule "Branch"
 
   local current_branch
   current_branch="$(git -C "$dev_tree" symbolic-ref --short HEAD 2>/dev/null || echo "(detached HEAD)")"
 
-  # Sync status for a branch vs origin
+  # Sync status for a branch vs the project's remote
   _sync_status() {
     local _branch="$1"
+    if [[ -z "$remote" ]]; then
+      printf '%s(git_remote_name in project.cfg is not a valid remote name)%s' "$YELLOW" "$RESET"
+      return
+    fi
     local _remote_ref
-    _remote_ref="$(git -C "$dev_tree" rev-parse --verify "origin/${_branch}" 2>/dev/null || echo "")"
+    _remote_ref="$(git -C "$dev_tree" rev-parse --verify "${remote}/${_branch}" 2>/dev/null || echo "")"
     if [[ -z "$_remote_ref" ]]; then
       printf '%s(no remote tracking branch)%s' "$DIM" "$RESET"
       return
     fi
     local _ahead _behind
-    _ahead="$(git -C "$dev_tree" rev-list "origin/${_branch}..${_branch}" --count 2>/dev/null || echo 0)"
-    _behind="$(git -C "$dev_tree" rev-list "${_branch}..origin/${_branch}" --count 2>/dev/null || echo 0)"
+    _ahead="$(git -C "$dev_tree" rev-list "${remote}/${_branch}..${_branch}" --count 2>/dev/null || echo 0)"
+    _behind="$(git -C "$dev_tree" rev-list "${_branch}..${remote}/${_branch}" --count 2>/dev/null || echo 0)"
     if [[ "$_ahead" -eq 0 && "$_behind" -eq 0 ]]; then
-      printf '%sin sync with origin/%s%s' "$GREEN" "$_branch" "$RESET"
+      printf '%sin sync with %s/%s%s' "$GREEN" "$remote" "$_branch" "$RESET"
     elif [[ "$_ahead" -gt 0 && "$_behind" -eq 0 ]]; then
-      printf '%s%d ahead of origin/%s%s' "$YELLOW" "$_ahead" "$_branch" "$RESET"
+      printf '%s%d ahead of %s/%s%s' "$YELLOW" "$_ahead" "$remote" "$_branch" "$RESET"
     elif [[ "$_ahead" -eq 0 && "$_behind" -gt 0 ]]; then
-      printf '%s%d behind origin/%s%s' "$YELLOW" "$_behind" "$_branch" "$RESET"
+      printf '%s%d behind %s/%s%s' "$YELLOW" "$_behind" "$remote" "$_branch" "$RESET"
     else
-      printf '%s%d ahead, %d behind origin/%s%s' "$RED" "$_ahead" "$_behind" "$_branch" "$RESET"
+      printf '%s%d ahead, %d behind %s/%s%s' "$RED" "$_ahead" "$_behind" "$remote" "$_branch" "$RESET"
     fi
   }
 
@@ -227,11 +228,11 @@ render_project_git_status() {
   _sync_status "$current_branch"
   printf '\n'
 
-  # Also show main sync status
-  if [[ "$current_branch" != "main" ]]; then
-    if git -C "$dev_tree" rev-parse --verify main &>/dev/null; then
-      printf '  main:     '
-      _sync_status main
+  # Also show the project's main branch (<branch_prefix>main) sync status
+  if [[ "$current_branch" != "$main_branch" ]]; then
+    if git -C "$dev_tree" rev-parse --verify "$main_branch" &>/dev/null; then
+      printf '  %-10s' "${main_branch}:"
+      _sync_status "$main_branch"
       printf '\n'
     fi
   fi
@@ -241,7 +242,7 @@ render_project_git_status() {
   # -------------------------------------------------------------------------
   # Section 2: Uncommitted changes
   # -------------------------------------------------------------------------
-  section_header "Uncommitted Changes"
+  section_header --rule "Uncommitted Changes"
 
   local status_output
   status_output="$(git -C "$dev_tree" status --porcelain 2>/dev/null)"
@@ -275,7 +276,7 @@ render_project_git_status() {
   # -------------------------------------------------------------------------
   # Section 3: In-flight rc/* branches (filtered by branch_prefix)
   # -------------------------------------------------------------------------
-  section_header "In-flight RC Branches"
+  section_header --rule "In-flight RC Branches"
 
   local rc_branches
   rc_branches="$(git -C "$dev_tree" branch --list "$rc_pattern" --format='%(refname:short)' 2>/dev/null || true)"
@@ -296,7 +297,7 @@ render_project_git_status() {
   # -------------------------------------------------------------------------
   # Section 4: Recent commits on main (top 5)
   # -------------------------------------------------------------------------
-  section_header "Recent Commits (main, last 5)"
+  section_header --rule "Recent Commits (main, last 5)"
 
   if git -C "$dev_tree" rev-parse --verify main &>/dev/null; then
     git -C "$dev_tree" log main --oneline -5 --format="%C(dim)%h%Creset  %s" 2>/dev/null \
@@ -312,7 +313,7 @@ render_project_git_status() {
   # -------------------------------------------------------------------------
   # Section 5: Recent tags (last 5, filtered by branch_prefix)
   # -------------------------------------------------------------------------
-  section_header "Recent Tags (last 5)"
+  section_header --rule "Recent Tags (last 5)"
 
   local recent_tags
   recent_tags="$(git -C "$dev_tree" tag --list "$tag_pattern" --sort=-version:refname 2>/dev/null | head -5 || true)"
@@ -389,9 +390,13 @@ for _proj in "${_PROJECTS[@]}"; do
     _branch_prefix="$_raw_prefix"
   fi
 
+  # Resolve the project's git remote (origin when git_remote_name is absent
+  # or blank; empty when it is invalid -- a render never refuses).
+  _git_remote="$(pp_git_remote_name --quiet "$_proj" 2>/dev/null)" || _git_remote=""
+
   # Render the project header and git status.
   project_header "$_proj" "$_dev_tree"
-  render_project_git_status "$_proj" "$_dev_tree" "$_branch_prefix"
+  render_project_git_status "$_proj" "$_dev_tree" "$_branch_prefix" "$_git_remote"
   _rendered_count=$(( _rendered_count + 1 ))
 done
 

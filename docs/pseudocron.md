@@ -117,16 +117,27 @@ the rest of the line intact.
 
 ## Running
 
-`pseudocron.py` takes **no arguments** — it resolves `pseudocron.cfg` and
-`pseudocron.env` from `$PGAI_AGENT_KANBAN_ROOT_PATH` (default
-`~/pgai_agent_kanban`). It is a foreground process; wrap it in tmux, or a
-container entrypoint, or systemd:
+`pseudocron.py` takes **no options**. It reads `pseudocron.cfg` and
+`pseudocron.env` from the kanban root named by
+`PGAI_AGENT_KANBAN_ROOT_PATH`, which is **required in the environment
+pseudocron is launched from and has no default**: with it unset,
+`pseudocron.py` exits 1 naming the variable. Setting it in
+`pseudocron.env` is not enough — that file configures the jobs pseudocron
+dispatches, and is found through the root, not the other way round.
 
 ```bash
-source ~/pgai_agent_kanban/shell-env
-tmux new -d -s pseudocron \
-  'python3 $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/pseudocron.py \
-     >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/pseudocron.log 2>&1'
+export PGAI_AGENT_KANBAN_ROOT_PATH=/home/you/pgai_agent_kanban
+python3 "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/pseudocron.py" >> "$PGAI_AGENT_KANBAN_ROOT_PATH/logs/pseudocron.log" 2>&1
+```
+
+It is a foreground process; wrap it in tmux, a container entrypoint, or
+systemd. In tmux, pass the variable into the session with `-e`, because a
+tmux server that is already running does not see what you exported in
+your own shell:
+
+```bash
+tmux new -d -s pseudocron -e PGAI_AGENT_KANBAN_ROOT_PATH="$PGAI_AGENT_KANBAN_ROOT_PATH" \
+  'python3 "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/pseudocron.py" >> "$PGAI_AGENT_KANBAN_ROOT_PATH/logs/pseudocron.log" 2>&1'
 ```
 
 On startup it prints two banner lines — `N jobs loaded` (the tier's job
@@ -134,7 +145,8 @@ count) and `N vars loaded` (your env file parsed; if this is 0, fix
 pseudocron.env before anything else). Each dispatch then logs a
 `<timestamp> fired (minute=NN): <command>` heartbeat line.
 
-A minimal systemd unit, for container/service deployments:
+A minimal systemd unit, for container/service deployments. Its
+`Environment=` line is what supplies the required root:
 
 ```ini
 [Unit]

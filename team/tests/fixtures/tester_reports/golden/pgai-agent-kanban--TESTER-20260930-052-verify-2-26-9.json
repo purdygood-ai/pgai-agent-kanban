@@ -1,0 +1,36 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "I verified RC v2.26.9 against `requirements/v2.26.9-bugfix-bundle-20260930.md`. The bundle contains two pre-existing test-layer bugs: BUG-0479, where the blocked-task guard verifier always failed because it grepped the provider wake scripts for guard code that now lives in `lib/wake_driver.sh`, and BUG-0480, where `test_wake_model_stamp.py` exercised a stale hand-kept copy of `stamp_model_field`. The diff `ai_main..ai_rc/v2.26.9` touches 3 files: `team/scripts/verify-blocked-task-guard.sh`, `team/tests/unit/test_verify_blocked_task_guard.py` (new) and `team/tests/unit/test_wake_model_stamp.py`.\n\nBoth gated runners exited 0. Every acceptance item in the requirements doc and in both bundled bugs was exercised, including reproducing the original failure on `ai_main` and mutation testing in a throwaway clone. BUG-0480 is fully met. BUG-0479 is met except for one acceptance item: of 7 guard-breaking mutations, the verifier misses one. If the scanner's \"Needs Human: yes\" predicate is removed, the verifier still exits 0. I filed that as BUG-0482 via Path C-A (filed as BUG — code defect / regression / test failure). The shipped guard itself is correct, so this is a low-severity test-coverage gap.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "blocked-task guard verifier does not catch a broken Needs Human predicate",
+      "heading": "Finding 1: blocked-task guard verifier does not catch a broken Needs Human predicate",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one verifier fixture; the shipped guard is correct)\n**Filed As:** BUG-0482-guard-verifier-misses-needs-human (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the blocked-task guard verifier still passes when the guard stops checking \"Needs Human\", so a guard that pauses every project with any BLOCKED task, even one no human is needed for, would not be caught.\n\nCriterion: BUG-0479 Acceptance 2, \"Removing or breaking the guard in `wake_driver.sh` (in a throwaway clone) makes the verifier exit 1.\"\n\nThe guard counts queue entries whose status is `BLOCKED` **and** `Needs Human: yes`. The verifier's `AC-3 (scanner)` fixture only has `BLOCKED`/`yes` (expect 1) and `DONE`/`no` (expect 0). There is no `BLOCKED`/`no` case, so the Needs Human half of the predicate is never exercised. I replaced `nh_m.group(2).strip().lower() == \"yes\"` with `True` in a clone. That would gate dispatch for every BLOCKED task, and the verifier still exited 0 with 20 passed and 0 failed. No other test in `team/tests` references the guard: a grep for `_blocked_nh_count` and the guard header only hits the RC's new test. Expected behaviour is exit 1 naming `AC-3 (scanner)`. Severity is low under the SOP rubric: this is a test-coverage gap with no runtime defect today. Reproduction steps and the suggested fix are in the bug file.",
+      "filed_as": "BUG-0482",
+      "filed_by": "TESTER (autonomous Path C) — the blocked-task guard verifier still passes when the guard stops checking \"Needs Human\", so a guard that pauses every project with any BLOCKED task, even one no human is needed for, would not be caught.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one verifier fixture; the shipped guard is correct)",
+        "filed_as": "BUG-0482-guard-verifier-misses-needs-human (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the blocked-task guard verifier still passes when the guard stops checking \"Needs Human\", so a guard that pauses every project with any BLOCKED task, even one no human is needed for, would not be caught."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

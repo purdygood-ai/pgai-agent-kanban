@@ -1,0 +1,242 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "v2.22.5 is a single-item bug bundle carrying BUG-0284 (a linked worktree's `.git`\nis a pointer to the shared repository, so `cp -r` of a working directory isolates\nno git state and history-rewriting verbs run in the copy move the real branch).\nThe RC ships five files across two feature merges: a new canonical passage in\n`docs/test-authoring-guidelines.md` (\"A copied worktree is not an isolated tree\")\nwith three runnable safe alternatives, one-to-two-sentence citing clauses in\n`team/roles/CODER.md`, `team/roles/TESTER.md` and `team/roles/WRITER.md`, and a new\ntwo-case regression module at `team/tests/unit/test_worktree_copy_git_isolation.py`\nthat pins both the hazard and the documented clone alternative.\n\nVerification covered: pre-flight merge checks over every DONE task with a live\nfeature branch, worktree identity and cleanliness, the full `ai_main..ai_rc/v2.22.5`\ndiff read end-to-end, both gated runners with `--coverage`, behavioral\nre-execution of the hazard and of all three documented alternatives in a throwaway\nsandbox under the framework temp root, the governance byte-budget lint named by the\nbug's own acceptance list, both requirements-doc compile/syntax criteria across the\nwhole tree, the skip-cites-real-bug gate, the release-state drift check, the prereq\ndependency graph, and the autonomous-operation criterion.\n\nBoth gated runners exited 0 with zero quality-class lint findings in either findings\nfile. Every acceptance criterion in the requirements doc and in BUG-0284 is met and\ndemonstrated by execution, not inspection. No `bug`, `gap`, or `stale-assertion`\nfinding was recorded, so nothing was filed via Path C (autonomous follow-up filing\n— non-blocking).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Bundled item BUG-0284 is addressed in the implementation",
+      "heading": "Finding 1: Bundled item BUG-0284 is addressed in the implementation",
+      "level": 3,
+      "body": "**Category:** pass\n\nRequirements-doc acceptance criterion 1 (\"Each bundled item is addressed in the\nimplementation\"). BUG-0284 carries four acceptance bullets of its own; each was\nchecked against the shipped tree.\n\n- **Bullet 1 — the canon names the hazard, states `cp -r` does not isolate git\n  state, and gives at least one safe alternative a stranger can run.** Met.\n  `docs/test-authoring-guidelines.md` gains a sibling subsection of \"Live-install\n  safety\" titled \"A copied worktree is not an isolated tree\". It shows the\n  `gitdir: ...` pointer shape, states that every git command in a recursive copy\n  resolves through the pointer and mutates the original repository's branches, HEAD\n  and index, names the four history-rewriting verbs (`revert`, `reset`,\n  `checkout -B`, `rebase`) as the destructive shape, and gives three alternatives\n  as a runnable fenced block with a stated default and per-option caveats. The\n  bug's `## Expected` asked for exactly these three (clone; `git worktree add`\n  under the framework temp root then remove; sever the copied `.git` first) — all\n  three are present.\n- **Bullet 2 — `team/roles/CODER.md` and `team/roles/TESTER.md` each carry a\n  clause pointing at that passage, and the byte-budget lint still reports `under`\n  for all seven roles.** Met, and exceeded: `team/roles/WRITER.md` carries the\n  clause too. Lint result recorded in Finding 3.\n- **Bullet 3 — the reproduction run against the documented safe alternative leaves\n  the source repository's branch unmoved.** Met, verified behaviorally — see\n  Finding 2.\n- **Bullet 4 — both gated runners still exit 0.** Met — see Finding 5.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "The hazard reproduces and all three documented alternatives are safe (behavioral)",
+      "heading": "Finding 2: The hazard reproduces and all three documented alternatives are safe (behavioral)",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.5 (trigger the failure mode; verify the guard fires) and Principle 4. The\ndocumented rule is the whole deliverable, so the rule's factual claims were\nre-executed rather than read. Everything below ran inside a throwaway repository\ncreated with `mktemp -d -p \"$PGAI_AGENT_KANBAN_TEMP_DIR\"`; no live repository was\ntouched.\n\n| Case | Command shape | Source branch `feature` | Verdict |\n|---|---|---|---|\n| Hazard | `cp -r wt copy` then `git -C copy commit --allow-empty` | `a81b7fe` -> `d26b56e` | moved — hazard reproduces exactly as documented |\n| Option 1 (clone) | `git clone \"$(git rev-parse --show-toplevel)\" $SCRATCH/clone`, commit inside | unmoved at `a81b7fe` | safe |\n| Option 2 (detached worktree) | `git worktree add --detach $SCRATCH/wt2 HEAD`, commit inside, `git worktree remove --force` | unmoved at `a81b7fe` | safe; the remove verb also succeeded |\n| Option 3 (sever `.git`) | `cp -r . $SCRATCH/copy && rm -rf $SCRATCH/copy/.git` | unmoved at `a81b7fe` | safe; `git status` in the copy returns `fatal: not a git repository`, i.e. the tree is inert as documented |\n\nThe worktree's `.git` was confirmed to be a one-line pointer file\n(`gitdir: <repo>/.git/worktrees/wt`), so the hazard case exercised the documented\nshape rather than an accidental clone. Both halves of Anti-pattern 6 in the role\nfile (\"synthesize the original failure mode AND the new normal case, then verify\nboth\") are covered: the old failure mode still reproduces and each new prescribed\npath is safe.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Governance byte budgets remain under after the role-file additions",
+      "heading": "Finding 3: Governance byte budgets remain under after the role-file additions",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`bash team/scripts/lint_governance_byte_budgets.sh --kanban-cfg kanban.cfg_example`\nexits 0 and reports `under` for all seven roles, which is BUG-0284's second\nacceptance bullet verbatim:\n\n```\npo 63167/65536  pm 76689/81920  coder 69616/69632  writer 69202/69632\ntester 102384/102400  cm 85578/86016  overwatch 73426/73728\n```\n\nThe caveat is headroom, not correctness. `coder` and `tester` each finish with\n**16 bytes** of margin. PM measured 28 (coder) and 100 (tester) bytes of headroom\nbefore this RC and flagged the squeeze as a non-blocking concern in its\ndecomposition; WRITER reclaimed the space by leaning out live-install prose that\nrestated what the canon now carries in full, which is the right trade and left both\nfiles under. The consequence for the next loop is that essentially no governance\nedit can land in those two role files without a paired reclamation in the same\nfile. This is recorded, not filed: the criterion is met, the lint narrates and\nnever blocks, and the condition is a property of the budget configuration rather\nthan a defect this RC introduced.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Regression module is collected, passing, and honestly constructed",
+      "heading": "Finding 4: Regression module is collected, passing, and honestly constructed",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/unit/test_worktree_copy_git_isolation.py` (212 lines, new) was read\ntop-to-bottom per Principle 3. It collects and passes under the gated unit runner\n(`tests/unit/test_worktree_copy_git_isolation.py ..` at 22% of the run). Quality\nobservations, all favourable:\n\n- **The negative case is real.** `test_recursive_copy_of_linked_worktree_moves_source_branch`\n  asserts the hazard still reproduces, so the positive case cannot pass vacuously\n  if a future git version or a changed fixture stops producing the pointer shape.\n  It additionally asserts `.git` is a file in both the worktree and the copy.\n- **Assertions compare resolved commit hashes**, not exit status or log text.\n- **Isolation is explicit, not ambient.** Every `git` call runs through `_git()`,\n  which strips the six `GIT_DIR`/`GIT_WORK_TREE`-family redirect variables from the\n  environment, so the fixture's isolation does not depend on the invoking agent's\n  shell. All state lives under pytest `tmp_path`, which the parent conftest\n  redirects under `$PGAI_AGENT_KANBAN_TEMP_DIR`. Test-fidelity checklist item 6\n  (no state-mutating work against the live install) is satisfied by construction.\n- **`git` is guarded** via `require_binary(\"git\", ...)` in an autouse fixture, so\n  the module skips rather than errors on a host without git.\n- **No provenance litter.** The docstring cites `docs/test-authoring-guidelines.md`\n  and the anti-pattern by name and carries no bug ID, task ID, or version. CODER\n  removed an earlier `BUG-0284` docstring mention in commit `b4cbb4c` before merge;\n  the provenance lint confirms 0 findings on the shipped file.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Both gated runners exit 0",
+      "heading": "Finding 5: Both gated runners exit 0",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe authoritative suite verdict, from the same commands an operator or CM would\nrun, executed from the RC worktree root:\n\n- `bash team/scripts/run-unit-tests.sh --coverage` -> **exit 0**. `4532 passed,\n  31 skipped in 726.55s`. Lint pre-flight passed (`governance_byte_budget: OK`,\n  `lint_skip_bug_gate: OK`, `bare_tmp_cleanliness: OK`, `listener_cleanliness: OK`).\n- `bash team/scripts/run-integration-tests.sh --coverage` -> **exit 0**. `465 passed,\n  1 skipped in 507.45s`. Same pre-flight checks green.\n\n`UNIT_EXIT == 0` AND `INTEGRATION_EXIT == 0`, so the suite-pass precondition for a\nPASS recommendation is satisfied on gated-runner evidence, not on a direct pytest\nline. Captured output: `${PGAI_AGENT_KANBAN_TEMP_DIR}/tester/unit_output.txt` and\n`${PGAI_AGENT_KANBAN_TEMP_DIR}/tester/integration_output.txt`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "All Python files compile and all bash files pass syntax check",
+      "heading": "Finding 6: All Python files compile and all bash files pass syntax check",
+      "level": 3,
+      "body": "**Category:** pass\n\nRequirements-doc acceptance criteria 2 and 3, run across the whole worktree rather\nthan only the diff:\n\n- `python3 -m py_compile` over all **467** `.py` files -> exit 0, no output.\n- `bash -n` over all **276** `.sh` files -> **0** failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Pre-flight merge verification passed",
+      "heading": "Finding 7: Pre-flight merge verification passed",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 2a. Every task directory under `$PGAI_PROJECT_ROOT/tasks/` whose `status.md`\nreads `DONE` and whose README names a `## Feature Branch` other than `none` was\nscanned; every such branch has already been deleted post-merge (the normal CODER/\nWRITER Procedure A Step 8 cleanup), so Check 1 and Check 2 were correctly skipped\nfor each and no branch was left unmerged or zero-commits-ahead. Zero anomalies.\nThe RC's own two feature branches (`ai_feature/WRITER-20260915-027-...`,\n`ai_feature/CODER-20260915-028-...`) are present in the RC history as `--no-ff`\nmerge commits `d1d9b5f` and `86fe323`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "No release-state drift",
+      "heading": "Finding 8: No release-state drift",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.1. `pp_last_released_version pgai-agent-kanban` -> `v2.22.4` (from the\n`ai_`-prefixed tag line; latest tag is `ai_v2.22.4`, and no `ai_v2.22.5` tag exists\nyet, which is correct for an in-flight RC). `semver_gt v2.22.5 v2.22.4` is true.\n`release-state.md` reads `Active RC: v2.22.5`, `RC Opened By Task:\nCM-20260915-029-open-rc-2-22-5`, `Last Released: v2.22.4` — well-formed `vX.Y.Z`,\nand the branch `ai_rc/v2.22.5` it names really exists. The two values were checked\nindependently, not against each other.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Skip-cites-real-bug gate clean",
+      "heading": "Finding 9: Skip-cites-real-bug gate clean",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.13. The authoritative gate ran inside the unit pre-flight:\n`lint_skip_bug_gate: BUG-NNNN file-existence check: 0 missing files` /\n`OK — all skip annotations are compliant`. A manual grep surfaced four IDs\n(`BUG-1234`, `BUG-1235`, `BUG-1237`, `BUG-1239`) with no file in `bugs/`; all four\nwere traced to string literals inside the fixture payloads of\n`team/tests/unit/test_skip_bug_citation_scan.py` (they are the inputs that test\ndrives the scanner with), not real skip annotations. False positives of the crude\ngrep; the gate, which is the source of truth, is clean.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Constraint negative checks clean",
+      "heading": "Finding 10: Constraint negative checks clean",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.9 / 6.14. The full RC diff carries no hardcoded secret, credential, token,\nor password. No new script was added, so directive 6 (`--help` naming every\nargument) has no new subject. No new operational value is hardcoded, and no\n`lib/` operation is re-implemented — the RC adds prose and one test module.\nStep 6.8 (synthetic release simulation) **does not apply**: the diff touches no\nrelease-lifecycle file (`cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`,\n`project_paths.sh`, or anything else under `team/scripts/`). Recorded as skipped\nwith reason, not silently omitted.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Prereq dependency graph is sound",
+      "heading": "Finding 11: Prereq dependency graph is sound",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.10. Five tasks, all referenced IDs resolve to real folders, no cycles:\n`CM-029 (open RC, no prereq)` -> `WRITER-027` -> `CODER-028` -> `TESTER-030` ->\n`CM-032 (release)`. Lifecycle bookends are correctly linked with CM-open first and\nTESTER before CM-release. Sequence numbers are non-colliding; `031` is simply\nunused in this plan, which is a gap in numbering, not a collision.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

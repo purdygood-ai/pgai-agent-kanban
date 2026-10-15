@@ -1,0 +1,212 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "v2.22.4 is a two-item bug bundle and both items are done. BUG-0281's residual\nsandbox hole is closed in `team/scripts/cleanup/cleanup.sh` by two new\ndual-channel refusals over the pre-resolved `PGAI_PROJECT_ROOT` and\n`PGAI_TASKS_DIR` exports, each carrying a census anchor and a matching\nLocator Index entry; I verified the fix behaviourally with six invocations in\na throwaway root, including the original destructive failure mode (a decoy\ntasks directory holding a backdated terminal task folder survives\nbyte-identical) and the three normal cases that must keep working. BUG-0282's\nbyte-budget overage is cleared by single-canoning the live-install-safety rule\ninto `docs/test-authoring-guidelines.md`: all seven roles now assemble under\nbudget and the unit runner's findings file carries zero\n`governance_byte_budget` entries. Both gated runners exit 0 (unit 4530 passed\n/ 31 skipped; integration 465 passed / 1 skipped) with zero quality-class lint\nfindings in either findings file. Two defects were found outside the bundle's\nown acceptance criteria and filed via Path C: a false refusal and an\ninaccurate refusal message when an export names the reconciled directory with\na trailing slash (BUG-0283), and a standing governance gap — nothing warns\nthat copying a linked git worktree carries its `.git` pointer, a shape that\nsilently moved a live feature branch during this very RC before the agent\ncaught and reverted it (BUG-0284). Neither costs the release its usability;\nboth belong to the next loop.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0281 — pre-resolved export reconciliation lands and holds under the original failure mode",
+      "heading": "Finding 1: BUG-0281 — pre-resolved export reconciliation lands and holds under the original failure mode",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/scripts/cleanup/cleanup.sh` gains two refusals immediately after the\n`_pp_project_root` / `_pp_tasks` / `_pp_req` resolution:\n`cleanup.project_root_export_mismatch` and `cleanup.tasks_dir_export_mismatch`.\nEach carries a `# CENSUS-ANCHOR:` marker, an inline `BLOCK-WORTHY`\nclassification comment, and a matching Locator Index line in\n`docs/blocking-site-census.md` (`cleanup-project-root-export-mismatch-01`,\n`cleanup-tasks-dir-export-mismatch-01`) — the full new-gate rule from SOP.md.\n`python3 team/scripts/lint_gate_census_compliance.py` exits 0 with 0 offenders\nover 36 scanned files and 161 exempted anchored sites.\n\nBehavioural verification (Step 6.5), six invocations, all inside a throwaway\nroot under `$PGAI_AGENT_KANBAN_TEMP_DIR`, with a decoy root standing in for\nthe operator's live install and a backdated (10-day) terminal task folder\nseeded in the decoy so Step 2's prune would actually take it:\n\n| Case | Invocation | Result |\n|---|---|---|\n| A | `PGAI_TASKS_DIR` → decoy, both roots sandboxed, **non-dry-run** | exit 1, `cleanup.tasks_dir_export_mismatch`, decoy task folder present afterwards |\n| B | `PGAI_PROJECT_ROOT` → decoy, both roots sandboxed | exit 1, `cleanup.project_root_export_mismatch` |\n| C | both exports cleared (the documented sandbox form) | exit 0, Steps 0-6 every header naming the sandbox root |\n| D | both exports set to the reconciled values | exit 0, Steps 0-6 naming the sandbox root — the guard does not fire on agreement |\n| E | `PGAI_TASKS_DIR` = reconciled path **with trailing slash** | exit 1 — see Finding 6 |\n| F | `--help` with a mismatched export | exit 0, usage printed, no filesystem action |\n\nCase A is BUG-0281's own \"Actual\" reproduction re-run on this RC with\n`--dry-run` removed; on `ai_rc/v2.22.3` it exited 0 and named the decoy in the\nStep 2 header. Both channels of each refusal are complete: stable `error` key,\nplain-language `message` naming both values, and a runnable `remedy`.\n\nCases C and D are the anti-pattern-6 half — the original failure mode *and*\nthe new normal case. Production `cleanup.sh` is cron-invoked\n(`docs/OPERATIONS.md` cron stanzas) from an environment that exports neither\nvariable, so the guard is inert on the path it actually runs on.\n\nRegression coverage (CODER-20260915-021) adds scenarios 4 and 5 to\n`team/tests/unit/test_cleanup_root_override.py`: each seeds a decoy, points\none export at it, asserts a non-zero exit, asserts all three dual-channel\nlines and both paths in stderr, asserts no `Step` header and no\n`log written to:` line fired, and asserts the decoy directory snapshot is\nbyte-identical afterwards. The tasks-dir decoy is backdated past the 7-day\nretention window so the assertion is coupled to genuinely deletable state —\nthe fixture proves something rather than nothing. Three pre-existing fixtures\nthat leaked the ambient exports into their subprocess calls were explicitly\ncleared rather than left to chance.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0282 — all seven roles back under their governance byte budgets",
+      "heading": "Finding 2: BUG-0282 — all seven roles back under their governance byte budgets",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/lint_governance_byte_budgets.sh --kanban-cfg kanban.cfg_example`\non the RC, exit 0:\n\n```\nROLE             ASSEMBLED         BUDGET   VERDICT\npo                   63167          65536   under\npm                   76689          81920   under\ncoder                69604          69632   under\nwriter               68797          69632   under\ntester              102300         102400   under\ncm                   85578          86016   under\noverwatch            73426          73728   under\n```\n\nBoth previously-`OVER` roles (`coder` 70897, `tester` 104287) are now under.\nThe bug's second acceptance bullet also holds: `findings-unit.json` written by\nthis run's `run-unit-tests.sh` contains zero findings, so no\n`governance_byte_budget` entry survives.\n\nThe bug's third bullet — that the lean-up preserve every substantive\ninstruction — holds on reading. `docs/test-authoring-guidelines.md` now owns a\n`## Live-install safety` section carrying the full fenced invocation, the\n\"why overriding one root is not a sandbox\" argument, the new \"why two of the\nfive are cleared rather than repointed\" paragraph, the `cleanup.root_mismatch`\nrefusal and its remedy, and the gated-runner-versus-ad-hoc scope statement.\n`team/roles/CODER.md` and `team/roles/TESTER.md` each retain a runnable\ncommand naming all five variables (`PGAI_TASKS_DIR`, `PGAI_PROJECT_ROOT`\ncleared via `env -u`; `KANBAN_ROOT`, `PGAI_AGENT_KANBAN_ROOT_PATH`,\n`PGAI_AGENT_KANBAN_TEMP_DIR` set), the one-sentence reason a single root\noverride is insufficient, and a citation to the canonical section. The chosen\nhome is outside every read-order manifest, so it costs no role budget —\nthe correct shape for this fix.\n\n`docs/README.md`'s index line for the guidelines document was updated to name\nthe new section, so the docs index does not go stale.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Requirements-doc acceptance criteria",
+      "heading": "Finding 3: Requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- *\"Each bundled item is addressed in the implementation\"* — Findings 1 and 2.\n- *\"All Python files compile cleanly\"* — the gated runners' breakage-class\n  pre-flight reports `444 python file(s) ... 0 breakage-class failures`.\n  `python3 -m py_compile` on both changed test files exits 0.\n- *\"All bash files pass syntax check\"* — same pre-flight, `265 shell file(s)`,\n  0 failures. `bash -n team/scripts/cleanup/cleanup.sh` exits 0.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Gated test suites",
+      "heading": "Finding 4: Gated test suites",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth run from the worktree root with `--coverage`. These exit codes are the\nsuite verdict; no direct-pytest result is quoted anywhere in this report.\n\n- `bash team/scripts/run-unit-tests.sh --coverage` → **exit 0**, `4530 passed,\n  31 skipped in 678.86s`.\n- `bash team/scripts/run-integration-tests.sh --coverage` → **exit 0**,\n  `465 passed, 1 skipped in 483.56s`.\n\nSkip-cites-a-real-bug (Step 6.13): the placeholder grep returns no real hits —\nevery `BUG-SKIP`-shaped match is either a gated-runner log line under\n`team/tests/artifacts/` or a string-literal fixture inside\n`team/tests/unit/test_skip_bug_citation_scan.py`, the test *of* the gate.\nThe four IDs my naive extraction flagged as missing (`BUG-1234`, `BUG-1235`,\n`BUG-1237`, `BUG-1239`) are all fixture payloads in that file, not skip\nannotations. `lint_skip_bug_gate.sh` ran green inside both gated runners.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Pre-flight, state and process checks",
+      "heading": "Finding 5: Pre-flight, state and process checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Merge verification.** All three DONE feature branches are merged — the RC\n  log carries `a836268` (CODER-020), `55b3b8c` (CODER-021) and `7535df9`\n  (WRITER-022) as `--no-ff` merges. The branches themselves are deleted, the\n  normal post-merge shape. The full pre-flight sweep over every DONE task in\n  `projects/pgai-agent-kanban/tasks/` reports zero anomalies (no UNMERGED, no\n  BUG-92 zero-commit branches).\n- **release-state.md.** `Active RC: v2.22.4`, `RC Opened By Task:\n  CM-20260915-023-open-rc-2-22-4`, `Last Released: v2.22.3` — well-formed\n  `vX.Y.Z`. `pp_last_released_version` returns `v2.22.3`; `v2.22.4` is\n  strictly semver-greater. No drift.\n- **Prerequisite graph.** Acyclic, every referenced ID exists, bookends\n  correct (CM-open first with no prerequisites; TESTER then CM-release last).\n  Sequence numbers do not collide. The CM-open bookend carries a higher\n  ordinal (023) than the work tickets it precedes (020-022) — the\n  materializer's standard bookend-injection numbering, not drift.\n- **Coding standards (Step 6.14 spot-check).** The RC's added lines carry no\n  bug ID, task ID, RC or version citation (directive 8) — grep over\n  `git diff ai_main..ai_rc/v2.22.4` added lines returns nothing.\n  `cleanup.sh --help` names every argument including the two new-ish\n  `--trivial-only` / `--temp-only` modes (directive 6). No new hardcoded\n  operational value; the two new refusals reuse the shared\n  `pgai_emit_error_contract` emitter rather than open-coding a message\n  (directives 1 and 3).\n- **Synthetic release simulation (Step 6.8).** Skipped with note: the diff\n  touches no release-lifecycle file. `cleanup.sh` lives under\n  `team/scripts/` but takes no part in the RC open/close cycle.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "The export refusals compare exactly but say they compare containment",
+      "heading": "Finding 6: The export refusals compare exactly but say they compare containment",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (fail-closed; the refusal never lets a destructive step run on an unsandboxed path, and its remedy line quotes the working value)\n**Regression:** yes (both refusals are new in this RC; the invocation it now rejects previously proceeded)\n**Integrity Damage:** no\n**Filed As:** BUG-0283 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nBoth new guards test exact string equality —\n`[[ \"$PGAI_TASKS_DIR\" != \"$_pp_tasks\" ]]` — while the message they print\nclaims a containment test: *\"does not sit underneath the reconciled root.\"*\nThe two do not agree in either direction. Case E above:\n\n```\n$ env -u PGAI_PROJECT_ROOT PGAI_TASKS_DIR=\"$R/projects/demo/tasks/\" \\\n      KANBAN_ROOT=\"$R\" PGAI_AGENT_KANBAN_ROOT_PATH=\"$R\" ... --dry-run\nerror:   cleanup.tasks_dir_export_mismatch\nmessage: PGAI_TASKS_DIR ('<R>/projects/demo/tasks/') does not sit underneath the reconciled root ('<R>/projects/demo/tasks'); cleanup.sh will not guess which one the caller meant.\nEXIT=1\n```\n\nThe quoted path *is* the reconciled directory; only the trailing slash\ndiffers. Conversely a path genuinely underneath the reconciled root satisfies\nthe message's wording and is still refused, so the message reads as correct\nthere by accident. The smallest correct fix is to normalise the trailing\nslash and reword to \"does not match\"; widening to a real containment test is\na deliberate behaviour change and should be chosen, not defaulted into.\n\nScope note: no documented invocation is affected. Every sandbox form the role\nfiles and `docs/test-authoring-guidelines.md` show uses\n`env -u PGAI_TASKS_DIR -u PGAI_PROJECT_ROOT`, which clears the variables.",
+      "filed_as": "BUG-0283",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (fail-closed; the refusal never lets a destructive step run on an unsandboxed path, and its remedy line quotes the working value)",
+        "regression": "yes (both refusals are new in this RC; the invocation it now rejects previously proceeded)",
+        "filed_as": "BUG-0283 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Nothing warns that copying a linked git worktree carries its `.git` pointer",
+      "heading": "Finding 7: Nothing warns that copying a linked git worktree carries its `.git` pointer",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 WRITER task; note the 28-byte and 100-byte role budget margins from Finding 8)\n**Systemic Risk:** medium (a real defect that ships and is healed next iteration; it can silently rewrite the branch an in-flight RC is built on, but git's reflog makes recovery routine)\n**Regression:** no (the gap pre-dates this RC — `grep -rn worktree` over `team/roles/` and `docs/test-authoring-guidelines.md` at `ai_main` returns only working-directory validation and the TESTER detached-HEAD check, exactly as on the RC)\n**Integrity Damage:** no (the one observed instance was detected and reverted in the same session; `ai_rc/v2.22.4` carries no revert commit and no content was lost)\n**Filed As:** BUG-0284 (Path C-A — filed as BUG)\n\nStep 6.11 spot-check, \"state drift\" category. A per-task worktree's `.git` is\na one-line `gitdir:` pointer at the shared repository, so a recursive copy of\nthe working directory does not isolate git state — commands in the copy mutate\nthe original repository's refs. Reproduced directly in a throwaway repo: an\n`--allow-empty` commit made entirely inside a `cp -r` copy of a linked\nworktree moved `feature` in the source repository.\n\nIt is not hypothetical here.\n`tasks/CODER-20260915-021-cleanup-export-regression/status.md` records that\nthe agent `cp -r`'d its worktree into a scratch directory and ran `git revert`\nthere, which \"briefly moved the real feature branch's HEAD to the revert\ncommit before I caught it via `git status`.\" It recovered with\n`git reset --soft`/`--mixed`. I confirmed independently that the RC is intact:\nthe eight-commit history carries no revert commit, the three merges are\npresent, and the shipped `cleanup.sh` behaves as specified across all six\nbehavioural cases above.\n\nThe governance already spends several hundred bytes on the analogous\ninherited-pointer hazard one layer up (five environment variables that resolve\nto the live install) and says nothing about this one. That asymmetry — not the\nagent's mistake — is the defect.",
+      "filed_as": "BUG-0284",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no (the one observed instance was detected and reverted in the same session; `ai_rc/v2.22.4` carries no revert commit and no content was lost)"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 WRITER task; note the 28-byte and 100-byte role budget margins from Finding 8)",
+        "systemic_risk": "medium (a real defect that ships and is healed next iteration; it can silently rewrite the branch an in-flight RC is built on, but git's reflog makes recovery routine)",
+        "regression": "no (the gap pre-dates this RC — `grep -rn worktree` over `team/roles/` and `docs/test-authoring-guidelines.md` at `ai_main` returns only working-directory validation and the TESTER detached-HEAD check, exactly as on the RC)",
+        "filed_as": "BUG-0284 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Byte-budget margins are 28 and 100 bytes",
+      "heading": "Finding 8: Byte-budget margins are 28 and 100 bytes",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`coder` clears its budget by 28 bytes (69604/69632) and `tester` by 100\n(102300/102400). The WRITER task flagged the same thing. This is not a defect\nand not a gap — BUG-0282's acceptance is met as written — but the next\nsubstantive sentence added to either rulebook re-trips the lint, and Finding\n7's fix is a clause in exactly those two files. Whoever takes BUG-0284 should\nexpect to either write a very short clause or move the budget deliberately, as\nBUG-0282's own Hypothesis section already framed it.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Autonomous operation criterion",
+      "heading": "Finding 9: Autonomous operation criterion",
+      "level": 3,
+      "body": "**Category:** pass\n\nSee the dedicated section below.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

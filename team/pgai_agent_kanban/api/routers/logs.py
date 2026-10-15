@@ -59,16 +59,17 @@ Project validation:
 
 from __future__ import annotations
 
-import configparser
-import os
 import pathlib
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from pgai_agent_kanban.lib import ini
+
 from ..adapter import HTTP_UNPROCESSABLE_ENTITY
-from ..dependencies import warn_unknown_query_params
+from ..dependencies import route_temp_root, warn_unknown_query_params
+from ..validation import has_traversal
 
 __all__ = ["router"]
 
@@ -102,72 +103,15 @@ _GLOBAL_SENTINEL = "global"
 # ---------------------------------------------------------------------------
 
 
-def _kanban_temp_root() -> pathlib.Path:
-    """Return the framework temp root directory.
-
-    Resolution matches the bash pgai_mktemp convention in team/scripts/lib/temp.sh:
-      1. PGAI_AGENT_KANBAN_TEMP_DIR env var if set.
-      2. /tmp/pgai_kanban_tmp as the hard fallback.
-    """
-    env_val = os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR", "").strip()
-    return pathlib.Path(env_val) if env_val else pathlib.Path("/tmp/pgai_kanban_tmp")
-
-
 def _read_registered_projects(kanban_root: pathlib.Path) -> frozenset[str]:
     """Return the set of project names registered in projects.cfg.
 
     Returns an empty frozenset when projects.cfg is absent or unreadable.
     """
-    cfg_path = kanban_root / "projects.cfg"
-    if not cfg_path.is_file():
-        return frozenset()
-
-    parser = configparser.RawConfigParser()
     try:
-        parser.read(str(cfg_path), encoding="utf-8")
-    except configparser.Error:
+        return frozenset(entry.name for entry in ini.projects_registry(kanban_root))
+    except ini.IniError:
         return frozenset()
-
-    names: set[str] = set()
-    for section in parser.sections():
-        if section.startswith("project:"):
-            names.add(section[len("project:"):])
-
-    return frozenset(names)
-
-
-def _has_traversal(value: str) -> bool:
-    """Return True when the value contains a path traversal sequence.
-
-    Checks both raw and common URL-encoded forms before any filesystem access.
-    A traversal is detected when the value contains:
-      - ".." (dot-dot)
-      - "/" or "\\" (path separator)
-      - URL-encoded variants: "%2F" (slash), "%5C" (backslash), "%2E" (dot),
-        or the two-dot sequence "%2E%2E".
-    Case-insensitive for URL-encoded forms.
-
-    This check is the confinement gate: it fires BEFORE any open() call.
-    """
-    upper = value.upper()
-    # Raw sequences.
-    if ".." in value:
-        return True
-    if "/" in value:
-        return True
-    if "\\" in value:
-        return True
-    # URL-encoded slash / backslash / dot.
-    if "%2F" in upper:
-        return True
-    if "%5C" in upper:
-        return True
-    if "%2E" in upper:
-        return True
-    # Null bytes (path confusion).
-    if "\x00" in value or "%00" in upper:
-        return True
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +206,7 @@ def _validate_agent_param(agent: Optional[str]) -> str:
         )
 
     # Confinement gate: traversal check fires before the whitelist check.
-    if _has_traversal(agent):
+    if has_traversal(agent):
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
             detail=(
@@ -305,7 +249,7 @@ def _validate_project_param(
         )
 
     # Confinement gate: traversal check fires before registry lookup.
-    if _has_traversal(project):
+    if has_traversal(project):
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
             detail=(
@@ -383,12 +327,12 @@ def _resolve_overwatch_path(
     return kanban_root / "projects" / project / "logs" / "overwatch" / "sweep.log"
 
 
-def _resolve_api_server_path() -> pathlib.Path:
-    """Resolve the API server log path.
+def _resolve_api_server_path(temp_root: pathlib.Path) -> pathlib.Path:
+    """Resolve the API server log path under *temp_root* (``route_temp_root``).
 
     Path: <temp_root>/api/api-server.log
     """
-    return _kanban_temp_root() / "api" / "api-server.log"
+    return temp_root / "api" / "api-server.log"
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +440,7 @@ def get_log_tail(
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
                 detail="Required parameter 'project' is missing or empty.",
             )
-        if _has_traversal(project):
+        if has_traversal(project):
             raise HTTPException(
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
                 detail=(
@@ -518,7 +462,7 @@ def get_log_tail(
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
                 detail="Required parameter 'project' is missing or empty.",
             )
-        if _has_traversal(project):
+        if has_traversal(project):
             raise HTTPException(
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
                 detail=(
@@ -539,7 +483,7 @@ def get_log_tail(
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
                 detail="Required parameter 'project' is missing or empty.",
             )
-        if _has_traversal(project):
+        if has_traversal(project):
             raise HTTPException(
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
                 detail=(
@@ -557,7 +501,7 @@ def get_log_tail(
     else:
         # kind == "api-server"
         # No params required
-        log_path = _resolve_api_server_path()
+        log_path = _resolve_api_server_path(route_temp_root(request))
 
     # -----------------------------------------------------------------------
     # Step 4: Read the file — the ONLY filesystem access in this handler.

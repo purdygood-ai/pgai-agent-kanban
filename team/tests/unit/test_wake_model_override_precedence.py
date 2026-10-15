@@ -5,7 +5,7 @@ Behavioral fixtures for the wake scripts' per-task model resolution.
 
 Both wake providers (scripts/wake/claude.sh, scripts/wake/codex.sh) resolve
 which model string to pass to the agent CLI for a given task using a 3-tier
-precedence chain (documented in SOP.md "Model Override Mechanism", highest
+precedence chain (documented in roles/PM.md "Model overrides", highest
 wins):
 
   1. The task README's ## Model Override field
@@ -38,7 +38,7 @@ production logic rather than a reimplementation of it.
 All tests use synthetic environments and never touch the live kanban root.
 
 Naming: function names describe behavior under test, never bug IDs or
-task IDs (see SOP.md "Test Authoring Guidelines").
+task IDs (see roles/TESTER.md "Test Authoring Guidelines").
 """
 
 from __future__ import annotations
@@ -52,9 +52,15 @@ import pytest
 # ---------------------------------------------------------------------------
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
-_WAKE_COMMON_LIB = pathlib.Path("scripts/lib/wake_common.sh")
-_CLAUDE_SH = pathlib.Path("scripts/wake/claude.sh")
-_CODEX_SH = pathlib.Path("scripts/wake/codex.sh")
+_WAKE_README_META_LIB = pathlib.Path("scripts/lib/wake_readme_meta.sh")
+# This model-selection block now lives once in the shared wake driver's
+# prep stage, sourced by both wake/claude.sh and wake/codex.sh --
+# process_one_task's inline body was lifted out of wake/claude.sh, and
+# wake/codex.sh now sources the same shared driver instead of carrying its
+# own inline copy. Both constants below point at the one shared file the
+# block now lives in.
+_CLAUDE_SH = pathlib.Path("scripts/lib/wake_driver_prep.sh")
+_CODEX_SH = pathlib.Path("scripts/lib/wake_driver_prep.sh")
 
 _PROVIDER_SCRIPTS = {"claude": _CLAUDE_SH, "codex": _CODEX_SH}
 
@@ -154,7 +160,7 @@ def _run_model_selection(
     script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
-        {_awk_extract_function("get_model_override_from_readme", _WAKE_COMMON_LIB)}
+        {_awk_extract_function("get_model_override_from_readme", _WAKE_README_META_LIB)}
 
         log() {{ :; }}
 
@@ -217,7 +223,7 @@ def _run_model_selection(
             id="env_var_wins_when_task_override_absent",
         ),
         pytest.param(
-            None, None, "", "subagent default for coder",
+            None, None, "", "provider CLI default for coder",
             id="provider_default_wins_when_no_override_or_env",
         ),
         pytest.param(
@@ -256,6 +262,13 @@ def test_sibling_model_selection_blocks_are_byte_identical() -> None:
     Extraction: locate _MODEL_SELECTION_ANCHOR in each file and capture
     through the closing 'fi'. The two blocks must match byte-for-byte so
     both providers share one resolution order.
+
+    v2.9.20-engine-decomposition moved this block into wake_driver_prep.sh,
+    the one shared stage file both wake/claude.sh and
+    wake/codex.sh source instead of each carrying its
+    own inline copy — so this comparison now extracts the same block from
+    the same file twice, which is the strongest form of "byte-identical":
+    there is only one copy left to drift.
     """
     claude_block = _extract_model_selection_block(_CLAUDE_SH)
     codex_block = _extract_model_selection_block(_CODEX_SH)

@@ -1,0 +1,212 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified RC `ai_rc/v2.28.2` (commit 380378c8, 7 commits over `ai_main` 375b053a, 19 files) against `requirements/v2.28.2-bugfix-bundle-20261004.md`, which bundles three bugs:\n- BUG-0537: seven package-module CLIs crash when run by file path.\n- BUG-0538: the GET /show-queues ICD description still says a no-project request \"reads 0/0\".\n- BUG-0539: the dashboard docs describe a hidden-window slowdown that no longer exists.\n\nAll three are fixed and every acceptance criterion in each bug passes. Each fix was confirmed behaviourally, not only by grep: the by-path crash was reproduced on `ai_main` and shown fixed on the RC; the documented `show_queues.no_project` refusal was observed from the live route in a sandbox; the new cadence prose was checked claim by claim against `cadence.sh`. Both gated runners exited 0 (unit: 7800 passed, 43 skipped; integration: 646 passed, 1 skipped), with zero lint findings.\n\nTwo follow-ups were filed via Path C (autonomous follow-up filing — non-blocking), as Path C-A (filed as BUG — code defect / regression / test failure):\n- BUG-0540 (low): the ICD bump left `docs/operator-api.md`'s support table without a 1.13.1 row.\n- BUG-0541 (medium, pre-existing): a spot-check found the by-path fix again covered only a hand-picked list. Three more modules crash as their own usage text describes, two of them regressed since v2.27.3.\n\nNeither defect affects the running system. The release is usable as shipped.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0537 — seven package-module CLIs run by file path again",
+      "heading": "Finding 1: BUG-0537 — seven package-module CLIs run by file path again",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll seven modules (`deep_verify/ledger.py`, `lib/refusal_ledger.py`, `metrics/blocked_ledger.py`, `overwatch/ledger.py`, `overwatch/resolution_matrix.py`, `reports/agent_timing.py`, `dashboard/queue_details.py`) were run as `python3 <file> --help` from `/` with PYTHONPATH unset:\n- RC: 7/7 exit 0 with no traceback.\n- Original failure synthesized on a `git archive ai_main team` copy: 7/7 exit 1 with `ModuleNotFoundError`.\n\nThe guard binds the module's own tree even when a competing tree is on PYTHONPATH (`runpy.run_path` probe). A package-member import leaves `sys.path` unchanged. Real subcommands work by path. `run-unit-tests.sh --files tests/unit/test_package_modules_run_by_path.py` exits 0 (30 passed). No dev-tree `sys.path` entry was introduced.\n\nTest fidelity: the extended test runs a real subprocess with a scrubbed env and a foreign cwd. That is the real breaking condition, not a mocked proxy.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "`dashboard/queue_details.py --help` prints a scan, not help",
+      "heading": "Finding 2: `dashboard/queue_details.py --help` prints a scan, not help",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`queue_details.py` has no argparse, so `--help` is read as a tasks-root path. It prints an empty JSON scan and exits 0. BUG-0537's criterion (exit 0, no traceback) is met, and this is the same behaviour as the last good release, as the implementing CODER also noted. Not filed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0538 — ICD description of GET /show-queues corrected (1.13.0 -> 1.13.1)",
+      "heading": "Finding 3: BUG-0538 — ICD description of GET /show-queues corrected (1.13.0 -> 1.13.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `grep \"else read 0/0\"` over reads.py and icd.json: empty.\n- The icd.json description names `show_queues.no_project`.\n- `lint_icd_freshness.py`: ok. `lint_icd_compat.py`: ok (15 baselines). `generate_operator_verb_docs.py --check`: OK.\n- `icd.json` is byte-identical to `baselines/icd-v1.13.1.json`. Both `ICD_VERSION` copies read `1.13.1`.\n- Apart from `info.version` and that one description, the ICD surface is identical to ai_main's, which is correct for a patch bump.\n\nBehaviour: a sandboxed `TestClient(create_app(...))` with PGAI_PROJECT_NAME unset returns 500, exit_code 1, empty stdout, and `error:   show_queues.no_project` in stderr, exactly as now documented. With a server project it returns 200.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "ICD support table in docs/operator-api.md lacks the 1.13.1 row",
+      "heading": "Finding 4: ICD support table in docs/operator-api.md lacks the 1.13.1 row",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks; one WRITER doc edit plus an optional mirror check)\n**Systemic Risk:** low (isolated documentation omission)\n**Regression:** yes\n**Integrity:** none\n**Filed As:** BUG-0540-icd-support-table-missing-1-13-1 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the API guide's table of supported contract versions stops at 1.13.0, although this release publishes and supports contract 1.13.1.\n\nBUG-0538 expected the patch bump \"that docs/operator-api.md prescribes\". Step 4 of that procedure is \"Add the version's row to the support table\", and the table is documented as mirroring `docs/api/baselines/SUPPORTED`. `SUPPORTED` gained `1.13.1`; the table did not. `diff <(grep -oE '^\\| [0-9]+\\.[0-9]+\\.[0-9]+ \\|' docs/operator-api.md | tr -d '| ') <(grep -vE '^\\s*(#|$)' docs/api/baselines/SUPPORTED)` prints `> 1.13.1`. No lint detects the drift. The implementing CODER flagged it as a WRITER follow-up, and no ticket picked it up.\n\nThere is also an unresolved conflict between `ICD_CHANGELOG.md` (\"description-only edits ... are not recorded\") and procedure step 4 (a changelog entry per bump). Severity low: the contract, baselines and gates are all correct.",
+      "filed_as": "BUG-0540",
+      "filed_by": "TESTER (autonomous Path C) — the API guide's table of supported contract versions stops at 1.13.0, although this release publishes and supports contract 1.13.1.",
+      "severity": null,
+      "category": "gap",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks; one WRITER doc edit plus an optional mirror check)",
+        "systemic_risk": "low (isolated documentation omission)",
+        "regression": "yes",
+        "integrity": "none",
+        "filed_as": "BUG-0540-icd-support-table-missing-1-13-1 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the API guide's table of supported contract versions stops at 1.13.0, although this release publishes and supports contract 1.13.1."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0539 — dashboard refresh-cadence docs match shipped behaviour",
+      "heading": "Finding 5: BUG-0539 — dashboard refresh-cadence docs match shipped behaviour",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `grep -nE 'slow(s|ed)? to 10x|times slower'` over both docs: empty. No broader \"10x\"/\"ten times\" residue.\n- Both docs state that a detached session is hidden and renders nothing (dashboard.md:113, :196; OPERATIONS.md:1283, :1489).\n- `check_docs_citations.py`: ok. `lint_doc_command_truth.py`: 0 findings. Provenance lint: 0 findings.\n\nEvery new claim matches the code:\n- Visibility is `#{session_attached} #{window_active}` (`dashboard_pane_visible`).\n- A hidden pane gets no render after its arrival render (`dashboard_cadence_run_loop`).\n- Stream panes are paused with SIGSTOP/SIGCONT (`dashboard_cadence_run_stream`).\n- The activation hooks are `session-window-changed` and `client-attached` (`lib/activation_hook.sh:64`).\n- The status line uses `status-interval ${REFRESH_INTERVAL}` (`create.sh:920`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Requirements-level criteria — compile and syntax",
+      "heading": "Finding 6: Requirements-level criteria — compile and syntax",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll 661 tracked `.py` files compile (in-memory `compile()`, no .pyc written). All 316 tracked `.sh` files plus 1 extensionless bash script pass `bash -n`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Gated runners",
+      "heading": "Finding 7: Gated runners",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `run-unit-tests.sh --coverage`: UNIT_EXIT=0. 7800 passed, 43 skipped (26:52). Lint pre-flight: 0 findings.\n- `run-integration-tests.sh --coverage`: INTEGRATION_EXIT=0. 646 passed, 1 skipped (15:28). Lint pre-flight: 0 findings.\n\nThe output is at `/tmp/pgai_kanban_tmp/tester/TESTER-20261004-014/{unit,integration}.out`. PASS evidence is these exit codes, not pytest lines.\n\nCoverage (informational only; from the `totals` object, with field names checked against the generated JSON):\n\n| Suite | Line (statements) | Branch | Blended |\n|---|---|---|---|\n| Unit | 80.34% | 66.57% | 77.29% |\n| Integration | 14.13% | 9.94% | 13.20% |",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "By-path CLI fix again applied to a hand-picked subset; three more modules crash as their usage describes",
+      "heading": "Finding 8: By-path CLI fix again applied to a hand-picked subset; three more modules crash as their usage describes",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the same class has now been fixed partially in two consecutive RCs and will recur until the test discovers modules itself)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0541-more-package-clis-crash-by-path (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the run-by-file-path fix has now been applied to a hand-picked list of modules twice, and three more package modules still crash with \"module not found\" when run the way their own usage text describes.\n\nThis came from the Step 6.11 spot-check (untested mechanism / recurrence of a prior gap). I swept every package module with `__main__` and a top-level `pgai_agent_kanban` import. 15 still crash by path with PYTHONPATH unset. Three of them are BUG-0537's defect:\n- `deep_verify/schedule.py` and `deep_verify/freshness.py` printed their usage by path on v2.27.3 (exit 2). They regressed in v2.28.0 when a private ISO parser became a package import.\n- `reports/project_summary.py`'s docstring advertises `python3 team/pgai_agent_kanban/reports/project_summary.py [options]`. It crashes, and did on v2.27.3 too.\n\n`test_package_modules_run_by_path.py` pins a literal list of 10 modules, although its docstring now claims coverage of every module with its own CLI.\n\nNot introduced by this RC (`Regression: no`), and not exercised in production: deep-verify scripts use `pp_run_ops`, and `project-summary.sh` sets PYTHONPATH. The `-m` form is the workaround, so per the \"Rating a Finding\" calibration it is rated medium. BUG-0537's acceptance named the seven modules explicitly, and those pass. This finding is outside that list, not a failure of it.",
+      "filed_as": "BUG-0541",
+      "filed_by": "TESTER (autonomous Path C) — the run-by-file-path fix has now been applied to a hand-picked list of modules twice, and three more package modules still crash with \"module not found\" when run the way their own usage text describes.",
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the same class has now been fixed partially in two consecutive RCs and will recur until the test discovers modules itself)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0541-more-package-clis-crash-by-path (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the run-by-file-path fix has now been applied to a hand-picked list of modules twice, and three more package modules still crash with \"module not found\" when run the way their own usage text describes."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Steps 6.1, 6.9, 6.10, 6.13, 6.14",
+      "heading": "Finding 9: Steps 6.1, 6.9, 6.10, 6.13, 6.14",
+      "level": 3,
+      "body": "**Category:** pass\n\n- 6.1: release-state.md is well-formed (Active RC v2.28.2, Last Released v2.28.1). `semver_gt v2.28.2 $(pp_last_released_version pgai-agent-kanban)` is true.\n- 6.9: no secrets, home paths or dev-tree paths in added lines.\n- 6.10: the prerequisite graph is acyclic, with correct bookends (CM-013 open, CM-016 release). Sequence 015 is unused, with no collision.\n- 6.13: no real skip cites a missing bug. The unresolved IDs are synthetic fixture strings.\n- 6.14: no provenance IDs in new comments or docstrings. The guard's 10-fold repetition is inherent: it must run before any package import, so it cannot move to `lib/`.\n- 6.8: skipped. The diff touches no release-lifecycle file.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

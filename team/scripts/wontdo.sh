@@ -61,11 +61,14 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 # --- Resolve project ---
-_project="$(operator_args_project)"
-if [[ -z "${_project}" ]]; then
+_project_raw="$(operator_args_project)"
+if [[ -z "${_project_raw}" ]]; then
     printf 'wontdo.sh: --project is required (or set $PGAI_PROJECT_NAME)\n' >&2
     exit 1
 fi
+
+# --- Resolve project name by exact match then unambiguous prefix ---
+_project="$(pp_resolve_project_name "${_project_raw}")" || exit 1
 
 # --- Validate --key ---
 _key="$(operator_args_get key)"

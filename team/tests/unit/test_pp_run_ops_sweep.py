@@ -32,8 +32,7 @@ rationale:
       caller-set PYTHONPATH entry (pp_run_ops prepends its own-tree root, which
       in a wake-script environment equals the live install, not the dev tree).
       Keeping the direct invocation preserves the correct import precedence for
-      a script that explicitly requires the dev-tree package (Option A per
-      BUG-0083).
+      a script that explicitly requires the dev-tree package.
 
 HOW THE GATE WORKS
 ------------------
@@ -45,7 +44,7 @@ Exemptions: the two files named above are excluded from the scan.
 Negative proof: a temp file containing a synthetic bare invocation is confirmed
 to match the pattern, showing the gate can catch new violations if they appear.
 
-TEST NAMING CONVENTION (SOP.md Anti-pattern 6)
+TEST NAMING CONVENTION (roles/TESTER.md Anti-pattern 6)
 -----------------------------------------------
 All test function names describe behavior, not the bug ID or task ID that
 prompted them.
@@ -57,6 +56,20 @@ import pathlib
 import re
 import subprocess
 
+import pytest
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="pp-run-ops-sweep")
+
 # ---------------------------------------------------------------------------
 # Exemption list (one entry per file; includes rationale as a comment above).
 # The paths are relative to the repo root and matched as exact file-relative
@@ -67,7 +80,7 @@ import subprocess
 # the bare invocation because it IS the cwd-independent wrapper implementation.
 #
 # team/scripts/generate-icd.sh — ICD wrapper: routes directly to avoid
-# KANBAN_ROOT overriding the pre-set dev-tree PYTHONPATH (Option A, BUG-0083).
+# KANBAN_ROOT overriding the pre-set dev-tree PYTHONPATH.
 _EXEMPT_SUFFIXES: tuple[str, ...] = (
     "team/scripts/lib/pp_run_ops.sh",
     "team/scripts/generate-icd.sh",
@@ -157,7 +170,7 @@ def test_no_bare_python3_module_invocations_outside_exemptions() -> None:
     Exempted files:
       - team/scripts/lib/pp_run_ops.sh   (the helper itself — must contain the form)
       - team/scripts/generate-icd.sh     (uses direct invocation with explicit PYTHONPATH
-                                          to keep dev-tree precedence; see BUG-0083)
+                                          to keep dev-tree precedence)
     """
     violations = _find_violations()
     assert not violations, (

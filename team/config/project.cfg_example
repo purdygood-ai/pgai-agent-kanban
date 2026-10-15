@@ -1,0 +1,408 @@
+# project.cfg_example — reference copy of every per-project setting.
+#
+# Each registered project keeps its own INI file at
+#   $PGAI_AGENT_KANBAN_ROOT_PATH/projects/<project_name>/project.cfg
+# create-project.sh writes that file from this template, and add-project.sh
+# writes one for a project directory that has none; neither ever rewrites
+# an existing project.cfg. Use this file to look up a key and copy its block
+# into a project's own project.cfg.
+#
+# In a project.cfg written from this template, this header is replaced by
+# one naming the project, and every <project_name> below becomes its name.
+#
+# Format: [section] headers and key = value lines. Comments begin with # or
+# ; and are ignored. Values are taken literally: no quoting is needed, and
+# ~ and $VARIABLES are NOT expanded. A key shown commented as
+# "# key = value" is not set here and shows the value in force while it
+# stays commented; uncomment the line to set it for this project.
+#
+# "Inherits: project.cfg > kanban.cfg > X" means the reader takes this
+# file's value, else kanban.cfg's value for the same [section] key, else X.
+#
+# Parsed by: scripts/lib/ini_parser.sh read_ini (and its Python twin).
+
+# ---------------------------------------------------------------------------
+# [project] — identity and git topology
+# ---------------------------------------------------------------------------
+[project]
+
+# project_name: this project's canonical name. Must equal the directory name
+# under projects/ and the [project:<name>] entry in projects.cfg.
+# Accepted: letters, digits, _ and -.
+# Default: empty; create-project.sh and add-project.sh write the name.
+project_name =
+
+# workflow_type: the workflow plugin that drives this project.
+# Accepted: any ready workflow plugin (release, document, testing-only).
+# Default: release
+workflow_type = release
+
+# git_remote_name: the name of the git remote this project's releases talk
+# to. Honoured by CM (open-rc, ship-rc, cancel-rc, unwind-rc and the
+# release squash and finalize steps fetch from, push to and delete RC
+# branches on it), by init-project-git-repo.sh, and by the push-lag checks
+# (OVERWATCH's check-push-lag and cm/push-watchdog.sh), which compare
+# against <remote>/<branch_prefix>main. Blank or absent means origin.
+# Accepted: a git remote name -- letters, digits, '.', '_' and '-', starting
+# with a letter or digit (any other value is refused, naming this key).
+# Default: origin
+git_remote_name = origin
+
+# dev_tree_path: absolute path of this project's local git repository. Task
+# worktrees are made from it, and CM's release and push steps need it.
+# Accepted: an absolute path; no ~ or $VARIABLES.
+# Example: /srv/checkouts/<project_name>
+# Default: empty. Where project.cfg leaves it empty the PGAI_DEV_TREE_PATH
+# environment variable, then kanban.cfg [paths] dev_tree_path, are used.
+dev_tree_path =
+
+# git_repo_url: URL of the remote repository. Not read when push_to_remote
+# is false; may stay empty then.
+# Accepted: any git URL.
+# Example: git@git.example.com:example-org/<project_name>.git
+# Default: empty
+git_repo_url =
+
+# --- Git branch topology (release workflow only; ignored for document) -----
+# Before this project's FIRST release, the chain's single base branch must
+# exist: <prefix>main. With the default prefix that is ai_main; with an
+# empty prefix, main. Your repo's own default branch is untouched and coexists.
+#   push_to_remote = true  -> the branch must also exist ON the remote: CM
+#                             branches RC from <prefix>main and squashes back.
+#   push_to_remote = false -> local branch in dev_tree_path suffices.
+# For push_to_remote = true, one idempotent command creates and pushes it:
+#   init-project-git-repo.sh --project <project_name>
+# For push_to_remote = false, create the branch locally instead (the init
+# script ALWAYS pushes — wrong for local-only mode):
+#   git branch <prefix>main main
+
+# branch_prefix: prefix put in front of every branch and tag the chain
+# creates (<prefix>main, <prefix>rc/vX.Y.Z, tag <prefix>vX.Y.Z). Useful when
+# people and agents share one repository; set it empty (branch_prefix =)
+# for a repository only the chain writes to. Never quote it ("").
+# Accepted: empty, or letters, digits, _ and - only ([A-Za-z0-9_-]); a value
+# with a space, slash, dot or any other character is refused.
+# Default: scaffolded as ai_; absent or empty means no prefix.
+branch_prefix = ai_
+
+# push_to_remote: whether CM pushes the release (main branch and version tag)
+# to git_remote_name when it ships. Only the exact value false keeps
+# releases local: the operator then pushes by hand when they choose. Any
+# other value, or no value, pushes. Pushing also needs dev_tree_path set.
+# Accepted: true|false
+# Default: true
+push_to_remote = true
+
+# temp_dir: this project's scratch directory, relative to the framework temp
+# root (PGAI_AGENT_KANBAN_TEMP_DIR, default /tmp/pgai_kanban_tmp); agents and
+# scripts route this project's transient files there.
+# Accepted: a relative name or path under that root; no leading /, no ~ or
+# $VARIABLES.
+# Default: projects/<project_name>
+# temp_dir = projects/<project_name>
+
+
+# ---------------------------------------------------------------------------
+# [versioning] — version ceilings and priority intake
+# ---------------------------------------------------------------------------
+[versioning]
+
+# max_patch: ceiling on the patch component (Z in vX.Y.Z) of a release the
+# chain may cut on its own. A target whose patch number is above the ceiling
+# waits for an operator (set-version-ceiling.sh). These cap the component's
+# value, not how many releases have been made.
+# The three ceilings read alike. An absent or empty key (or no project.cfg at
+# all) is the default below, so deleting the line restores the default; it
+# never removes the cap. To remove a cap, write none (set-version-ceiling.sh
+# --no-minor / --no-major write it for max_minor / max_major). Any other value
+# is refused: discovery and pm-agent treat the project as ceiling-blocked and
+# print one line naming this file, the key and the value.
+# Accepted: a non-negative whole number, or none (no ceiling).
+# Default: 21
+max_patch = 21
+
+# max_minor: ceiling on the minor component (Y in vX.Y.Z), as max_patch.
+# Accepted: a non-negative whole number, or none (no ceiling).
+# Default: 13
+max_minor = 13
+
+# max_major: ceiling on the major component (X in vX.Y.Z), as max_patch.
+# As shipped, max_major = 0 is the operator gate for majors: no major release
+# happens until an operator raises this ceiling. Deleting the line keeps the
+# gate (the default is 0); max_major = none removes it.
+# Accepted: a non-negative whole number, or none (no ceiling).
+# Default: 0
+max_major = 0
+
+# max_priorities_per_run: how many operator priority intake files the
+# discovery pipeline bundles into one requirements document per run. Lower
+# it to review each bundle before the next one; raise it to drain a backlog
+# faster.
+# Accepted: a non-negative whole number; 0 turns priority intake off.
+# Default: 1
+max_priorities_per_run = 1
+
+
+# ---------------------------------------------------------------------------
+# [release] — release retries, bug deferral, DEEP-VERIFY and ship posture
+# ---------------------------------------------------------------------------
+[release]
+
+# max_rc_retries: how many times OVERWATCH may cancel and rebundle one
+# bundle family (the same cargo set under a new patch number) before the
+# block escalates to a hard HALT with the full retry history. A lane whose
+# release chain modifies the kanban itself is best kept at 1.
+# Accepted: a non-negative whole number.
+# Inherits: project.cfg > kanban.cfg [release] max_rc_retries.
+# Default: No in-code default — absent from both files fails loud.
+# max_rc_retries = 3
+
+# --- Bug deferral ----------------------------------------------------------
+# Three deferral keys follow (project.cfg > kanban.cfg > default), validated
+# when resolved: an unrecognized value refuses loud naming the accepted set.
+# Booleans are spelled true or false only. A DEFER-LOW-BUGS campaign file,
+# when armed, outranks these. deep_verify below is a separate setting.
+
+# deferred_bugs: master switch — whether this project defers bugs at all.
+# Accepted: true|false
+# Inherits: project.cfg > kanban.cfg > false
+# Default: false
+# deferred_bugs = false
+
+# deferred_bug_level: the highest severity that waits. A bug at or below it
+# is deferred; a bug above it still opens a bugfix RC. At high, only a
+# critical bug opens an RC on its own. critical is not an accepted value: a
+# critical bug is never deferred.
+# Accepted: low|medium|high
+# Inherits: project.cfg > kanban.cfg > low
+# Default: low
+# deferred_bug_level = low
+
+# defer_piggyback: when a bug above deferred_bug_level opens an RC, whether
+# every deferred bug rides along with it.
+# Accepted: true|false
+# Inherits: project.cfg > kanban.cfg > true
+# Default: true
+# defer_piggyback = true
+
+# deep_verify: this project's DEEP-VERIFY scheduled-dispatch cadence. Only
+# [release] deep_verify is honored; the key under any other section is
+# reported and ignored. Commented out, the kanban.cfg value applies. An
+# unrecognized value here refuses loud; it never falls through to kanban.cfg.
+# Accepted: weekly|off (true|false also accepted as aliases: true=weekly,
+# false=off).
+# Inherits: project.cfg > kanban.cfg > weekly
+# Default: weekly
+# deep_verify = weekly
+
+# deep_verify_offhours_window: the daily UTC window a scheduled DEEP-VERIFY
+# run may fire in; stagger it to keep projects' weekly runs apart. Absent or
+# blank, the kanban.cfg value applies; a malformed value counts as absent,
+# with one warning, rather than refusing.
+# Accepted: HH:MM-HH:MM (UTC).
+# Inherits: project.cfg > kanban.cfg > 03:00-03:59
+# Default: 03:00-03:59
+# deep_verify_offhours_window = 03:00-03:59
+
+# ship_posture: how CM answers a ship-policy trigger that would otherwise
+# HALT. matrix applies the ship-policy matrix as written; always ships
+# through the triggers the posture covers and records what they would have
+# stopped on (kanban.cfg_example describes both in full). Blank counts as
+# absent; an unrecognized value resolves to matrix with one warning line.
+# Accepted: matrix|always
+# Example (local-only lane, push_to_remote = false): ship_posture = always
+# Inherits: project.cfg > kanban.cfg > matrix
+# Default: matrix
+# ship_posture = matrix
+
+# ship_posture_confirm_remote: required alongside ship_posture = always when
+# push_to_remote is true; without it always resolves to matrix with one
+# warning line, so a lane that publishes to a remote never slips into always
+# by accident. Not consulted when push_to_remote is false.
+# Accepted: true|false
+# Example (remote lane deliberately opting in): ship_posture_confirm_remote = true
+# Inherits: project.cfg > kanban.cfg > false
+# Default: false
+# ship_posture_confirm_remote = false
+
+# overwatch_resolve: this project's override of whether OVERWATCH may act
+# autonomously on a resolvable CM block, rather than only observing and
+# raising Needs Human as today — read by pp_overwatch_resolve()
+# (team/scripts/lib/project_paths.sh) and its Python counterpart
+# resolve_overwatch_resolve() (team/pgai_agent_kanban/overwatch/
+# resolution_matrix.py). Checked here first; falls back to the kanban-wide
+# default in kanban.cfg when commented out.
+#
+# Turning this on authorises OVERWATCH to execute its documented recovery
+# playbooks (Lane A: rewrite-and-recycle a bad-fix regression; Lane B: ship
+# a HALT whose cause matches a declared operator INTENT.md entry) for THIS
+# project without waiting for a human — see team/roles/OVERWATCH.md,
+# "Autonomous Block Resolution". Everything else still escalates to Needs
+# Human exactly as today, unconditionally.
+#
+# Left commented out so a fresh project ships dark: absent, blank, or
+# unreadable resolves to false — never an error, never "true". Only an
+# unrecognized non-boolean value (a typo, 'yes') refuses loud.
+# Accepted: true|false
+# Inherits: project.cfg > kanban.cfg > false
+# Default: false
+# overwatch_resolve = false
+
+
+# ---------------------------------------------------------------------------
+# [locks] — advisory-lock staleness
+# ---------------------------------------------------------------------------
+[locks]
+
+# stale_lock_reap_after_wake_periods: after how many wake periods (one
+# period = one per-agent cron firing) a contended lock whose holder pid is
+# still alive is narrated as overdue. A live holder is never reaped on age;
+# only a dead-pid or provenance-less lock is reaped. The same threshold
+# drives why.sh's STUCK-LOCK verdict. The effective threshold is floored at
+# kanban.cfg's [wake] runtime budget (kanban.cfg_example's [locks] section
+# gives the derivation), so raising this only matters above that floor.
+# Accepted: a positive whole number.
+# Inherits: project.cfg > kanban.cfg > 3
+# Default: 3
+# stale_lock_reap_after_wake_periods = 3
+
+
+# ---------------------------------------------------------------------------
+# [overwatch] — OVERWATCH block triage
+# ---------------------------------------------------------------------------
+[overwatch]
+
+# block_triage: whether OVERWATCH's block-triage sweep may act on a blocked
+# task's Block Record (requeue, promote, escalate) or only write the record
+# and its diagnosis. Set false to keep OVERWATCH to records and diagnoses
+# for this project. An unrecognized value refuses loud.
+# Accepted: true|false
+# Inherits: project.cfg > kanban.cfg [overwatch] > true
+# Default: true
+# block_triage = true
+
+# requeue_budget: how many times block triage may return one blocked task to
+# its owner over the life of its Block Record, across every block reason,
+# before escalating it to a human. 0 requeues nothing. A value that is not a
+# whole number refuses loud.
+# Accepted: a non-negative whole number.
+# Inherits: project.cfg > kanban.cfg [overwatch] > 3
+# Default: 3
+# requeue_budget = 3
+
+
+# ---------------------------------------------------------------------------
+# [archive] — finished-work archive
+# ---------------------------------------------------------------------------
+[archive]
+
+# archive_count: how many of the newest finished items per category (bugs,
+# priorities, requirements, and tasks per role) stay live; older finished
+# items move to $PGAI_AGENT_KANBAN_ROOT_PATH/archive/<project_name>/, are
+# recorded in that directory's ARCHIVE-LEDGER.tsv, and can be restored. 0
+# keeps everything live. A value that is not a whole number is refused and
+# nothing is archived for this project on that run.
+# Accepted: a non-negative whole number.
+# Inherits: project.cfg > kanban.cfg [archive] > 55
+# Default: 55
+# archive_count = 55
+
+
+# ---------------------------------------------------------------------------
+# [hooks] — optional CM release lifecycle hooks
+# ---------------------------------------------------------------------------
+# CM's release and ship-rc steps run a hook at three phases: pre-squash
+# (before the RC squashes to main), pre-tag (after the squash, before the
+# tag) and post-tag (after the tag, before the push). Each phase's hook is
+# found at the first of:
+#   (a) the cm_release_<phase>_hook key below (explicit path)
+#   (b) $PGAI_AGENT_KANBAN_ROOT_PATH/projects/<project_name>/hooks/cm-release-<phase>.sh
+#   (c) <dev_tree_path>/.pgai/hooks/cm-release-<phase>.sh (travels with the repo)
+# A path in (a) with a leading / is absolute; otherwise it is relative to
+# dev_tree_path. A pre-squash or pre-tag hook that fails blocks the release;
+# a post-tag failure is logged only. A non-executable hook at (c) is an
+# error. Every release prints one resolution line per phase, e.g.
+# "pre-squash hook: none configured". docs/OPERATIONS.md, "Release
+# Lifecycle Hooks", has the hook environment.
+[hooks]
+
+# cm_release_pre_squash_hook: hook run before the RC branch is squashed to
+# main; its commits become part of the squash. Failure blocks the release.
+# Accepted: a path, or empty.
+# Example: scripts/release-version-bump.sh
+# Default: empty (no hook; "none configured" is printed)
+cm_release_pre_squash_hook =
+
+# cm_release_pre_squash_hook_required: when true, the release HALTs before
+# the pre-squash phase if no hook is found at any of (a)-(c); the HALT names
+# the phase, the three places searched and this key.
+# Accepted: true|false
+# Default: false
+cm_release_pre_squash_hook_required = false
+
+# cm_release_pre_tag_hook: hook run after the squash to main, before the tag;
+# use it for final consistency checks. Failure blocks the release.
+# Accepted: a path, or empty.
+# Example: hooks/cm-release-pre-tag.sh
+# Default: empty (no hook)
+cm_release_pre_tag_hook =
+
+# cm_release_pre_tag_hook_required: when true, the release HALTs before the
+# pre-tag phase if no hook is found at any of (a)-(c).
+# Accepted: true|false
+# Default: false
+cm_release_pre_tag_hook_required = false
+
+# cm_release_post_tag_hook: hook run after the tag, before the push; use it
+# for notifications or asset uploads. Failure is logged, never blocking.
+# Accepted: a path, or empty.
+# Example: /opt/release-hooks/post-tag.sh
+# Default: empty (no hook)
+cm_release_post_tag_hook =
+
+# cm_release_post_tag_hook_required: when true, the release HALTs before the
+# post-tag phase if no hook is found at any of (a)-(c).
+# Accepted: true|false
+# Default: false
+cm_release_post_tag_hook_required = false
+
+
+# ---------------------------------------------------------------------------
+# [debug] — diagnostic output
+# ---------------------------------------------------------------------------
+[debug]
+
+# verbose_mode: when true, the roles in verbose_agents emit extra diagnostic
+# output (INI reads, queue scans, git operations). Only the exact value
+# true turns it on.
+# Accepted: true|false
+# Default: false
+verbose_mode = false
+
+# verbose_agents: the roles that emit verbose output when verbose_mode is
+# true, comma-separated.
+# Accepted: any of pm, coder, writer, tester, cm, po, overwatch.
+# Default: pm,coder,writer,tester,cm
+verbose_agents = pm,coder,writer,tester,cm
+
+
+# ---------------------------------------------------------------------------
+# [training] — training corpus and reasoning traces
+# ---------------------------------------------------------------------------
+[training]
+
+# reasoning_trace: when true, the roles in training_agents write a reasoning
+# trace (task context, decisions and notes) to this project's training
+# corpus at
+# $PGAI_AGENT_KANBAN_ROOT_PATH/projects/<project_name>/logs/training/<agent>/<timestamp>-<task-id>.md
+# Only the exact value true turns it on.
+# Accepted: true|false
+# Default: false
+reasoning_trace = false
+
+# training_agents: the roles that write reasoning traces when
+# reasoning_trace is true, comma-separated. Empty means none: tracing is
+# opt-in per role.
+# Accepted: any of pm, coder, writer, tester, cm, po, overwatch.
+# Default: empty (no roles)
+training_agents =

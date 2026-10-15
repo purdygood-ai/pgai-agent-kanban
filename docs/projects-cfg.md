@@ -28,7 +28,7 @@ enabled=true
 dashboard_color=#378ADD
 dashboard_max_rows=20
 
-[project:video-editor]
+[project:pgai-chomp-man]
 priority=2
 dashboard_color=#1D9E75
 dashboard_max_rows=30
@@ -109,7 +109,7 @@ scripts/add-project.sh --project imported-project --priority 4
 
 ### Unregister or remove a project
 
-`scripts/remove-project.sh <name>` unregisters a project from `projects.cfg`. With `--force` it also deletes the project directory under `projects/<name>/`. It refuses to remove a project that has an active RC in flight unless `--force` is given (and warns even then).
+`scripts/remove-project.sh <name>` unregisters a project from `projects.cfg`. With `--force` it also deletes the project directory under `projects/<name>/`. It refuses to remove a project that has an active RC in flight, with or without `--force` (exit 2, `remove_project.active_rc`), and changes nothing; ship or cancel the RC first.
 
 ```bash
 scripts/remove-project.sh old-project              # unregister only
@@ -161,15 +161,15 @@ The colon format is the previous syntax for `projects.cfg`. Each project occupie
 
 ```
 pgai-agent-kanban:1:#378ADD
-video-editor:2:#1D9E75
+pgai-chomp-man:2:#1D9E75
 ```
 
-It is **deprecated** and will be **removed in a future major release** (the parser's deprecation warning names `v1.0.0` as that target). Until then it remains fully supported: the parser detects and reads it transparently, all operator scripts handle it, and no data is lost. The only visible behavior change is a one-time deprecation warning per parser invocation:
+It is **deprecated** and will be **removed in a future major release**. Until then it remains fully supported: the parser detects and reads it transparently, all operator scripts handle it, and no data is lost. The only visible behavior change is a one-time deprecation warning per parser invocation:
 
 ```
 [projects.cfg] WARNING: colon-format detected. This format is deprecated.
 [projects.cfg] WARNING: Run 'scripts/migrate/projects-cfg.sh' to convert to INI format.
-[projects.cfg] WARNING: Old format will be removed in v1.0.0.
+[projects.cfg] WARNING: Old format will be removed in a future major release.
 ```
 
 The warning is emitted once per process — not once per line — to keep logs readable.

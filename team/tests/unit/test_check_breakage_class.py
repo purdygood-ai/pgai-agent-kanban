@@ -11,8 +11,8 @@ or a first-party ``pgai_agent_kanban`` import that no longer resolves.
 Every other pre-flight check is quality-class (never fatal — see
 test_gated_runner_lint.py).
 
-Tests cover the core acceptance criteria (v2.3.5 requirements, Goal 2 /
-Acceptance 2 — "Breakage fixture: a syntax error -> runners exit 1 before
+Tests cover the core acceptance criteria for the breakage-class check
+("Breakage fixture: a syntax error -> runners exit 1 before
 pytest"):
 
   1. **A Python syntax error is reported and fails the gate** — the

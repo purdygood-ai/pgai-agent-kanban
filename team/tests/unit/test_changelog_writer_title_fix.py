@@ -1,7 +1,7 @@
 """
 test_changelog_writer_title_fix.py
 ===================================
-Acceptance tests for the Fixed-entry title sanitization fix (BUG-0072).
+Acceptance tests for the Fixed-entry title sanitization fix.
 
 Covers:
   1. Ugly-bug fixture: a bug whose ## Symptom contains a pytest traceback,
@@ -17,7 +17,7 @@ Covers:
      are byte-stable when bugs have clean symptoms (no sanitization effect).
   4. _sanitize_symptom_for_title unit tests covering the five strip cases.
 
-Test naming describes behavior (SOP.md Anti-pattern 6 compliance).
+Test naming describes behavior (roles/TESTER.md Anti-pattern 6 compliance).
 All temp paths use pytest's tmp_path fixture.
 No bare /tmp paths in this file.
 """
@@ -471,7 +471,7 @@ class TestBareKiIdJoinInBugsResolved:
         # (We allow 'resolved' as part of the affects/fixed-in clause, but not as
         # the only content for the bug entry.)
         # The substituted line keeps the "- " bullet marker of the concise
-        # placeholder it replaces (BUG-0024), so match on the KI id
+        # placeholder it replaces, so match on the KI id
         # appearing after an optional leading list marker rather than
         # requiring it at column 0.
         fixed_lines = [ln.strip() for ln in fixed_body.splitlines() if ln.strip()]
@@ -481,7 +481,7 @@ class TestBareKiIdJoinInBugsResolved:
         assert len(ki_lines) >= 1, "KI-1.0.0.1 line not found in Fixed body"
         ki_line = ki_lines[0]
         assert ki_line.startswith("- "), (
-            f"Joined KI line lost its list bullet marker (BUG-0024): {ki_line!r}"
+            f"Joined KI line lost its list bullet marker: {ki_line!r}"
         )
         assert "Widget crashes on startup" in ki_line, (
             f"Joined KI line does not carry title: {ki_line!r}"

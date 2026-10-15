@@ -2,8 +2,10 @@
 # team/scripts/lib/cm_release_hooks.sh
 #
 # Shared library for CM release hook resolution, visibility printing, and
-# required-hook enforcement.  Used by both release.sh and ship-rc.sh so that
-# hook logic lives in exactly one implementation (one-implementation rule).
+# required-hook enforcement.  Used by both release.sh and the ship-rc verb
+# (pgai_agent_kanban/cm/ship.py, which sources this file in a bash child and
+# reads the resolved path back) so that hook logic lives in exactly one
+# implementation (one-implementation rule).
 #
 # Precedence order (highest to lowest):
 #   (a) project.cfg [hooks] cm_release_<phase>_hook          (cfg)
@@ -12,9 +14,10 @@
 # Deployment overrides app default — the highest-precedence tier that supplies
 # a path wins.
 #
-# Hook execution is delegated to _run_release_hook (defined in release.sh /
-# ship-rc.sh).  This library does NOT execute hooks itself; it resolves, prints,
-# and enforces.
+# Hook execution is delegated to _run_release_hook (defined in
+# lib/cm/release_finalize.sh for release.sh's callers) and to
+# pgai_agent_kanban/cm/ship.py's _run_hook for ship-rc.  This library does
+# NOT execute hooks itself; it resolves, prints, and enforces.
 #
 # RC-branch-aware resolution (tiers a-relative and c)
 # ----------------------------------------------------
@@ -95,7 +98,7 @@
 #   team/scripts/lib/project_paths.sh  — provides _pp_project_cfg_file,
 #                                        _pp_read_cfg_key, pp_project_root
 #
-# The caller (release.sh / ship-rc.sh) must also define
+# The caller (release.sh / cm/ship.py's resolver child) must also define
 # cm_halt <error_key> <message> <remedy> (the dual-channel error contract —
 # see team/scripts/lib/error_contract.sh)
 # before any cm_resolve_and_enforce_hook call.
@@ -264,7 +267,7 @@ cm_resolve_and_enforce_hook() {
                     echo "[cm-release] ERROR: To fix:" >&2
                     echo "[cm-release] ERROR:   1. git update-index --chmod=+x ${_creh_cfg_raw}" >&2
                     echo "[cm-release] ERROR:   2. git commit -m \"chmod +x ${_creh_cfg_raw}\"   # run on ${_creh_rc_branch}" >&2
-                    echo "[cm-release] ERROR:   3. Re-run cm-release.sh to re-resolve the ${_creh_phase} hook." >&2
+                    echo "[cm-release] ERROR:   3. Re-run scripts/cm/release.sh to re-resolve the ${_creh_phase} hook." >&2
                     echo "[cm-release] ERROR:" >&2
                     echo "[cm-release] ERROR: Rule: a hook committed to the RC branch must carry the executable git mode (100755), or the release cannot invoke it deterministically." >&2
                     CM_RESOLVED_HOOK_PATH=""
@@ -319,7 +322,7 @@ cm_resolve_and_enforce_hook() {
                     echo "[cm-release] ERROR: To fix:" >&2
                     echo "[cm-release] ERROR:   1. git update-index --chmod=+x ${_creh_in_repo_relpath}" >&2
                     echo "[cm-release] ERROR:   2. git commit -m \"chmod +x ${_creh_in_repo_relpath}\"   # run on ${_creh_rc_branch}" >&2
-                    echo "[cm-release] ERROR:   3. Re-run cm-release.sh to re-resolve the ${_creh_phase} hook." >&2
+                    echo "[cm-release] ERROR:   3. Re-run scripts/cm/release.sh to re-resolve the ${_creh_phase} hook." >&2
                     echo "[cm-release] ERROR:" >&2
                     echo "[cm-release] ERROR: Rule: a hook committed to the RC branch must carry the executable git mode (100755), or the release cannot invoke it deterministically." >&2
                     CM_RESOLVED_HOOK_PATH=""
@@ -343,7 +346,7 @@ cm_resolve_and_enforce_hook() {
                     echo "[cm-release] ERROR:" >&2
                     echo "[cm-release] ERROR: To fix:" >&2
                     echo "[cm-release] ERROR:   1. chmod +x ${_creh_in_repo}" >&2
-                    echo "[cm-release] ERROR:   2. Re-run cm-release.sh to re-resolve the ${_creh_phase} hook." >&2
+                    echo "[cm-release] ERROR:   2. Re-run scripts/cm/release.sh to re-resolve the ${_creh_phase} hook." >&2
                     echo "[cm-release] ERROR:" >&2
                     echo "[cm-release] ERROR: Rule: a hook file that exists at a resolved tier must be executable, or the release cannot invoke it deterministically." >&2
                     CM_RESOLVED_HOOK_PATH=""

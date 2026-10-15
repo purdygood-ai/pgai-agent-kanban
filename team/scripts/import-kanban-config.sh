@@ -68,7 +68,7 @@ OPERATOR_VALID_FLAGS=(file force help h)
 # ---------------------------------------------------------------------------
 # Value-taking: file.
 # Boolean: force, help.
-argparse_parse \
+operator_args_argparse \
     --value-flags "file" \
     -- "$@"
 

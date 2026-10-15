@@ -1,0 +1,149 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.11.1 is a single-bug patch RC. It resolves BUG-0193 by routing every RC branch\nname that `team/scripts/verify-rc-state.sh` Check e constructs or matches through\n`pp_prefix_branch`, and adds a six-case integration test covering the prefixed and\nunprefixed paths. Verification confirmed the fix behaviourally, not structurally:\nthe pre-fix script from `ai_main` was run against the live prefixed project and\nreproduced the original `[ERROR] ... rc/v2.11.1 does not exist` with exit 1, while\nthe RC's script exits 0 with `[OK] Active RC v2.11.1 has matching local branch:\nai_rc/v2.11.1`. All five of BUG-0193's acceptance criteria were exercised\nindependently against synthetic projects in throwaway kanban roots — the prefixed\nOK/ERROR/WARN arms, the extra-branch WARN arm, and the unprefixed no-regression\narms — and all pass. Both gated runners exited 0 (unit 3321 passed / 3 skipped;\nintegration 366 passed / 1 skipped, including the six new cases). The requirements\ndoc's two generic criteria also pass: 348 Python files compile and 241 shell files\npass `bash -n`. Two defects were found outside the acceptance criteria and filed\nvia Path C: the new prefixed glob makes Check e blind to an *unprefixed* orphan\n`rc/*` branch on a prefixed project — coverage the check had before this RC\n(BUG-0197, regression, low) — and two further prefix-blind RC-branch call sites\nremain elsewhere in the tree, handed off by CODER as out of scope for the ticket\n(BUG-0198, pre-existing, low). Neither is severe; both are hygiene the next loop\nheals.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0193 acceptance criterion 1 — prefixed project exits 0 with a prefixed OK line",
+      "heading": "Finding 1: BUG-0193 acceptance criterion 1 — prefixed project exits 0 with a prefixed OK line",
+      "level": 3,
+      "body": "**Category:** pass\n\nRan the RC's script against the live self-build project (`branch_prefix = ai_`,\n`## Active RC` = `v2.11.1`, branch `ai_rc/v2.11.1` present). `verify-rc-state.sh` is\nread-only — grepped for write operations before running it against the live root;\nit performs none.\n\n```\n$ bash team/scripts/verify-rc-state.sh pgai-agent-kanban --verbose\n--- Check e: release-state.md <-> git branch consistency ---\n[OK]    Active RC v2.11.1 has matching local branch: ai_rc/v2.11.1\nverify-rc-state: 0 errors, 14 warnings, 38 ok\n$ echo $?\n0\n```\n\nExit 0 and the exact `[OK]` wording the bug's acceptance criterion names. The\n14 warnings are all historical `PRIORITY backlog [x] ... already shipped` notes —\nbenign, unrelated, present before this RC.\n\n**Original failure mode re-synthesized.** The pre-fix script\n(`git show ai_main:team/scripts/verify-rc-state.sh`) run against the same live\nproject reproduces the reported defect exactly:\n\n```\n[ERROR] release-state.md Active RC=v2.11.1 but local branch rc/v2.11.1 does not exist in $HOME/develop/pgai-agent-kanban\nverify-rc-state: 1 errors, 14 warnings, 32 ok   (exit 1)\n```\n\nOld case broken, new case fixed — both verified, not inferred.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0193 acceptance criteria 2-4 — guard arms fire correctly (behavioral)",
+      "heading": "Finding 2: BUG-0193 acceptance criteria 2-4 — guard arms fire correctly (behavioral)",
+      "level": 3,
+      "body": "**Category:** pass\n\nSix synthetic projects were built under `$PGAI_AGENT_KANBAN_TEMP_DIR` (throwaway\nkanban roots and git repos, never the live install) and the RC's script run against\neach. Every arm was triggered deliberately, including the failure paths:\n\n| Case | Fixture | Expected | Observed |\n|---|---|---|---|\n| 1 | prefix `ai_`, Active RC `v9.9.9`, no branch | ERROR naming `ai_rc/v9.9.9`, exit 1 | `[ERROR] ... local branch ai_rc/v9.9.9 does not exist`, exit 1 |\n| 2 | prefix `ai_`, Active RC `none`, stray `ai_rc/v0.0.1` | WARN naming the branch | `[WARN] ... local branch exists: ai_rc/v0.0.1`, exit 0 |\n| 3 | no prefix, Active RC `v1.0.0`, branch `rc/v1.0.0` | OK, exit 0 | `[OK] Active RC v1.0.0 has matching local branch: rc/v1.0.0`, exit 0 |\n| 4 | no prefix, Active RC `v9.9.9`, no branch | ERROR naming `rc/v9.9.9`, never `ai_rc/` | `[ERROR] ... local branch rc/v9.9.9 does not exist`, exit 1 |\n| 5 | prefix `ai_`, Active RC `v2.0.0` + stray `ai_rc/v1.0.0` | OK + extra-branch WARN | both lines present, exit 0 |\n| 6 | prefix `ai_`, Active RC `none`, no branches | OK naming the prefixed glob | `[OK] Active RC is none and no local ai_rc/* branches exist` |\n\nCases 3, 4 and 6 are the no-regression evidence for unprefixed projects\n(`pp_prefix_branch` is identity on an empty prefix). Case 5 exercises the\nextra-branch comparison the diff also changed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0193 acceptance criterion 5 — test coverage exists and runs",
+      "heading": "Finding 3: BUG-0193 acceptance criterion 5 — test coverage exists and runs",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/integration/test_verify_rc_state_check_e_branch_prefix.py` (284 lines,\nnew) covers six cases against a synthetic git repo and a temporary kanban root built\nfrom `tmp_path`; it invokes the script by subprocess with\n`PGAI_AGENT_KANBAN_ROOT_PATH` repointed at that temp root, never the live install\n(test-fidelity checklist items 2 and 6 satisfied). It exercises the real bash entry\npoint rather than a Python proxy (item 1). Read fully; the assertions match the\nbehaviour independently observed in Finding 2, and the unprefixed cases are asserted\nexplicitly rather than left to inference — including\n`assert \"ai_rc/v9.9.9\" not in error_lines[0]`, which is the assertion that would\ncatch an over-eager prefix. No bare `/tmp` paths, no provenance references.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Requirements-doc criteria — compile and syntax",
+      "heading": "Finding 4: Requirements-doc criteria — compile and syntax",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `python3 -m py_compile` over all 348 tracked `.py` files: clean.\n- `bash -n` over all 241 tracked `.sh` files: clean, 0 failures.\n- Each bundled item addressed: the single item (BUG-0193) is addressed — see\n  Findings 1-3.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Check e no longer surfaces an unprefixed orphan RC branch on a prefixed project",
+      "heading": "Finding 5: Check e no longer surfaces an unprefixed orphan RC branch on a prefixed project",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (a read-only advisory check loses one class of warning; nothing in the release path depends on it)\n**Regression:** yes (the pre-fix script warns on this fixture; the RC's script does not)\n**Integrity Damage:** no\n**Filed As:** BUG-0197 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nThe fix replaced Check e's `git branch --list 'rc/*'` with a single\n`<prefix>rc/*` glob. On a prefixed project that glob cannot match a leftover\n*unprefixed* `rc/vX.Y.Z` branch, so the check now emits a positive all-clear where\nit previously warned. Verified both ways on the same synthetic fixture\n(prefix `ai_`, Active RC `none`, branch `rc/v0.0.9` present):\n\n```\nRC script : [OK]    Active RC is none and no local ai_rc/* branches exist   (exit 0)\nai_main   : [WARN]  release-state.md shows Active RC=none but local branch exists: rc/v0.0.9\n```\n\nThis is inside the spirit of BUG-0193 (which complained the old glob was \"a false\nnegative in that direction and a false positive in the other\") but outside its\nwritten acceptance criteria, which named only `<prefix>rc/*` for this arm. It\nmatters because `verify-rc-state.sh` is the post-unwind safety net\n`docs/OPERATIONS.md` points operators at, and a false all-clear there is worse than\na noisy warning. It is not hypothetical on this tree: an unprefixed `main` still\nsits beside `ai_main` in the dev tree, so unprefixed leftovers do occur here. Low\nseverity — the branch is inert, the check is advisory, and the fix is to widen the\nlisting rather than to change any resolution logic.",
+      "filed_as": "BUG-0197",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (a read-only advisory check loses one class of warning; nothing in the release path depends on it)",
+        "regression": "yes (the pre-fix script warns on this fixture; the RC's script does not)",
+        "filed_as": "BUG-0197 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Two RC-branch call sites elsewhere in the tree remain prefix-blind",
+      "heading": "Finding 6: Two RC-branch call sites elsewhere in the tree remain prefix-blind",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one inert warning and one auto-detection fallback; neither is on the release path)\n**Regression:** no (both call sites are untouched by this RC's diff, which names only `verify-rc-state.sh` and one new test file; the defect predates v2.11.1)\n**Integrity Damage:** no\n**Filed As:** BUG-0198 (Path C-A)\n\nSurfaced by the CODER hand-off note on `CODER-20260908-014` and confirmed by\nreading both sites:\n\n- `team/pgai_agent_kanban/ops/write.py:1325`, `_warn_if_merged()` — lists RC\n  branches with a hardcoded `\"rc/*\"`. On a prefixed project that list is always\n  empty, so the \"re-running this task will produce a second merge commit\" warning\n  can never fire. That is the same duplicate-merge-commit class this project has\n  filed before (BUG-0183, BUG-0192), and the guard against it is inert here.\n- `team/scripts/cleanup-stale-artifact-only-branches.sh:200` — RC auto-detection\n  hardcodes `'ai_rc/*'` with a bare `'rc/*'` fallback. It works for `ai_` and for\n  unprefixed projects and fails closed (exit 3, remedy names `--rc`) for any other\n  prefix, so it is the milder of the two, but it is still one project's prefix\n  hardcoded in shared tooling.\n\nBoth are out of scope for the v2.11.1 ticket by its own brief; filed so the next\nloop picks them up rather than losing the hand-off.",
+      "filed_as": "BUG-0198",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one inert warning and one auto-detection fallback; neither is on the release path)",
+        "regression": "no (both call sites are untouched by this RC's diff, which names only `verify-rc-state.sh` and one new test file; the defect predates v2.11.1)",
+        "filed_as": "BUG-0198 (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

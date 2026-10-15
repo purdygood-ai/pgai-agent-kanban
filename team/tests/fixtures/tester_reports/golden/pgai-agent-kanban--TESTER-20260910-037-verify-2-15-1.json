@@ -1,0 +1,275 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified the v2.15.1 bug bundle (BUG-0227, BUG-0228, BUG-0224, BUG-0225,\nBUG-0226, BUG-0229) against `ai_rc/v2.15.1`. Pre-flight passed: the worktree\nHEAD matches the RC branch, the tree is clean, there are no stashes, and no\nDONE task's feature branch is unmerged or carries zero unique commits. Both\ngated runners exit 0 — `run-unit-tests.sh` 3735 passed / 3 skipped,\n`run-integration-tests.sh` 435 passed / 1 skipped. Every acceptance criterion\nin the requirements doc's own list is met (all bundled items addressed, all\nchanged Python compiles, all changed bash passes `bash -n`).\n\nFour of the six bundled bugs are fully closed and behaviourally verified:\nBUG-0227 (the docs manifest now delivers `operator-api.md`, all six citation\ntests pass, and the manifest's closure rule still holds), BUG-0228 (`why.sh\n--details` now exits with the verdict's own code — confirmed by hand across all\nfive verdicts plus the section-refusal case), BUG-0225 (the internal-ID scrub\nnow consumes the whole task-ID slug, with no stranded fragment and the normal\ncase undisturbed), and BUG-0226 (the PM governance byte-budget finding is gone\nfrom both runners' findings files).\n\nTwo gaps remain, both in the provenance-hygiene class the bundle was partly\nchartered to close. This RC added ten new `comment_provenance` violations of\nits own by citing `BUG-0228` in comments and test docstrings, taking the tree\nfrom 3 findings at v2.15.0 to 11 at v2.15.1. And BUG-0224's structural half\nlanded as an unwired helper: `build_bugs_skipped_notes_block` exists and is\nwell tested, but nothing in the release pipeline calls it, so CM still\nhand-authors the `## Bugs Skipped` block with no scrub — and the already-shipped\n`release-notes/v2.15.0.md:64` leaks a task ID by exactly the mechanism BUG-0224\ndescribed. Neither gap affects any runtime path, corrupts state, or risks data.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0227 — docs manifest now delivers operator-api.md",
+      "heading": "Finding 1: BUG-0227 — docs manifest now delivers operator-api.md",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `grep -q '^operator-api\\.md$' team/config/docs-manifest.txt` — succeeds.\n- `team/tests/unit/test_installed_governance_docs_citations_resolve.py` —\n  6 passed, 0 failed inside the gated unit run (`...... [76%]`). Both the\n  fresh-install and upgraded-root variants are green, which is the criterion\n  \"after a fresh `install.sh` … and the same after the `upgrade.sh` route\".\n- `bash team/scripts/run-unit-tests.sh` exits 0 (this was the red suite the bug\n  was filed against).\n- Closure rule re-checked independently: the only `docs/` path\n  `docs/operator-api.md` itself cites is `docs/operator-commands.md`, which the\n  manifest already names. The dangling pointer did not move one hop deeper.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0228 — why.sh --details now exits with the verdict's own code",
+      "heading": "Finding 2: BUG-0228 — why.sh --details now exits with the verdict's own code",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehavioral verification (Step 6.5), run by hand against a throwaway fixture\nkanban root under `$PGAI_AGENT_KANBAN_TEMP_DIR` (never the live install), with\n`PGAI_AGENT_KANBAN_ROOT_PATH` repointed for every invocation:\n\n| Fixture state | `why.sh --project X` | `why.sh --project X --details` |\n|---|---|---|\n| BLOCKED task | 4 | **4** |\n| project `HALT` present | 5 | **5** |\n| no tasks (IDLE) | 2 | **2** |\n| WORKING task, fresh mtime | 0 | **0** |\n| WORKING task, mtime 3h old (stalled) | 3 | **3** |\n| malformed `DEFER-LOW-BUGS` (section refusal) | — | **1**, stdout empty (0 bytes) |\n\nAll five verdicts now agree, and the refusal case still wins at exit 1 with\nnothing printed — the exact failure mode the bug's Reproduction step 7 recorded\nas `0` now reports `4`. The bug's third acceptance criterion (a unit test\npinning at least HALTED and RUNNING-stalled) is met by five new tests in\n`team/tests/unit/test_why_details_pane.py`, plus one guarding that a section\nrefusal still exits 1.\n\nImplementation reviewed: `_why_print_details` now parses `exit_code=` out of\n`verdict_resolve_project`'s block, refuses (`return 1`) if the field is absent,\nand stashes it in `_WHY_LAST_EXIT_CODE`; the caller does\n`_why_print_details \"${_project}\" || exit 1` then `exit \"${_WHY_LAST_EXIT_CODE}\"`.\n`team/scripts/lib/verdict.sh` sets `exit_code` on every one of its five\nresolution paths, so the new \"field absent\" refusal is unreachable in practice\nand is a belt-and-braces guard rather than a live behaviour change.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0225 — internal-ID scrub consumes the whole task-ID slug",
+      "heading": "Finding 3: BUG-0225 — internal-ID scrub consumes the whole task-ID slug",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehavioral verification against the bug's own reproduction, from the worktree's\n`team/` directory with scratch fixtures under `$PGAI_AGENT_KANBAN_TEMP_DIR`:\n\n```\nSymptom text  : \"The importer crashes on a malformed header (Source Task: TESTER-20260909-045-verify-2-14-1). More prose.\"\nRendered      : \"- The importer crashes on a malformed header (Source Task: ). (internal-only, not yet disclosed) — No workaround available.\"\nPublic ID     : \"KI-2026.09 (see CODER-20260910-011-provenance-test-prose-pin)\"\nRendered      : \"- **KI-2026.09 (see )** — A disclosed pre-existing defect in the importer. — No workaround available.\"\nNormal case   : a bug whose Symptom carries no identifier renders unchanged.\n```\n\nNo `-verify-2-14-1` fragment survives, which was the whole defect. The residual\n`(Source Task: )` / `(see )` shape is what the bug's own Expected section\nexplicitly permits (\"or, better, drops the emptied parenthetical entirely — but\nin no case leaves a hyphen-leading fragment\"). Both copies of the pattern were\nfixed (`release_known_issue.sh` and the pre-existing `release_notes.sh` copy),\nand both now have positive assertions on the surviving text via\n`_STRANDED_HYPHEN_FRAGMENT_RE`, closing the \"the test passes against mangled\noutput\" hole the bug identified. See Finding 6 for the duplication caveat.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0226 — PM governance byte budget retuned",
+      "heading": "Finding 4: BUG-0226 — PM governance byte budget retuned",
+      "level": 3,
+      "body": "**Category:** pass\n\n`kanban.cfg_example` `budget_bytes_pm` moved 73728 → 81920 with a comment\nrecording the re-baseline against the 76391-byte assembled pack. Verified\nend-to-end rather than by inspection: `findings-unit.json` and\n`findings-integration.json` now carry **one** finding each (`comment_provenance`)\nand no `governance_byte_budget` entry at all — it was present on every run\nbefore this RC. Both runners still exit 0, so the check remains quality-class.\n\nThe bug's criterion \"`kanban.cfg` and `kanban.cfg_example` agree\" is\nnot applicable as written: the dev tree ships no `kanban.cfg`, and the gated\nrunners invoke the lint with an explicit\n`--kanban-cfg \"${REPO_ROOT}/kanban.cfg_example\"`, so `kanban.cfg_example` is the\nvalue actually in effect at verification time. The live install's\n`$HOME/pgai_agent_kanban/kanban.cfg` has no `[governance]` section at all,\nso there is nothing there to disagree with.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0229 — the two named provenance sites are clean",
+      "heading": "Finding 5: BUG-0229 — the two named provenance sites are clean",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `grep -nE 'CODER-[0-9]{8}-[0-9]+' team/scripts/verify-rc-state.sh\n  team/tests/integration/test_verify_rc_state_two_project_prefix_fixture.py`\n  returns nothing.\n- Neither path appears in the `comment_provenance` finding list.\n- Both rewrites are genuine rewrites, not deletions: the script's header now\n  reads `Branch-prefix / field-validation coverage summary:` and keeps its\n  full a–f enumeration; the fixture docstring still states what the two-project\n  shape proves.\n- No `provenance-allowlist` marker was added to either file.\n\nBUG-0229's own acceptance is met. The class regressed elsewhere — see Finding 7.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "three copies of the internal-ID scrub now exist",
+      "heading": "Finding 6: three copies of the internal-ID scrub now exist",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`_INTERNAL_ID_RE` / `_strip_internal_ids` now appears at\n`team/scripts/lib/cm/release_notes.sh:282`,\n`team/scripts/lib/cm/release_known_issue.sh:179`, and — new in this RC —\n`team/scripts/lib/cm/release_known_issue.sh:273` inside\n`build_bugs_skipped_notes_block`. BUG-0225's Fix section named this outcome in\nadvance: \"Fix both in the same change, or extract the pair into one shared\nsource both heredocs read **so a third copy cannot appear**.\" The RC took the\nfirst option and then added the third copy in the same change. All three copies\nare currently identical and all three are tested, so nothing is wrong today;\nthe caveat is that the next fix to this pattern must now land in three places.\nRecorded as a code-hygiene note inside BUG-0231 rather than as a separate\nfiling.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "this RC added ten new comment-provenance violations",
+      "heading": "Finding 7: this RC added ten new comment-provenance violations",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (comment-only; no runtime path, no state, no data; both gated runners exit 0)\n**Regression:** yes (all ten sites arrive with this RC's commits; the class grew from 3 findings at ai_v2.15.0 to 11 at ai_rc/v2.15.1)\n**Integrity Damage:** no\n**Filed As:** BUG-0230 (Path C-A — filed as BUG — code defect / regression / test failure)\n\n`python3 team/scripts/lint_comment_provenance.py` exits 1 with 11 findings. Ten\nare new in this RC and every one cites `BUG-0228` in a comment or docstring:\n\n```\nteam/scripts/why.sh:180                                     [BUG-ID] 'BUG-0228'\nteam/scripts/why.sh:264                                     [BUG-ID] 'BUG-0228'\nteam/tests/integration/test_defer_campaign_lifecycle.py:281 [BUG-ID] 'BUG-0228'\nteam/tests/unit/test_defer_operator_verbs.py:133            [BUG-ID] 'BUG-0228'\nteam/tests/unit/test_defer_operator_verbs.py:265            [BUG-ID] 'BUG-0228'\nteam/tests/unit/test_defer_operator_verbs.py:287            [BUG-ID] 'BUG-0228'\nteam/tests/unit/test_defer_operator_verbs.py:307            [BUG-ID] 'BUG-0228'\nteam/tests/unit/test_defer_operator_verbs.py:372            [BUG-ID] 'BUG-0228'\nteam/tests/unit/test_why_details_pane.py:419                [BUG-ID] 'BUG-0228'\nteam/tests/unit/test_why_details_pane.py:486                [BUG-ID] 'BUG-0228'\n```\n\n`git diff ai_main..ai_rc/v2.15.1 | grep -c \"^+.*BUG-0228\"` reports 12 added\nlines carrying the identifier. None of the citations is load-bearing: in each\ncase the surrounding prose already states the behaviour completely and the\nidentifier can be deleted without losing meaning.\n\nThis is categorised as a Step-7 `bug` rather than left in the non-blocking lint\nsection because it is a regression, introduced by this RC, in the exact defect\nclass one of the RC's own bundled items (BUG-0229) was chartered to shrink. The\nfinding is nevertheless low risk in every dimension that matters for shipping.",
+      "filed_as": "BUG-0230",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (comment-only; no runtime path, no state, no data; both gated runners exit 0)",
+        "regression": "yes (all ten sites arrive with this RC's commits; the class grew from 3 findings at ai_v2.15.0 to 11 at ai_rc/v2.15.1)",
+        "filed_as": "BUG-0230 (Path C-A — filed as BUG — code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0224's structural half landed as an unwired helper",
+      "heading": "Finding 8: BUG-0224's structural half landed as an unwired helper",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (published-document hygiene; no runtime path, no state, no data)\n**Regression:** no (the offending text at `release-notes/v2.15.0.md:64` is on `ai_main` and `git diff --stat ai_main..ai_rc/v2.15.1 -- release-notes/v2.15.0.md` is empty; the unwired-helper shape is a shortfall in this RC's fix, not a behaviour this RC broke)\n**Integrity Damage:** no\n**Filed As:** BUG-0231 (Path C-A)\n\nBUG-0224 asked for two things. The text repair to `release-notes/v2.14.2.md`\nlanded and is clean. The durable half — \"the `## Bugs Skipped` authoring path\ncannot emit a kanban task ID again\" — landed as\n`build_bugs_skipped_notes_block` in\n`team/scripts/lib/cm/release_known_issue.sh`, correct and covered by eight new\nunit tests including one parameterised over all six agent prefixes. But nothing\ncalls it: `grep -rn \"build_bugs_skipped_notes_block\" --include=*.sh .` finds no\ncaller outside its own definition file, and `cm-release.sh` still leaves the\nblock to CM to type by hand with no scrub and no check in front of it.\n\nThe consequence is already observable. `release-notes/v2.15.0.md:64` — shipped,\non `ai_main` — reads `… cite task ID \\`CODER-20260910-023\\` — provenance\nlitter …`, a published document naming a kanban task folder no reader can open.\nIt got there exactly the way BUG-0224 predicted: CM copied a TESTER finding\nsummary into the Bugs-Skipped block, and that summary was itself about a leaked\nidentifier. Third release running (v2.14.1, v2.14.2, v2.15.0).\n\nThree of BUG-0224's five acceptance criteria therefore fail on this RC:\n\n- criterion 1 — `lint_comment_provenance.py` exits 0 with zero findings: **FAIL** (exit 1, 11 findings)\n- criterion 2 — `grep -rEn '(CODER|WRITER|TESTER|CM|PM|PO)-[0-9]{8}-[0-9]+' release-notes/` returns nothing: **FAIL** (one hit, `release-notes/v2.15.0.md:64`)\n- criterion 3 — no `provenance-allowlist` marker added to `release-notes/v2.14.2.md`: **PASS**\n- criterion 4 — neither runner's findings file contains a `comment_provenance` finding: **FAIL**\n- criterion 5 — a test drives the authoring path with a task ID for each of the six prefixes: **PASS**",
+      "filed_as": "BUG-0231",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (published-document hygiene; no runtime path, no state, no data)",
+        "regression": "no (the offending text at `release-notes/v2.15.0.md:64` is on `ai_main` and `git diff --stat ai_main..ai_rc/v2.15.1 -- release-notes/v2.15.0.md` is empty; the unwired-helper shape is a shortfall in this RC's fix, not a behaviour this RC broke)",
+        "filed_as": "BUG-0231 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "requirements-doc acceptance criteria",
+      "heading": "Finding 9: requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"Each bundled item is addressed in the implementation\" — all six items have\n  landed changes on the RC. Four are fully closed (Findings 1–5); BUG-0224 is\n  partially closed (Finding 8) and BUG-0229 is closed for its own named sites\n  while the class regressed elsewhere (Finding 7).\n- \"All Python files compile cleanly\" — `python3 -m py_compile` over every `.py`\n  in `git diff --name-only ai_main..ai_rc/v2.15.1`: clean. The gated runners'\n  breakage-class pre-flight compiles the whole tree and passed.\n- \"All bash files pass syntax check\" — `bash -n` over every `.sh` in the diff:\n  clean.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "release-state drift check (Step 6.1)",
+      "heading": "Finding 10: release-state drift check (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `pp_last_released_version pgai-agent-kanban` → `v2.15.0`;\n  `semver_gt v2.15.1 v2.15.0` is true.\n- `release-state.md`: `Active RC: v2.15.1`, `RC Opened At:\n  2026-09-10T12:35:16+00:00`, `RC Opened By Task:\n  CM-20260910-036-open-rc-2-15-1`, `Last Released: v2.15.0` (well-formed\n  `vX.Y.Z`).\n- `ai_rc/v2.15.1` exists locally, so `Active RC` is not pointing at a branch\n  that does not exist.\n- No kanban-root or project-scoped `HALT` / `HALT-AFTER` flag present.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "skip-cites-real-bug gate (Step 6.13)",
+      "heading": "Finding 11: skip-cites-real-bug gate (Step 6.13)",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo placeholder skip IDs (`BUG-SKIP`, `skip.*BUG-[A-Za-z]`) in `team/tests/`\noutside archived coverage logs under `team/tests/artifacts/`, and no cited\n`BUG-NNNN` in a skip annotation resolves to a missing file in `bugs/`. The\nrunners' own `lint_skip_bug_gate.sh` pre-flight also passed inside both green\nruns.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "prereq dependency graph (Step 6.10)",
+      "heading": "Finding 12: prereq dependency graph (Step 6.10)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CM-20260910-036-open-rc-2-15-1` (DONE) →\n`PM-20260910-004-decompose-v2-15-1-bugfix-bundle-20260910` (DONE) →\n`CODER-20260910-031/032/033/035` + `WRITER-20260910-034` (all DONE) →\n`TESTER-20260910-037-verify-2-15-1` (this task) →\n`CM-20260910-039-release-2-15-1`. No cycles, every referenced task ID exists,\nsequence numbers are consistent and non-colliding, and the lifecycle bookends\nare present at both ends.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

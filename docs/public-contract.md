@@ -1,9 +1,9 @@
-# Public Contract — What You Can Depend On Across 1.x
+# Public Contract — What You Can Depend On Within a Major Version
 
-This page declares the stable surface of pgai-agent-kanban for the 1.x line.
-Anything listed here changes only with a major version. Anything NOT listed
-here may change in any 1.x release; where a change breaks an existing
-install, it ships with a migration script.
+This page declares the stable surface of pgai-agent-kanban within a major
+version line. Anything listed here changes only with a major version.
+Anything NOT listed here may change in any minor or patch release; where a
+change breaks an existing install, it ships with a migration script.
 
 ## Intake filename keys
 
@@ -12,13 +12,13 @@ and validated by filename:
 
 | Kind | Pattern | Notes |
 |---|---|---|
-| Bug | `BUG-NNNN[-YYYYMMDD]-slug.md` | NNNN is 4+ digits; the date segment is optional |
+| Bug | `BUG-NNNN[-YYYYMMDD]-slug.md` | NNNN is exactly four digits; the date segment is optional |
 | Priority | `PRIORITY-NNNN[-YYYYMMDD]-slug.md` | same rules as bugs |
 | Requirements | `vX.Y.Z-slug.md` | the version is the target version |
 
 The internal `# BUG-NNNN...` / `# PRIORITY-NNNN...` heading must match the
-filename's ID. Malformed files are quarantined to `.rejected/` with a
-`.reason` sidecar — never silently dropped (see
+filename's ID. Malformed files are quarantined to the project's
+`rejected/` directory with a `.reason` sidecar — never silently dropped (see
 [quarantine-recovery.md](quarantine-recovery.md)).
 
 ## Operator command surface
@@ -71,7 +71,7 @@ filename's ID. Malformed files are quarantined to `.rejected/` with a
 
 Operators may author their own workflow-type plugins under
 `$KANBAN_ROOT/workflows/<name>/` — the same directory the framework's own
-plugins live in. Two contract guarantees apply across the 1.x line.
+plugins live in. Two contract guarantees apply within a major version.
 
 - **Upgrade survival.** A plugin directory absent from the shipped source
   tree survives `upgrade.sh --force` byte-identical. The mechanism is an
@@ -99,10 +99,32 @@ dev-tree path).
   writes stay under it, never bare `/tmp`).
 - Configuration precedence: environment variable > project config > default,
   fail-loud on missing required keys.
+- **The four-concerns separation of the root config files.** `kanban.cfg`
+  carries kanban behaviour, `shell-env` the shell environment the kanban
+  needs to run, `claude-env` tuning the provider CLI binary itself reads, and
+  `secrets` credentials. Which file a value belongs in is decidable, and the
+  boundary does not move within a major version. It is load-bearing, not cosmetic: a
+  provider-tuning value that lands in `secrets`, or a credential that lands in
+  `claude-env`, defeats the separation all four exist to preserve. The full
+  statement — one sentence per file plus what each misplacement costs — is
+  [HOW_TO.md](../HOW_TO.md) section 1.2, "The four-concerns law"; it is
+  canonical there and deliberately not duplicated here.
+- **Sourcing order: `claude-env` after `shell-env`, on every entry path**,
+  including a cron or pseudocron firing. A name set in both files resolves to
+  the `claude-env` value. `claude-env` is optional — an absent file is a
+  clean no-op — and a syntactically broken one is refused before it is
+  sourced rather than half-applied.
+- **Operator config survives upgrade.** `kanban.cfg`, `shell-env`,
+  `claude-env`, `secrets`, `projects.cfg` and each project's `project.cfg`
+  are never overwritten by install or upgrade once they exist; the
+  `*_example` templates beside them are refreshed. Where the framework
+  derives a runtime value the operator may also set — the provider CLI's
+  background-wait ceiling, derived from the per-task budget — the operator's
+  value wins.
 
 ## Explicitly NOT stable
 
 Internal script names and locations under `scripts/lib/`, dashboard layout
 and rendering, role-file wording, metrics file formats, and the test suite's
-shape may all change within 1.x without notice. Build against the surfaces
+shape may all change in any minor or patch release without notice. Build against the surfaces
 above, not against internals.

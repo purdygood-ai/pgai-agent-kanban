@@ -190,6 +190,9 @@ def test_bash_side_green_on_real_tree() -> None:
     in the swept directories source an approved prelude.  If this test fails,
     a new script was added without the required source line.
     """
+    # Deliberately exercises the real team/scripts/ tree (not a fixture):
+    # this is a live regression guard, not an isolated behavior a fixture
+    # could stand in for.
     violations = _lint.check_bash_side(_REAL_SCRIPTS_DIR, verbose=False)
     assert violations == [], (
         f"Unexpected violations on the real tree:\n"
@@ -255,17 +258,17 @@ def test_bash_side_scratch_negative_violation_message_is_actionable(
 
 # ---------------------------------------------------------------------------
 # Case 2b — Bash-side ordering violation: source after first usage is flagged
-# (BUG-0073 closed-hole proof — kept as a regression fixture)
+# (a closed-hole proof kept as a regression fixture)
 # ---------------------------------------------------------------------------
 
 
 def test_bash_side_ordering_violation_is_flagged(tmp_path: Path) -> None:
     """Bash-side check flags a script that sources env_bootstrap.sh AFTER first usage.
 
-    This is the closed-hole proof for BUG-0073.  The pre-fix po-agent.sh pattern
-    (and eight other scripts) had env_bootstrap.sh sourced after the first runtime
-    use of PGAI_AGENT_KANBAN_ROOT_PATH.  The old presence-only predicate passed
-    those files; the ordering check must catch them.
+    This is the closed-hole proof for the ordering check.  A po-agent.sh-style
+    script that sources env_bootstrap.sh after the first runtime use of
+    PGAI_AGENT_KANBAN_ROOT_PATH passes a presence-only predicate; the
+    ordering check must catch it.
 
     If this test fails, the ordering check has regressed and the predicate hole
     has re-opened.
@@ -279,7 +282,7 @@ def test_bash_side_ordering_violation_is_flagged(tmp_path: Path) -> None:
     assert violations, (
         "Expected the bash-side check to flag the ordering violation (source after "
         "first usage), but it returned no violations.  The ordering predicate may "
-        "have regressed — the BUG-0073 hole may be re-open."
+        "have regressed, re-opening a hole it is meant to close."
     )
     violation_paths = [v.path for v in violations]
     assert fixture_sh in violation_paths, (
@@ -355,7 +358,7 @@ def test_source_precedes_first_usage_no_usage_is_ok() -> None:
 
 # ---------------------------------------------------------------------------
 # Case 2c — Heredoc body exclusion: var mention in heredoc body above source
-#           must NOT produce an ordering violation (regression guard for BUG-0087)
+#           must NOT produce an ordering violation
 # ---------------------------------------------------------------------------
 
 
@@ -363,8 +366,9 @@ def test_source_precedes_first_usage_heredoc_only_mention_is_not_flagged() -> No
     """A heredoc body that mentions PGAI_AGENT_KANBAN_ROOT_PATH above the source line
     must NOT be treated as a runtime usage.
 
-    This is the regression guard for BUG-0087: cm/finalize.sh and cm/open-doc.sh
-    have --help heredocs that document the env var above the source call.  The lint
+    This is the regression guard for the heredoc-body exclusion: cm/finalize.sh
+    and cm/open-doc.sh have --help heredocs that document the env var above the
+    source call.  The lint
     must not flag that pattern as an ordering violation because the heredoc body is
     documentation, not executable code.
     """
@@ -392,7 +396,7 @@ def test_source_precedes_first_usage_heredoc_only_mention_is_not_flagged() -> No
     ok, src_line, use_line = _lint._source_precedes_first_usage(text)
     assert ok is True, (
         f"A heredoc-only mention of the env var above the source line must not "
-        f"be flagged as an ordering violation (BUG-0087 regression).  "
+        f"be flagged as an ordering violation.  "
         f"src_line={src_line}, use_line={use_line}"
     )
 
@@ -433,7 +437,8 @@ def test_bash_side_heredoc_only_mention_does_not_violate(tmp_path: Path) -> None
     """check_bash_side does not flag a script whose only pre-source mention of the
     env var is inside a heredoc body (--help usage block pattern).
 
-    This is the integration-level regression guard for BUG-0087.
+    This is the integration-level regression guard for the heredoc-body
+    exclusion.
     """
     scripts = _make_minimal_scripts_dir(tmp_path)
     heredoc_sh = scripts / "heredoc_help_entry.sh"
@@ -463,7 +468,7 @@ def test_bash_side_heredoc_only_mention_does_not_violate(tmp_path: Path) -> None
     violation_paths = [v.path for v in violations]
     assert heredoc_sh not in violation_paths, (
         "Script with env var mentioned only inside a heredoc body (above the source "
-        "line) was incorrectly flagged as an ordering violation (BUG-0087 regression)."
+        "line) was incorrectly flagged as an ordering violation."
     )
 
 
@@ -516,6 +521,9 @@ def test_python_side_green_on_real_tree() -> None:
     Confirms that all Python entry points and package modules route through
     resolve_kanban_root() rather than reading the env var directly.
     """
+    # Deliberately exercises the real team/ directory (not a fixture): this
+    # is a live regression guard, not an isolated behavior a fixture could
+    # stand in for.
     violations = _lint.check_python_side(_TEAM_DIR, verbose=False)
     assert violations == [], (
         f"Unexpected Python violations on the real tree:\n"

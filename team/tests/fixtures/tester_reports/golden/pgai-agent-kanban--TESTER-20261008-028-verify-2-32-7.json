@@ -1,0 +1,87 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified ai_rc/v2.32.7 (HEAD 770fda54, detached worktree) against `requirements/v2.32.7-bugfix-bundle-20261008.md`. The bundle contains BUG-0623 (the release-notes Bugs Skipped table drops findings written under level-4-or-deeper `Finding` headings) and BUG-0624 (a busy-chain PM wake integration test that failed intermittently on a 10-second wall-clock budget). The RC diff against ai_main touches 3 files: `team/pgai_agent_kanban/cm/skipped_bug_pairs.py`, `team/tests/integration/test_pm_wake_discovery_lock_scope.py` and `team/tests/unit/test_release_notes_bugs_skipped_render.py`. It consists of two CODER commits, each merged with `--no-ff`.\n\nBoth gated runners exited 0. All three requirements-doc acceptance criteria are met, and every acceptance bullet in both bug files is met. Both fixes were exercised behaviourally:\n- **BUG-0623:** the original failure reproduces on ai_main and is fixed on the RC. Old and new output are identical across all 91 real reports in the install.\n- **BUG-0624:** four mutants were run. The rewritten test catches a scan-step call that the ai_main test missed.\n\nOne low-severity bug was found and filed: two unusual heading shapes are still split differently by the Bugs Skipped reader and the ship-policy reader, and the new module docstring claims the two agree.",
+  "findings": [
+    {
+      "number": null,
+      "label": "A",
+      "title": "BUG-0623 — Bugs Skipped reads level-4+ findings",
+      "heading": "Finding A: BUG-0623 — Bugs Skipped reads level-4+ findings",
+      "level": 4,
+      "body": "**Category:** pass\n- **Original failure mode, on ai_main:** I used the bug's own reproduction report (a `#### Finding 1:` under a `### Step 6.4` heading, sandboxed). `read_ship_policy_skipped_bug_pairs` printed 0 rows.\n- **On the RC:** the same report prints `bugs/BUG-0001-alpha.md<TAB>Predates this release ... deferred to a follow-up release.`, byte-identical to the level-3 variant.\n- **Acceptance 1** (level-4 row equals level-3 row): pass, by the run above and by the new unit test `test_level_four_finding_under_step_heading_renders_its_level_three_row`.\n- **Acceptance 2** (a `### Step` heading ends a preceding `#### Finding`, matching `stop_bug_files.finding_blocks`): pass. The new module calls `stop_bug_files.finding_blocks` directly, and `test_shallower_step_heading_ends_a_level_four_finding_block` covers the case.\n- **Acceptance 3:** `bash team/scripts/run-unit-tests.sh --files team/tests/unit/test_release_notes_bugs_skipped_render.py team/tests/unit/test_cm_known_issue_carry_forward_bash.py` exit 0, 71 passed. For \"existing level-3 reports render byte-identically\", I ran the ai_main module and the RC module over all 91 `report.md*` files under `projects/*/tasks/*/artifacts/`. 50 produce rows, and 0 differ.\n- **Additional level-5 probe:** a `#####` finding gives a row on the RC and none on ai_main.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "original_failure_mode_on_ai_main": "I used the bug's own reproduction report (a `#### Finding 1:` under a `### Step 6.4` heading, sandboxed). `read_ship_policy_skipped_bug_pairs` printed 0 rows.",
+        "on_the_rc": "the same report prints `bugs/BUG-0001-alpha.md<TAB>Predates this release ... deferred to a follow-up release.`, byte-identical to the level-3 variant.",
+        "acceptance_3": "`bash team/scripts/run-unit-tests.sh --files team/tests/unit/test_release_notes_bugs_skipped_render.py team/tests/unit/test_cm_known_issue_carry_forward_bash.py` exit 0, 71 passed. For \"existing level-3 reports render byte-identically\", I ran the ai_main module and the RC module over all 91 `report.md*` files under `projects/*/tasks/*/artifacts/`. 50 produce rows, and 0 differ.",
+        "additional_level_5_probe": "a `#####` finding gives a row on the RC and none on ai_main."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": null,
+      "label": "B",
+      "title": "BUG-0624 — busy-chain PM wake proved by behaviour, not wall-clock time",
+      "heading": "Finding B: BUG-0624 — busy-chain PM wake proved by behaviour, not wall-clock time",
+      "level": 4,
+      "body": "**Category:** pass\n- **Acceptance 1** (no elapsed-time assertion): pass. `time`, `_BUSY_WAKE_BUDGET_SECONDS` and `elapsed` are removed. \"Fast\" is now asserted as the exact record sequence `discovery_enter`, `chain_check wake=FREE probe=ACQUIRED`, `discovery_return status=idle`. The probe now wraps the three scan steps, the write-phase gate and both lock takers. A `probe_missing` tripwire fails the test if any wrapped function disappears.\n- **Acceptance 2:** `bash team/scripts/run-integration-tests.sh --files team/tests/integration/test_pm_wake_discovery_lock_scope.py` exit 0, 2 passed.\n- **Acceptance 3** (a deliberately slow busy-exit path still fails). I ran mutation tests in `git clone`s of the RC with sandboxed environments, editing `team/scripts/lib/discovery.sh` only:\n  - Silent `discovery_step_bugs` before the busy check: **FAIL** (caught: the lock is held at `chain_check`).\n  - Discovery's own repo-lock take before the busy check: **FAIL**.\n  - Silent `discovery_step_bugs` call after the busy check that returns before the write gate: **FAIL** on the *new* exact-sequence assertion. The record was `[..., 'chain_check wake=FREE probe=ACQUIRED', 'discovery_step_bugs wake=FREE', 'discovery_return status=idle']`. **The ai_main version of the test PASSES this mutant**, so the rewrite strictly strengthens the guard.\n  - A wrapped function (`_disc_take_own_write_lock`) renamed throughout production: **FAIL** on the `probe_missing` assertion in both tests.\n  - Unmutated control: 2 passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "acceptance_2": "`bash team/scripts/run-integration-tests.sh --files team/tests/integration/test_pm_wake_discovery_lock_scope.py` exit 0, 2 passed."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Report readers still split two heading shapes differently; new docstring overclaims agreement",
+      "heading": "Finding 1: Report readers still split two heading shapes differently; new docstring overclaims agreement",
+      "level": 4,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (no real report uses either shape; isolated to corner-case heading parsing)\n**Regression:** yes\n**Integrity:** none\n**Filed As:** BUG-0625 (Path C-A, filed as BUG — code defect)\n\n**Filed By:** TESTER (autonomous Path C) — the Bugs Skipped reader and the ship-policy reader still disagree on which headings start a finding for two unusual heading shapes, and the module docstring says they agree.\n\nThe RC routes `skipped_bug_pairs` through `stop_bug_files.finding_blocks`, which matches headings with `^(#{1,6})\\s+…` and `startswith(\"finding\")`. The ship-policy parser (`release_ship_policy_report.sh` heredoc) uses its own `(?im)^(#{3,})\\s*Finding\\b`. I measured both on the RC in a sandbox:\n- `###Finding 1:` (no space after the hashes): ai_main Bugs Skipped gives 1 row. RC Bugs Skipped gives **0 rows**. Ship-policy dims read the block (`no none`). This is a narrow regression of exactly BUG-0623's symptom class.\n- `### Findings summary`: RC Bugs Skipped gives 1 row. Ship-policy reports \"zero finding blocks … unknown unknown\".\n\nThe new docstring says the shared splitter makes \"the Bugs Skipped table, the Known Issues stop list and the ship-policy matrix agree\". The ship-policy matrix does not use that splitter. Severity is low: none of the 91 real reports uses either shape, and the report template uses `### Finding N:`. Traces to: BUG-0623 Symptom (\"one report is read three ways\") and Expected (one rule for all readers).",
+      "filed_as": "BUG-0625",
+      "filed_by": "TESTER (autonomous Path C) — the Bugs Skipped reader and the ship-policy reader still disagree on which headings start a finding for two unusual heading shapes, and the module docstring says they agree.",
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (no real report uses either shape; isolated to corner-case heading parsing)",
+        "regression": "yes",
+        "integrity": "none",
+        "filed_as": "BUG-0625 (Path C-A, filed as BUG — code defect)",
+        "filed_by": "TESTER (autonomous Path C) — the Bugs Skipped reader and the ship-policy reader still disagree on which headings start a finding for two unusual heading shapes, and the module docstring says they agree."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

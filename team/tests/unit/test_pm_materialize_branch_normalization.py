@@ -2,7 +2,8 @@
 test_pm_materialize_branch_normalization.py
 =============================================
 Unit tests for the branch-normalization trust-boundary guard in
-pm_materialize.py (BUG-0037: materializer trusts model-authored branch names).
+pm_materialize.py, which stops the materializer from trusting a
+model-authored branch name verbatim.
 
 Covers the acceptance criteria for the materializer-as-authority fix:
 

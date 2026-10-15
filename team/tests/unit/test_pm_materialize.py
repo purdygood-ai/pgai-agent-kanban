@@ -16,8 +16,8 @@ Covers the assembly logic of the materializer:
     validate_model_override, compute_plan_hash.
 
 All filesystem writes target tmp_path (never bare /tmp).
-No subprocess / git calls are exercised — functions that call git
-(e.g. _compute_next_patch_py) are not invoked here.
+No subprocess / git calls are exercised — functions that read a git dev
+tree are not invoked here.
 """
 
 from __future__ import annotations
@@ -159,6 +159,24 @@ def test_inject_cm_bookends_appends_tester_task() -> None:
     pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE")
     tester_tasks = [t for t in tasks if t.get("role") == "TESTER"]
     assert len(tester_tasks) == 1
+
+
+def test_inject_cm_bookends_tester_goal_names_autonomous_filing() -> None:
+    """The injected TESTER goal names verifying, reporting and filing gaps and bugs.
+
+    TESTER files every gap and bug itself and never escalates to a human, so
+    the goal it reads first must say that rather than defer to a reviewer.
+    """
+    tasks = _stamp_ids(_make_tasks(2))
+    pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE")
+    tester = next(t for t in tasks if t.get("role") == "TESTER")
+    goal = tester["goal"]
+    assert "human review" not in goal.lower(), goal
+    assert "v0.5.0" in goal, goal
+    assert "requirements document" in goal, goal
+    assert "verification report" in goal, goal
+    assert "gaps or bugs" in goal, goal
+    assert "Path C" in goal, goal
 
 
 def test_inject_cm_bookends_appends_cm_release_task() -> None:
@@ -349,7 +367,7 @@ def test_determine_source_branch_with_branch_prefix(
     result = pm.determine_source_branch(
         task, str(tmp_path), workflow_type="release", target_version="v0.5.0"
     )
-    assert result == "myorcrc/v0.5.0" or result.startswith("myorg")
+    assert result == "myorgrc/v0.5.0"
 
 
 def test_determine_source_branch_no_target_version_returns_main(

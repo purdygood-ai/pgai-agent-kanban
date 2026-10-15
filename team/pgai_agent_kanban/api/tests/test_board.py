@@ -16,7 +16,7 @@ Two suites:
 
 2. **Parity-pin test** (``TestBoardClassifierParity``):
    - For the same fixture inputs, the ``status`` field returned by ``GET /board``
-     equals the status produced by calling ``board_classifier`` functions directly.
+     equals the status produced by calling the ``pgai_agent_kanban.board`` classifier directly.
    - This is the load-bearing artifact: it ensures a future edit to either the
      board handler or the classifier module does not silently diverge.
 
@@ -41,7 +41,7 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 # Classifier imports (parity-pin test uses these directly)
 # ---------------------------------------------------------------------------
-from pgai_agent_kanban.api.board_classifier import (
+from pgai_agent_kanban.board import (
     classify_input_item,
     classify_queue_item,
     get_active_rc_for_project,
@@ -148,6 +148,13 @@ def _materialise_two_project_fixture(root: pathlib.Path) -> None:
     _write(
         alpha / "bugs" / ".rejected" / "BUG-9999.md",
         "# Bug: BUG-9999\n\n## Status\nopen\n\n## Summary\nQuarantined.\n",
+    )
+    # Quarantined priority: in the project's rejected/ directory, its
+    # sidecar naming the priority/ intake it came from.
+    _write(alpha / "rejected" / "held-intake.md", "x\n")
+    _write(
+        alpha / "rejected" / "held-intake.md.reason",
+        f"original_type=priority\noriginal_dir={alpha / 'priority'}\nreason=malformed filename\n",
     )
 
     # Priorities: one open priority item
@@ -420,6 +427,19 @@ class TestBoardEndpoint:
                 "expected 'blocked'."
             )
 
+    def test_quarantined_file_in_project_rejected_dir_shows_in_its_origin_column(
+        self,
+        board_client: TestClient,
+    ) -> None:
+        """A file in the project's rejected/ appears in the column its sidecar names."""
+        body = board_client.get("/board").json()
+        by_column = {
+            col["name"]: [i["title"] for i in col["items"] if i["kind"] == "quarantine"]
+            for col in body["columns"]
+        }
+        assert by_column["PRIORITIES"] == ["held-intake"], by_column
+        assert by_column["BUGS"] == ["BUG-9999"], by_column
+
     def test_project_filter_returns_422(
         self,
         board_client: TestClient,
@@ -457,23 +477,23 @@ class TestBoardEndpoint:
     ) -> None:
         """truncated > 0 when items exceed the per-project cap.
 
-        Sets dashboard_max_rows=1 and adds two bug files to confirm
-        truncated=1 appears on the BUGS column.
+        Sets dashboard_max_rows=5 (the smallest cap: the board clamps the
+        field to 5..100, as the tmux dashboard does) and adds six bug files
+        to confirm truncated=1 appears on the BUGS column.
         """
         root = tmp_path / "trunc_fixture"
 
         _write(
             root / "projects.cfg",
             "[project:trunc-proj]\npriority=1\ndashboard_color=#378ADD\n"
-            "dashboard_max_rows=1\n",
+            "dashboard_max_rows=5\n",
         )
         proj = root / "projects" / "trunc-proj"
         _write(proj / "release-state.md",
                "# Release State\n\n## Active RC\nnone\n\n## Last Released\nnone\n")
-        _write(proj / "bugs" / "BUG-0001.md",
-               "# Bug: BUG-0001\n\n## Status\nopen\n")
-        _write(proj / "bugs" / "BUG-0002.md",
-               "# Bug: BUG-0002\n\n## Status\nopen\n")
+        for number in range(1, 7):
+            _write(proj / "bugs" / f"BUG-000{number}.md",
+                   f"# Bug: BUG-000{number}\n\n## Status\nopen\n")
         # Empty queues.
         for agent in ("pm", "coder", "writer", "tester", "cm"):
             _write(proj / "tasks" / "queues" / f"{agent}_backlog.md",
@@ -492,8 +512,8 @@ class TestBoardEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         bugs_col = next(c for c in body["columns"] if c["name"] == "BUGS")
-        assert len(bugs_col["items"]) <= 1, (
-            f"Expected at most 1 item (cap=1), got {len(bugs_col['items'])}."
+        assert len(bugs_col["items"]) <= 5, (
+            f"Expected at most 5 items (cap=5), got {len(bugs_col['items'])}."
         )
         assert bugs_col["truncated"] == 1, (
             f"Expected truncated=1, got {bugs_col['truncated']}."
@@ -575,10 +595,10 @@ class TestBoardEndpoint:
 
 
 class TestBoardClassifierParity:
-    """Parity-pin: GET /board status must equal board_classifier's classification.
+    """Parity-pin: GET /board status must equal the board classifier's classification.
 
     For each item returned by /board, re-classify it independently using the
-    board_classifier functions and assert the two status values are equal.
+    pgai_agent_kanban.board functions and assert the two status values are equal.
     This is the house-sibling rule: if the board handler and the classifier
     diverge, this test fails immediately.
     """
@@ -588,7 +608,7 @@ class TestBoardClassifierParity:
         item: dict,
         two_project_root: pathlib.Path,
     ) -> str:
-        """Re-classify one board item using board_classifier directly.
+        """Re-classify one board item using pgai_agent_kanban.board directly.
 
         Returns the status string the classifier produces for this item.
         Raises AssertionError when the item's kind is unrecognized.
@@ -684,7 +704,7 @@ class TestBoardClassifierParity:
         board_client: TestClient,
         two_project_root: pathlib.Path,
     ) -> None:
-        """For every item returned by /board, its status matches board_classifier's output.
+        """For every item returned by /board, its status matches the board classifier's output.
 
         This is the parity-pin: the board handler and the classifier must agree
         on every item's status for the same fixture inputs.

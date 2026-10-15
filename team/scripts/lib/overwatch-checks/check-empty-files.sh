@@ -2,8 +2,16 @@
 # team/scripts/lib/overwatch-checks/check-empty-files.sh
 #
 # OVERWATCH detection module: scan bugs/ and priority/ under the kanban project
-# for 0-byte files, rename each to <name>.empty.orphan, log the action, and
-# file a brief bug entry.
+# for 0-byte REPORT files, rename each to <name>.empty.orphan, log the action,
+# and file a brief bug entry. The scan is scoped to report files only — any
+# dotfile (a filename starting with ".") is protocol machinery (claim-lock
+# sentinels, claim ledgers, and similar in-flight state) rather than a report,
+# and is left untouched regardless of size. The module also runs a bounded
+# prune of claim-lock-shaped residue (".claim-NNNN.lock.empty.orphan") that
+# earlier, unscoped firings of this check left behind — each was a permanently
+# consumed claim slot with no report content to preserve as evidence, so the
+# prune removes it. Every other ".empty.orphan" file is left in place as
+# evidence, pruned or not.
 #
 # This script is both:
 #   - Sourceable (for the OVERWATCH driver): source this file and call
@@ -23,10 +31,12 @@
 #   bash check-empty-files.sh [--dry-run]
 #
 # Exit codes:
-#   0 — completed successfully (no empty files, or renamed without error)
+#   0 — completed successfully (no empty report files, or renamed/pruned
+#       without error)
 #   1 — internal error (missing dependencies, unreadable state dir, etc.)
 #
-# --dry-run: scans and logs findings but does NOT rename files or create bug entries.
+# --dry-run: scans and logs findings but does NOT rename, prune, or create
+# bug entries.
 
 # ---------------------------------------------------------------------------
 # _cef_resolve_env
@@ -70,6 +80,41 @@ _cef_ensure_state_dir() {
         return 1
     fi
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# _cef_is_report_candidate <path>
+# True (0) when <path>'s basename is eligible to be treated as a report file
+# by this check; false (1) for anything else.
+#
+# The only exclusion is dotfiles: a filename starting with "." is protocol
+# machinery, never a bug or priority report. This covers the claim-lock
+# sentinel shape owned by team/pm-agent/lib/bug_scanner.py
+# (".claim-NNNN.lock", matched there by _CLAIM_LOCK_RE) and its durable
+# claim ledger (".bug-claims.log", _CLAIM_LOG_FILENAME) without restating
+# either pattern here — both are dotfiles, so the general exclusion covers
+# them, and covers any future dotfile-shaped protocol state the same way.
+# ---------------------------------------------------------------------------
+_cef_is_report_candidate() {
+    local bn
+    bn="$(basename "$1")"
+    [[ "${bn}" == .* ]] && return 1
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _cef_is_claim_lock_residue <path>
+# True (0) when <path>'s basename is a claim-lock sentinel already quarantined
+# by a prior, unscoped firing of this check — i.e. matches the claim-lock
+# shape from team/pm-agent/lib/bug_scanner.py's _CLAIM_LOCK_RE
+# (".claim-NNNN.lock", 4+ digits) suffixed with the ".empty.orphan" this
+# check appends. False (1) for every other filename, including every other
+# ".empty.orphan" file — those remain in place as evidence.
+# ---------------------------------------------------------------------------
+_cef_is_claim_lock_residue() {
+    local bn
+    bn="$(basename "$1")"
+    [[ "${bn}" =~ ^\.claim-[0-9]{4,}\.lock\.empty\.orphan$ ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -137,6 +182,45 @@ _cef_do_rename() {
 }
 
 # ---------------------------------------------------------------------------
+# _cef_do_prune
+# Inner function invoked via overwatch_halt_first_fix for one claim-lock
+# residue file (a ".claim-NNNN.lock.empty.orphan" left by a prior, unscoped
+# firing of this check). Reads _CEF_TARGET_FILE from the environment.
+#
+# Actions:
+#   1. Backup the source file via overwatch_backup_file (same
+#      backup-before-modify contract as _cef_do_rename)
+#   2. Delete the file
+#   3. Log the action via overwatch_log_action
+# ---------------------------------------------------------------------------
+_cef_do_prune() {
+    local src="${_CEF_TARGET_FILE}"
+    local backup_path="none"
+
+    local bpath
+    bpath="$(overwatch_backup_file "${src}")" || {
+        echo "check-empty-files: backup failed for ${src}" >&2
+        return 1
+    }
+    backup_path="${bpath}"
+
+    if ! rm -f "${src}" 2>/dev/null; then
+        echo "check-empty-files: prune failed: ${src}" >&2
+        return 1
+    fi
+
+    overwatch_log_action \
+        "check-empty-files" \
+        "${src}" \
+        "pruned-claim-lock-residue" \
+        "${backup_path}" \
+        "stale claim-lock sentinel quarantined by a prior firing; permanently consumed claim slot, no report content to preserve" \
+    || true
+
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # _cef_file_bug <bugs_dir> <orphan_list>
 # Create a brief bug entry listing the orphaned files.
 # <orphan_list> is a newline-separated list of original file paths.
@@ -188,8 +272,9 @@ EOF
 
 # ---------------------------------------------------------------------------
 # overwatch_check_empty_files [--dry-run]
-# Main detection function. Scans bugs/ and priority/ for 0-byte files.
-# When --dry-run is passed (or _CEF_DRY_RUN=1), skips all mutations.
+# Main detection function. Scans bugs/ and priority/ for 0-byte report files
+# (skipping dotfiles) and for claim-lock residue left by a prior, unscoped
+# firing. When --dry-run is passed (or _CEF_DRY_RUN=1), skips all mutations.
 # Returns 0 on success, 1 on internal error.
 # ---------------------------------------------------------------------------
 overwatch_check_empty_files() {
@@ -236,6 +321,7 @@ overwatch_check_empty_files() {
     local priority_dir="${project_root}/priority"
 
     local found_empty=()
+    local residue=()
     local scan_dir
 
     for scan_dir in "${bugs_dir}" "${priority_dir}"; do
@@ -248,16 +334,28 @@ overwatch_check_empty_files() {
             if [[ "${f}" == *.empty.orphan ]]; then
                 continue
             fi
+            # Scope to report files only: a dotfile is protocol machinery
+            # (claim-lock sentinel, claim ledger, or similar in-flight
+            # state), never a bug or priority report.
+            _cef_is_report_candidate "${f}" || continue
             found_empty+=("${f}")
         done < <(find "${scan_dir}" -maxdepth 1 -type f -empty 2>/dev/null)
+
+        # Bounded prune scope: claim-lock residue left by a prior, unscoped
+        # firing of this check. Every other ".empty.orphan" file is left in
+        # place as evidence — only the claim-lock shape is pruned.
+        while IFS= read -r f; do
+            [[ -z "${f}" ]] && continue
+            _cef_is_claim_lock_residue "${f}" && residue+=("${f}")
+        done < <(find "${scan_dir}" -maxdepth 1 -type f -name '.claim-*.lock.empty.orphan' 2>/dev/null)
     done
 
-    if (( ${#found_empty[@]} == 0 )); then
-        echo "check-empty-files: no 0-byte files found in bugs/ or priority/" >&2
+    if (( ${#found_empty[@]} == 0 && ${#residue[@]} == 0 )); then
+        echo "check-empty-files: no 0-byte report files or claim-lock residue found in bugs/ or priority/" >&2
         return 0
     fi
 
-    echo "check-empty-files: found ${#found_empty[@]} empty file(s)" >&2
+    echo "check-empty-files: found ${#found_empty[@]} empty report file(s), ${#residue[@]} claim-lock residue file(s)" >&2
 
     if (( dry_run == 1 )); then
         local f
@@ -268,7 +366,17 @@ overwatch_check_empty_files() {
                 "${f}" \
                 "dry-run-empty-file-detected" \
                 "none" \
-                "0-byte file detected (dry-run; no action taken)" \
+                "0-byte report file detected (dry-run; no action taken)" \
+            2>/dev/null || true
+        done
+        for f in "${residue[@]}"; do
+            echo "check-empty-files: [dry-run] would prune claim-lock residue: ${f}" >&2
+            overwatch_log_action \
+                "check-empty-files" \
+                "${f}" \
+                "dry-run-claim-lock-residue-detected" \
+                "none" \
+                "claim-lock residue from a prior firing (dry-run; no action taken)" \
             2>/dev/null || true
         done
         return 0
@@ -290,6 +398,9 @@ overwatch_check_empty_files() {
         elif (( fix_exit == 4 )); then
             echo "check-empty-files: per-repo flock contended; aborting rename of ${f}" >&2
             return 0
+        elif (( fix_exit == 5 )); then
+            echo "check-empty-files: fix deferred: HALT present; aborting rename of ${f}" >&2
+            return 0
         elif (( fix_exit != 0 )); then
             echo "check-empty-files: rename failed for ${f} (exit ${fix_exit})" >&2
             # Continue with remaining files
@@ -305,6 +416,33 @@ overwatch_check_empty_files() {
     if [[ -n "${orphan_list}" ]]; then
         _cef_file_bug "${bugs_dir}" "${orphan_list}" || true
     fi
+
+    # Live mode: prune claim-lock residue via overwatch_halt_first_fix.
+    # Independent of found_empty/orphan_list above — this is cleanup of a
+    # prior firing's over-eager renames, not a new detection, so it is never
+    # folded into the bug report.
+    for f in "${residue[@]}"; do
+        export _CEF_TARGET_FILE="${f}"
+
+        local prune_exit=0
+        overwatch_halt_first_fix _cef_do_prune || prune_exit=$?
+
+        if (( prune_exit == 3 )); then
+            echo "check-empty-files: HALT_OVERWATCH guard tripped; aborting prune of ${f}" >&2
+            return 0
+        elif (( prune_exit == 4 )); then
+            echo "check-empty-files: per-repo flock contended; aborting prune of ${f}" >&2
+            return 0
+        elif (( prune_exit == 5 )); then
+            echo "check-empty-files: fix deferred: HALT present; aborting prune of ${f}" >&2
+            return 0
+        elif (( prune_exit != 0 )); then
+            echo "check-empty-files: prune failed for ${f} (exit ${prune_exit})" >&2
+            # Continue with remaining files
+        fi
+
+        unset _CEF_TARGET_FILE
+    done
 
     return 0
 }

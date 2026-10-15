@@ -1,5 +1,4 @@
-# resolution-matrix.yaml — OVERWATCH's autonomous block-resolution matrix
-# (v2.0.0 Goal 1: "The resolution matrix").
+# resolution-matrix.yaml — OVERWATCH's autonomous block-resolution matrix.
 #
 # Config-declared, operator-extensible. This file is the shipped default —
 # loaded by pgai_agent_kanban.overwatch.resolution_matrix.load_matrix() when
@@ -65,8 +64,8 @@
 #
 # Operator extensibility: add new rows below, or replace this whole file at
 # $PGAI_AGENT_KANBAN_ROOT_PATH/resolution-matrix.yaml to override the shipped
-# defaults entirely without editing the dev tree. The shipped v2.0.0 default
-# is exactly the one CANCEL-AND-REBUNDLE row below — no other rows ship.
+# defaults entirely without editing the dev tree. The shipped default is
+# exactly the one CANCEL-AND-REBUNDLE row below — no other rows ship.
 
 rows:
   - trigger_class: ship-policy-halt

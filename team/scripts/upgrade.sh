@@ -15,12 +15,29 @@
 # and NO crontab work — it is a small, stable bootstrap that changes rarely.
 #
 # PHASE 2 (the actual upgrade — deposit, state preservation, crontab, VERSION
-# stamp) runs inside the DEV TREE's upgrade.sh, which executes with full
-# knowledge of the version being installed.
+# stamp, destination-keyed migrations) runs inside the DEV TREE's upgrade.sh,
+# which executes with full knowledge of the version being installed. After
+# the VERSION stamp, phase 2 applies every scripts/migrations/
+# migrate_vX.Y.Z_to_vA.B.C.sh script whose destination version falls in
+# (installed, target] via the SOURCE TREE's team/scripts/migrations/
+# run-migrations.sh (the runner and migrations being deposited, never the
+# installed copies) — see scripts/migrations/README.md for the selection rule
+# and contract.
+#
+# PARTIAL DEPOSIT STOPS THE RUN: when any managed item that differs is left
+# undeposited — no TTY and no --force, or the operator answers N or q at a
+# prompt — phase 2 stops before the scheduler hooks, the VERSION stamp and
+# the migrations, lists the skipped items, and exits non-zero with the
+# --force re-run command. VERSION keeps the old version, so the re-run
+# selects every migration from it. A managed directory whose every shipped
+# file is already identical in place counts as current, not as differing.
 #
 # If the dev-tree script fails the bash -n probe or lacks --phase2 support,
 # phase 1 fails loud with the manual-bootstrap instruction (cp + retry) and
 # exits non-zero before depositing anything.
+#
+# Phase 2 likewise refuses, before depositing anything, a source tree that
+# has no team/scripts/lib/version_stamp.sh (the helper that writes VERSION).
 #
 # Usage:
 #   upgrade.sh [VERSION] [OPTIONS]
@@ -47,11 +64,17 @@
 #
 # OPTIONS:
 #   --force                Overwrite changed managed files without prompting.
+#                          Without it, a run that leaves any changed item
+#                          undeposited stops before the VERSION stamp and
+#                          migrations and exits non-zero (see PARTIAL DEPOSIT).
 #   --no-backup            Skip the pre-upgrade backup (advanced; not recommended).
 #   --wake-tier small|medium|large|none
-#                          Override the crontab cadence tier on upgrade.
-#                          When OMITTED, the existing tier is detected and preserved.
-#   --add-claude-agents    Deploy provider-agent wrappers to ~/.claude/agents/.
+#                          Rewrite the crontab's kanban-managed lines for this
+#                          tier (other cron lines are kept; none = leave the
+#                          crontab alone). When OMITTED, the crontab is not
+#                          touched; its tier is detected and reported only.
+#   --add-claude-agents    Deploy provider-agent wrappers to $CLAUDE_CONFIG_DIR/agents/
+#                          (default ~/.claude/agents/).
 #   --add-codex-agents     Deploy provider-agent wrappers to ~/.codex/agents/.
 #   --dev-tree PATH        Explicit path to dev tree (overrides kanban.cfg and env).
 #   --stamp-version STRING Write STRING verbatim to VERSION; bypass git resolution
@@ -61,23 +84,64 @@
 # DEPRECATED OPTIONS (still accepted; emit a deprecation notice to stderr):
 #   --crontab-tier small|medium|large|none   Use --wake-tier instead.
 #
+# INTERNAL (phase-2 re-exec only; do not pass by hand):
+#   --phase2               Run as phase 2, the upgrade body; phase 1 passes it
+#                          when it execs the dev tree's upgrade.sh.
+#   --phase2-protocol N    Version of the phase-1/phase-2 handoff (phase 1
+#                          passes 1); required with --phase2.
+#   --kanban-root PATH     Kanban root phase 2 upgrades; required with --phase2.
+#   --backup PATH          Pre-upgrade backup tarball phase 1 created (passed
+#                          only when a backup was made).
+#
 # ENVIRONMENT:
 #   PGAI_AGENT_KANBAN_ROOT_PATH   Kanban root (default: $HOME/pgai_agent_kanban)
 #   PGAI_DEV_TREE_PATH            Dev tree path (required when not set in kanban.cfg)
+#   CLAUDE_CONFIG_DIR             Claude Code config dir (default: $HOME/.claude);
+#                                 --add-claude-agents deploys to its agents/ subdirectory
 #
 # PROTECTED SET (declared once here; never overwritten on upgrade):
-#   Config files:   kanban.cfg, projects.cfg, secrets, shell-env, pseudocron.env
-#                   and each project's project.cfg
+#   Config files:   kanban.cfg, projects.cfg, secrets, shell-env, claude-env,
+#                   pseudocron.env and each project's project.cfg
 #   Projects dir:   projects/ (all per-project state: tasks, bugs, requirements,
-#                   release-state, queues, release-notes)
-#   Crontab:        preserved by default; overwritten only on explicit --wake-tier
-#                   / --crontab-tier change
-#   Agent wrappers: ~/.claude/agents/ and ~/.codex/agents/ (opt-in only; when
-#                   --add-claude-agents / --add-codex-agents are NOT passed,
-#                   the installed wrappers are left exactly as-is)
+#                   release-state, queues, release-notes). The one exception is
+#                   each registered project's seeded intake templates -- see
+#                   SEEDED INTAKE TEMPLATES below.
+#   Crontab:        left untouched unless --wake-tier / --crontab-tier names a
+#                   tier; then only its kanban-managed lines (the marked
+#                   pgai-agent-kanban block and lines naming this root) are
+#                   rewritten and every other line is kept
+#   pseudocron.cfg: never overwritten once it exists (it may be hand-tuned);
+#                   the pseudocron hook reads its tier from the file's
+#                   "# Tier:" header and is skipped when there is none
+#   Agent wrappers: $CLAUDE_CONFIG_DIR/agents/ (default ~/.claude/agents/) and
+#                   ~/.codex/agents/ (opt-in only; when --add-claude-agents /
+#                   --add-codex-agents are NOT passed, the installed wrappers
+#                   are left exactly as-is). Every upgrade still compares them,
+#                   read-only, with the subagents/MANIFEST.txt wrappers it
+#                   ships: each missing or differing one is warned by name,
+#                   e.g. "Agent wrapper out of date: claude/coder.md (...) --
+#                   refresh: <root>/scripts/upgrade.sh --add-claude-agents",
+#                   and the summary says "current" when all match. A provider
+#                   whose agents directory does not exist is neither compared
+#                   nor created.
 #   Example templates: *_example files are refreshed; the ACTIVE config they seed
-#                      (e.g. kanban.cfg) is preserved
+#                      (e.g. kanban.cfg, claude-env) is preserved
 #   Runtime dirs:   logs/, locks/ — ensure-if-missing; never deleted
+#
+# NOTE: claude-env is create-if-absent on upgrade (seeded from the freshly
+#   refreshed claude-env_example when no live claude-env exists yet — e.g. an
+#   install upgrading from before the file was introduced) but, like every
+#   other file in the protected set, never overwritten once it exists.
+#
+# SEEDED INTAKE TEMPLATES (refreshed, not protected):
+#   Phase 2 refreshes every registered project's bugs/templates/BUG-TEMPLATE.md,
+#   priority/templates/PRIORITY-TEMPLATE.md and
+#   requirements/templates/REQUIREMENTS-TEMPLATE.md from the installed
+#   templates/project/<workflow_type>/ set, the source create-project.sh seeds
+#   from. Identical copies are left alone; missing ones are seeded; a copy that
+#   differs (an older release's template or an operator edit) is kept beside
+#   itself as <file>.<UTC timestamp>.bak and then overwritten, with one line
+#   naming the project, file and backup. No other project file is written.
 #
 # BACKUP:
 #   A tarball of the whole kanban root is created before any change, excluding
@@ -177,6 +241,8 @@ fi
 # shellcheck source=team/scripts/lib/argparse.sh
 source "$_UPG_ARGPARSE_SH"
 unset _UPG_ARGPARSE_SH
+# shellcheck source=lib/script_common.sh
+source "${_SCRIPT_DIR}/lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Repo root: install.sh lives one level above team/scripts/ (at the repo root).
@@ -248,6 +314,7 @@ PROTECTED_FILES=(
   "projects.cfg"
   "secrets"
   "shell-env"
+  "claude-env"
   "pseudocron.env"
 )
 
@@ -286,7 +353,7 @@ _is_protected_path() {
 # ---------------------------------------------------------------------------
 FORCE_UPGRADE=false
 DO_BACKUP=true
-WAKE_TIER=""          # empty = detect and preserve existing tier
+WAKE_TIER=""          # empty = leave the crontab untouched (tier detected, reported only)
 ADD_CLAUDE_AGENTS=false
 ADD_CODEX_AGENTS=false
 BACKUP_PATH=""
@@ -322,8 +389,8 @@ trap '_cleanup' EXIT
 # ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
-_print_usage() {
-  cat <<EOF
+# Usage text as data (per lib/script_common.sh's print_usage_and_exit contract).
+_USAGE_TEXT="$(cat <<EOF
 Usage: $(basename "$0") [VERSION] [OPTIONS]
 
 Upgrade an existing pgai-agent-kanban installation.
@@ -332,6 +399,25 @@ This is the UPGRADE path only (phase-1 bootstrap).  It validates the dev tree,
 creates a pre-upgrade backup, and hands execution to the dev tree's upgrade.sh
 as phase 2 (the actual upgrade).  If the target is not an existing installation,
 use install.sh instead.
+
+Phase 2 also applies every migrations/migrate_vX.Y.Z_to_vA.B.C.sh script whose
+destination version falls in (installed, target], via the source tree's
+team/scripts/migrations/run-migrations.sh -- see scripts/migrations/README.md.
+Most upgrades select zero scripts (most version bumps need no migration); this
+is the normal, non-error case.
+
+When a changed item is left undeposited (no TTY and no --force, or an N or q
+answer at a prompt), the upgrade stops before the crontab/pseudocron hooks,
+the VERSION stamp and the migrations, names the skipped items, and exits
+non-zero; re-run with --force to finish. VERSION keeps the old version, so
+the re-run applies every migration from it.
+
+Phase 2 also refreshes every registered project's seeded intake templates
+(bugs/templates/BUG-TEMPLATE.md, priority/templates/PRIORITY-TEMPLATE.md,
+requirements/templates/REQUIREMENTS-TEMPLATE.md) from the installed
+templates/project/<workflow_type>/ set. A copy that differs is kept as
+<file>.<UTC timestamp>.bak beside itself, then overwritten, with one line
+naming the project and file; the rest of projects/ stays protected.
 
 Version-targeted upgrade (forward-only):
   Pass an optional positional VERSION argument to upgrade TO a specific
@@ -369,12 +455,27 @@ Version-targeted upgrade (forward-only):
 
 OPTIONS:
   --force                 Overwrite changed managed files without prompting.
+                          Without it, a run that leaves any changed item
+                          undeposited stops before the VERSION stamp and
+                          migrations and exits non-zero.
   --no-backup             Skip the pre-upgrade backup (advanced; not recommended).
   --wake-tier small|medium|large|none
-                          Override the crontab cadence tier applied during upgrade.
-                          When OMITTED, upgrade.sh detects and preserves the existing tier.
-  --add-claude-agents     Deploy provider-agent wrappers to ~/.claude/agents/.
+                          Rewrite the crontab's kanban-managed lines for this tier;
+                          every other crontab line is kept (none = leave it alone).
+                          When OMITTED, the crontab is not touched: the installed
+                          tier is detected and reported only. pseudocron.cfg is
+                          never overwritten by an upgrade either way.
+  --add-claude-agents     Deploy provider-agent wrappers to \$CLAUDE_CONFIG_DIR/agents/
+                          (default ~/.claude/agents/).
   --add-codex-agents      Deploy provider-agent wrappers to ~/.codex/agents/.
+                          Without either flag the deployed wrappers are
+                          protected: nothing under a provider's agents
+                          directory is written or created, but each existing
+                          directory is compared with the wrappers this upgrade
+                          ships. A missing or differing wrapper is warned by
+                          provider and file name with the refresh command
+                          (upgrade.sh --add-<provider>-agents); when all match,
+                          the summary reports the wrappers as current.
   --dev-tree PATH         Explicit path to dev tree (overrides env and kanban.cfg).
   --stamp-version STRING  Write STRING verbatim to VERSION; bypass git resolution
                           and suppress divergence advisory.
@@ -383,20 +484,31 @@ OPTIONS:
 DEPRECATED OPTIONS (still accepted; emit a deprecation notice to stderr):
   --crontab-tier small|medium|large|none   Use --wake-tier instead.
 
+INTERNAL (phase-2 re-exec only; do not pass by hand):
+  --phase2                Run as phase 2, the upgrade body; phase 1 passes it
+                          when it execs the dev tree's upgrade.sh.
+  --phase2-protocol N     Version of the phase-1/phase-2 handoff (phase 1
+                          passes 1); required with --phase2.
+  --kanban-root PATH      Kanban root phase 2 upgrades; required with --phase2.
+  --backup PATH           Pre-upgrade backup tarball phase 1 created (passed
+                          only when a backup was made).
+
 ENVIRONMENT:
   PGAI_AGENT_KANBAN_ROOT_PATH   Kanban root (default: \$HOME/pgai_agent_kanban)
   PGAI_DEV_TREE_PATH            Dev tree path (set via kanban.cfg or this env var)
+  CLAUDE_CONFIG_DIR             Claude Code config dir (default: \$HOME/.claude);
+                                --add-claude-agents deploys to its agents/ subdirectory
 
 EXAMPLES:
-  $(basename "$0")                                      # upgrade, preserve tier
+  $(basename "$0")                                      # upgrade, crontab untouched
   $(basename "$0") --force                              # upgrade silently
-  $(basename "$0") --wake-tier large                   # upgrade and change to large tier
+  $(basename "$0") --wake-tier large                   # upgrade; kanban cron lines -> large tier
   $(basename "$0") --wake-tier none                    # upgrade, skip crontab
   $(basename "$0") --add-claude-agents                 # upgrade and refresh claude wrappers
   $(basename "$0") --no-backup                         # upgrade without backup (advanced)
   $(basename "$0") v2.2.0                              # forward-only upgrade to tag v2.2.0
 EOF
-}
+)"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -438,7 +550,7 @@ fi
 
 # Handle --help / -h.
 if argparse_has "help" || argparse_has "h"; then
-  _print_usage; exit 0
+  print_usage_and_exit 0 "$_USAGE_TEXT"
 fi
 
 # Handle short flags and the optional positional VERSION argument from
@@ -450,7 +562,7 @@ fi
 # thread-through flag.
 for _pos in "${ARGPARSE_POSITIONAL[@]+"${ARGPARSE_POSITIONAL[@]}"}"; do
   case "$_pos" in
-    -h) _print_usage; exit 0 ;;
+    -h) print_usage_and_exit 0 "$_USAGE_TEXT" ;;
     -*)
       err "Unknown option: $_pos"
       err "Run '$(basename "$0") --help' for usage."
@@ -879,7 +991,7 @@ info "bash -n: OK"
 
 info "Probing dev-tree upgrade.sh: --phase2 support check..."
 if ! grep -q -- '--phase2' "$_DEV_UPGRADE_SH"; then
-  err "Dev-tree upgrade.sh does not appear to support --phase2 (this may be a pre-v1.7 script or a downgrade)."
+  err "Dev-tree upgrade.sh does not appear to support --phase2 (it may be an older script or a downgrade)."
   err "Nothing has been deposited.  Your pre-upgrade backup is still intact."
   err "Manual bootstrap: cp ${_DEV_UPGRADE_SH} scripts/ then retry"
   unset _DEV_UPGRADE_SH
@@ -906,26 +1018,86 @@ exec bash "$_DEV_UPGRADE_SH" \
 fi  # [[ "$_PHASE2_MODE" != "true" ]]
 
 # ---------------------------------------------------------------------------
+# PRE-DEPOSIT: the source tree must carry the shared version-stamp helper.
+#
+# The VERSION stamp that follows the deposit calls stamp_version_files and
+# git_describe_tag_pattern, both defined only in the deposited tree's
+# team/scripts/lib/version_stamp.sh. A tree without that file (a damaged or
+# hand-assembled copy) is refused here, before the first file is laid down,
+# so the root is never left holding the new tree's files beside the old
+# VERSION with no migrations run. install.sh refuses the same tree the same
+# way. The helper is sourced here, once, for the stamp step further down.
+#
+# The remedy depends on where DEV_TREE came from: a version-targeted upgrade
+# reads a tag's tree, so the fix is to upgrade from the checked-out tree
+# instead; a git checkout can restore the file from HEAD; a tree with no
+# .git (an archive export or tarball) is replaced by a fresh clone.
+# ---------------------------------------------------------------------------
+_UPG_STAMP_LIB="$DEV_TREE/team/scripts/lib/version_stamp.sh"
+if [[ ! -f "$_UPG_STAMP_LIB" ]]; then
+  if [[ -n "${_UPG_RESOLVED_TAG:-}" ]]; then
+    _upg_stamp_remedy="'${_UPG_ORIGINAL_DEV_TREE}/team/scripts/upgrade.sh' --dev-tree '${_UPG_ORIGINAL_DEV_TREE}'"
+  elif [[ -e "$DEV_TREE/.git" ]]; then
+    _upg_stamp_remedy="git -C '${DEV_TREE}' checkout HEAD -- team/scripts/lib/version_stamp.sh && '${DEV_TREE}/team/scripts/upgrade.sh' --dev-tree '${DEV_TREE}'"
+  else
+    _upg_stamp_remedy="git clone https://github.com/purdygood-ai/pgai-agent-kanban.git '${HOME}/pgai-agent-kanban-src' && '${HOME}/pgai-agent-kanban-src/team/scripts/upgrade.sh' --dev-tree '${HOME}/pgai-agent-kanban-src'"
+  fi
+  # shellcheck source=lib/error_contract.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
+  # BLOCK-WORTHY (docs/blocking-site-census.md): depositing a tree that
+  # cannot stamp its own VERSION leaves the root half-upgraded -- new files,
+  # the old VERSION, no migrations -- a state-corrupting partial upgrade.
+  pgai_emit_error_contract \
+    "upgrade.stamp-helper-missing" \
+    "The source tree ${DEV_TREE} has no version-stamp helper at ${_UPG_STAMP_LIB}; without it the upgrade cannot write VERSION after depositing. Nothing has been deposited and ${KANBAN_ROOT} is unchanged." \
+    "${_upg_stamp_remedy}"
+  # CENSUS-ANCHOR: upgrade-stamp-helper-missing-01
+  exit 1
+fi
+# shellcheck source=team/scripts/lib/version_stamp.sh
+source "$_UPG_STAMP_LIB"
+unset _UPG_STAMP_LIB
+
+# ---------------------------------------------------------------------------
 # Detect the installed crontab tier (when --wake-tier was NOT supplied).
 #
+# The result is reported only: a plain upgrade never writes the crontab, so
+# detection can never turn into an applied tier.
+#
 # Detection order:
-#   1. "# Tier: <x>" header line in `crontab -l`.
-#   2. Body-match against tier templates in $KANBAN_ROOT/templates/install/.
-#   3. Crontab exists but tier undetectable → fall back to "small".
-#   4. crontab not on PATH or no crontab installed → "none".
+#   1. crontab not available, no crontab installed, or no wake job line
+#      (a non-comment line running wake.sh, wake-batch.sh or wake-now.sh)
+#      → "none", whatever "# Tier:" header or cleanup lines remain.
+#   2. "# Tier: <x>" header line in `crontab -l`.
+#   3. Body-match against tier templates in $KANBAN_ROOT/templates/install/.
+#   4. Wake job lines that match no tier → "custom" (no tier is invented).
+#
+# The crontab is read through PGAI_CRONTAB_CMD when set (the same seam
+# lib/safe_overwrite.sh uses), else the crontab on PATH.
 # ---------------------------------------------------------------------------
 _detect_installed_tier() {
-  if ! command -v crontab >/dev/null 2>&1; then
+  local _crontab_cmd="${PGAI_CRONTAB_CMD:-crontab}"
+  if ! command -v "$_crontab_cmd" >/dev/null 2>&1; then
     echo "none"; return 0
   fi
 
   local _raw
-  _raw="$(crontab -l 2>/dev/null)" || true
+  _raw="$("$_crontab_cmd" -l 2>/dev/null)" || true
   if [[ -z "$_raw" ]]; then
     echo "none"; return 0
   fi
 
-  # Strategy 1: canonical "# Tier: <x>" header.
+  # Strategy 1: no wake job line means no wake tier is installed. A header
+  # left behind with only cleanup lines (or nothing) is not a tier.
+  # Here-strings, not a pipe into grep -q: under pipefail an early grep -q
+  # exit would fail the writer and read as "no match".
+  local _job_lines
+  _job_lines="$(grep -vE '^[[:space:]]*(#|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=)' <<< "$_raw")" || true
+  if ! grep -qE 'wake(-batch|-now)?\.sh' <<< "$_job_lines"; then
+    echo "none"; return 0
+  fi
+
+  # Strategy 2: canonical "# Tier: <x>" header.
   local _tier_header
   _tier_header="$(printf '%s\n' "$_raw" \
     | grep -iE '^[[:space:]]*#[[:space:]]*Tier:[[:space:]]*(small|medium|large)' \
@@ -937,7 +1109,7 @@ _detect_installed_tier() {
     small|medium|large) echo "$_tier_header"; return 0 ;;
   esac
 
-  # Strategy 2: match installed crontab body against tier templates.
+  # Strategy 3: match installed crontab body against tier templates.
   local _templates_dir="${KANBAN_ROOT}/templates/install"
   local _tier
   for _tier in large medium small; do
@@ -962,9 +1134,9 @@ _detect_installed_tier() {
         local _i_expr
         _i_expr="$(printf '%s\n' "$_iline" | awk '{print $1,$2,$3,$4,$5}')"
         [[ "$_i_expr" != "$_cron_expr" ]] && continue
-        printf '%s\n' "$_iline" | grep -qF -- "$_agent_tok" || continue
+        grep -qF -- "$_agent_tok" <<< "$_iline" || continue
         if [[ -n "$_sleep_tok" ]]; then
-          printf '%s\n' "$_iline" | grep -qF -- "$_sleep_tok" || continue
+          grep -qF -- "$_sleep_tok" <<< "$_iline" || continue
         fi
         _found=true; break
       done <<< "$_raw"
@@ -977,14 +1149,15 @@ _detect_installed_tier() {
     fi
   done
 
-  # Strategy 3: crontab exists but tier is unidentifiable → safe fallback.
-  echo "small"; return 0
+  # Strategy 4: wake job lines exist but match no shipped tier.
+  echo "custom"; return 0
 }
 
+_UPG_DETECTED_TIER=""
 if [[ -z "$WAKE_TIER" ]]; then
   info "Detecting installed crontab tier (--wake-tier not supplied)..."
-  WAKE_TIER="$(_detect_installed_tier)"
-  info "Detected installed tier: ${WAKE_TIER} (will preserve)"
+  _UPG_DETECTED_TIER="$(_detect_installed_tier)"
+  info "Detected installed tier: ${_UPG_DETECTED_TIER} (crontab left untouched; pass --wake-tier to change it)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -992,12 +1165,43 @@ fi
 #
 # Helper: deposit_item <src-path> <kanban-root-relative-path> <label>
 #   - Skips items that are in the protected set.
-#   - Skips identical files silently.
+#   - Skips identical files silently, and a directory whose every source file
+#     is already identical in place (extra files at the root do not count;
+#     see _deposit_dir_is_current).
 #   - With FORCE_UPGRADE=true: overwrites non-protected items without prompting.
 #   - Without force and with a TTY: prompts [y]es/[N]o/[a]ll/[q]uit.
 #   - Without force and without a TTY: skips with a message.
+#   Every differing item left undeposited (no TTY, N, q) is recorded in
+#   _DEPOSIT_SKIPPED; a non-empty list stops the run before the scheduler
+#   hooks, the VERSION stamp and the migrations (see "PARTIAL DEPOSIT").
 # ---------------------------------------------------------------------------
 _DEPOSIT_BULK_CHOICE=""
+_DEPOSIT_SKIPPED=()
+
+# _deposit_dir_is_current <src-dir> <dst-dir>
+#
+# Returns 0 when depositing <src-dir> onto <dst-dir> would change nothing:
+# every file under <src-dir> exists under <dst-dir> with identical content.
+# Files only present under <dst-dir> are ignored (the deposit copies over and
+# never deletes), as are Python bytecode caches, which differ between any two
+# trees that ran Python. Returns 1 on any difference, or when diff is not
+# available (the item is then treated as differing, as before).
+_deposit_dir_is_current() {
+  local src="$1" dst="$2"
+  [[ -d "$src" && -d "$dst" ]] || return 1
+  command -v diff >/dev/null 2>&1 || return 1
+  local _report _rc=0
+  _report="$(LC_ALL=C diff -rq -x __pycache__ -x '*.pyc' -x .pytest_cache "$src" "$dst" 2>&1)" || _rc=$?
+  [[ "$_rc" -le 1 ]] || return 1
+  # Only "Only in <dst...>" lines are acceptable: extra files at the root.
+  local _line
+  while IFS= read -r _line; do
+    [[ -z "$_line" ]] && continue
+    [[ "$_line" == "Only in ${dst}: "* || "$_line" == "Only in ${dst}/"* ]] && continue
+    return 1
+  done <<< "$_report"
+  return 0
+}
 
 deposit_item() {
   local src="$1"
@@ -1020,10 +1224,15 @@ deposit_item() {
   if [[ -f "$src" && -f "$dst" ]] && cmp -s "$src" "$dst" 2>/dev/null; then
     return 0
   fi
+  # Directory already current — every shipped file identical in place.
+  if [[ -d "$src" && -d "$dst" ]] && _deposit_dir_is_current "$src" "$dst"; then
+    return 0
+  fi
 
   # Bulk-quit: operator chose [q]uit earlier in this run.
   if [[ "$_DEPOSIT_BULK_CHOICE" == "quit" ]]; then
     warn "Skipped (quit): $label"
+    _DEPOSIT_SKIPPED+=("$label")
     return 0
   fi
 
@@ -1040,6 +1249,7 @@ deposit_item() {
       err "  $dst differs from source but no TTY is available for prompting."
       err "  Re-run with --force to overwrite silently."
       warn "Skipped (no-TTY): $label"
+      _DEPOSIT_SKIPPED+=("$label")
       return 0
     fi
 
@@ -1049,9 +1259,9 @@ deposit_item() {
       IFS= read -r _answer < /dev/tty || _answer=""
       case "$_answer" in
         [aA]*) _DEPOSIT_BULK_CHOICE="all" ;;
-        [qQ]*) _DEPOSIT_BULK_CHOICE="quit"; warn "Skipped (quit): $label"; return 0 ;;
+        [qQ]*) _DEPOSIT_BULK_CHOICE="quit"; warn "Skipped (quit): $label"; _DEPOSIT_SKIPPED+=("$label"); return 0 ;;
         [yY]*) : ;; # proceed
-        *)     warn "Skipped: $label"; return 0 ;;
+        *)     warn "Skipped: $label"; _DEPOSIT_SKIPPED+=("$label"); return 0 ;;
       esac
     fi
   fi
@@ -1073,18 +1283,78 @@ deposit_item() {
 info ""
 info "Depositing upgraded kanban tree..."
 
-for item in README.md DIRECTIVES.md OVERVIEW.md SOP.md roles scripts pm-agent workflows pgai_agent_kanban halt_after templates demos config; do
+for item in README.md DIRECTIVES.md OVERVIEW.md SOP-core.md roles scripts pm-agent workflows pgai_agent_kanban halt_after templates demos config read-order; do
   src="${DEV_TREE}/team/$item"
   [[ -e "$src" ]] || { warn "Source missing (skipping): team/$item"; continue; }
   deposit_item "$src" "$item" "team/$item"
 done
 
+# ---------------------------------------------------------------------------
+# docs/ reference set: same manifest install.sh reads, delivered through
+# deposit_item so its backup, protected-item and identical-file-skip
+# semantics apply exactly as they do to the team/ items above. docs/ is a
+# repository-root directory, not a team/ subdirectory, so it needs its own
+# loop here — resolving these paths against ${DEV_TREE}/team/ would look for
+# files that do not exist.
+# ---------------------------------------------------------------------------
+DOCS_MANIFEST="${DEV_TREE}/team/config/docs-manifest.txt"
+DOCS_TO_DEPOSIT=()
+if [[ ! -f "$DOCS_MANIFEST" ]]; then
+  # Tolerant, like every "Source missing" check in the loop above: an older
+  # dev tree checked out from before this manifest existed should not fail
+  # the whole upgrade over a set of reference docs it never shipped either.
+  warn "Docs manifest not found (skipping docs/ deposit): $DOCS_MANIFEST"
+else
+  while IFS= read -r doc_line; do
+    doc_line="${doc_line%%#*}"
+    doc_line="${doc_line#"${doc_line%%[![:space:]]*}"}"
+    doc_line="${doc_line%"${doc_line##*[![:space:]]}"}"
+    [[ -z "$doc_line" ]] && continue
+    DOCS_TO_DEPOSIT+=("$doc_line")
+  done < "$DOCS_MANIFEST"
+fi
+
+for doc_item in "${DOCS_TO_DEPOSIT[@]}"; do
+  src="${DEV_TREE}/docs/${doc_item}"
+  [[ -e "$src" ]] || { warn "Source missing (skipping): docs/$doc_item"; continue; }
+  deposit_item "$src" "docs/$doc_item" "docs/$doc_item"
+done
+unset doc_item DOCS_MANIFEST DOCS_TO_DEPOSIT doc_line
+
 # Refresh example templates (active configs derived from these are preserved).
-for example in kanban.cfg_example shell-env_example secrets_example projects.cfg_example project.cfg_example; do
+# project.cfg_example is published from team/config/project.cfg_example, the
+# one copy of its text (deposited above as config/project.cfg_example, which
+# create-project.sh and add-project.sh render each new project.cfg from). An
+# existing project's own project.cfg is never touched here.
+for example in kanban.cfg_example shell-env_example secrets_example projects.cfg_example project.cfg_example claude-env_example; do
   src="${DEV_TREE}/$example"
+  [[ "$example" == "project.cfg_example" ]] && src="${DEV_TREE}/team/config/project.cfg_example"
   [[ -e "$src" ]] || continue
   deposit_item "$src" "$example" "$example"
 done
+
+# ---------------------------------------------------------------------------
+# Seed claude-env from template (no-clobber), same idiom as install.sh's
+# fresh-install "Seed claude-env from template" block.
+#
+# claude-env is in PROTECTED_FILES above, so deposit_item never overwrites an
+# existing one — but deposit_item also never CREATES a missing one, since
+# protected paths short-circuit before the copy. An install upgrading from
+# before claude-env existed as a shipped file would otherwise never get it
+# at all. This block closes that gap: create-if-absent only, using the
+# claude-env_example that was just refreshed above. An operator's existing
+# claude-env — hand-tuned, possibly mid-upgrade-run — is never touched.
+# ---------------------------------------------------------------------------
+_claude_env_template="${DEV_TREE}/claude-env_example"
+if [[ ! -f "${KANBAN_ROOT}/claude-env" ]]; then
+  if [[ -f "$_claude_env_template" ]]; then
+    cp "$_claude_env_template" "${KANBAN_ROOT}/claude-env"
+    ok "Initialized: claude-env (from claude-env_example)"
+  else
+    warn "Source missing (skipping): claude-env_example — claude-env not initialized"
+  fi
+fi
+unset _claude_env_template
 
 # ---------------------------------------------------------------------------
 # Ensure runtime directories exist (never delete, only create if missing).
@@ -1130,6 +1400,26 @@ fi
 unset _projects_cfg_file _pname _plog_dir
 
 # ---------------------------------------------------------------------------
+# Refresh registered projects' seeded intake templates (see SEEDED INTAKE
+# TEMPLATES in the header). Runs after the deposit above, through the
+# INSTALLED scripts/lib/pp_run_ops.sh with PYTHONPATH cleared, so the
+# installed pgai_agent_kanban.ops module reads the installed
+# templates/project/ set -- never this dev tree's. Idempotent: a re-run over
+# current copies writes nothing and prints one no-op line. A failure warns
+# and the upgrade carries on: a stale template copy is a quality issue, not
+# a broken install.
+# ---------------------------------------------------------------------------
+if [[ -f "$KANBAN_ROOT/scripts/lib/pp_run_ops.sh" ]]; then
+  if ! PYTHONPATH="" bash "$KANBAN_ROOT/scripts/lib/pp_run_ops.sh" pgai_agent_kanban.ops \
+      refresh_seeded_templates --kanban-root="$KANBAN_ROOT"; then
+    warn "Seeded template refresh reported problems (see the lines above); other projects were still refreshed."
+    warn "Re-run it after fixing the cause: bash \"$KANBAN_ROOT/scripts/lib/pp_run_ops.sh\" pgai_agent_kanban.ops refresh_seeded_templates --kanban-root=\"$KANBAN_ROOT\""
+  fi
+else
+  warn "Seeded template refresh skipped: $KANBAN_ROOT/scripts/lib/pp_run_ops.sh not installed"
+fi
+
+# ---------------------------------------------------------------------------
 # Make scripts executable (idempotent).
 # ---------------------------------------------------------------------------
 if [[ -d "$KANBAN_ROOT/scripts" ]]; then
@@ -1148,10 +1438,20 @@ fi
 # ---------------------------------------------------------------------------
 # Provider-agent wrapper deployment (opt-in; protected unless flag is passed).
 #
-# The deployed wrappers under ~/.claude/agents/ and ~/.codex/agents/ are in
-# the protected set by default.  Passing --add-claude-agents / --add-codex-agents
+# The deployed wrappers under $CLAUDE_CONFIG_DIR/agents/ (default
+# ~/.claude/agents/) and ~/.codex/agents/ are in the protected set by
+# default; provider_agents_dir (team/scripts/lib/subagent_deploy.sh) names
+# each provider's directory.  Passing --add-claude-agents / --add-codex-agents
 # explicitly OPTs IN to refreshing those wrappers for the named provider.
 # Without the flag, NOTHING is written under the provider directory.
+#
+# On that protected path the deployed wrappers are still compared, read-only
+# (subagent_wrapper_drift in team/scripts/lib/subagent_deploy.sh), with the
+# ones this tree ships under subagents/: each missing or differing wrapper
+# gets a warning naming provider and file plus the runnable refresh command,
+# and an all-match result says the wrappers are current. A provider whose
+# agents directory does not exist is neither compared nor created. The final
+# summary reports one line per provider from the same results.
 #
 # Once opted in, the target agents directory is always created via mkdir -p
 # (ensure_provider_agents_dir in team/scripts/lib/subagent_deploy.sh) when
@@ -1215,19 +1515,76 @@ if [[ -f "$INSTALLED_AGENTS_STATE" ]]; then
 fi
 
 _ANY_PROVIDER_FLAG_SET=false
+# One entry per provider, printed under "Protected (preserved)" in the final
+# summary (e.g. "claude: current (7 wrappers match the shipped copies)").
+_WRAPPER_SUMMARY_LINES=()
+
+# _report_protected_wrapper_drift <provider>
+#
+# Protected path for a provider whose opt-in flag was not passed. Compares
+# the deployed wrappers with $DEV_TREE/subagents/ through
+# subagent_wrapper_drift, which only reads, then narrates:
+#   - agents directory absent: one skip line; not compared, not created.
+#   - drift: one warning per missing or differing wrapper, naming
+#     <provider>/<name>.md and the refresh command
+#     ($KANBAN_ROOT/scripts/upgrade.sh --add-<provider>-agents).
+#   - no drift: one line saying the wrappers are current.
+# Appends the provider's outcome to _WRAPPER_SUMMARY_LINES. Writes nothing
+# under any provider agents directory.
+_report_protected_wrapper_drift() {
+  local provider="$1"
+  local agents_dir refresh_cmd drift state name
+  local -a drifted=()
+  agents_dir="$(provider_agents_dir "$provider")"
+  refresh_cmd="$KANBAN_ROOT/scripts/upgrade.sh --add-${provider}-agents"
+
+  if [[ ! -d "$agents_dir" ]]; then
+    info "Provider-agent wrappers: skipping $provider (protected; no agents directory at $agents_dir, so nothing to compare)"
+    _WRAPPER_SUMMARY_LINES+=("$provider: not compared (no agents directory at $agents_dir)")
+    return 0
+  fi
+  if [[ ${#CURRENT_SUBAGENTS[@]} -eq 0 ]]; then
+    info "Provider-agent wrappers: skipping $provider (protected; no wrappers listed in $SUBAGENT_MANIFEST to compare)"
+    _WRAPPER_SUMMARY_LINES+=("$provider: not compared (no wrappers listed in subagents/MANIFEST.txt)")
+    return 0
+  fi
+
+  drift="$(subagent_wrapper_drift "$DEV_TREE/subagents" "$agents_dir" "${CURRENT_SUBAGENTS[@]}")" || drift=""
+  while read -r state name; do
+    [[ -n "$name" ]] || continue
+    drifted+=("$provider/$name.md")
+    if [[ "$state" == "missing" ]]; then
+      warn "Agent wrapper out of date: $provider/$name.md (missing from $agents_dir) -- refresh: $refresh_cmd"
+    else
+      warn "Agent wrapper out of date: $provider/$name.md (differs from subagents/$name.md) -- refresh: $refresh_cmd"
+    fi
+  done <<< "$drift"
+
+  if [[ ${#drifted[@]} -eq 0 ]]; then
+    info "Provider-agent wrappers: $provider wrappers current (all ${#CURRENT_SUBAGENTS[@]} match subagents/; protected, nothing written)"
+    _WRAPPER_SUMMARY_LINES+=("$provider: current (${#CURRENT_SUBAGENTS[@]} wrappers match the shipped copies)")
+  else
+    info "Provider-agent wrappers: $provider has ${#drifted[@]} out-of-date wrapper(s); protected, nothing written"
+    local joined
+    joined="$(printf '%s, ' "${drifted[@]}")"
+    _WRAPPER_SUMMARY_LINES+=("$provider: ${#drifted[@]} out of date (${joined%, }) -- refresh: $refresh_cmd")
+  fi
+  return 0
+}
+
 info ""
 
 for _provider in $_subagent_providers; do
   case "$_provider" in
     claude)
       if [[ "$ADD_CLAUDE_AGENTS" != "true" ]]; then
-        info "Provider-agent wrappers: skipping claude (protected; pass --add-claude-agents to refresh)"
+        _report_protected_wrapper_drift claude
         continue
       fi
       ;;
     codex)
       if [[ "$ADD_CODEX_AGENTS" != "true" ]]; then
-        info "Provider-agent wrappers: skipping codex (protected; pass --add-codex-agents to refresh)"
+        _report_protected_wrapper_drift codex
         continue
       fi
       ;;
@@ -1242,10 +1599,11 @@ for _provider in $_subagent_providers; do
 
   if ! command -v "$_provider" >/dev/null 2>&1; then
     warn "Skipping $_provider: CLI binary not found on PATH"
+    _WRAPPER_SUMMARY_LINES+=("$_provider: not refreshed (CLI binary not found on PATH)")
     continue
   fi
 
-  _provider_agents_dir="$HOME/.${_provider}/agents"
+  _provider_agents_dir="$(provider_agents_dir "$_provider")"
 
   # Directory creation: always ensured before deploying wrappers — a missing
   # target directory must never silently no-op the deploy. See
@@ -1292,6 +1650,7 @@ for _provider in $_subagent_providers; do
   fi
 
   ok "Provider-agent wrapper deployment complete for: $_provider"
+  _WRAPPER_SUMMARY_LINES+=("$_provider: refreshed (--add-${_provider}-agents)")
 done
 
 # Update .installed-subagents state file when at least one provider ran.
@@ -1310,16 +1669,59 @@ unset PREVIOUSLY_INSTALLED prev still_shipped current obsolete_file
 unset _subagent_safe_overwrite_available _ANY_PROVIDER_FLAG_SET
 
 # ---------------------------------------------------------------------------
+# PARTIAL DEPOSIT: stop before the hooks, the VERSION stamp and migrations.
+#
+# deposit_item records every differing item it left undeposited (no TTY and
+# no --force, or an N / q answer). Stamping VERSION over such a root would
+# claim a version whose files are not all in place, and the migrations for
+# that version would be selected out of every later run's range. So the run
+# stops here: VERSION keeps the old version, the crontab and pseudocron are
+# untouched, and the --force re-run selects every migration from the old
+# version.
+# ---------------------------------------------------------------------------
+if [[ ${#_DEPOSIT_SKIPPED[@]} -gt 0 ]]; then
+  _upg_skip_list="$(printf '%s, ' "${_DEPOSIT_SKIPPED[@]:0:10}")"
+  _upg_skip_list="${_upg_skip_list%, }"
+  if [[ ${#_DEPOSIT_SKIPPED[@]} -gt 10 ]]; then
+    _upg_skip_list+=" and $(( ${#_DEPOSIT_SKIPPED[@]} - 10 )) more"
+  fi
+  _upg_old_version="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
+  _upg_rerun_dev_tree="${_UPG_ORIGINAL_DEV_TREE:-$DEV_TREE}"
+  _upg_rerun="PGAI_AGENT_KANBAN_ROOT_PATH='${KANBAN_ROOT}' '${KANBAN_ROOT}/scripts/upgrade.sh'"
+  [[ -n "$REQUESTED_VERSION" ]] && _upg_rerun+=" '${REQUESTED_VERSION}'"
+  _upg_rerun+=" --dev-tree '${_upg_rerun_dev_tree}'"
+  [[ -n "$WAKE_TIER" ]] && _upg_rerun+=" --wake-tier ${WAKE_TIER}"
+  _upg_rerun+=" --force"
+  # shellcheck source=lib/error_contract.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
+  # BLOCK-WORTHY (docs/blocking-site-census.md): stamping VERSION over a
+  # partly deposited root records a version whose files are not all in
+  # place and drops that version's migrations from every later run's range
+  # -- a state-corrupting partial upgrade.
+  pgai_emit_error_contract \
+    "upgrade.partial-deposit" \
+    "The upgrade left ${#_DEPOSIT_SKIPPED[@]} changed item(s) undeposited (no TTY and no --force, or an N/q answer): ${_upg_skip_list}. It stopped before the crontab/pseudocron hooks, the VERSION stamp and the migrations: VERSION is still ${_upg_old_version:-unset} and no migration ran. Re-run with --force to deposit everything and finish." \
+    "${_upg_rerun}"
+  # CENSUS-ANCHOR: upgrade-partial-deposit-01
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Scheduler hooks: crontab and pseudocron.
 #
-# Crontab: only touched when operator passed --wake-tier / --crontab-tier
-#          (explicit change intent).  When WAKE_TIER was detected from the
-#          existing install, we still apply it via install-crontab.sh to
-#          ensure the latest tier template is used.  This matches the legacy
-#          upgrade.sh behavior and is safe because the tier value is the
-#          preserved one.
+# Crontab: written only when --wake-tier / --crontab-tier names a tier. Then
+#          install-crontab.sh rewrites the kanban-managed lines (the marked
+#          pgai-agent-kanban block and lines naming this root) and keeps every
+#          other line. With no tier given the crontab is not read for writing
+#          and not touched; the detected tier above is reported only.
 #
-# Pseudocron: always installed (inert until pseudocron.py is started).
+# Pseudocron: the tier is read from pseudocron.cfg's own "# Tier:" header,
+#          never from the host crontab (a container host runs pseudocron with
+#          an empty host crontab). No file or no header means no pseudocron
+#          set-up on this host: the hook is skipped. Otherwise
+#          install-pseudocron.sh --keep-existing leaves pseudocron.cfg
+#          byte-identical (it may be hand-tuned) and only seeds a missing
+#          pseudocron.env.
 # ---------------------------------------------------------------------------
 info ""
 
@@ -1344,19 +1746,37 @@ if [[ "$_kanban_root_real" == /var/folders/* ]]; then
 fi
 unset _kanban_root_real _system_tmp_real
 
+# _read_pseudocron_tier: echoes small|medium|large from the first
+# "# Tier: <x>" line of $KANBAN_ROOT/pseudocron.cfg, or "none" when the file
+# or the header is absent.
+_read_pseudocron_tier() {
+  local _cfg="$KANBAN_ROOT/pseudocron.cfg" _tier=""
+  [[ -f "$_cfg" ]] || { echo "none"; return 0; }
+  _tier="$(grep -iE '^[[:space:]]*#[[:space:]]*Tier:[[:space:]]*(small|medium|large)([[:space:]]|$)' "$_cfg" \
+    | head -1 \
+    | sed -E 's/^[[:space:]]*#[[:space:]]*Tier:[[:space:]]*//' \
+    | awk '{print tolower($1)}')" || true
+  case "$_tier" in
+    small|medium|large) echo "$_tier" ;;
+    *) echo "none" ;;
+  esac
+}
+
 # Crontab hook.
 _INSTALL_CRONTAB_SH="$KANBAN_ROOT/scripts/install-crontab.sh"
-if [[ "$WAKE_TIER" == "none" ]]; then
+if [[ -z "$WAKE_TIER" ]]; then
+  info "Crontab: left untouched (--wake-tier not supplied; detected tier: ${_UPG_DETECTED_TIER:-none})."
+elif [[ "$WAKE_TIER" == "none" ]]; then
   info "Crontab: skipped (tier=none — cron-less / Docker deployment)."
 elif [[ "$_is_temp_root" == "true" ]]; then
   info "Crontab: skipped — target is under a temp/test directory (temp-target guard)."
-elif ! command -v crontab >/dev/null 2>&1; then
+elif ! command -v "${PGAI_CRONTAB_CMD:-crontab}" >/dev/null 2>&1; then
   warn "Crontab: crontab not found in PATH — skipping crontab update."
 elif [[ ! -f "$_INSTALL_CRONTAB_SH" ]]; then
   warn "Crontab: install-crontab.sh not found — skipping crontab update."
   warn "To install manually: $KANBAN_ROOT/scripts/install-crontab.sh --wake-tier=${WAKE_TIER}"
 else
-  info "Crontab: applying tier '${WAKE_TIER}' via install-crontab.sh..."
+  info "Crontab: applying tier '${WAKE_TIER}' to the kanban-managed lines via install-crontab.sh..."
   _ct_result=0
   PGAI_AGENT_KANBAN_ROOT_PATH="$KANBAN_ROOT" "$_INSTALL_CRONTAB_SH" \
     --wake-tier="${WAKE_TIER}" --yes || _ct_result=$?
@@ -1374,27 +1794,45 @@ unset _INSTALL_CRONTAB_SH
 
 # Pseudocron hook.
 _INSTALL_PSEUDOCRON_SH="$KANBAN_ROOT/scripts/install-pseudocron.sh"
-if [[ "$_is_temp_root" == "true" ]]; then
+_UPG_PSEUDOCRON_TIER="$(_read_pseudocron_tier)"
+if [[ "$_UPG_PSEUDOCRON_TIER" == "none" ]]; then
+  info "Pseudocron: skipped (no tier in $KANBAN_ROOT/pseudocron.cfg — pseudocron is not set up on this host)."
+elif [[ "$_is_temp_root" == "true" ]]; then
   info "Pseudocron: skipped — target is under a temp/test directory (temp-target guard)."
 elif [[ ! -f "$_INSTALL_PSEUDOCRON_SH" ]]; then
   warn "Pseudocron: install-pseudocron.sh not found — skipping."
-  warn "To install manually: $KANBAN_ROOT/scripts/install-pseudocron.sh --wake-tier=${WAKE_TIER}"
 else
-  info "Pseudocron: installing tier '${WAKE_TIER}' via install-pseudocron.sh..."
+  info "Pseudocron: tier '${_UPG_PSEUDOCRON_TIER}' (from pseudocron.cfg); keeping pseudocron.cfg as-is..."
   _pc_result=0
   PGAI_AGENT_KANBAN_ROOT_PATH="$KANBAN_ROOT" "$_INSTALL_PSEUDOCRON_SH" \
-    --wake-tier="${WAKE_TIER}" --yes || _pc_result=$?
+    --wake-tier="${_UPG_PSEUDOCRON_TIER}" --keep-existing --yes || _pc_result=$?
   case "$_pc_result" in
-    0) ok "Pseudocron: ready (tier: ${WAKE_TIER})" ;;
+    0) ok "Pseudocron: ready (tier: ${_UPG_PSEUDOCRON_TIER}; pseudocron.cfg kept)" ;;
     2) warn "Pseudocron: not installed (operator declined)." ;;
     *)
       warn "Pseudocron: installation failed (exit $_pc_result)."
-      warn "To install manually: $KANBAN_ROOT/scripts/install-pseudocron.sh --wake-tier=${WAKE_TIER}"
+      warn "To check by hand: $KANBAN_ROOT/scripts/install-pseudocron.sh --wake-tier=${_UPG_PSEUDOCRON_TIER} --keep-existing --dry-run"
       ;;
   esac
   unset _pc_result
 fi
 unset _INSTALL_PSEUDOCRON_SH _is_temp_root
+
+# ---------------------------------------------------------------------------
+# Capture the pre-upgrade VERSION for the migration runner below, before
+# stamp_version_files() overwrites $KANBAN_ROOT/VERSION with the new one.
+# Falls back to v0.0.0 (same fallback the version-targeted-upgrade forward-
+# only check above uses) for a very old install that predates VERSION
+# tracking -- the destination-keyed selection rule then simply selects every
+# migration whose destination is <= the target, which is correct: an
+# install with no VERSION file has no config layout newer migrations can
+# assume already happened.
+_UPG_MIGRATION_FROM_VERSION="v0.0.0"
+if [[ -f "$KANBAN_ROOT/VERSION" ]]; then
+  _upg_pre_version="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION")"
+  [[ -n "$_upg_pre_version" ]] && _UPG_MIGRATION_FROM_VERSION="$_upg_pre_version"
+  unset _upg_pre_version
+fi
 
 # ---------------------------------------------------------------------------
 # Write VERSION and VERSION_DETAIL files.
@@ -1407,35 +1845,48 @@ unset _INSTALL_PSEUDOCRON_SH _is_temp_root
 #     The committed file IS the identity; no git-describe rewrite occurs.
 #   - VERSION_DETAIL (full describe + deposit SHA) is always tool-written as
 #     deployment provenance; it is not committed.
+#   - A version-targeted upgrade passes the tag it resolved (_UPG_RESOLVED_TAG),
+#     so VERSION_DETAIL starts with that tag (e.g. "ai_v2.33.0  deposit-sha=...").
 #
 # Override path (--stamp-version STRING):
 #   - VERSION is written verbatim from the explicit value.
-#   - VERSION_DETAIL is NOT written.
-_UPG_STAMP_LIB="$DEV_TREE/team/scripts/lib/version_stamp.sh"
-if [[ -f "$_UPG_STAMP_LIB" ]]; then
-  # shellcheck source=team/scripts/lib/version_stamp.sh
-  source "$_UPG_STAMP_LIB"
-fi
-unset _UPG_STAMP_LIB
+#   - VERSION_DETAIL is NOT written, and any earlier one is removed, so no
+#     VERSION_DETAIL names a deposit other than the stamped one.
+#
+# The helper was sourced before the deposit (see "PRE-DEPOSIT" above); a tree
+# without it never reaches this point.
 
+# The stamp is written on every path, whether or not DEV_TREE is a git
+# checkout, exactly as install.sh calls the helper: the override always
+# lands in VERSION, and a normal deposit always copies the tree's committed
+# VERSION and replaces or removes VERSION_DETAIL (the helper skips its own
+# git work when there is no .git). Only the work that needs git sits under
+# the .git test below: the branch-prefix resolution and the describe-based
+# divergence advisory.
+#
 # -e (exists), not -d (is-a-directory): a version-targeted upgrade redirects
 # DEV_TREE to a detached git worktree (see "VERSION-TARGETED UPGRADE" above),
-# and a worktree's .git is a FILE (a gitdir pointer), not a directory. -e
-# accepts both shapes so VERSION/VERSION_DETAIL are still stamped correctly
-# from a worktree-sourced DEV_TREE; git -C works unchanged against either.
+# and a dev tree may itself be a linked worktree; either way its .git is a
+# FILE (a gitdir pointer), not a directory. -e accepts both shapes, as
+# stamp_version_files does on every path, so VERSION_DETAIL is written from
+# either; a version-targeted upgrade also passes the tag it resolved so
+# VERSION_DETAIL names that tag. git -C works unchanged against either shape.
+_UPG_BRANCH_PREFIX=""
 if [[ -e "$DEV_TREE/.git" ]]; then
   # Resolve branch_prefix for this project so the git-describe --match
   # pattern uses the project's own tag shape (<prefix>v[0-9]*). Shared with
   # the version-targeted-upgrade resolution block above so the two call
   # sites cannot drift on how the prefix is derived.
   _UPG_BRANCH_PREFIX="$(_upg_resolve_branch_prefix)"
+fi
 
-  if [[ -n "$STAMP_VERSION" ]]; then
-    # Operator override: write verbatim via shared helper; skip advisory.
-    ok "VERSION stamp: using --stamp-version override: $STAMP_VERSION"
-    stamp_version_files "$DEV_TREE" "$KANBAN_ROOT" "$STAMP_VERSION"
-    ok "VERSION updated: $STAMP_VERSION"
-  else
+if [[ -n "$STAMP_VERSION" ]]; then
+  # Operator override: write verbatim via shared helper; skip advisory.
+  ok "VERSION stamp: using --stamp-version override: $STAMP_VERSION"
+  stamp_version_files "$DEV_TREE" "$KANBAN_ROOT" "$STAMP_VERSION"
+  ok "VERSION updated: $STAMP_VERSION"
+else
+  if [[ -e "$DEV_TREE/.git" ]]; then
     # Normal deposit: describe is used only for the advisory and VERSION_DETAIL,
     # not to determine VERSION.  VERSION comes from the dev tree's committed file.
     _upg_match_pattern="$(git_describe_tag_pattern "$_UPG_BRANCH_PREFIX")"
@@ -1455,18 +1906,108 @@ if [[ -e "$DEV_TREE/.git" ]]; then
       fi
       unset _old_answer
     fi
-    unset _VER_SH _upg_match_pattern
-
-    # Propagate committed VERSION (when present) and write VERSION_DETAIL.
-    # branch_prefix is passed so the describe inside stamp_version_files is
-    # prefix-aware when building VERSION_DETAIL.
-    stamp_version_files "$DEV_TREE" "$KANBAN_ROOT" "" "$_UPG_BRANCH_PREFIX"
-    _upg_clean_tag="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
-    ok "VERSION updated: ${_upg_clean_tag} (from source tree; detail in VERSION_DETAIL)"
-    unset _cur_full_describe _upg_clean_tag
+    unset _VER_SH _upg_match_pattern _cur_full_describe
   fi
-  unset _UPG_BRANCH_PREFIX
+
+  # Propagate committed VERSION (when present) and write VERSION_DETAIL when
+  # DEV_TREE is a git checkout. branch_prefix is passed so the describe
+  # inside stamp_version_files is prefix-aware when building VERSION_DETAIL;
+  # on a version-targeted upgrade the resolved tag is passed too (empty
+  # otherwise), so VERSION_DETAIL names the tag actually laid down.
+  stamp_version_files "$DEV_TREE" "$KANBAN_ROOT" "" "$_UPG_BRANCH_PREFIX" "${_UPG_RESOLVED_TAG:-}"
+  _upg_clean_tag="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION" 2>/dev/null || true)"
+  # The helper leaves VERSION_DETAIL in place only when it wrote it, and
+  # writes no VERSION at all from a tree with neither a committed VERSION
+  # nor a .git -- say so rather than report the old VERSION as updated.
+  if [[ -f "$KANBAN_ROOT/VERSION_DETAIL" ]]; then
+    ok "VERSION updated: ${_upg_clean_tag} (from source tree; detail in VERSION_DETAIL)"
+  elif [[ -f "$DEV_TREE/VERSION" ]]; then
+    ok "VERSION updated: ${_upg_clean_tag} (from source tree; not a git checkout, so no VERSION_DETAIL)"
+  else
+    warn "VERSION unchanged: ${_upg_clean_tag:-none} (source tree has no committed VERSION and is not a git checkout; no VERSION_DETAIL)"
+  fi
+  unset _upg_clean_tag
 fi
+unset _UPG_BRANCH_PREFIX
+
+# ---------------------------------------------------------------------------
+# Apply destination-version-selected migrations (team/scripts/migrations/).
+#
+# This is the auto-runner team/scripts/migrations/README.md ("Auto-runner")
+# promises: every migration script whose destination version falls in
+# (installed, target] is applied automatically on upgrade, in ascending
+# order, so an existing install picks up a config/layout change (e.g. the
+# overwatch_resolve seed) without the operator needing to know a
+# migration script exists or run it by hand.
+#
+# _UPG_MIGRATION_FROM_VERSION was captured above, before stamp_version_files
+# overwrote $KANBAN_ROOT/VERSION. The "to" version is read now, after the
+# stamp, so it names what this run deposited on every path -- the
+# --stamp-version value, or the dev tree's committed VERSION, whether or not
+# DEV_TREE is a git checkout. A deposit from a tree with no .git that carries
+# a newer committed VERSION therefore selects the migrations in that range,
+# as the same deposit from a checkout does. Only when the stamp leaves VERSION
+# as it was (a re-deposit of the installed version, or a tree with neither a
+# committed VERSION nor a .git, where the helper writes no VERSION) does
+# _UPG_MIGRATION_TO_VERSION equal _UPG_MIGRATION_FROM_VERSION -- an empty
+# (X, X] range selects nothing, which is correct: the installed version did
+# not change.
+#
+# The runner is the SOURCE tree's own team/scripts/migrations/
+# run-migrations.sh, so the migrations selected are the ones shipped with the
+# version being stamped -- never an older installed runner's set. The root
+# it migrates is passed explicitly as PGAI_AGENT_KANBAN_ROOT_PATH.
+_UPG_MIGRATION_TO_VERSION="$_UPG_MIGRATION_FROM_VERSION"
+if [[ -f "$KANBAN_ROOT/VERSION" ]]; then
+  _upg_post_version="$(tr -d '[:space:]' < "$KANBAN_ROOT/VERSION")"
+  [[ -n "$_upg_post_version" ]] && _UPG_MIGRATION_TO_VERSION="$_upg_post_version"
+  unset _upg_post_version
+fi
+
+_UPG_MIGRATIONS_RUNNER="$DEV_TREE/team/scripts/migrations/run-migrations.sh"
+if [[ -f "$_UPG_MIGRATIONS_RUNNER" ]]; then
+  # A stamped identity (--stamp-version, or --dev-tree/--stamp-version test
+  # fixtures) can legitimately be any operator-chosen string, not a released
+  # semver tag -- that escape hatch exists precisely to "bypass git tag
+  # resolution" (see --stamp-version's own header comment above). Real
+  # migrations are keyed off released vX.Y.Z tags, so a from/to pair that
+  # is not well-formed semver has nothing a migration script's destination
+  # could ever match; skip the check rather than fail the whole upgrade
+  # on an identity migrations were never meant to reason about.
+  if [[ ! "$_UPG_MIGRATION_FROM_VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || [[ ! "$_UPG_MIGRATION_TO_VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ "$_UPG_MIGRATION_FROM_VERSION" != "$_UPG_MIGRATION_TO_VERSION" ]]; then
+      info "Migrations: skipped -- '${_UPG_MIGRATION_FROM_VERSION}' or '${_UPG_MIGRATION_TO_VERSION}' is not a released vX.Y.Z version (stamped/test identity)."
+    fi
+  elif [[ "$_UPG_MIGRATION_FROM_VERSION" != "$_UPG_MIGRATION_TO_VERSION" ]]; then
+    info "Checking for migrations in (${_UPG_MIGRATION_FROM_VERSION}, ${_UPG_MIGRATION_TO_VERSION}]..."
+    _upg_mig_rc=0
+    PGAI_AGENT_KANBAN_ROOT_PATH="$KANBAN_ROOT" bash "$_UPG_MIGRATIONS_RUNNER" \
+      --from "$_UPG_MIGRATION_FROM_VERSION" --to "$_UPG_MIGRATION_TO_VERSION" || _upg_mig_rc=$?
+    if [[ "$_upg_mig_rc" -ne 0 ]]; then
+      err "ERROR: migration runner failed (exit ${_upg_mig_rc}) applying (${_UPG_MIGRATION_FROM_VERSION}, ${_UPG_MIGRATION_TO_VERSION}]."
+      err "Deposit and VERSION stamp already completed; re-run this upgrade (or"
+      err "PGAI_AGENT_KANBAN_ROOT_PATH=$KANBAN_ROOT $_UPG_MIGRATIONS_RUNNER --from ${_UPG_MIGRATION_FROM_VERSION} --to ${_UPG_MIGRATION_TO_VERSION} directly)"
+      err "after fixing the underlying cause -- migrations are additive/idempotent, so"
+      err "re-running is safe and already-applied ones no-op."
+      # Classification (docs/blocking-site-census.md vocabulary): BLOCK-WORTHY
+      # -- letting the upgrade report success here would silently leave an
+      # existing install missing a config change a later release depends on
+      # (see team/scripts/migrations/README.md, "Migration contract"); the
+      # operator has no other signal that this step did not complete.
+      # upgrade.sh is not on the census lint's scanned file list
+      # (team/scripts/lint_gate_census_compliance.py _CENSUS_BASH_FILES) as of
+      # this writing -- like every other pre-existing exit site in this file
+      # (e.g. the manifest hygiene check above) -- so this is recorded in
+      # prose rather than a formal CENSUS-ANCHOR / Locator Index entry.
+      exit 1
+    fi
+    unset _upg_mig_rc
+  fi
+else
+  warn "Migration runner not found (skipping): $_UPG_MIGRATIONS_RUNNER"
+fi
+unset _UPG_MIGRATIONS_RUNNER _UPG_MIGRATION_FROM_VERSION _UPG_MIGRATION_TO_VERSION
 
 # ---------------------------------------------------------------------------
 # Retired-file migration: move manifest-listed fossils to the graveyard.
@@ -1544,7 +2085,11 @@ echo "  Dev tree:          $DEV_TREE"
 if [[ -n "$REQUESTED_VERSION" ]]; then
   echo "  Version:           ${_UPG_INSTALLED_VERSION} -> ${_UPG_TARGET_VERSION} (tag ${_UPG_RESOLVED_TAG})"
 fi
-echo "  Wake tier:         ${WAKE_TIER}"
+if [[ -n "$WAKE_TIER" ]]; then
+  echo "  Wake tier:         ${WAKE_TIER} (--wake-tier)"
+else
+  echo "  Wake tier:         ${_UPG_DETECTED_TIER:-none} (detected; crontab untouched)"
+fi
 if [[ "$_RETIRED_COUNT" -gt 0 ]]; then
   echo "  Retired:           ${_RETIRED_COUNT} file(s) -> ${_RETIRED_DEST_LABEL}"
 else
@@ -1552,14 +2097,26 @@ else
 fi
 echo ""
 echo "${C_BOLD}Protected (preserved):${C_RESET}"
-echo "  kanban.cfg, projects.cfg, secrets, shell-env, pseudocron.env"
-echo "  projects/ directory (all per-project state)"
-echo "  crontab tier (detected and re-applied: ${WAKE_TIER})"
-echo "  agent wrappers (pass --add-claude-agents / --add-codex-agents to refresh)"
+echo "  kanban.cfg, projects.cfg, secrets, shell-env, claude-env, pseudocron.env"
+echo "  projects/ directory (all per-project state; seeded intake templates refreshed, see above)"
+if [[ -z "$WAKE_TIER" ]]; then
+  echo "  crontab (left untouched; detected tier: ${_UPG_DETECTED_TIER:-none})"
+else
+  echo "  crontab lines outside the kanban-managed block (tier ${WAKE_TIER} applied to the block)"
+fi
+echo "  pseudocron.cfg (kept as-is; tier: ${_UPG_PSEUDOCRON_TIER:-none})"
+if [[ ${#_WRAPPER_SUMMARY_LINES[@]} -gt 0 ]]; then
+  for _wrapper_line in "${_WRAPPER_SUMMARY_LINES[@]}"; do
+    echo "  agent wrappers, ${_wrapper_line}"
+  done
+else
+  echo "  agent wrappers (pass --add-claude-agents / --add-codex-agents to refresh)"
+fi
 echo ""
 echo "See $KANBAN_ROOT/README.md for post-upgrade notes."
 echo ""
 
-unset _RETIRED_COUNT _RETIRED_DEST_LABEL
+unset _RETIRED_COUNT _RETIRED_DEST_LABEL _WRAPPER_SUMMARY_LINES _wrapper_line
+unset _UPG_DETECTED_TIER _UPG_PSEUDOCRON_TIER
 
 exit 0

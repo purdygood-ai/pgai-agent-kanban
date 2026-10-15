@@ -51,6 +51,21 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+# Run by file path (``python3 .../project_summary.py``) or loaded from a file
+# outside its package, this module has no parent package and the interpreter
+# puts only its own directory on sys.path, so the package import below would
+# not resolve. Put this file's own package root -- the directory holding the
+# pgai_agent_kanban/ this file sits in -- at the front of sys.path so the
+# import resolves from the same tree, never another. Imported as a package
+# member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.lib.html_comments import strip_html_comments  # noqa: E402
+from pgai_agent_kanban.task_status import section_value  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -123,32 +138,14 @@ def _project_root(kanban_root: pathlib.Path, name: str) -> pathlib.Path:
 
 
 def _read_ini_value(cfg_path: pathlib.Path, section: str, key: str) -> str:
-    """Read a single key from a simple INI-format config file.
+    """Read a single key from an INI-format config file.
 
-    Does not require configparser — uses a plain regex scan so the function
-    works without any third-party dependencies.
-
-    Returns the value stripped of leading/trailing whitespace, or '' when the
-    key is not found.
+    Delegates to ``pgai_agent_kanban.lib.ini.get_value``. Returns the value
+    stripped of leading/trailing whitespace, or '' when the file is missing
+    or not valid INI, or the section or key is absent.
     """
-    text = _safe_read(cfg_path)
-    if not text:
-        return ""
-    in_section = False
-    section_re = re.compile(r"^\[" + re.escape(section) + r"\]", re.IGNORECASE)
-    any_section_re = re.compile(r"^\[")
-    key_re = re.compile(r"^\s*" + re.escape(key) + r"\s*=\s*(.+)", re.IGNORECASE)
-    for line in text.splitlines():
-        if section_re.match(line):
-            in_section = True
-            continue
-        if in_section:
-            if any_section_re.match(line):
-                break  # entered next section
-            m = key_re.match(line)
-            if m:
-                return m.group(1).strip()
-    return ""
+    from pgai_agent_kanban.lib import ini
+    return ini.get_value(cfg_path, section, key)
 
 
 def _dev_tree_path(project_root: pathlib.Path) -> pathlib.Path | None:
@@ -171,14 +168,47 @@ def _dev_tree_path(project_root: pathlib.Path) -> pathlib.Path | None:
 # ---------------------------------------------------------------------------
 
 
+def _strip_html_comments(text: str) -> str:
+    """Return *text* with its HTML comments removed, as markdown renders them.
+
+    - An opener that begins a line (after optional indentation) starts a
+      comment block. It runs to the next ``-->`` wherever that is, so a
+      heading-like line inside it is comment text, not a heading. Left
+      open, it runs to the end of *text*.
+    - An opener in the middle of a line is a comment only when ``-->``
+      closes it within the same paragraph, which ends at a blank line or a
+      heading. Otherwise it is literal text, so a ``<!--`` quoted in prose
+      never swallows a later section and never cuts its own line short.
+    - Inside an inline code span (text between matching backtick runs in
+      the same paragraph) ``<!--`` is literal text.
+
+    Text with no comment comes back unchanged. The scan is the shared one
+    in ``pgai_agent_kanban.lib.html_comments``, so this reader and the
+    release-notes Status reader agree on what is a comment.
+    """
+    return strip_html_comments(text)
+
+
 def _extract_field(text: str, field: str) -> str:
     """Extract the value of a markdown header field.
 
     Looks for a pattern like:
         ## FieldName
+        <!-- optional guidance comment, on one line or several -->
         <value on next non-blank line(s)>
 
-    Returns the stripped first non-blank line after the header, or ''.
+    HTML comments after the header are removed before the value is taken,
+    so template guidance such as the bug template's comment opening
+    ``## Symptom`` is skipped and the first line of real prose is returned.
+    A line that held only a comment counts as blank. Comments are found the
+    way markdown renders them (see ``_strip_html_comments``): a ``<!--``
+    quoted in prose or inside inline code is text, and a comment opened
+    mid-line never reaches past its own paragraph into a later section.
+    Text with no HTML comment reads exactly as it would without this step.
+
+    Returns the stripped first non-blank line after the header that is not
+    itself a heading, or ''. A section with no value (empty, or holding only
+    comments) yields the first such line of a later section, if any.
     """
     pattern = re.compile(
         r"^#{1,3}\s+" + re.escape(field) + r"\s*$",
@@ -187,7 +217,7 @@ def _extract_field(text: str, field: str) -> str:
     m = pattern.search(text)
     if m is None:
         return ""
-    rest = text[m.end():]
+    rest = _strip_html_comments(text[m.end():])
     for line in rest.splitlines():
         stripped = line.strip()
         if stripped and not stripped.startswith("#"):
@@ -305,18 +335,22 @@ class BugItem:
 
     @property
     def is_open(self) -> bool:
+        """True when the bug's status is ``open`` or ``blocked``."""
         return self.status in _OPEN_BUG_STATUSES
 
     @property
     def is_done(self) -> bool:
+        """True when the bug's status is ``done``."""
         return self.status in _CLOSED_BUG_STATUSES
 
     @property
     def is_wont_fix(self) -> bool:
+        """True when the bug's status is ``wont-fix``."""
         return self.status in _WONT_FIX_STATUSES
 
     @property
     def is_wont_do(self) -> bool:
+        """True when the bug's status is ``wont-do``."""
         return self.status in _WONT_DO_STATUSES
 
 
@@ -343,10 +377,12 @@ class PriorityItem:
 
     @property
     def is_open(self) -> bool:
+        """True when the priority's status is ``open``, ``running`` or ``blocked``."""
         return self.status in _OPEN_PRIORITY_STATUSES
 
     @property
     def is_done(self) -> bool:
+        """True when the priority's status is ``done``."""
         return self.status in _DONE_PRIORITY_STATUSES
 
 
@@ -371,14 +407,17 @@ class RequirementItem:
 
     @property
     def is_shipped(self) -> bool:
+        """True when the requirement's status is ``done``."""
         return self.status == _STATUS_DONE
 
     @property
     def is_inflight(self) -> bool:
+        """True when the requirement's status is ``running``, ``working`` or ``blocked``."""
         return self.status in {_STATUS_RUNNING, _STATUS_WORKING, _STATUS_BLOCKED}
 
     @property
     def is_queued(self) -> bool:
+        """True when the requirement's status is ``open``, ``backlog`` or ``waiting``."""
         return self.status in {_STATUS_OPEN, _STATUS_BACKLOG, _STATUS_WAITING}
 
 
@@ -420,11 +459,13 @@ class TaskEvent:
         self.path = path
         text = _safe_read(path)
 
-        task_id = _extract_field(text, "Task") or path.parent.name
+        # status.md sections are read through task_status, the one
+        # status.md reader (read_section's value-level wrapper).
+        task_id = section_value(text, "Task") or path.parent.name
         self.task_id = task_id
-        self.state = _extract_field(text, "State").upper() or "UNKNOWN"
-        self.role = _extract_field(text, "Role").upper() or ""
-        self.summary = _extract_field(text, "Summary") or ""
+        self.state = section_value(text, "State").upper() or "UNKNOWN"
+        self.role = section_value(text, "Role").upper()
+        self.summary = section_value(text, "Summary")
 
         # Derive a date from the task ID (format: ROLE-YYYYMMDD-NNN-...)
         self.date = _date_from_task_id(task_id)
@@ -605,7 +646,14 @@ def _load_task_events(
 
 
 def _offline_oneliner_bug(bug: BugItem) -> str:
-    """Produce an 80-char offline one-liner for a bug."""
+    """Produce an 80-char offline one-liner for a bug.
+
+    The Symptom value (``BugItem.symptom``) is preferred. It is read by
+    ``_extract_field``, which skips HTML comments such as template guidance,
+    so comment text never becomes the one-liner. A Symptom value is empty
+    only when nothing but headings and comments follows the Symptom heading.
+    In that case the H1 title is used, then the filename slug.
+    """
     # Prefer symptom field, then title, then filename slug
     for candidate in (bug.symptom, bug.title, _slug_from_filename(bug.path)):
         if candidate:
@@ -834,45 +882,60 @@ class ProjectReport:
     # Derived views
 
     def open_bugs(self) -> list[BugItem]:
+        """Return the bugs whose ``is_open`` is true, in load order."""
         return [b for b in self.bugs if b.is_open]
 
     def done_bugs(self) -> list[BugItem]:
+        """Return the bugs whose ``is_done`` is true, in load order."""
         return [b for b in self.bugs if b.is_done]
 
     def wont_fix_bugs(self) -> list[BugItem]:
+        """Return the bugs closed without a fix (``wont-fix`` or ``wont-do``), in load order."""
         return [b for b in self.bugs if b.is_wont_fix or b.is_wont_do]
 
     def open_priorities(self) -> list[PriorityItem]:
+        """Return the priorities whose ``is_open`` is true, in load order."""
         return [p for p in self.priorities if p.is_open]
 
     def done_priorities(self) -> list[PriorityItem]:
+        """Return the priorities whose ``is_done`` is true, in load order."""
         return [p for p in self.priorities if p.is_done]
 
     def shipped_requirements(self) -> list[RequirementItem]:
+        """Return the requirements whose ``is_shipped`` is true, in load order."""
         return [r for r in self.requirements if r.is_shipped]
 
     def inflight_requirements(self) -> list[RequirementItem]:
+        """Return the requirements whose ``is_inflight`` is true, in load order."""
         return [r for r in self.requirements if r.is_inflight]
 
     def queued_requirements(self) -> list[RequirementItem]:
+        """Return the requirements whose ``is_queued`` is true, in load order."""
         return [r for r in self.requirements if r.is_queued]
 
     def current_version(self) -> str:
+        """Return the highest release-note version, or ``"none"`` when there are no release notes."""
         if not self.releases:
             return "none"
         return self.releases[-1].version
 
     def last_release_date(self) -> datetime | None:
+        """Return the release date of the highest release-note version, or None when there is none."""
         if not self.releases:
             return None
         return self.releases[-1].release_date
 
     def first_release_date(self) -> datetime | None:
+        """Return the release date of the lowest release-note version, or None when there is none."""
         if not self.releases:
             return None
         return self.releases[0].release_date
 
     def time_since_last_release(self) -> str:
+        """Return the age of the last release as ``"<N>h ago"`` (under a day) or ``"<N>d ago"``.
+
+        ``"unknown"`` when no release note carries a date.
+        """
         dt = self.last_release_date()
         if dt is None:
             return "unknown"
@@ -884,6 +947,7 @@ class ProjectReport:
         return f"{delta.days}d ago"
 
     def bugs_by_severity(self) -> dict[str, int]:
+        """Return a count of bugs per severity; a bug with no severity counts under ``"unknown"``."""
         counts: dict[str, int] = {}
         for b in self.bugs:
             s = b.severity if b.severity else "unknown"
@@ -891,6 +955,10 @@ class ProjectReport:
         return counts
 
     def oldest_open_bug(self) -> BugItem | None:
+        """Return the open bug with the earliest date, or None when no bug is open.
+
+        When no open bug carries a date, the first undated open bug in load order.
+        """
         open_bugs = self.open_bugs()
         if not open_bugs:
             return None
@@ -902,6 +970,10 @@ class ProjectReport:
         return undated[0] if undated else None
 
     def most_recent_bug(self) -> BugItem | None:
+        """Return the bug with the latest date, or None when there are no bugs.
+
+        When no bug carries a date, the last bug in load order.
+        """
         if not self.bugs:
             return None
         dated = [b for b in self.bugs if b.date is not None]
@@ -911,6 +983,7 @@ class ProjectReport:
         return self.bugs[-1]
 
     def recent_events(self, n: int = 10) -> list[TaskEvent]:
+        """Return the *n* most recent task events, newest first (undated events sort last)."""
         events = sorted(
             self.task_events,
             key=lambda e: _sort_key_date(e.date),

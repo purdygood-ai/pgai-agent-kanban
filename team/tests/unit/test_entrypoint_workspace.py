@@ -3,11 +3,16 @@ test_entrypoint_workspace.py
 =============================
 Pure-bash unit tests for docker/entrypoint.sh under the workspace model.
 
-The entrypoint has exactly two responsibilities: verify that
-$PGAI_AGENT_KANBAN_ROOT_PATH names an existing directory (fail loud, naming
-the path, if not), then `cd` into it and `exec bash -l`. There is no mount
-enforcement and no startup-mode dispatch — a container is a workspace, not a
-supervised scheduler.
+The entrypoint enforces the launcher's mount contract before doing anything
+else: $PGAI_AGENT_KANBAN_ROOT_PATH and $HOME must each name an existing
+directory, and the directory presented as the kanban root must be an
+install.sh-populated install rather than a raw repository checkout (fail
+loud, naming the unmet condition, the offending path, and a remedy, if not).
+Once satisfied, it `cd`s into the kanban root and `exec`s `bash -l` — there
+is still no startup-mode dispatch; a container is a workspace, not a
+supervised scheduler. See test_entrypoint_mount_contract.py for the
+dedicated coverage of the three refusal conditions; this module focuses on
+the cd + exec bash -l behavior of the satisfied-contract path.
 
 These tests invoke docker/entrypoint.sh directly via bash in a subprocess.
 No docker daemon is required: the script only touches the filesystem and
@@ -45,6 +50,23 @@ def _isolated_home(tmp_path: pathlib.Path) -> pathlib.Path:
     home = tmp_path / "isolated_home"
     home.mkdir()
     return home
+
+
+def _install_shaped_root(tmp_path: pathlib.Path, name: str = "kanban-root") -> pathlib.Path:
+    """Return a fresh directory shaped like an install.sh-populated kanban root.
+
+    install.sh copies team/scripts/ (source layout) to scripts/ (install
+    layout) at the kanban root, and pseudocron.py sits directly under
+    team/scripts/ in the source tree — so scripts/pseudocron.py is the
+    concrete artifact that distinguishes an install from a raw checkout.
+    Tests below that exercise the satisfied-contract cd + exec path need a
+    root shaped this way, or the install-vs-checkout condition refuses
+    before the cd + exec behavior under test ever runs.
+    """
+    root = tmp_path / name
+    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "pseudocron.py").write_text("# stub\n", encoding="utf-8")
+    return root
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +169,7 @@ def test_valid_root_lands_the_shell_in_that_directory(tmp_path: pathlib.Path) ->
     from stdin when stdin is not a terminal) and asserts the printed cwd
     matches the target directory exactly.
     """
-    root = tmp_path / "kanban-root"
-    root.mkdir()
+    root = _install_shaped_root(tmp_path)
 
     result = run_bash(
         tmp_path,
@@ -178,8 +199,7 @@ def test_valid_root_execs_a_login_shell(tmp_path: pathlib.Path) -> None:
     a login shell via argv[0]). Confirms the entrypoint's contract literally:
     `exec bash -l`, not `exec bash`.
     """
-    root = tmp_path / "kanban-root"
-    root.mkdir()
+    root = _install_shaped_root(tmp_path)
 
     result = run_bash(
         tmp_path,
@@ -207,8 +227,7 @@ def test_valid_root_replaces_the_process_not_a_subshell(tmp_path: pathlib.Path) 
     shell. $$ inside the login shell must equal the PID the parent bash
     process reported for itself before the exec.
     """
-    root = tmp_path / "kanban-root"
-    root.mkdir()
+    root = _install_shaped_root(tmp_path)
 
     result = run_bash(
         tmp_path,

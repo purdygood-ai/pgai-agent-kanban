@@ -1,0 +1,38 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "I verified RC `ai_rc/v2.26.6` (a1ab87d2) against `requirements/v2.26.6-bugfix-bundle-20260930.md`, which bundles BUG-0470 (Fixed-In restamp can't correct a wrong value), BUG-0471 (bundled bugs never reach Bug Fixes / `### Fixed`) and BUG-0472 (status writers delete the section after an empty one). The diff `ai_main..ai_rc/v2.26.6` covers 12 files, +789/-77, from CODER-20260930-025/026/027.\n\nBoth gated runners exited 0. Every acceptance bullet of the three bundled bugs was exercised behaviorally in sandboxes, reproducing the original failure (on ai_main where applicable) and then the fixed behavior. All three fixes work as specified.\n\nOne pre-existing defect of the same class as BUG-0472 was found in the status *readers* of the same file and filed via Path C (autonomous follow-up filing — non-blocking) as BUG-0474. It predates this RC and is not a regression.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "wake status readers misread an empty `## State` as the next section",
+      "heading": "Finding 1: wake status readers misread an empty `## State` as the next section",
+      "level": 4,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to four reader regexes in one file; pre-existing)\n**Filed As:** BUG-0474 (Path C-A — filed as BUG: code defect)\n**Regression:** no\n**Integrity:** none\n**Filed By:** TESTER (autonomous Path C) — the wake scripts' status readers misread a task whose State section is empty, taking the text of the next section as its state, so such a task is never dispatched and never re-checked.\n\nThis was found in the Step 6.11 spot-check (untested mechanism adjacent to the BUG-0472 fix; CODER-027 flagged it as out of scope). `get_state`, `get_first_pending_task`, `recheck_waiting_tasks` and `recheck_blocked_tasks` in `team/scripts/lib/wake_task_state.sh` still use `^## State\\s*\\n(.*?)(\\n+##|\\Z)` with `re.S`.\n\nRun on `printf '## State\\n\\n## Summary\\nDONE\\n\\n## Blockers\\nnone\\n'`, `get_state` prints `## SUMMARY` / `DONE`, and the other three regexes yield `'## Summary\\nDONE'`. A populated state reads correctly. The reader lines are unchanged from ai_main, so this predates the RC. It is rated medium per SOP-core calibration: a real defect with no current production trigger, since writers now never produce an empty `## State` by deletion.",
+      "filed_as": "BUG-0474",
+      "filed_by": "TESTER (autonomous Path C) — the wake scripts' status readers misread a task whose State section is empty, taking the text of the next section as its state, so such a task is never dispatched and never re-checked.",
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to four reader regexes in one file; pre-existing)",
+        "filed_as": "BUG-0474 (Path C-A — filed as BUG: code defect)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_by": "TESTER (autonomous Path C) — the wake scripts' status readers misread a task whose State section is empty, taking the text of the next section as its state, so such a task is never dispatched and never re-checked."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

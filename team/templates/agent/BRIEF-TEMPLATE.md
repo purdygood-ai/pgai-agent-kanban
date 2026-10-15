@@ -64,7 +64,7 @@ auto
 ## Model Overrides
 
 <!-- Optional. Use this section to request that specific tasks use a particular
-     model instead of the default assigned by the subagent.
+     model instead of the provider CLI's built-in default.
 
      Format: one hint per line, in plain English. The PO agent will copy these
      hints verbatim into the requirements doc. The PM agent will translate them
@@ -84,7 +84,7 @@ auto
        - All documentation tasks should use sonnet
        - The integration test task should use claude-opus-4-7
 
-     If this section is omitted or blank, all tasks use their subagent defaults.
+     If this section is omitted or blank, all tasks use the provider CLI's built-in default.
 -->
 
 ## Context
@@ -92,7 +92,7 @@ auto
 <!-- Required. Anything the PM agent or coder agents need to understand the domain.
 
      Useful things to include:
-       - Paths to existing files that are relevant (e.g. /opt/pgai/team/pm-agent/README.md)
+       - Paths to existing files that are relevant (e.g. $PGAI_AGENT_KANBAN_ROOT_PATH/pm-agent/README.md)
        - Current system behavior the work changes or extends
        - Prior decisions or rejected approaches
        - External docs or specs that define required behavior

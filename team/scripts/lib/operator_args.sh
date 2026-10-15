@@ -40,6 +40,17 @@
 #       standard ARGPARSE_* arrays from argparse.sh.  Normalizes -h to --help
 #       before delegating to argparse_parse.
 #
+#   operator_args_argparse [--value-flags "name1 name2 ..."] [--] "$@"
+#       Drop-in replacement for argparse_parse for a script that declares its
+#       own value-taking flags instead of the canonical set.  Takes exactly
+#       argparse_parse's arguments and passes them through unchanged, except
+#       that each -h in the caller's argv is normalized to --help first (the
+#       same mapping operator_args_parse applies).  Like argparse_parse, it
+#       does not reset the ARGPARSE_* arrays.  A script that renders help with
+#       operator_args_render_help_for_flags advertises "--help, -h", so it
+#       parses through this function or operator_args_parse, never through
+#       argparse_parse directly.
+#
 #   operator_args_get FLAG
 #       Return (echo) the value of FLAG from ARGPARSE_FLAGS.
 #       Returns empty string when the flag was not supplied.
@@ -95,8 +106,14 @@ _OPERATOR_ARGS_SH_LOADED=1
 #   operator_args_render_help_for_flags SCRIPT_NAME DESCRIPTION VALID_FLAGS_ARRAY_NAME [EXTRA_LINE ...]
 #       Per-script help renderer.  Emits a usage block containing ONLY the
 #       flags listed in the caller's declared-flags array (nameref).
-#       Uses built-in descriptions for known canonical flags; falls back to a
-#       generic line for any flag not in the canonical set.
+#       Uses built-in descriptions for known canonical flags.  A flag outside
+#       the canonical set that an EXTRA_LINE already describes gets no line of
+#       its own; one described nowhere gets a "(no description)" line.  The h
+#       alias is shown only on the "--help, -h" line.  A caller whose
+#       flag means something narrower than the canonical one (close.sh's
+#       --state takes done|wont-do, not task states) declares the global
+#       associative array OPERATOR_FLAG_HELP before calling; an entry there
+#       replaces the built-in line for that flag.
 #       EXTRA_LINE arguments (zero or more) are printed after the flags block.
 
 # ---------------------------------------------------------------------------
@@ -120,32 +137,115 @@ _OPERATOR_ARGS_VALID_AGENTS="pm coder writer tester cm po"
 _OPERATOR_ARGS_VALID_STATES="BACKLOG WAITING WORKING BLOCKED DONE WONT-DO"
 
 # ---------------------------------------------------------------------------
-# operator_args_parse "$@"
+# operator_args_parse [--extra-value-flags "flag1 flag2 ..."] "$@"
 #
 # Parse the caller's argv using the canonical operator flag set.
 # Boolean flags (--yes, --force, --dry-run, --help) are recognized
 # automatically by argparse_parse (they are not in the value-flags list).
 # The short form -h is normalized to --help before delegation.
 #
+# --extra-value-flags is optional and additive: it appends caller-specific
+# value-taking flag names (e.g. "version") to the canonical set for this
+# parse only, so a wrapper that needs a value flag outside the canonical
+# vocabulary (project/key/agent/state) does not have to hand-roll its own
+# argparse_parse call. Omitting it preserves the exact prior behavior for
+# every existing caller.
+#
 # After this function returns, the standard ARGPARSE_FLAGS, ARGPARSE_POSITIONAL,
 # and ARGPARSE_MISSING arrays are populated and available to the caller.
+#
+# Example:
+#   OPERATOR_VALID_FLAGS=(project version help)
+#   operator_args_parse --extra-value-flags "version" "$@"
 # ---------------------------------------------------------------------------
 operator_args_parse() {
+    local _extra_value_flags=""
+    if [[ "${1:-}" == "--extra-value-flags" ]]; then
+        _extra_value_flags="${2:-}"
+        shift 2
+    fi
+
     # Normalize -h → --help in the argument list before delegating.
     local _normalized_args=()
-    local _arg
-    for _arg in "$@"; do
-        if [[ "$_arg" == "-h" ]]; then
-            _normalized_args+=("--help")
-        else
-            _normalized_args+=("$_arg")
-        fi
-    done
+    _operator_args_normalize_help_alias _normalized_args "$@"
 
     argparse_reset
     argparse_parse \
-        --value-flags "${_OPERATOR_ARGS_VALUE_FLAGS}" \
+        --value-flags "${_OPERATOR_ARGS_VALUE_FLAGS}${_extra_value_flags:+ ${_extra_value_flags}}" \
         -- "${_normalized_args[@]+"${_normalized_args[@]}"}"
+}
+
+# ---------------------------------------------------------------------------
+# _operator_args_normalize_help_alias OUT_ARRAY_NAME "$@"
+#
+# Copy "$@" into the caller's indexed array OUT_ARRAY_NAME (nameref), with
+# every argument that is exactly "-h" replaced by "--help".  Every other
+# argument is copied verbatim, in order.  This is the one place the -h alias
+# is defined; operator_args_parse and operator_args_argparse both use it.
+# ---------------------------------------------------------------------------
+_operator_args_normalize_help_alias() {
+    local -n _oanha_out="$1"
+    shift
+    local _oanha_arg
+    for _oanha_arg in "$@"; do
+        if [[ "${_oanha_arg}" == "-h" ]]; then
+            _oanha_out+=("--help")
+        else
+            _oanha_out+=("${_oanha_arg}")
+        fi
+    done
+}
+
+# ---------------------------------------------------------------------------
+# operator_args_argparse [--value-flags "flag1 flag2 ..."] [--] "$@"
+#
+# argparse_parse with the operator -h alias.  For a script that names its own
+# value-taking flags rather than the canonical set operator_args_parse uses.
+#
+# The leading options are argparse_parse's own (--value-flags LIST,
+# --value-flags=LIST, then an optional -- separator) and are passed through
+# unchanged.  Each "-h" in the caller's argv after them becomes "--help"
+# (_operator_args_normalize_help_alias), then argparse_parse parses the result.
+# For every argv with no "-h" in it the outcome is exactly argparse_parse's.
+# The ARGPARSE_* arrays are not reset first, matching argparse_parse.
+#
+# Example:
+#   OPERATOR_VALID_FLAGS=(project out help h)
+#   operator_args_argparse --value-flags "project out" -- "$@"
+#   if argparse_has help; then ...render help...; exit 0; fi
+# ---------------------------------------------------------------------------
+operator_args_argparse() {
+    # argparse_parse's own leading options, read with argparse_parse's grammar.
+    local _oaa_options=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --value-flags)
+                _oaa_options+=("$1")
+                shift
+                if [[ $# -gt 0 ]]; then
+                    _oaa_options+=("$1")
+                    shift
+                fi
+                ;;
+            --value-flags=*)
+                _oaa_options+=("$1")
+                shift
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    local _oaa_args=()
+    _operator_args_normalize_help_alias _oaa_args "$@"
+
+    argparse_parse "${_oaa_options[@]+"${_oaa_options[@]}"}" \
+        -- "${_oaa_args[@]+"${_oaa_args[@]}"}"
 }
 
 # ---------------------------------------------------------------------------
@@ -333,9 +433,32 @@ operator_args_validate_known() {
 # caller's declared-flags array (nameref) — no canonical flags are shown unless
 # the caller explicitly declared them.
 #
-# Built-in descriptions exist for the known canonical flags.  Any flag name not
-# in the built-in set is rendered as "--FLAG  (no description)" so the output
-# is always valid even for future or caller-specific flags.
+# Each declared flag is listed once in the Options block, with a description:
+#
+#   1. An OPERATOR_FLAG_HELP entry for the flag (below) is printed verbatim.
+#   2. Otherwise a known canonical flag prints its built-in line.
+#   3. Otherwise, when an EXTRA_LINE already describes the flag, the flags block
+#      prints nothing for it and the caller's own line is its listing.  An
+#      EXTRA_LINE describes --FLAG when it is
+#        - option-shaped: one to four whitespace characters of indent, an
+#          optional "(", then --FLAG ending at whitespace, ":" or the end of
+#          the line ("  --archive PATH   Archive file", "  (--apply: ...)");
+#        - a mode line: --FLAG at column 0, optionally followed by one value
+#          word, then ":" ("--details: ...", "--release NAME: ...");
+#        - or names it as an alias anywhere ("alias: --dev-tree-path").
+#      A flag merely mentioned in prose or in an example is not described.
+#   4. Otherwise the flag is described nowhere, and it still gets a line of its
+#      own, padded like the built-ins: "  --FLAG             (no description)".
+#      An accepted option never silently disappears from the help.
+#
+# The "h" entry callers declare so that -h parses is the --help alias: it is
+# shown only as part of the "--help, -h" line and never gets a line of its own.
+#
+# Per-script override: when the caller has declared the global associative
+# array OPERATOR_FLAG_HELP, an entry for a flag is printed verbatim in place of
+# the built-in line (format it like the built-ins: two-space indent, the flag
+# and its value placeholder padded to column 21).  Flags without an entry, and
+# callers that never declare the array, follow steps 2-4 above.
 #
 # Parameters:
 #   $1   SCRIPT_NAME            — the name of the calling script (e.g. "halt.sh")
@@ -347,6 +470,11 @@ operator_args_validate_known() {
 #   OPERATOR_VALID_FLAGS=(project help)
 #   operator_args_render_help_for_flags "halt.sh" "Halt all tasks for a project." \
 #       OPERATOR_VALID_FLAGS
+#
+#   declare -A OPERATOR_FLAG_HELP=(
+#       [state]="  --state STATE      Closed state: done|wont-do (default: done)"
+#   )
+#   operator_args_render_help_for_flags "close.sh" "Close an item." OPERATOR_VALID_FLAGS
 # ---------------------------------------------------------------------------
 operator_args_render_help_for_flags() {
     local _name="${1:-<script>}"
@@ -361,6 +489,7 @@ operator_args_render_help_for_flags() {
         [agent]="  --agent ROLE       Agent role: pm|coder|writer|tester|cm|po"
         [state]="  --state STATE      Task state: BACKLOG|WAITING|WORKING|BLOCKED|DONE|WONT-DO"
         [file]="  --file PATH        File path"
+        [until]="  --until vX.Y.Z     Release version boundary (a leading 'v' is optional)"
         [yes]="  --yes              Skip confirmation prompts"
         [force]="  --force            Override safety guards"
         [dry-run]="  --dry-run          Report what would happen without making changes"
@@ -375,12 +504,46 @@ operator_args_render_help_for_flags() {
     fi
     printf 'Options:\n'
 
+    # Caller overrides win over the built-ins (see the header above).
+    local _oarhf_have_overrides=false
+    if [[ "$(declare -p OPERATOR_FLAG_HELP 2>/dev/null)" == "declare -A"* ]]; then
+        _oarhf_have_overrides=true
+    fi
+
+    # Flags the caller's extra lines already describe (rule 3 in the header).
+    local _oarhf_name_re='([A-Za-z0-9][A-Za-z0-9_-]*)'
+    local _oarhf_option_re="^[[:space:]]{1,4}[(]?--${_oarhf_name_re}([[:space:]:]|\$)"
+    local _oarhf_mode_re="^--${_oarhf_name_re}([[:space:]]+[^[:space:]:]+)?:"
+    local _oarhf_alias_re="[Aa]lias(es)?:?[[:space:]]+--${_oarhf_name_re}"
+    local -A _oarhf_described=()
+    local _oarhf_line _oarhf_rest
+    for _oarhf_line in "$@"; do
+        if [[ "${_oarhf_line}" =~ ${_oarhf_option_re} ]]; then
+            _oarhf_described["${BASH_REMATCH[1]}"]=1
+        elif [[ "${_oarhf_line}" =~ ${_oarhf_mode_re} ]]; then
+            _oarhf_described["${BASH_REMATCH[1]}"]=1
+        fi
+        _oarhf_rest="${_oarhf_line}"
+        while [[ "${_oarhf_rest}" =~ ${_oarhf_alias_re} ]]; do
+            _oarhf_described["${BASH_REMATCH[2]}"]=1
+            _oarhf_rest="${_oarhf_rest#*"${BASH_REMATCH[0]}"}"
+        done
+    done
+
     local _oarhf_f
     for _oarhf_f in "${_oarhf_valid_flags[@]}"; do
-        if [[ -v "_oarhf_descriptions[${_oarhf_f}]" ]]; then
+        if [[ "${_oarhf_f}" == "h" ]]; then
+            # -h is shown on the --help line; it is not an option of its own.
+            continue
+        elif [[ "${_oarhf_have_overrides}" == true && -v "OPERATOR_FLAG_HELP[${_oarhf_f}]" ]]; then
+            printf '%s\n' "${OPERATOR_FLAG_HELP[${_oarhf_f}]}"
+        elif [[ -v "_oarhf_descriptions[${_oarhf_f}]" ]]; then
             printf '%s\n' "${_oarhf_descriptions[${_oarhf_f}]}"
+        elif [[ -v "_oarhf_described[${_oarhf_f}]" ]]; then
+            # The caller's own extra line lists and describes this flag.
+            continue
         else
-            printf '  --%s\n' "${_oarhf_f}"
+            printf '  %-18s %s\n' "--${_oarhf_f}" "(no description)"
         fi
     done
 

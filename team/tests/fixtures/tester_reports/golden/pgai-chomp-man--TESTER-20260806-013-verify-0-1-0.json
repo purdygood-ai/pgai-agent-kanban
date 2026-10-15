@@ -1,0 +1,158 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate v0.1.0 of pgai-chomp-man (\"Maze Screen and Chomp Man\nMovement\") against `requirements/v0.1.0-screen-and-movement.md`. The RC adds a\nmaze grid data structure with rendering (`maze.py`), a grid-aligned player entity\nwith the A/Z/J/L case-insensitive input map (`player.py`), wall-collision blocking,\nand a fixed-60-FPS game loop with clean quit wired through the entry point\n(`pgai-chomp-man.py`). Verification was performed on the detached-HEAD worktree at\nthe RC commit (`9bcdd5d`), using `py_compile`, direct behavioral exercise of the\ninput mapping / collision / quit logic under a headless SDL dummy driver, and code\ninspection. All six acceptance criteria are met. No bugs, gaps, or stale assertions\nwere found.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "AC1 — py_compile passes for all changed/added .py files",
+      "heading": "Finding 1: AC1 — py_compile passes for all changed/added .py files",
+      "level": 3,
+      "body": "**Category:** pass\n`python3 -m py_compile maze.py player.py pgai-chomp-man.py` exits 0.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "AC2 — maze renders and Chomp Man is visible",
+      "heading": "Finding 2: AC2 — maze renders and Chomp Man is visible",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\nVerified by code inspection and headless structural checks. `build_default_maze()`\nyields a valid 15x19 grid (border fully walled, 139 open cells, all reachable from\nthe spawn via flood-fill — fully connected). `render_maze()` draws purely by\niterating the grid (walls as beveled ember blocks, floor as a two-tone checker), and\n`ChompMan.draw()` renders a gold open-mouthed wedge distinct from the wall/floor\npalette. Caveat: the actual pixel output cannot be visually confirmed on a headless\nhost — the rendering code is sound and runs without error under the SDL dummy\ndriver, but a human should do the one-time visual confirmation.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "AC3 — movement keys work case-insensitively (A/Z/J/L)",
+      "heading": "Finding 3: AC3 — movement keys work case-insensitively (A/Z/J/L)",
+      "level": 3,
+      "body": "**Category:** pass\nBehaviorally exercised: synthesized `KEYDOWN` events for K_a/K_z/K_j/K_l both\nwithout and with `KMOD_SHIFT`. `direction_for_event()` resolves each to the correct\ndirection in every case: a/A->up(-1,0), z/Z->down(1,0), j/J->left(0,-1),\nl/L->right(0,1). Case-insensitivity is structurally sound: pygame reports the same\nkey identity (and `pygame.key.name().lower()`) regardless of Shift, and the map is\nlowercase-keyed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "AC4 — Chomp Man cannot move through walls",
+      "heading": "Finding 4: AC4 — Chomp Man cannot move through walls",
+      "level": 3,
+      "body": "**Category:** pass\nBehaviorally exercised on a synthetic bordered maze: a move into a border wall is\nblocked (position and facing unchanged); a move into an open cell succeeds and\nupdates facing; a move into an interior wall cell is blocked; an out-of-bounds step\nis blocked by the `in_bounds` guard. `ChompMan.move()` uses a single\n`in_bounds`/`is_wall` cell check, correct for grid-aligned movement.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "AC5 — K unbound; arrows and WASD unbound",
+      "heading": "Finding 5: AC5 — K unbound; arrows and WASD unbound",
+      "level": 3,
+      "body": "**Category:** pass\nBehaviorally exercised: K (and Shift+K), all four arrow keys, and w/s/d all return\n`None` from `direction_for_event()`. `DIRECTION_KEYS` contains exactly {a,z,j,l}.\nNote: `a` is bound to *up* per the game's own A/Z/J/L scheme — this is the required\ncustom layout, not WASD semantics (w/s/d are unbound).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "AC6 — steady frame rate and clean quit",
+      "heading": "Finding 6: AC6 — steady frame rate and clean quit",
+      "level": 3,
+      "body": "**Category:** pass\n`FRAME_RATE = 60` with `clock.tick(60)` each frame gives a steady fixed FPS. Quit is\nhandled on both `pygame.QUIT` (window close) and `K_q`. Smoke test: posted a QUIT\nevent and ran `run()` under the dummy driver — the loop returned cleanly and\n`pygame.get_init()` was `False` afterward (pygame.quit() ran).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Extensibility (Notes-for-TESTER request)",
+      "heading": "Finding 7: Extensibility (Notes-for-TESTER request)",
+      "level": 3,
+      "body": "**Category:** pass\nStructures are extensible as requested. The maze is a `CellType`-valued 2D grid;\n`Maze.from_layout()` maps arbitrary layout characters via `CellType(char)`, and\n`render_maze()` dispatches purely off grid contents, so adding DOT / POWER_PELLET /\nDRAGON_SPAWN members later needs no change to lookup or rendering machinery. Player\nposition is tracked in grid coordinates (no separate pixel state), so future\ndot-eating/collision are simple cell checks. Later releases can extend, not rewrite.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

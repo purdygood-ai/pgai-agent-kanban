@@ -11,7 +11,8 @@
 #
 # Detection logic:
 #   1. Scan $KANBAN_ROOT/projects/$OVERWATCH_PROJECT/tasks/ for PM task folders
-#      (directories whose name matches CLAUDE-PM-*).
+#      (directories named as a task ID whose role is PM -- PM-YYYYMMDD-NNN-slug,
+#      or the legacy CLAUDE-PM-... form -- per task_ids.sh's kanban_task_id_role).
 #   2. For each PM task, read its README.md ## Inputs section.
 #   3. Check each input line for:
 #      a. A path ending in /README.md (or == README.md), OR
@@ -330,13 +331,19 @@ blocked_reason = (
     f"Bug BUG-{bug_num} filed at {bug_file}."
 )
 
+# Section boundary: the heading line, then body lines none of which starts
+# with "##" (the boundary set_block in wake_task_state.sh splices with), so an
+# empty body is never read as running into the next section. The separator
+# after the body is re-emitted as found.
+def _section_pattern(heading):
+    return rf'(^## {re.escape(heading)}[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)'
+
 def replace_block(text, heading, new_body):
-    pattern = rf'(^## {re.escape(heading)}\s*\n)(.*?)(\n+##|\Z)'
     text_new, n = re.subn(
-        pattern,
-        lambda m: m.group(1) + new_body.strip() + "\n" + (m.group(3) if m.group(3) else ''),
+        _section_pattern(heading),
+        lambda m: m.group(1) + "\n" + new_body.strip() + (m.group(3) or "\n"),
         text,
-        flags=re.S | re.M,
+        flags=re.M,
     )
     if n == 0:
         # Field absent — skip silently
@@ -353,10 +360,10 @@ if re.search(r'^## Blocked Reason\s*$', new_text, flags=re.M):
     new_text = replace_block(new_text, "Blocked Reason", blocked_reason)
 elif re.search(r'^## Blockers\s*$', new_text, flags=re.M):
     new_text = re.sub(
-        r'(^## Blockers\s*\n.*?)(\n+##|\Z)',
-        lambda m: m.group(1) + f"\n\n## Blocked Reason\n{blocked_reason.strip()}\n" + (m.group(2) if m.group(2) else ''),
+        _section_pattern("Blockers"),
+        lambda m: m.group(1) + m.group(2) + f"\n\n## Blocked Reason\n{blocked_reason.strip()}" + (m.group(3) or "\n"),
         new_text,
-        flags=re.S | re.M,
+        flags=re.M,
         count=1,
     )
 else:
@@ -416,6 +423,18 @@ overwatch_check_readme_bundled() {
         return 1
     fi
 
+    # The shared task-ID shape picks out PM task folders.
+    if ! declare -f kanban_task_id_role >/dev/null 2>&1; then
+        local ids_lib
+        ids_lib="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/task_ids.sh"
+        if [[ ! -f "${ids_lib}" ]]; then
+            echo "check-readme-bundled: task_ids.sh not found at ${ids_lib}" >&2
+            return 1
+        fi
+        # shellcheck source=../task_ids.sh
+        source "${ids_lib}"
+    fi
+
     # Source overwatch_protocol.sh if not already loaded
     if ! declare -f overwatch_log_action >/dev/null 2>&1; then
         local lib_dir
@@ -457,11 +476,12 @@ overwatch_check_readme_bundled() {
     local remediated=0
     local task_dir task_id task_readme task_status
 
-    # Scan PM task directories (name prefix: CLAUDE-PM-)
+    # Scan PM task directories (a task-ID name whose role is PM)
     while IFS= read -r task_dir; do
         [[ -d "${task_dir}" ]] || continue
 
         task_id="$(basename "${task_dir}")"
+        [[ "$(kanban_task_id_role "${task_id}")" == "PM" ]] || continue
         task_readme="${task_dir}/README.md"
         task_status="${task_dir}/status.md"
 
@@ -539,6 +559,9 @@ overwatch_check_readme_bundled() {
         elif (( fix_exit == 4 )); then
             echo "check-readme-bundled: per-repo flock contended; aborting" >&2
             return 0
+        elif (( fix_exit == 5 )); then
+            echo "check-readme-bundled: fix deferred: HALT present; aborting" >&2
+            return 0
         elif (( fix_exit != 0 )); then
             echo "check-readme-bundled: remediation failed for ${task_id} (exit ${fix_exit}); continuing" >&2
             continue
@@ -546,7 +569,7 @@ overwatch_check_readme_bundled() {
 
         remediated=$(( remediated + 1 ))
 
-    done < <(find "${tasks_root}" -maxdepth 1 -type d -name 'CLAUDE-PM-*' 2>/dev/null | sort)
+    done < <(find "${tasks_root}" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort)
 
     echo "check-readme-bundled: complete; remediated ${remediated} PM task(s)" >&2
     return 0

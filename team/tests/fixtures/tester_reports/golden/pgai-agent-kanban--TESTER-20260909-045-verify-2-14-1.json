@@ -1,0 +1,251 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "high",
+  "summary": "v2.14.1 is a single-item documentation bundle: BUG-0217, the stale\n`## Configuration` section in `team/README.md`. The RC's entire source delta\nagainst `ai_main` is that one file (+12/-8 lines, +1603 bytes). Every\nacceptance criterion the bug and the WRITER ticket set is met, including the\noperator-facing half — a fully sandboxed `install.sh` + `upgrade.sh` run\nconfirms the deposited `$KANBAN_ROOT/README.md` now carries the corrected\ntext rather than overwriting a correct README with a stale one. The\nintegration suite is green. The unit suite is **not**: the README's growth\npushed the PM role's assembled governance reading pack 1440 bytes past its\nconfigured byte budget, and the test that enforces those budgets fails.\nThat failure was introduced by this RC — the same lint reports every role\n`under` on `ai_main` — and is filed as BUG-0220. It has no runtime effect\n(the budget lint narrates and exits 0; nothing truncates an over-budget\npack), but it leaves the authoritative gated unit runner red. The release\nitself is usable; the defect is one config value and its test.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0217 content criteria — team/README.md Configuration section",
+      "heading": "Finding 1: BUG-0217 content criteria — team/README.md Configuration section",
+      "level": 3,
+      "body": "**Category:** pass\n\nEvery acceptance assertion from BUG-0217 and from the WRITER ticket, run\nagainst the RC worktree:\n\n| Check | Expected | Actual |\n|---|---|---|\n| `grep -c 'five configuration files' team/README.md` | 0 | 0 |\n| `grep -c 'team/templates/kanban.cfg.example' team/README.md` | 0 | 0 |\n| Table rows for `shell-env`, `claude-env`, `secrets` | present | present (lines 177, 178, 179) |\n| `env` / `bashrc` rows describe them as legacy only | yes | yes (lines 182, 183: \"Legacy compatibility only — superseded by …\") |\n| Every template path named resolves to a real file | all 6 | `kanban.cfg_example`, `shell-env_example`, `claude-env_example`, `secrets_example`, `projects.cfg_example`, `project.cfg_example` — all present at tree root |\n| No second full statement of the four-concerns law | pointer only | one line (185) pointing at `HOW_TO.md` section 1.2; that section exists at `HOW_TO.md:79` under exactly that title |\n| `docs/OPERATIONS.md` referenced by the closing paragraph exists | yes | yes |\n| `git diff --name-only ai_main..HEAD` | `team/README.md` only | `team/README.md` only |\n\nThe section was read in full, not grepped. The rewritten table lists four\ncurrent operator-owned root files plus `projects.cfg` and per-project\n`project.cfg`, then `env` and `bashrc` as legacy — the same surface\n`docs/OPERATIONS.md` \"Configuration File System\" and `HOW_TO.md` section 1.2\ndescribe. The closing paragraph was brought along in the same pass (the\nticket's stated intended scope) and now describes what `install.sh`\nauto-seeds and what is opt-in, instead of the `config.cfg` -> `kanban.cfg`\nmigration history.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0217 operator-facing half — the deposit (behavioral, Step 6.5)",
+      "heading": "Finding 2: BUG-0217 operator-facing half — the deposit (behavioral, Step 6.5)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe half of BUG-0217 with operator consequence is that `install.sh` and\n`team/scripts/upgrade.sh` deposit `team/README.md` into `$KANBAN_ROOT/README.md`\nand `README.md` is not in `upgrade.sh`'s `PROTECTED_FILES`, so an upgrade was\nreplacing correct operator-facing text with stale text. Both halves of the\nguard were exercised, per the anti-pattern \"verify only the new normal case\":\n\n- **Original failure mode reproduced:** `git show ai_main:team/README.md | grep -c 'five configuration files'` -> `1`. The pre-fix tree does deposit the stale text.\n- **New normal case verified:** sandboxed `install.sh` then `upgrade.sh --force --no-backup --wake-tier none` into a throwaway root created with `mktemp -d -p \"$PGAI_AGENT_KANBAN_TEMP_DIR\"` (never the live root; `HOME` and `CLAUDE_CONFIG_DIR` redirected into the sandbox). Both exited 0. On the deposited `$SB/root/README.md`: `grep -c 'five configuration files'` -> **0**, `grep -c 'team/templates/kanban.cfg.example'` -> **0**, and the `shell-env` / `claude-env` / `secrets` rows are present at lines 177-179.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "original_failure_mode_reproduced": "`git show ai_main:team/README.md | grep -c 'five configuration files'` -> `1`. The pre-fix tree does deposit the stale text.",
+        "new_normal_case_verified": "sandboxed `install.sh` then `upgrade.sh --force --no-backup --wake-tier none` into a throwaway root created with `mktemp -d -p \"$PGAI_AGENT_KANBAN_TEMP_DIR\"` (never the live root; `HOME` and `CLAUDE_CONFIG_DIR` redirected into the sandbox). Both exited 0. On the deposited `$SB/root/README.md`: `grep -c 'five configuration files'` -> **0**, `grep -c 'team/templates/kanban.cfg.example'` -> **0**, and the `shell-env` / `claude-env` / `secrets` rows are present at lines 177-179."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "PM governance byte budget exceeded — unit suite red",
+      "heading": "Finding 3: PM governance byte budget exceeded — unit suite red",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task — one config key and its comment)\n**Systemic Risk:** high (regression: the authoritative unit runner exited 0 on v2.14.0 and exits 1 here; see the Systemic-Risk Rubric in `team/SOP.md`)\n**Regression:** yes (introduced by this RC's own change; the identical lint reports every role `under` on `ai_main`)\n**Integrity Damage:** no (no queue, lockfile, task state, or data is touched; the budget lint narrates and exits 0, and nothing truncates an over-budget governance pack)\n**Filed As:** BUG-0220-pm-governance-budget-over (Path C-A — filed as BUG — code defect / regression / test failure)\n\n`bash team/scripts/run-unit-tests.sh --coverage` exits **1**:\n\n```\nFAILED tests/unit/test_composer_governance_byte_budget.py::test_every_role_governance_assembly_stays_under_configured_budget\nAssertionError: role(s) not under their configured governance budget: pm (assembled=75168 budget=73728 verdict=OVER)\n1 failed, 3594 passed, 3 skipped in 449.27s\n```\n\n`team/read-order/pm.txt` names `README.md` as one of the five files in PM's\ngovernance pack. This RC grew that file by 1603 bytes; PM's assembled total\nwent from 73565 (163 bytes under its 73728-byte budget) to 75168 (1440 over).\nConfirmed both directions:\n\n```\n# RC:      bash team/scripts/lint_governance_byte_budgets.sh --kanban-cfg kanban.cfg_example\npm  75168  73728  OVER      (all six other roles under)\n# ai_main (git archive extracted to a sandbox under the framework temp root):\npm  73565  73728  under     (all seven roles under)\n```\n\nNot classified `stale-assertion`: the literal the test rests on is\n`budget_bytes_pm` in `kanban.cfg_example`, which this RC did **not** change,\nand the correct fix is to re-baseline that config value per the HEADROOM\nPOLICY already documented above the key — not to edit a test literal. Per\nStep 7 rule 5, ambiguity defaults to real-failure; this is not even\nambiguous.\n\nImpact is bounded and worth stating precisely. The lint itself is\nnarrating-only (`exit 0` regardless of verdict, by design — see the\n`[governance]` comment block in `kanban.cfg_example`), and\n`_wd_build_governance_line` in `team/scripts/lib/wake_driver_invoke.sh`\nperforms no truncation or refusal, so no agent's runtime behaviour changes\nand the shipped release is fully usable. What is damaged is the\ncertification signal: the gated unit runner is the one authoritative\npass/fail source, and while it is red no subsequent RC can earn a PASS on\nthe strength of the suites, and the next genuine unit failure arrives beside\na known-red test.\n\nThird occurrence of the class (BUG-0174, BUG-0199, both `done`), each closed\nby re-baselining rather than by catching growth at authoring time.\nBUG-0220 names the mechanical remedy (`budget_bytes_pm = 81920`, derived from\nthe file's own 4KB-block rule) and flags that `overwatch` now has only 1316\nbytes of headroom.",
+      "filed_as": "BUG-0220",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "high",
+      "extra": {
+        "integrity_damage": "no (no queue, lockfile, task state, or data is touched; the budget lint narrates and exits 0, and nothing truncates an over-budget governance pack)"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task — one config key and its comment)",
+        "systemic_risk": "high (regression: the authoritative unit runner exited 0 on v2.14.0 and exits 1 here; see the Systemic-Risk Rubric in `team/SOP.md`)",
+        "regression": "yes (introduced by this RC's own change; the identical lint reports every role `under` on `ai_main`)",
+        "filed_as": "BUG-0220-pm-governance-budget-over (Path C-A — filed as BUG — code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Integration suite",
+      "heading": "Finding 4: Integration suite",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/run-integration-tests.sh --coverage` exited **0** —\n`424 passed, 1 skipped in 385.49s`. Post-suite cleanliness gates both OK\n(`bare_tmp_cleanliness`, `listener_cleanliness`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Pre-flight merge verification (Step 2a)",
+      "heading": "Finding 5: Pre-flight merge verification (Step 2a)",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo DONE task in `projects/pgai-agent-kanban/tasks/` has a live feature branch\n(`git branch --list 'feature/*'` and `ai_feature/*` are both empty) — normal\npost-merge cleanup per CODER/WRITER Procedure A Step 8. Check 1 and Check 2\nskip every task on the documented missing-branch rule. The cycle's only\nauthoring task, `WRITER-20260909-043-readme-config-section`, is merged:\n`23504c4` is the `--no-ff` merge of its branch, and its content commit\n`3b2e9e6` carries the README change.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Worktree and RC identity (Steps 3, 3a)",
+      "heading": "Finding 6: Worktree and RC identity (Steps 3, 3a)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` = `git rev-parse ai_rc/v2.14.1` =\n`23504c47682e425993fff2c9c2786d1642ec8413`. `git status --short` empty.\n`git stash list` empty.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "release-state.md drift check (Step 6.1)",
+      "heading": "Finding 7: release-state.md drift check (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_last_released_version pgai-agent-kanban` -> `v2.14.0`;\n`semver_gt v2.14.1 v2.14.0` -> true. `release-state.md` holds\n`Active RC: v2.14.1`, `RC Opened By Task: CM-20260909-044-open-rc-2-14-1`,\nand a well-formed `## Last Released: v2.14.0`. The branch `ai_rc/v2.14.1`\nnamed by `Active RC` exists. No drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "RC commit hygiene (Step 6.11 spot-check)",
+      "heading": "Finding 8: RC commit hygiene (Step 6.11 spot-check)",
+      "level": 3,
+      "body": "**Category:** pass\n\nTwo commits above `ai_main`: one content commit and its `--no-ff` merge.\nNeither is empty (`git show --name-only` non-empty for the content commit);\nthe RC does not repeat the stray-empty-commit pattern of BUG-0219. No\nsecrets, tokens, or credentials appear anywhere in the diff.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Skip-cites-real-bug gate (Step 6.13)",
+      "heading": "Finding 9: Skip-cites-real-bug gate (Step 6.13)",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo placeholder skip IDs and no dangling `BUG-NNNN` citations. The only hits\nfor the placeholder pattern are inside archived runner logs under\n`team/tests/artifacts/coverage-*/`, which contain the literal string\n`BUG-NNNN` as lint narration, not skip annotations. Every cited ID resolves\nto a file in `bugs/` (zero `MISSING:` lines).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Prerequisite dependency graph (Step 6.10)",
+      "heading": "Finding 10: Prerequisite dependency graph (Step 6.10)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CM-20260909-044-open-rc-2-14-1` (none) -> `WRITER-20260909-043-readme-config-section`\n-> `TESTER-20260909-045-verify-2-14-1` -> `CM-20260909-047-release-2-14-1`\n(depends on both WRITER-043 and TESTER-045). Acyclic, every referenced task\nID exists on disk, lifecycle bookends correct, sequence numbers 043/044/045/047\nnon-colliding. Queue markers agree with task state (`[A]` for this task,\n`[W]` for the waiting release task).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Constraint and coding-standards checks (Steps 6.8, 6.9, 6.14)",
+      "heading": "Finding 11: Constraint and coding-standards checks (Steps 6.8, 6.9, 6.14)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Step 6.8 (synthetic release simulation) — **skipped with note**: the diff touches no release-lifecycle file. `git diff --name-only ai_main..HEAD` is `team/README.md` alone; no `cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`, `project_paths.sh`, or any `team/scripts/` path.\n- Step 6.9 — no forbidden references introduced; the diff is prose in one markdown file, no scripts changed, so no `set -euo pipefail` / trap / query-parameterization surface is touched.\n- Step 6.14 — no new or modified script, no new production string, no new hardcoded operational value, no duplicated `lib/` implementation. The RC's one changed file names no bug ID, task ID, or version-bundle slug (directive 8 clean).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "high"
+  }
+}

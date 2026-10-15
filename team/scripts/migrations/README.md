@@ -1,8 +1,14 @@
 # scripts/migrations/ — Migration Convention
 
 This directory holds post-install migration scripts for the pgai-agent-kanban.
-At v1.0.0 it is **empty of actual migrations** — the directory and its
-convention exist so future migrations have a documented, forward-compatible home.
+The directory and its convention give every migration a documented,
+forward-compatible home. `migrate_v2.22.5_to_v2.23.0.sh` is the first real
+migration to land in it (seeds the commented `overwatch_resolve` key into
+every already-registered project's project.cfg — see that script's own
+header for its contract). `migrate_v2.24.7_to_v2.24.8.sh` seeds
+`tasks/queues/overwatch_backlog.md` into every already-registered project,
+matching what `create-project.sh` now writes for a brand-new one — see that
+script's own header for its contract.
 
 ---
 
@@ -71,32 +77,61 @@ scripts out of order) produces a clear error rather than silent data loss.
 
 ---
 
-## Manual operator procedure (v1.0.0 — no migrations exist)
+## Running migrations by hand
 
-After every upgrade:
+Upgrades apply their own migrations — see "Auto-runner — runs on every
+upgrade" below. Use the procedure here when you need to apply a migration
+outside an upgrade: after an upgrade whose migration step failed, when a
+project was registered after the upgrade ran, or to preview what a range
+would do before you commit to it.
 
-1. Identify the installed version before upgrade (`I`) and the version being
-   installed (`T`). These are typically printed by `upgrade.sh`.
+1. Identify the installed version (`vX.Y.Z`) and the version you are moving
+   to (`vA.B.C`). An upgrade names the range it covered in its own
+   `Checking for migrations in (…, …]` line; `cat
+   "$PGAI_AGENT_KANBAN_ROOT_PATH/VERSION"` gives you what is installed now.
 
-2. List migration scripts whose destination version falls in `(I, T]`:
-
-   ```bash
-   ls scripts/migrations/migrate_v*.sh 2>/dev/null | sort -V
-   ```
-
-   At v1.0.0 there are no scripts, so this step is a **no-op**.
-
-3. For each script in ascending semver order, run:
+2. Preview the selection without writing anything:
 
    ```bash
-   bash scripts/migrations/migrate_vX.Y.Z_to_vA.B.C.sh
+   bash scripts/migrations/run-migrations.sh --from vX.Y.Z --to vA.B.C --dry-run
    ```
 
-   Each script is self-contained and can be run from any directory as long
-   as `PGAI_AGENT_KANBAN_ROOT_PATH` is set (or the kanban root is at
-   `~/pgai_agent_kanban`).
+   The runner prints the scripts whose destination version falls in
+   `(vX.Y.Z, vA.B.C]`, in the order it would run them, and forwards
+   `--dry-run` to each so every script previews its own writes. A selection
+   of zero scripts is normal and is not an error — see "Sparse rule" above.
 
-4. Verify the output. Each script prints a summary; review for warnings.
+3. Apply them:
+
+   ```bash
+   bash scripts/migrations/run-migrations.sh --from vX.Y.Z --to vA.B.C
+   ```
+
+   Add `--project <name>` to limit the run to one registered project; omit it
+   to cover every registered project. Both flags are forwarded to each
+   selected script. A worked range — the one that seeds the
+   `overwatch_resolve` key into an install still on v2.22.5:
+
+   ```bash
+   bash scripts/migrations/run-migrations.sh --from v2.22.5 --to v2.23.0
+   ```
+
+4. Verify the output. Each script prints a summary; review it for warnings.
+   The runner exits `0` on success (including the nothing-to-apply case), `1`
+   on a usage error, and `2` when a selected script fails — in which case it
+   names the failing script and stops before running any later one.
+
+Because every migration is additive, non-destructive, and idempotent, re-running
+this command over a range you have already applied is safe: each script detects
+its own prior application and no-ops.
+
+You can still invoke one script directly —
+`bash scripts/migrations/migrate_vX.Y.Z_to_vA.B.C.sh` — when you want exactly
+that one. Each script is self-contained and can be run from any directory as
+long as `PGAI_AGENT_KANBAN_ROOT_PATH` is set (or the kanban root is at
+`~/pgai_agent_kanban`). Prefer the runner whenever you are covering a version
+range: it applies the selection rule for you instead of asking you to apply it
+by eye.
 
 > **Security note — the upgrade backup contains cleartext secrets.** The upgrade
 > step that precedes migration writes a backup tarball of your config files, and
@@ -107,22 +142,51 @@ After every upgrade:
 
 ---
 
-## Auto-runner — deferred
+## Auto-runner — runs on every upgrade
 
-**The automatic migration runner is not implemented in this release (v1.0.0).**
+`upgrade.sh` applies migrations for you. There is nothing to opt into and no
+flag to remember.
 
-The manual procedure above is the supported path. An auto-runner will be
-integrated into `upgrade.sh` when the first real migration is written. At that
-point `upgrade.sh` will:
+In phase 2, immediately after the VERSION stamp, `upgrade.sh` invokes
 
-- enumerate all migration scripts in this directory,
-- filter to those whose destination version falls in `(installed, target]`,
-- run them in ascending semver order with operator-visible output, and
-- abort with a clear error if any script exits non-zero.
+```
+scripts/migrations/run-migrations.sh --from <installed> --to <target>
+```
 
-The auto-runner will parse script names using the same `from_to` convention
-and destination-keyed selection rule documented above. Scripts placed in this
-directory today are forward-compatible with that future runner.
+where `<installed>` is the version captured before the stamp and `<target>` is
+the version just stamped. The runner then:
+
+- enumerates every `migrate_vX.Y.Z_to_vA.B.C.sh` in this directory,
+- selects those whose destination version falls in `(installed, target]`,
+  parsing names by the same `from_to` convention and destination-keyed
+  selection rule documented above,
+- runs them in ascending destination-version order with operator-visible
+  output, and
+- aborts on the first script that exits non-zero.
+
+Neither `--project` nor `--dry-run` is passed on this path, so an upgrade
+applies every selected migration to every registered project, for real.
+
+Three cases the upgrade step passes over without failing:
+
+- **Nothing selected.** The common case. The runner reports "nothing to
+  apply" and exits 0.
+- **Installed and target are the same version.** An empty `(X, X]` range
+  selects nothing, so the step is skipped.
+- **A version that is not released semver.** A stamped identity
+  (`--stamp-version`, and the test fixtures that use it) is not a `vX.Y.Z`
+  tag, so no migration destination could ever match it. The step is skipped
+  and says so.
+
+If the runner exits non-zero, `upgrade.sh` fails loud and exits 1. The deposit
+and the VERSION stamp have already completed by then, so the recovery is to fix
+the underlying cause and re-run either the upgrade or the runner directly over
+the same range — see "Running migrations by hand" above. Migrations are
+idempotent, so the ones already applied no-op on the second pass. If the runner
+is missing from the install altogether, `upgrade.sh` warns and continues.
+
+A fresh `install.sh` runs no migrations: there is no installed version to
+migrate from.
 
 ---
 

@@ -1,0 +1,952 @@
+{
+ "_about": "Pre-port CLI behaviour of cm/cancel-rc.sh on sandbox roots and repositories; see team/tests/integration/test_cm_cancel_rc.py. Scenarios for a project the shared push-decision resolver cannot resolve (no project.cfg, no dev_tree_path in it) are recorded with the push gate applied: a skipped-unresolved-project line and no origin step.",
+ "scenarios": {
+  "active-none-branch-left": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: none\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n[push_to_remote=false] skipping origin push for cancel-fixture: git push origin --delete rc/v0.4.0 (Step 8)\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\n  Active RC already none — skipping release-state.md reset (idempotent).\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "active-rc-mismatch": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv9.9.9\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: Active RC mismatch.\n  release-state.md shows Active RC = 'v9.9.9'\n  You requested cancel of: 'v0.4.0'\n  Only the active RC can be cancelled.\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n"
+  },
+  "already-cancelled": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "INFO: RC cancellation already complete (idempotent run).\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n  Active RC on main: none\n  rc/v0.4.0: not found locally or on origin\n  Per-RC record still open from an earlier run; marking it cancelled.\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nNothing else to do. Exiting cleanly.\n"
+  },
+  "branch-prefix": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = ai_\npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "ai_main",
+    "refs": [
+     "refs/heads/ai_main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Already on 'ai_main'\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: ai_rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n[push_to_remote=false] skipping origin push for cancel-fixture: git push origin --delete ai_rc/v0.4.0 (Step 8)\nDeleting local branch ai_rc/v0.4.0...\nDeleted branch ai_rc/v0.4.0 (was <SHA>).\n  Deleted local branch ai_rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to ai_main...\n[push_to_remote=false] skipping origin pull for cancel-fixture: merge --ff-only origin/ai_main (Step 10)\n  ai_main checked out locally; no pull (push_to_remote=false).\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: ai_rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "cancel-on-main": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n[push_to_remote=false] skipping origin push for cancel-fixture: git push origin --delete rc/v0.4.0 (Step 8)\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\n[push_to_remote=false] skipping origin pull for cancel-fixture: merge --ff-only origin/main (Step 10)\n  main checked out locally; no pull (push_to_remote=false).\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "cancel-on-rc-branch": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Switched to branch 'main'\nAlready on 'main'\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n[push_to_remote=false] skipping origin push for cancel-fixture: git push origin --delete rc/v0.4.0 (Step 8)\nSwitching to main before deleting local branch...\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\n[push_to_remote=false] skipping origin pull for cancel-fixture: merge --ff-only origin/main (Step 10)\n  main checked out locally; no pull (push_to_remote=false).\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "cancel-twice": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "INFO: RC cancellation already complete (idempotent run).\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n  Active RC on main: none\n  rc/v0.4.0: not found locally or on origin\n\nNothing to do. Exiting cleanly.\n"
+  },
+  "help": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Usage: cancel-rc.sh --project <name> --key vX.Y.Z [--yes] [--help]\n\nCancel an active release candidate branch and reset release-state.md.\n\nBoth --project and --key are REQUIRED. Positional invocation is not supported.\n\nArguments:\n  --project <name>  project name; drives project resolution via the pp layer\n  --key vX.Y.Z      RC version to cancel (format: vX.Y.Z, e.g. v0.15.4)\n  --yes             skip the interactive confirmation prompt\n  --help            print this message and exit 0\n\nFOOTPRINT — what this script touches vs. leaves alone:\n\n  TOUCHES:\n    origin/rc/<version>          deleted (git push origin --delete)\n    local rc/<version>           deleted (git branch -D)\n    release-state.md             Active RC / RC Opened At / RC Opened By Task\n                                 reset to 'none'\n    main branch (local)          checked out; fast-forward pulled from origin when push_to_remote=true\n\n  DOES NOT TOUCH:\n    main branch on origin        never pushed (operator pushes via finalize-release.sh if needed)\n    git tags                     never created, moved, or deleted\n    release-state.md ## Last Released field\n                                 read before the rewrite and written back\n                                 unchanged (canonical value comes from the\n                                 git tag; cancel never clears it)\n    task folders / status.md     not modified; caller must mark tasks WONT-DO\n    queue files                  coder_backlog.md, cm_backlog.md, etc. not modified\n    requirements/ files          not renamed or deleted\n    priority/ files              not modified\n    bugs/ files                  not modified\n    artifacts/                   not modified\n    dev tree source files        not modified\n\n  NOTE: For a full unwind (task folders, queue markers, requirements file,\n  priority files, bug files, PM plan markers) use the top-level\n  scripts/unwind-rc.sh instead.\n\n  NOTE: To re-run the CM release step without deleting the rc branch, use\n  reset.sh --project <name> --key <version> instead.\n\nConfiguration:\n  PGAI_PROJECT_NAME   fallback project name (when --project flag not used)\n  REPO_ROOT           override path to the repository root\n  KANBAN_ROOT         path to the kanban root (default: $HOME/pgai_agent_kanban)\n"
+  },
+  "invalid-version": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: invalid version format: '0.4'\nExpected format: vX.Y.Z (e.g. v0.15.4)\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\n"
+  },
+  "missing-dev-tree-path": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: dev_tree_path is not set in project.cfg for project 'cancel-fixture'\n  Add 'dev_tree_path=<path>' to <ROOT>/projects/cancel-fixture/project.cfg\n",
+   "stdout": "[cm-cancel-rc] skipped-unresolved-project: project 'cancel-fixture': missing dev-tree-path: <ROOT>/projects/cancel-fixture/project.cfg names no dev_tree_path (an inherited PGAI_DEV_TREE_PATH is never used for a push); nothing pushed and no remote contacted\n"
+  },
+  "missing-project-cfg": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "project_paths.sh: PROJECT.cfg not found at <ROOT>/projects/cancel-fixture/PROJECT.cfg (and project.cfg not found at <ROOT>/projects/cancel-fixture/project.cfg)\nERROR: could not load project.cfg for project 'cancel-fixture'\n  Expected: <ROOT>/projects/cancel-fixture/project.cfg\n",
+   "stdout": "[cm-cancel-rc] skipped-unresolved-project: project 'cancel-fixture': missing project-cfg: <ROOT>/projects/cancel-fixture/project.cfg does not exist; nothing pushed and no remote contacted\n"
+  },
+  "missing-release-state": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: project-scoped release-state.md not found: <ROOT>/projects/cancel-fixture/release-state.md\nExpected path: $KANBAN_ROOT/projects/<name>/release-state.md\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n"
+  },
+  "no-json-record": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n[push_to_remote=false] skipping origin push for cancel-fixture: git push origin --delete rc/v0.4.0 (Step 8)\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\n[push_to_remote=false] skipping origin pull for cancel-fixture: merge --ff-only origin/main (Step 10)\n  main checked out locally; no pull (push_to_remote=false).\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "project-from-environment": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n[push_to_remote=false] skipping origin push for cancel-fixture: git push origin --delete rc/v0.4.0 (Step 8)\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\n[push_to_remote=false] skipping origin pull for cancel-fixture: merge --ff-only origin/main (Step 10)\n  main checked out locally; no pull (push_to_remote=false).\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "prompt-answer-without-newline": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\nThis will:\n  - Delete local branch rc/v0.4.0\n  - Reset release-state.md: Active RC -> none\n\nThis does NOT touch main, does NOT delete any tags.\n\n"
+  },
+  "prompt-answered-no": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\nThis will:\n  - Delete local branch rc/v0.4.0\n  - Reset release-state.md: Active RC -> none\n\nThis does NOT touch main, does NOT delete any tags.\n\nCancelled. No changes made.\n"
+  },
+  "prompt-answered-padded-yes": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\nThis will:\n  - Delete local branch rc/v0.4.0\n  - Reset release-state.md: Active RC -> none\n\nThis does NOT touch main, does NOT delete any tags.\n\n\n[push_to_remote=false] skipping origin push for cancel-fixture: git push origin --delete rc/v0.4.0 (Step 8)\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\n[push_to_remote=false] skipping origin pull for cancel-fixture: merge --ff-only origin/main (Step 10)\n  main checked out locally; no pull (push_to_remote=false).\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "prompt-answered-yes": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\nThis will:\n  - Delete local branch rc/v0.4.0\n  - Reset release-state.md: Active RC -> none\n\nThis does NOT touch main, does NOT delete any tags.\n\n\n[push_to_remote=false] skipping origin push for cancel-fixture: git push origin --delete rc/v0.4.0 (Step 8)\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\n[push_to_remote=false] skipping origin pull for cancel-fixture: merge --ff-only origin/main (Step 10)\n  main checked out locally; no pull (push_to_remote=false).\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "prompt-unanswered": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\nThis will:\n  - Delete local branch rc/v0.4.0\n  - Reset release-state.md: Active RC -> none\n\nThis does NOT touch main, does NOT delete any tags.\n\n"
+  },
+  "push-true-from-rc-branch": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = true  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/remotes/origin/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Switched to branch 'main'\nAlready on 'main'\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=true — origin branch delete will proceed.\nPGAI_AGENT_ROLE=tester — skipping git fetch origin (only the cm role touches the remote; local refs are used as-is).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n  rc/v0.4.0 not found on origin — skipping remote delete (idempotent).\nSwitching to main before deleting local branch...\nAlready up to date.\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\nAlready up to date.\n  main fast-forward updated from origin.\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "push-true-no-origin-main": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = true  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 1,
+   "stderr": "Already on 'main'\nmerge: origin/main - not something we can merge\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=true — origin branch delete will proceed.\nPGAI_AGENT_ROLE=tester — skipping git fetch origin (only the cm role touches the remote; local refs are used as-is).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n  rc/v0.4.0 not found on origin — skipping remote delete (idempotent).\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\n"
+  },
+  "push-true-non-cm-role": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = true  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/remotes/origin/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=true — origin branch delete will proceed.\nPGAI_AGENT_ROLE=tester — skipping git fetch origin (only the cm role touches the remote; local refs are used as-is).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n  rc/v0.4.0 not found on origin — skipping remote delete (idempotent).\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\nAlready up to date.\n  main fast-forward updated from origin.\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "repo-root-override": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json": "{\n  \"closed_at\": \"<UTC>\",\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"cancelled\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main"
+    ]
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "[cm-cancel-rc] skipped-unresolved-project: project 'cancel-fixture': missing dev-tree-path: <ROOT>/projects/cancel-fixture/project.cfg names no dev_tree_path (an inherited PGAI_DEV_TREE_PATH is never used for a push); nothing pushed and no remote contacted\npush_to_remote=false — skipping git fetch origin (local-only install).\n\nRC to cancel: rc/v0.4.0\nCurrent Active RC on main: v0.4.0\n\nPending tasks for v0.4.0:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nNOTE: These tasks will NOT be automatically cancelled by this script.\n      You should manually set them to WONT-DO after cancellation.\n\n[push_to_remote=false] skipping origin push for cancel-fixture: git push origin --delete rc/v0.4.0 (Step 8)\nDeleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was <SHA>).\n  Deleted local branch rc/v0.4.0.\nResetting project-scoped release-state.md (Active RC -> none)...\n  release-state.md reset.\n  Path: <ROOT>/projects/cancel-fixture/release-state.md\nSwitching to main...\n[push_to_remote=false] skipping origin pull for cancel-fixture: merge --ff-only origin/main (Step 10)\n  main checked out locally; no pull (push_to_remote=false).\n  Per-RC release-state JSON updated (cancelled): <ROOT>/projects/cancel-fixture/release-state/v0.4.0.json\n  Per-RC history archived: <ROOT>/projects/cancel-fixture/release-state/history/v0.4.0-cancelled-<UTC>.json\n\nRC cancellation complete.\n  Cancelled: rc/v0.4.0\n  Cancelled at: <NOW>\n\nReminder: mark these tasks as WONT-DO in the kanban:\n  - CODER-20260101-001-pending (BACKLOG)\n  - CODER-20260101-002-working (WORKING)\n  - CODER-20260101-007-no-state ()\n\nReminder: close the requirements bundle intake item to prevent re-selection:\n  close.sh --project cancel-fixture --key v0.4.0-bugfix-bundle-<YYYYMMDD> --state wont-do\n  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)\n  Leaving the bundle live re-arms the discovery re-selection path.\n\nYou may now open a new RC with scripts/cm/open-rc.sh <version>.\n"
+  },
+  "usage-key-without-value": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: --key requires a value\n\nUsage: cancel-rc.sh --project <name> --key vX.Y.Z [--yes] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      RC version to cancel (required; format: vX.Y.Z)\n  --yes             skip interactive confirmation prompt\n  --help            print full usage and footprint documentation\n",
+   "stdout": ""
+  },
+  "usage-missing-key": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: missing required flag --key vX.Y.Z\n\nUsage: cancel-rc.sh --project <name> --key vX.Y.Z [--yes] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      RC version to cancel (required; format: vX.Y.Z)\n  --yes             skip interactive confirmation prompt\n  --help            print full usage and footprint documentation\n",
+   "stdout": ""
+  },
+  "usage-missing-project": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: missing required flag --project <name>\n\nUsage: cancel-rc.sh --project <name> --key vX.Y.Z [--yes] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      RC version to cancel (required; format: vX.Y.Z)\n  --yes             skip interactive confirmation prompt\n  --help            print full usage and footprint documentation\n",
+   "stdout": ""
+  },
+  "usage-positional": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: positional arguments are not supported; use --project and --key flags\n\nUsage: cancel-rc.sh --project <name> --key vX.Y.Z [--yes] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      RC version to cancel (required; format: vX.Y.Z)\n  --yes             skip interactive confirmation prompt\n  --help            print full usage and footprint documentation\n",
+   "stdout": ""
+  },
+  "usage-project-without-value": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: --project requires a value\n\nUsage: cancel-rc.sh --project <name> --key vX.Y.Z [--yes] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      RC version to cancel (required; format: vX.Y.Z)\n  --yes             skip interactive confirmation prompt\n  --help            print full usage and footprint documentation\n",
+   "stdout": ""
+  },
+  "usage-unknown-flag": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "main",
+    "refs": [
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: unknown flag: --bogus\n\nUsage: cancel-rc.sh --project <name> --key vX.Y.Z [--yes] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      RC version to cancel (required; format: vX.Y.Z)\n  --yes             skip interactive confirmation prompt\n  --help            print full usage and footprint documentation\n",
+   "stdout": ""
+  },
+  "wrong-branch": {
+   "after": {
+    "files": {
+     "projects/cancel-fixture/project.cfg": "[project]\nproject_name = cancel-fixture\ndev_tree_path = <REPO>\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false  # sandbox\n",
+     "projects/cancel-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n",
+     "projects/cancel-fixture/release-state/v0.4.0.json": "{\n  \"closed_at\": null,\n  \"opened_at\": \"2026-01-01T00:00:00+00:00\",\n  \"outcome\": \"in_progress\",\n  \"rc\": \"v0.4.0\"\n}\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/README.md": "# Task: CODER-20260101-001-pending\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-001-pending/status.md": "# Status\n\n## Task\nCODER-20260101-001-pending\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/README.md": "# Task: CODER-20260101-002-working\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-002-working/status.md": "# Status\n\n## Task\nCODER-20260101-002-working\n\n## State\nWORKING\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/README.md": "# Task: CODER-20260101-003-finished\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-003-finished/status.md": "# Status\n\n## Task\nCODER-20260101-003-finished\n\n## State\nDONE\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/README.md": "# Task: CODER-20260101-004-dropped\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-004-dropped/status.md": "# Status\n\n## Task\nCODER-20260101-004-dropped\n\n## State\nWONT-DO\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/README.md": "# Task: CODER-20260101-005-lowercase\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-005-lowercase/status.md": "# Status\n\n## Task\nCODER-20260101-005-lowercase\n\n## State\ndone\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/README.md": "# Task: CODER-20260101-006-other-rc\n\n## Release Version\nv0.5.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-006-other-rc/status.md": "# Status\n\n## Task\nCODER-20260101-006-other-rc\n\n## State\nBACKLOG\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/README.md": "# Task: CODER-20260101-007-no-state\n\n## Release Version\nv0.4.0\n",
+     "projects/cancel-fixture/tasks/CODER-20260101-007-no-state/status.md": "# Status\n\n## Task\nCODER-20260101-007-no-state\n\n## Summary\nfixture\n",
+     "projects/cancel-fixture/tasks/queues/coder_backlog.md": "# Coder Backlog\n\n## Queue\n- [ ] CODER-20260101-001-pending — pending\n- [A] CODER-20260101-002-working — working\n- [x] CODER-20260101-003-finished — finished\n"
+    },
+    "head": "feature/elsewhere",
+    "refs": [
+     "refs/heads/feature/elsewhere",
+     "refs/heads/main",
+     "refs/heads/rc/v0.4.0"
+    ]
+   },
+   "rc": 1,
+   "stderr": "ERROR: must be on 'main' or 'rc/v0.4.0' to cancel this RC\nCurrent branch: feature/elsewhere\nPlease checkout main or rc/v0.4.0 first.\n",
+   "stdout": "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\npush_to_remote=false — skipping git fetch origin (local-only install).\n"
+  }
+ }
+}

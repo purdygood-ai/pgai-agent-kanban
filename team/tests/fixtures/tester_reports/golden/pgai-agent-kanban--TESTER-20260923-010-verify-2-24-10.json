@@ -1,0 +1,107 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified release candidate `ai_rc/v2.24.10` (commit `37e1d1b`) of project\n`pgai-agent-kanban` against its requirements document\n`requirements/v2.24.10-bugfix-bundle-20260922.md` — a five-item BUG bundle\n(BUG-0363 git-guard self-recursion storm, BUG-0365 the guard refusing\nfixture-local pushes, BUG-0366 the guard shim leaking processes, BUG-0367 the\nguard presence check testing the wrong thing, BUG-0364 an extracted stage missing\nfrom the engine-size manifest) plus the two test-authoring contracts WRITER-006\nrecorded. Work landed as six `--no-ff` merges; a seventh ticket (CODER-007) was a\nverification-only run that correctly produced no commit. Both gated runners exit 0\n(unit 4980 passed / 30 skipped; integration 541 passed / 1 skipped), and every one\nof the five bugs' own acceptance criteria was exercised behaviorally rather than\ninferred from the code — including the criterion this RC exists to satisfy, that\n`run-unit-tests.sh` exits 0 under `PGAI_AGENT_ROLE=coder` with the shim on PATH,\nwhich it now does in 850 s with zero leaked processes where v2.24.9 exited 1 in\n3712 s with 42 failures. Four findings were recorded, none severe: one bundled item\nthe RC did not address (`critical` missing from the deferral ranker's severity\nvocabulary), three internal bug identifiers shipped in new comments, the hygiene\nlint's structural inability to read the guard shim that let them through, and a\nrole-file cross-reference left one contract short. Each is filed via Path C-A\n(filed as BUG — code defect / regression / test failure).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "`critical` is absent from the deferral ranker's severity vocabulary",
+      "heading": "Finding 1: `critical` is absent from the deferral ranker's severity vocabulary",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** medium (recurs on every `critical` bug filed, and the level\nvocabulary is shared with `resolve_defer_posture`)\n**Filed As:** BUG-0372-severity-rank-omits-critical (Path C-A — filed as BUG, code\ndefect / regression / test failure)\n\nTraces to the requirements document's `## Acceptance Criteria` #1, \"Each bundled\nitem is addressed in the implementation.\" The FIRST entry in the same document's\n`## Bundled Items` list is the discovery WARNING that\n`BUG-0363-git-guard-self-recursion-storm.md`'s severity field \"is missing or\nunparseable ('critical')\". Nothing in this RC addressed it.\n\n`_disc_severity_rank` (`team/scripts/lib/discovery_defer.sh:167`) ranks only\n`low|medium|high` and returns 1 for anything else, so `critical` reaches\n`_disc_severity_defer_decision`'s `unparseable` branch in the same column as the\nstring `bogus`. Measured:\n\n```\nlow        -> rank=1          decision=deferred\nmedium     -> rank=2          decision=kept\nhigh       -> rank=3          decision=kept\ncritical   -> rank=UNRANKED   decision=unparseable\nCRITICAL   -> rank=UNRANKED   decision=unparseable\nbogus      -> rank=UNRANKED   decision=unparseable\n```\n\n`critical` is a first-class severity everywhere else: `SOP-core.md` (\"Rating a\nFinding\") defines it as the top rung, and `bugs/templates/BUG-TEMPLATE.md:7`\noffers it first on the `**Severity:**` line. `BUG-0363`'s file is correct\n(`**Severity:** critical` at line 12); the ranker is not.\n\nRated `medium` rather than `high` because the outcome is accidentally right — an\n`unparseable` severity is kept as a candidate and eligible to be the bundling\ntrigger, which is what a critical bug deserves, so nothing was mis-bundled. What\nis wrong is the narration (an operator is told a correctly authored emergency\nreport is malformed, in the message that prints the value it just read) and the\nrobustness (the right answer is reached through the error path). It predates this\nRC by a wide margin — `git log -S'_disc_severity_rank'` puts the function's\nintroduction at `356b53c`, \"Release v2.13.0\" — so it is not a regression.\n\nAn honest note on scope, since a reader could reasonably disagree: the three\nnarration lines in `## Bundled Items` are log entries the discovery pipeline\nappended, not bug files PM decomposed into tickets, so one reading is that AC #1\nnever meant them. I record this as a gap rather than dropping it because the\nunderlying condition is real and independently verifiable, and because a bundle\nlisting a warning as an item it does not then address is exactly the kind of thing\nthat is easier to fix than to keep re-reading.",
+      "filed_as": "BUG-0372",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "medium (recurs on every `critical` bug filed, and the level",
+        "filed_as": "BUG-0372-severity-rank-omits-critical (Path C-A — filed as BUG, code"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "three internal bug identifiers shipped in new source comments",
+      "heading": "Finding 2: three internal bug identifiers shipped in new source comments",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task; three lines)\n**Systemic Risk:** low (isolated to two files; no runtime effect)\n**Filed As:** BUG-0370-guard-shim-comments-cite-bug-id (Path C-A — filed as BUG)\n\n`SOP-core.md` (\"Naming: describe behavior, not scaffolding or provenance\") states\nthat no internal bug identifier may reach a shipped artifact, and none of its\nthree sanctioned exceptions applies here. Three lines added by this RC cite\n`BUG-0366`:\n\n| file | line |\n|---|---|\n| `team/scripts/wake/git-guard/git` | 29 |\n| `team/scripts/wake/git-guard/git` | 146 |\n| `team/tests/fixtures/dashboard_render_fixture.py` | 121 |\n\n`git diff ai_main..ai_rc/v2.24.10 -U0 | grep '^+' | grep -E 'BUG-[0-9]{4}'` returns\nexactly these three and nothing else. Each already carries the behavioral sentence\nbeside it, so the citation is a removable parenthetical. The RC's own CODER ran a\nsweep for precisely this (commit `d29042c`, \"Reword BUG-ID citations in new\ncomments/messages to describe behavior\") that did not reach them — which is\nFinding 3's subject.",
+      "filed_as": "BUG-0370",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task; three lines)",
+        "systemic_risk": "low (isolated to two files; no runtime effect)",
+        "filed_as": "BUG-0370-guard-shim-comments-cite-bug-id (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "the hygiene lint structurally cannot read the guard shim",
+      "heading": "Finding 3: the hygiene lint structurally cannot read the guard shim",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small-to-medium (2–3 CODER tasks: widen the selector, then sweep\nthe citations it surfaces, including 13 pre-existing `BUG-0112` lines)\n**Systemic Risk:** medium (a stated project-wide law is unenforceable on a shipped\nfile, and will be for any future extensionless entry point)\n**Filed As:** BUG-0371-hygiene-lint-misses-extensionless-scripts (Path C-A — filed\nas BUG)\n\n`lint_hygiene.py` builds its code surface by file-name suffix —\n`_collect_files(code_targets, (\".py\", \".sh\"))` at line 1624, and `_collect_files`\nwalks with `scan_dir.rglob(f\"*{suffix}\")` at line 604. `team/scripts/wake/git-guard/git`\nsits under `team/scripts`, which IS a default scan directory, and `rglob` does\ndescend into `wake/git-guard/` — only the suffix filter excludes it. That\nfilename cannot change: being found as `git` on PATH is the entire mechanism.\n\nEstablished causally rather than by reading:\n\n```\npython3 team/scripts/lint_hygiene.py --classes provenance   -> OK, 0 findings\ngrep -n 'BUG-0366' team/scripts/wake/git-guard/git          -> lines 29, 146\ncp team/scripts/wake/git-guard/git team/scripts/lib/probe_shim.sh\npython3 team/scripts/lint_hygiene.py --classes provenance   -> reports both lines\nrm team/scripts/lib/probe_shim.sh                           -> back to 0 findings\n```\n\nThe identical bytes are scanned under a `.sh` name and skipped under the name\n`git`. A second half of the same blind spot: `_TEST_TREE_EXCLUDE_SEGMENTS` (line\n507) excludes any path with a `fixtures` component, so `team/tests/fixtures/*.py`\n— shared long-lived helper modules, not generated data — is scanned by neither\nsurface, which is why Finding 2's third line also went unseen.\n\nFiled separately from Finding 2 because TESTER Step 10 requires one filing per\ngap even where two share a root cause, and because the fixes are different changes\nin different files. They are best sequenced Finding 2 first, then Finding 3, so\nthe lint does not go red in between.",
+      "filed_as": "BUG-0371",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small-to-medium (2–3 CODER tasks: widen the selector, then sweep",
+        "systemic_risk": "medium (a stated project-wide law is unenforceable on a shipped",
+        "filed_as": "BUG-0371-hygiene-lint-misses-extensionless-scripts (Path C-A — filed"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "role file says \"four contracts\"; the document it cites now has five",
+      "heading": "Finding 4: role file says \"four contracts\"; the document it cites now has five",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1 WRITER task; one line)\n**Systemic Risk:** low (one cross-reference)\n**Filed As:** BUG-0373-role-file-contract-count-stale (Path C-A — filed as BUG)\n\n`SOP-core.md`'s Documentation Discipline Rule makes the matching documentation\nartifact part of done. WRITER-006 added a fifth contract to\n`docs/test-authoring-guidelines.md` and updated that document's own two counts\n(lines 20 and 366), but `team/roles/TESTER.md:399` still reads \"**The four\ncontracts for a test that reaches outside its own process**\" and enumerates only\nthe original four — omitting the subprocess-ownership contract, which is the one\nthis RC's own BUG-0366 work needed. `grep -rn \"four contracts\\|five contracts\"\nteam/roles/ docs/` returns exactly those three lines, so the drift is confined to\nthis one cross-reference.\n\nSelf-reported, not discovered: WRITER-20260923-006's `status.md` names it and\nnames the ticket's diff-scope constraint as the reason it was left (\"a one-line\nfollow-up for the next loop\"). Respecting that constraint was correct; this\nfinding is the follow-up made explicit rather than carried on trust. No gate\ncatches it — `check_docs_citations.py` reports `ok`, because it verifies that\ncited documents and sections exist, not that a count inside a sentence still\nmatches.",
+      "filed_as": "BUG-0373",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1 WRITER task; one line)",
+        "systemic_risk": "low (one cross-reference)",
+        "filed_as": "BUG-0373-role-file-contract-count-stale (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

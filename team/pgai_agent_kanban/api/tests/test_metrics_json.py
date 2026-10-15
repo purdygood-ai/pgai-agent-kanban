@@ -7,12 +7,13 @@ Two suites:
      Build a fixture project with known history.csv and/or usage/rc/ data.
      Assert that the JSON rows' field values equal the values in the source files
      field-by-field.  This is the load-bearing check that keeps the two renderers
-     (text shell-out and Python JSON reader) from drifting apart.
+     (the text view and the JSON row reader) from drifting apart.
 
   2. **Text-identical regression tests** (``TestMetricsCostsTextRegression``):
      Assert that /metrics and /costs with no ``format`` parameter return a text
-     envelope, not JSON rows.  The text path must continue to call the underlying
-     shell scripts — the JSON branch must be fully gated on ``format=json``.
+     envelope, not JSON rows.  The text path renders what the CLI scripts print
+     (pgai_agent_kanban.lib.metrics) — the JSON branch must be fully gated on
+     ``format=json``.
 
   3. **Missing-field omission tests** (``TestMissingFieldOmission``):
      Assert that rows whose source has empty/absent fields omit those fields from
@@ -66,8 +67,9 @@ def _write_history_csv(
     Args:
         project_root: The project directory under the kanban root.
         rows:         List of dicts with CSV column values.  Columns:
-                      rc, wall_time_minutes, input_tokens, output_tokens,
-                      cache_read_tokens, cache_write_tokens, tasks_total.
+                      rc, wall_time_minutes, blocked_minutes, input_tokens,
+                      output_tokens, cache_read_tokens, cache_write_tokens,
+                      tasks_total.
                       Missing keys default to empty string.
     """
     metrics_dir = project_root / "metrics"
@@ -75,6 +77,7 @@ def _write_history_csv(
     fieldnames = [
         "rc",
         "wall_time_minutes",
+        "blocked_minutes",
         "input_tokens",
         "output_tokens",
         "cache_read_tokens",
@@ -158,7 +161,7 @@ def metrics_api_client(
     cfg = ApiConfig(
         host="127.0.0.1",
         port=0,
-        kanban_root=_TEAM_DIR,  # scripts resolve from dev-tree team/
+        kanban_root=metrics_kanban_root,  # every route reads the server's own root
     )
     app = create_app(cfg=cfg)
 
@@ -326,6 +329,99 @@ class TestMetricsJsonEquality:
             f"row['wall_seconds'] must equal wall_time_minutes * 60 = 2700.0; "
             f"got {rows[0].get('wall_seconds')!r}"
         )
+
+    def test_metrics_json_blocked_seconds_equals_csv_blocked_minutes_times_60(
+        self,
+        metrics_kanban_root: pathlib.Path,
+        metrics_api_client: TestClient,
+    ) -> None:
+        """JSON row 'blocked_seconds' equals blocked_minutes * 60 from history.csv."""
+        project_name = "eq-blocked"
+        project_root = _materialise_project(metrics_kanban_root, project_name)
+        _write_history_csv(
+            project_root,
+            [{"rc": "v1.0.0", "blocked_minutes": "50"}],
+        )
+
+        resp = metrics_api_client.get(
+            "/metrics",
+            params={"project": project_name, "format": "json"},
+        )
+        rows = resp.json()
+        assert rows[0]["blocked_seconds"] == pytest.approx(3000.0, abs=0.5), (
+            f"row['blocked_seconds'] must equal blocked_minutes * 60 = 3000.0; "
+            f"got {rows[0].get('blocked_seconds')!r}"
+        )
+
+    def test_metrics_json_blocked_seconds_explicit_zero_is_zero_not_absent(
+        self,
+        metrics_kanban_root: pathlib.Path,
+        metrics_api_client: TestClient,
+    ) -> None:
+        """An explicit 0 in blocked_minutes produces blocked_seconds=0, never omission."""
+        project_name = "eq-blocked-zero"
+        project_root = _materialise_project(metrics_kanban_root, project_name)
+        _write_history_csv(
+            project_root,
+            [{"rc": "v1.0.0", "blocked_minutes": "0"}],
+        )
+
+        resp = metrics_api_client.get(
+            "/metrics",
+            params={"project": project_name, "format": "json"},
+        )
+        rows = resp.json()
+        assert "blocked_seconds" in rows[0], (
+            f"'blocked_seconds' must be present (a real 0) when blocked_minutes=0; "
+            f"row: {rows[0]}"
+        )
+        assert rows[0]["blocked_seconds"] == 0, (
+            f"row['blocked_seconds'] must equal 0 for blocked_minutes=0; "
+            f"got {rows[0].get('blocked_seconds')!r}"
+        )
+
+    def test_metrics_json_pre_existing_fields_unaffected_by_blocked_minutes(
+        self,
+        metrics_kanban_root: pathlib.Path,
+        metrics_api_client: TestClient,
+    ) -> None:
+        """Every pre-existing field on the row is unchanged when blocked_minutes is present.
+
+        Guards against the additive change accidentally touching version, tasks,
+        wall_seconds, tokens_in, tokens_out, or cache_read_pct.
+        """
+        project_name = "eq-blocked-siblings"
+        project_root = _materialise_project(metrics_kanban_root, project_name)
+        _write_history_csv(
+            project_root,
+            [
+                {
+                    "rc": "v1.0.0",
+                    "wall_time_minutes": "45.0",
+                    "blocked_minutes": "50",
+                    "input_tokens": "1000",
+                    "output_tokens": "200",
+                    "cache_read_tokens": "500",
+                    "tasks_total": "5",
+                },
+            ],
+        )
+
+        resp = metrics_api_client.get(
+            "/metrics",
+            params={"project": project_name, "format": "json"},
+        )
+        rows = resp.json()
+        row = rows[0]
+        assert row["version"] == "v1.0.0"
+        assert row["tasks"] == 5
+        assert row["wall_seconds"] == pytest.approx(2700.0, abs=0.5)
+        assert row["tokens_in"] == 1000
+        assert row["tokens_out"] == 200
+        assert row["cache_read_pct"] == pytest.approx(
+            round(500 / (1000 + 500) * 100, 1), abs=0.05
+        )
+        assert row["blocked_seconds"] == pytest.approx(3000.0, abs=0.5)
 
     def test_metrics_json_cache_read_pct_computed_from_csv(
         self,
@@ -680,9 +776,9 @@ class TestCostsJsonEquality:
 class TestMetricsCostsTextRegression:
     """Assert that /metrics and /costs without format param return text envelopes.
 
-    The text path must be byte-identical to the pre-v1.6.0 behavior: it calls the
-    underlying shell scripts and returns the standard envelope.  The JSON branch
-    must be fully gated on ``format=json``.
+    The text path returns the standard envelope around the same text the CLI
+    scripts print (tests/unit/test_lib_metrics.py compares the bytes).  The
+    JSON branch must be fully gated on ``format=json``.
     """
 
     def test_metrics_no_format_returns_text_envelope(
@@ -776,6 +872,60 @@ class TestMissingFieldOmission:
         assert "wall_seconds" not in rows[0], (
             f"'wall_seconds' must be absent when wall_time_minutes is empty; "
             f"row: {rows[0]}"
+        )
+
+    def test_missing_blocked_minutes_omits_blocked_seconds(
+        self,
+        metrics_kanban_root: pathlib.Path,
+        metrics_api_client: TestClient,
+    ) -> None:
+        """When blocked_minutes is empty in history.csv, 'blocked_seconds' must not appear."""
+        project_name = "omit-blocked"
+        project_root = _materialise_project(metrics_kanban_root, project_name)
+        _write_history_csv(
+            project_root,
+            [{"rc": "v1.0.0", "blocked_minutes": ""}],  # empty — unreadable/not-yet-computed
+        )
+
+        resp = metrics_api_client.get(
+            "/metrics",
+            params={"project": project_name, "format": "json"},
+        )
+        rows = resp.json()
+        assert len(rows) == 1
+        assert "blocked_seconds" not in rows[0], (
+            f"'blocked_seconds' must be absent when blocked_minutes is empty; "
+            f"row: {rows[0]}"
+        )
+
+    def test_absent_blocked_minutes_column_omits_blocked_seconds(
+        self,
+        metrics_kanban_root: pathlib.Path,
+        metrics_api_client: TestClient,
+    ) -> None:
+        """A history.csv written before this column existed (column absent entirely)
+        also omits 'blocked_seconds' rather than erroring or fabricating a value.
+        """
+        project_name = "omit-blocked-no-column"
+        project_root = _materialise_project(metrics_kanban_root, project_name)
+        metrics_dir = project_root / "metrics"
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        # Pre-v2.24.0 shape: no blocked_minutes column at all.
+        (metrics_dir / "history.csv").write_text(
+            "rc,wall_time_minutes,tasks_total\nv1.0.0,30,5\n",
+            encoding="utf-8",
+        )
+
+        resp = metrics_api_client.get(
+            "/metrics",
+            params={"project": project_name, "format": "json"},
+        )
+        assert resp.status_code == 200, f"HTTP {resp.status_code}: {resp.text}"
+        rows = resp.json()
+        assert len(rows) == 1
+        assert "blocked_seconds" not in rows[0], (
+            f"'blocked_seconds' must be absent when the column does not exist "
+            f"in history.csv at all; row: {rows[0]}"
         )
 
     def test_missing_est_cost_omits_est_cost(

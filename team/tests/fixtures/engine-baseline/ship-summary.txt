@@ -1,0 +1,20 @@
+Local release preparation complete.
+  Version:     v0.1.0
+  State file:  <TMPPATH>/ship/kanban_root/projects/harness-fixture/release-state.md
+
+Summary of what was done:
+  - rc/v0.1.0 squashed to main (single-lane squash commit)
+  - Post-squash fidelity gate passed: rc/v0.1.0 and main trees are identical
+  - Tag v0.1.0 created locally only (push_to_remote=false; not pushed)
+  - rc/v0.1.0 deleted locally; origin not touched (local only, push_to_remote=false)
+  - release-state.md updated: Active RC -> none
+  - release-notes/v0.1.0.md generated and committed on main
+  - bundled items promoted from 'running' to 'done' (Step 13c)
+  - ## Fixed In: v0.1.0 — 0 stamped; no bugs directory at <TMPPATH>/ship/kanban_root/projects/harness-fixture/bugs. (Step 16b)
+  - metrics aggregation + history.csv append attempted (Step 15, non-blocking)
+  - auto-push of main and tags skipped (Step 14; push_to_remote=false — release is local only)
+  - RC temp cleanup attempted (Step 16, non-blocking — git worktree prune; no FS sweep by design)
+
+## Next Recommended Step
+This release is local only (push_to_remote=false): no push or branch deletion was run against origin.
+The release is complete locally.

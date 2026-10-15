@@ -14,7 +14,7 @@
 #   container-shell.sh [OPTIONS]
 #
 # Options:
-#   -t, --image-tag TAG       Image to run. Default: pgai-agent-kanban-rocky:latest
+#   -t, --image-tag TAG       Image to run. Default: pgai-agent-kanban-debian:latest
 #   --mount HOST:CONTAINER    Extra bind mount ("<host-path>:<container-path>").
 #                             Repeatable.
 #   --kanban-root PATH        Override PGAI_AGENT_KANBAN_ROOT_PATH.
@@ -32,6 +32,10 @@
 #                                  image-baked user's.
 #   PGAI_AGENT_KANBAN_ROOT_PATH    set to the mounted kanban root.
 #
+# The standard mounts, the environment and the --mount extras are assembled
+# by team/scripts/lib/container_mounts.sh, shared with container-up.sh, so
+# every kanban container sees the same paths.
+#
 # Exit codes:
 #   0  the container exited normally (this script execs into the engine, so
 #      the container's own exit code is what the caller sees)
@@ -48,14 +52,24 @@ _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=lib/docker_engine.sh
 source "${_SCRIPT_DIR}/lib/docker_engine.sh"
+# shellcheck source=lib/docker_use.sh
+source "${_SCRIPT_DIR}/lib/docker_use.sh"
+# shellcheck source=lib/script_common.sh
+source "${_SCRIPT_DIR}/lib/script_common.sh"
+# shellcheck source=lib/container_mounts.sh
+source "${_SCRIPT_DIR}/lib/container_mounts.sh"
 
-_DEFAULT_IMAGE_TAG="pgai-agent-kanban-rocky:latest"
+_DEFAULT_IMAGE_TAG="pgai-agent-kanban-debian:latest"
 
 # ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
-usage() {
-    cat >&2 <<EOF
+# Usage text as data (per lib/script_common.sh's documented convention).
+# This script's usage intentionally prints to stderr on BOTH the --help
+# (exit 0) and error (exit 2) paths — print_usage_and_exit's stdout-on-0
+# contract does not fit that shape, so the destination is pinned here
+# instead of delegated.
+_USAGE_TEXT="$(cat <<EOF
 Usage: ${_SCRIPT_NAME} [OPTIONS]
 
 Starts an interactive workspace shell in the pgai-agent-kanban container.
@@ -88,7 +102,7 @@ The container engine (docker or podman) is resolved from kanban.cfg
 identically under either engine; the run invocation below uses only flags
 both engines share.
 EOF
-}
+)"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -127,12 +141,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            usage
+            printf '%s\n' "$_USAGE_TEXT" >&2
             exit 0
             ;;
         *)
             echo "${_SCRIPT_NAME}: unknown argument: $1" >&2
-            usage
+            printf '%s\n' "$_USAGE_TEXT" >&2
             exit 2
             ;;
     esac
@@ -146,49 +160,31 @@ if [[ -n "${KANBAN_ROOT_OVERRIDE}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Resolve and validate the two standard mount sources
+# Assemble the standard mounts and environment (lib/container_mounts.sh):
+# the kanban root and $HOME, validated and realpath'd, mounted at matching
+# paths and exported, then each --mount value as an extra bind mount. A
+# missing path exits 1; a malformed --mount value exits 2. Every check here
+# is on arguments and the filesystem, not the environment's tooling, so it
+# runs before engine resolution below -- a malformed --mount value is a
+# usage error (exit 2) on every host, including a host with no container
+# engine on PATH at all, instead of being masked behind an unrelated exit 1.
 # ---------------------------------------------------------------------------
-_KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-}"
-if [[ -z "${_KANBAN_ROOT}" || ! -d "${_KANBAN_ROOT}" ]]; then
-    echo "${_SCRIPT_NAME}: PGAI_AGENT_KANBAN_ROOT_PATH is not set to an existing directory: '${_KANBAN_ROOT}'" >&2
-    exit 1
-fi
-_KANBAN_ROOT="$(realpath "${_KANBAN_ROOT}")"
-
-_HOST_HOME="${HOME:-}"
-if [[ -z "${_HOST_HOME}" || ! -d "${_HOST_HOME}" ]]; then
-    echo "${_SCRIPT_NAME}: \$HOME is not set to an existing directory: '${_HOST_HOME}'" >&2
-    exit 1
-fi
-_HOST_HOME="$(realpath "${_HOST_HOME}")"
+container_mounts_assemble "${_SCRIPT_NAME}" \
+    "${PGAI_AGENT_KANBAN_ROOT_PATH:-}" "${HOME:-}" "${EXTRA_MOUNTS[@]}" || exit $?
+_KANBAN_ROOT="${CONTAINER_MOUNTS_KANBAN_ROOT}"
+_HOST_HOME="${CONTAINER_MOUNTS_HOME}"
 
 # ---------------------------------------------------------------------------
 # Resolve the container engine (docker by default, podman when configured).
 # ---------------------------------------------------------------------------
 _DOCKER_EXE="$(resolve_docker_exe "${_KANBAN_ROOT}")" || exit 1
 
-# ---------------------------------------------------------------------------
-# Translate --mount values into engine bind-mount flags. Both docker and
-# podman accept "-v <host>:<container>", so no engine-specific branching
-# is needed here.
-# ---------------------------------------------------------------------------
-_MOUNT_FLAGS=()
-if [[ ${#EXTRA_MOUNTS[@]} -gt 0 ]]; then
-    for _m in "${EXTRA_MOUNTS[@]}"; do
-        if [[ "${_m}" != *:* ]]; then
-            echo "${_SCRIPT_NAME}: --mount value must be '<host-path>:<container-path>': '${_m}'" >&2
-            exit 2
-        fi
-        _MOUNT_FLAGS+=(-v "${_m}")
-    done
-fi
-
 echo "${_SCRIPT_NAME}: engine=${_DOCKER_EXE} image=${IMAGE_TAG} kanban_root=${_KANBAN_ROOT} home=${_HOST_HOME}" >&2
 
-exec "${_DOCKER_EXE}" run --rm -it \
-    -v "${_HOST_HOME}:${_HOST_HOME}" \
-    -v "${_KANBAN_ROOT}:${_KANBAN_ROOT}" \
-    -e "HOME=${_HOST_HOME}" \
-    -e "PGAI_AGENT_KANBAN_ROOT_PATH=${_KANBAN_ROOT}" \
-    "${_MOUNT_FLAGS[@]}" \
+# Through the shared engine helper (lib/docker_use.sh), which records the
+# launch and its exit in the docker-use log; this script's exit status is
+# the container shell's own.
+pgai_docker "${_DOCKER_EXE}" run --rm -it \
+    "${CONTAINER_MOUNTS_ARGS[@]}" \
     "${IMAGE_TAG}"
+exit $?

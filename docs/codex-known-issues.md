@@ -1,7 +1,7 @@
 # Codex Lane — Known Issues
 
 The Codex/OpenAI lane is exercised — a managed project has shipped
-end-to-end on Codex with OAuth — and ships **experimental** in v1.0.0.
+end-to-end on Codex with OAuth — and is **experimental**.
 Claude remains the supported production provider. Before running the Codex
 lane, know these rough edges:
 
@@ -26,5 +26,5 @@ do not run the self-build unattended on Codex. Switch providers with
 `scripts/switch-provider.sh`; the `wake-claude` / `wake-codex` prefix in the
 wake logs is ground truth for which lane is live.
 
-Hardening the Codex lane to supported status is the v1.1.x theme — see
+Hardening the Codex lane to supported status is roadmap work — see
 [ROADMAP.md](../ROADMAP.md).

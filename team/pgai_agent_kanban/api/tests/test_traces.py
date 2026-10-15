@@ -239,8 +239,8 @@ class TestTracesIndex:
             (e for e in body if e["id"] == _ALPHA_CODER_STEM), None
         )
         assert alpha_coder is not None, "Expected alpha coder trace in index"
-        # Stem: "20260703T133901-CODER-20260703-002-entry-point"
-        # task_key should be: "CODER-20260703-002-entry-point"
+        # task_key strips the leading "<timestamp>-" segment from the trace
+        # stem, leaving the task-folder name that follows it.
         assert alpha_coder["task_key"] == "CODER-20260703-002-entry-point", (
             f"Unexpected task_key: {alpha_coder['task_key']!r}"
         )

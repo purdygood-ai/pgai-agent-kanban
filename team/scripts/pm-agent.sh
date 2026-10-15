@@ -10,7 +10,10 @@
 # after reviewing the queue).
 #
 # Usage:
-#   pm-agent.sh <requirements.md>                          # queue PM ticket (ceiling enforced)
+#   pm-agent.sh <requirements.md>                          # queue PM ticket (ceiling enforced; on a
+#                                                          #  semver project ## Target Version must be
+#                                                          #  an explicit vX.Y.Z -- only --auto
+#                                                          #  resolves an auto version)
 #   pm-agent.sh <requirements.md> --dry-run                # preview only, don't write ticket
 #   pm-agent.sh <requirements.md> --max-tasks 10           # limit task count (stored in ticket)
 #   pm-agent.sh <requirements.md> --override-ceiling       # queue even if Target Version exceeds ceiling
@@ -120,12 +123,23 @@ Three operating modes:
                    Queue a specific requirements doc for PM decomposition.
                    Bypasses the discovery pipeline but still enforces version
                    ceilings from project.cfg. Use --override-ceiling to bypass.
+                   On a semver project the doc's ## Target Version must be an
+                   explicit vX.Y.Z: an auto, next-patch, empty or absent value
+                   is refused (exit 1, nothing written), because only the
+                   discovery pipeline (--auto) resolves one, writing it into
+                   the doc before it queues PM.
   2. One-shot:     pm-agent.sh --auto
                    Run the discovery pipeline until idle or blocked. Loops
                    through bugs/, priority/, and requirements/ in order,
                    advancing one step per iteration until nothing remains
                    to process or Active RC blocks further work. Equivalent
                    to running multiple cron iterations in one command.
+                   While any task in a role queue is unfinished (or an RC
+                   is open) each iteration exits idle before scanning.
+                   Scans run without the project's repo lock; a write
+                   (bundle, PM ticket) takes it first and waits for no
+                   one: if a wake holds it, that write is left for the
+                   next run.
   3. Continuous:   (set up cron with wake-batch.sh --agent=pm)
                    The same pipeline as --auto, but driven by cron and
                    running one iteration per cron firing over time.
@@ -139,9 +153,11 @@ Options:
   --override-ceiling   Bypass the version ceiling check for this invocation. A warning
                        is emitted to stderr when the ceiling is exceeded but --override-ceiling
                        is passed; the PM ticket is created anyway. Without this flag, a
-                       requirements file whose Target Version exceeds the configured project
-                       ceiling (max_minor, max_major, max_patch in project.cfg) causes the
-                       script to exit non-zero without creating any task folder or backlog entry.
+                       requirements file whose Target Version exceeds the project ceiling
+                       (max_minor, max_major, max_patch in project.cfg; an absent key is its
+                       default 13, 0 or 21, and only 'none' lifts a cap), or whose project
+                       has an unreadable ceiling value, causes the script to exit non-zero
+                       without creating any task folder or backlog entry.
   --project <name>     Project name (required when PGAI_PROJECT_NAME is not set)
   --help, -h           Show this help
 
@@ -220,6 +236,7 @@ if [[ "$AUTO" == "true" ]]; then
   # Loops over all projects registered in projects.cfg via projects_cfg_list.
   # For each
   # project:
+  #   - projects.cfg enabled=false (projects_cfg_enabled) skips that project.
   #   - Per-project HALT (projects/<name>/HALT) skips that project.
   #   - Global HALT ($TEAM_ROOT/HALT) exits the entire auto mode.
   #   - MAX_AUTO_ITERS is enforced PER PROJECT so project A cannot starve B.
@@ -227,6 +244,12 @@ if [[ "$AUTO" == "true" ]]; then
   # The cron-driven path (wake-batch.sh) calls discovery_run_pipeline
   # directly and is NOT affected by this loop — it only calls the function once
   # per cron firing, as before.
+  #
+  # Repo lock: discovery_run_pipeline is called here with no
+  # DISCOVERY_WRITE_LOCK_HOOK, so discovery takes the project's repo lock
+  # itself at its first write and releases it before returning (see
+  # lib/discovery.sh, "Repo-lock scope") -- it is free again by the time the
+  # post-discovery wake-batch.sh call below takes it for the PM dispatch.
 
   if [[ -f "$_SCRIPT_DIR/lib/discovery.sh" ]]; then
     # shellcheck source=lib/discovery.sh
@@ -279,6 +302,15 @@ if [[ "$AUTO" == "true" ]]; then
       if [[ -f "${TEAM_ROOT}/HALT" ]]; then
         echo "--- auto: global HALT detected mid-run; stopping ---"
         exit 0
+      fi
+
+      # Disabled project (projects.cfg enabled=false): skipped before any
+      # discovery scan or repo lock, and marked done so the skip line is
+      # narrated once per run, not once per round.
+      if ! projects_cfg_enabled "$_pm_proj"; then
+        echo "--- auto: $(projects_cfg_disabled_skip_line "$_pm_proj") ---"
+        _pm_auto_done[$_pm_proj]=1
+        continue
       fi
 
       # Per-project HALT check.
@@ -371,8 +403,23 @@ fi
 REQUIREMENTS_FILE="$(cd "$(dirname "$REQUIREMENTS_FILE")" && pwd)/$(basename "$REQUIREMENTS_FILE")"
 
 # --- Extract Target Version from requirements file ---
-TARGET_VERSION="$(awk '/^## Target Version/{flag=1; next} /^##/{flag=0} flag && /^v[0-9]/{print; exit}' "$REQUIREMENTS_FILE" | tr -d '[:space:]')"
-TARGET_VERSION="${TARGET_VERSION:-none}"
+# Read through md_fields, which tolerates the shapes an editor leaves (blank
+# lines before the value, an inline "## Target Version: v1.2.3", a bold
+# value). A value starting v<digit> (or V<digit>, written back as v) is the
+# explicit version carried into the ticket's ## Release Version; anything
+# else reads as "none". _RAW_TARGET_VERSION keeps the value as written for
+# the auto-sentinel check below; an absent field reads as empty.
+if ! declare -F pp_run_ops >/dev/null 2>&1; then
+    # shellcheck source=lib/pp_run_ops.sh
+    source "${_SCRIPT_DIR}/lib/pp_run_ops.sh"
+fi
+_RAW_TARGET_VERSION="$(pp_run_ops pgai_agent_kanban.lib.md_fields read "$REQUIREMENTS_FILE" "Target Version" 2>/dev/null)" || _RAW_TARGET_VERSION=""
+_RAW_TARGET_VERSION="$(printf '%s' "$_RAW_TARGET_VERSION" | tr -d '[:space:]')"
+if [[ "$_RAW_TARGET_VERSION" =~ ^[vV][0-9] ]]; then
+    TARGET_VERSION="v${_RAW_TARGET_VERSION:1}"
+else
+    TARGET_VERSION="none"
+fi
 
 # --- Resolve target project ---
 # Resolution order (highest to lowest precedence):
@@ -387,77 +434,113 @@ _TARGET_PROJECT="$(pp_require_project_context "$_PM_EFFECTIVE_PROJECT")" || {
     exit 1
 }
 
+# --- Version semantics (sentinel and ceiling checks below) ---
+# Ceiling checks and the auto-sentinel refusal are semver consumption
+# checkpoints — they are meaningless for label or none projects where
+# versions are names, not numbers. Load the workflow plugin to query the
+# project's declared version_semantics (mirrors the equivalent gate in
+# discovery eligibility).
+_pm_wf_type="$(pp_workflow_type "$_TARGET_PROJECT" 2>/dev/null)" || _pm_wf_type="release"
+_pm_wf_load_exit=0
+set +e
+wf_load_plugin "$_pm_wf_type"
+_pm_wf_load_exit=$?
+set -e
+if [[ $_pm_wf_load_exit -ne 0 ]]; then
+    # Plugin load failed — default to semver (safe: enforces ceiling rather
+    # than skipping it; matches the analogous fallback in discovery.sh).
+    _pm_version_semantics="semver"
+else
+    _pm_version_semantics="$(wf_version_semantics)"
+fi
+
+# --- Auto-sentinel refusal (manual mode) ---
+# An auto / next-patch / empty / absent ## Target Version on a semver project
+# is resolved only by discovery (--auto, or the cron pipeline), which writes
+# the explicit version into the file under the repo lock before it runs this
+# script. Queued as-is, the ticket would carry Release Version none and the
+# materializer would refuse the plan, so refuse here before writing anything.
+_raw_tv_lc="$(printf '%s' "$_RAW_TARGET_VERSION" | tr '[:upper:]' '[:lower:]')"
+if [[ "$_pm_version_semantics" == "semver" ]] \
+    && [[ -z "$_raw_tv_lc" || "$_raw_tv_lc" == "auto" || "$_raw_tv_lc" == "next-patch" ]]; then
+    # BLOCK-WORTHY: invariant by design -- only an explicit version reaches PM
+    # and the materializer; nothing has been written when this fires.
+    pgai_emit_error_contract \
+        "pm-agent.target-version-not-explicit" \
+        "pm-agent.sh will not queue PM for ${REQUIREMENTS_FILE}: its ## Target Version is '${_RAW_TARGET_VERSION:-(absent)}', not an explicit version (expected vX.Y.Z). Only discovery resolves an auto version, writing it into the file before PM is queued." \
+        "Let discovery resolve it and queue PM: ${_SCRIPT_DIR}/pm-agent.sh --auto --project ${_TARGET_PROJECT} -- or write an explicit version (for example v1.0.1) under ## Target Version in ${REQUIREMENTS_FILE} and re-run ${_SCRIPT_DIR}/pm-agent.sh ${REQUIREMENTS_FILE} --project ${_TARGET_PROJECT}" \
+        "${_TARGET_PROJECT}"
+    # CENSUS-ANCHOR: pm-agent-01
+    exit 1
+fi
+
 # --- Version ceiling check (manual mode) ---
 # Reuses pp_version_within_ceiling from project_paths.sh — the same helper the
 # autonomous discovery pipeline uses — so both paths enforce an identical rule.
-# A Target Version of "none" (no ## Target Version field) is skipped; the PM
-# agent will treat it as an auto-sentinel when it runs.
-#
-# Version semantics gate (mirrors the equivalent gate in discovery eligibility):
-# Ceiling checks are semver consumption checkpoints — they are meaningless for
-# label or none projects where versions are names, not numbers.  Load the
-# workflow plugin to query the project's declared version_semantics; skip the
-# entire ceiling block when the semantics are not "semver".
+# A Target Version of "none" (a non-version value on a label project) skips
+# the check. The ceilings are read once, up front, with their stderr left
+# visible: an absent key is its documented default, an explicit `none` lifts
+# that cap, and a malformed value (its accessor prints one line naming the
+# file, key and value) fails the check like an exceeded ceiling — never
+# "no ceiling".
 if [[ "$TARGET_VERSION" != "none" ]]; then
-    # Resolve version_semantics for this project's workflow type.
-    _pm_wf_type="$(pp_workflow_type "$_TARGET_PROJECT" 2>/dev/null)" || _pm_wf_type="release"
-    _pm_wf_load_exit=0
-    set +e
-    wf_load_plugin "$_pm_wf_type"
-    _pm_wf_load_exit=$?
-    set -e
-    if [[ $_pm_wf_load_exit -ne 0 ]]; then
-        # Plugin load failed — default to semver (safe: enforces ceiling rather
-        # than skipping it; matches the analogous fallback in discovery.sh).
-        _pm_version_semantics="semver"
-    else
-        _pm_version_semantics="$(wf_version_semantics)"
-    fi
-
     if [[ "$_pm_version_semantics" != "semver" ]]; then
         # Label or none project: versions are names, not numbers.
         # Ceiling arithmetic does not apply — skip the ceiling block entirely.
         true
-    elif ! pp_version_within_ceiling "$_TARGET_PROJECT" "$TARGET_VERSION" 2>/dev/null; then
-        # Semver project whose Target Version exceeds the configured ceiling.
-        # Determine which component was violated for a precise error message.
-        _ceil_max_major="$(pp_max_major "$_TARGET_PROJECT" 2>/dev/null)" || _ceil_max_major=""
-        _ceil_max_minor="$(pp_max_minor "$_TARGET_PROJECT" 2>/dev/null)" || _ceil_max_minor=""
-        _ceil_max_patch="$(pp_max_patch "$_TARGET_PROJECT" 2>/dev/null)" || _ceil_max_patch=""
+    else
+        _ceil_unreadable=""
+        _ceil_max_major="$(pp_max_major "$_TARGET_PROJECT")" || _ceil_unreadable=1
+        _ceil_max_minor="$(pp_max_minor "$_TARGET_PROJECT")" || _ceil_unreadable=1
+        _ceil_max_patch="$(pp_max_patch "$_TARGET_PROJECT")" || _ceil_unreadable=1
 
-        # Extract and validate version components before arithmetic.
-        # A malformed semver on a semver project (e.g. garbage string) must
-        # produce a named parse error, never an unbound-variable crash.
-        _v_clean="${TARGET_VERSION#v}"; _v_clean="${_v_clean#V}"
-        _v_major="${_v_clean%%.*}"
-        _v_rest="${_v_clean#*.}"; _v_minor="${_v_rest%%.*}"; _v_patch="${_v_rest#*.}"
-
-        # Guard: only use arithmetic when each component is a non-negative integer.
-        # A component that contains non-digit characters (e.g. a hyphen from a
-        # label suffix) is not a valid semver field; skip the per-component detail
-        # and fall through to the generic ceiling message instead of crashing.
         _ceil_detail=""
-        if [[ "$_v_major" =~ ^[0-9]+$ && "$_v_minor" =~ ^[0-9]+$ && "$_v_patch" =~ ^[0-9]+$ ]]; then
-            if [[ -n "$_ceil_max_major" ]] && (( _v_major > _ceil_max_major )); then
-                _ceil_detail="major version ${_v_major} exceeds max_major=${_ceil_max_major}"
-            elif [[ -n "$_ceil_max_minor" ]] && (( _v_minor > _ceil_max_minor )); then
-                _ceil_detail="minor version ${_v_minor} exceeds max_minor=${_ceil_max_minor}"
-            elif [[ -n "$_ceil_max_patch" ]] && (( _v_patch > _ceil_max_patch )); then
-                _ceil_detail="patch version ${_v_patch} exceeds max_patch=${_ceil_max_patch}"
+        if [[ -n "$_ceil_unreadable" ]]; then
+            _ceil_detail="a version ceiling in the project config is unreadable (named above); inspect it with ${_SCRIPT_DIR}/set-version-ceiling.sh --project ${_TARGET_PROJECT} --show"
+        elif ! pp_version_within_ceiling "$_TARGET_PROJECT" "$TARGET_VERSION"; then
+            # Semver project whose Target Version exceeds the ceiling in effect.
+            # Determine which component was violated for a precise error message.
+
+            # Extract and validate version components before arithmetic.
+            # A malformed semver on a semver project (e.g. garbage string) must
+            # produce a named parse error, never an unbound-variable crash.
+            _v_clean="${TARGET_VERSION#v}"; _v_clean="${_v_clean#V}"
+            _v_major="${_v_clean%%.*}"
+            _v_rest="${_v_clean#*.}"; _v_minor="${_v_rest%%.*}"; _v_patch="${_v_rest#*.}"
+
+            # Guard: only use arithmetic when each component is a non-negative integer.
+            # A component that contains non-digit characters (e.g. a hyphen from a
+            # label suffix) is not a valid semver field; skip the per-component detail
+            # and fall through to the generic ceiling message instead of crashing.
+            if [[ "$_v_major" =~ ^[0-9]+$ && "$_v_minor" =~ ^[0-9]+$ && "$_v_patch" =~ ^[0-9]+$ ]]; then
+                if [[ -n "$_ceil_max_major" ]] && (( _v_major > _ceil_max_major )); then
+                    _ceil_detail="major version ${_v_major} exceeds max_major=${_ceil_max_major}"
+                elif [[ -n "$_ceil_max_minor" ]] && (( _v_minor > _ceil_max_minor )); then
+                    _ceil_detail="minor version ${_v_minor} exceeds max_minor=${_ceil_max_minor}"
+                elif [[ -n "$_ceil_max_patch" ]] && (( _v_patch > _ceil_max_patch )); then
+                    _ceil_detail="patch version ${_v_patch} exceeds max_patch=${_ceil_max_patch}"
+                else
+                    _ceil_detail="version exceeds configured project ceiling"
+                fi
             else
-                _ceil_detail="version exceeds configured project ceiling"
+                _ceil_detail="version '${TARGET_VERSION}' could not be parsed as semver (expected vX.Y.Z)"
             fi
-        else
-            _ceil_detail="version '${TARGET_VERSION}' could not be parsed as semver (expected vX.Y.Z)"
         fi
 
-        if [[ "$OVERRIDE_CEILING" == "true" ]]; then
-            echo "WARNING: Target Version ${TARGET_VERSION} ceiling check failed: ${_ceil_detail}" >&2
-            echo "WARNING: --override-ceiling was passed; proceeding despite ceiling violation." >&2
-        else
-            echo "ERROR: Target Version ${TARGET_VERSION} ceiling check failed: ${_ceil_detail}" >&2
-            echo "       To override: rerun with --override-ceiling" >&2
-            exit 1
+        if [[ -n "$_ceil_detail" ]]; then
+            if [[ "$OVERRIDE_CEILING" == "true" ]]; then
+                echo "WARNING: Target Version ${TARGET_VERSION} ceiling check failed: ${_ceil_detail}" >&2
+                echo "WARNING: --override-ceiling was passed; proceeding despite ceiling violation." >&2
+            else
+                echo "ERROR: Target Version ${TARGET_VERSION} ceiling check failed: ${_ceil_detail}" >&2
+                echo "       To override: rerun with --override-ceiling" >&2
+                # BLOCK-WORTHY: approval/invariant-by-design -- an unreadable
+                # or exceeded ceiling stops the manual queue the way it stops
+                # discovery; reading a malformed value as "no ceiling" would
+                # remove the operator's version gate without a word.
+                # CENSUS-ANCHOR: pm-agent-ceiling-unreadable-01
+                exit 1
+            fi
         fi
     fi
 fi
@@ -552,11 +635,11 @@ The materializer will create the task folders in \$PGAI_PROJECT_ROOT/tasks/ and 
 ${TARGET_VERSION}
 
 ## Constraints
-- Maximum tasks to generate: ${MAX_TASKS}
+- Hard ceiling (safety limit, not a target): ${MAX_TASKS} tasks — design to the twelve-ticket cap in team/roles/PM.md "Decomposition standards".
 
 ## Acceptance Criteria
 - [ ] Tasks have been decomposed from the requirements file
-- [ ] Each task has a README.md and status.md in BACKLOG state
+- [ ] Each task has a README.md and a status.md the materializer wrote (BACKLOG, or WAITING when it has unmet prerequisites)
 - [ ] Tasks have been appended to the appropriate backlog queue
 
 ## Prerequisites
@@ -628,11 +711,11 @@ The materializer will create the task folders in \$PGAI_PROJECT_ROOT/tasks/ and 
 ${TARGET_VERSION}
 
 ## Constraints
-- Maximum tasks to generate: ${MAX_TASKS}
+- Hard ceiling (safety limit, not a target): ${MAX_TASKS} tasks — design to the twelve-ticket cap in team/roles/PM.md "Decomposition standards".
 
 ## Acceptance Criteria
 - [ ] Tasks have been decomposed from the requirements file
-- [ ] Each task has a README.md and status.md in BACKLOG state
+- [ ] Each task has a README.md and a status.md the materializer wrote (BACKLOG, or WAITING when it has unmet prerequisites)
 - [ ] Tasks have been appended to the appropriate backlog queue
 
 ## Prerequisites

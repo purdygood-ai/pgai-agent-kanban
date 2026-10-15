@@ -34,6 +34,8 @@ _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _TEMP_SH="${_SCRIPT_DIR}/lib/temp.sh"
 if [[ ! -f "$_TEMP_SH" ]]; then
     echo "ERROR: temp.sh not found at: $_TEMP_SH" >&2
+    # BLOCK-WORTHY: this gate cannot run without its own temp-path helper.
+    # CENSUS-ANCHOR: verify-perproject-devtree-gate-temp-sh-missing-01
     exit 2
 fi
 # shellcheck source=lib/temp.sh
@@ -223,6 +225,9 @@ _CHECK_FUNC=$(sed -n '/_check_project_dev_tree()/,/^}/p' "$WAKE_COMMON_SH")
 if [[ -z "$_CHECK_FUNC" ]]; then
     fail "AC-1/2/3: could not extract _check_project_dev_tree from wake_common.sh"
     echo "--- RESULTS: ${PASS_COUNT} passed, ${FAIL_COUNT} failed ---"
+    # BLOCK-WORTHY: verification unable to run at all -- without the
+    # function body under test, none of this gate's assertions mean anything.
+    # CENSUS-ANCHOR: verify-perproject-devtree-gate-extract-failed-01
     exit 1
 fi
 
@@ -330,6 +335,9 @@ echo ""
 
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "${C_RED}FAILED: ${FAIL_COUNT} assertion(s) failed.${C_RESET}" >&2
+    # BLOCK-WORTHY: breakage-class -- a failed dev-tree-gate assertion
+    # means the gate this verifies would misbehave on a real project.
+    # CENSUS-ANCHOR: verify-perproject-devtree-gate-assertions-failed-01
     exit 1
 else
     echo "${C_GREEN}ALL PASSED: ${PASS_COUNT} assertions.${C_RESET}"

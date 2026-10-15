@@ -7,16 +7,26 @@ from executable lines in team/scripts/upgrade.sh.
 
 WHY THIS EXISTS
 ---------------
-The v1.7.0 two-phase upgrade architecture retired the self-overwrite guard
-mechanism (_PGAI_UPGRADE_SELF_COPY, _PGAI_UPGRADE_REEXEC, _PGAI_UPGRADE_ORIG_DIR).
-an earlier defect showed that a squash-merge conflict at the CM layer can silently resurrect
-the retired block — TESTER saw the correct RC tree; CM's squash to ai_main
-produced the wrong result for upgrade.sh.
+The two-phase upgrade architecture has no self-overwrite guard mechanism
+(_PGAI_UPGRADE_SELF_COPY, _PGAI_UPGRADE_REEXEC, _PGAI_UPGRADE_ORIG_DIR).
+A squash-merge conflict at the CM layer can silently resurrect
+the retired block — TESTER can see a correct RC tree while CM's squash to
+ai_main produces the wrong result for upgrade.sh.
 
-This lint converts the one-time Goal-4 behavior-pattern grep-zero acceptance
-criterion into a permanent, gated-suite check.  When a future merge restores the
+This lint is a permanent, gated-suite check that those variables stay
+absent.  When a future merge restores the
 retired block, this script exits 1 and the suite catches it before it reaches
 production — the same role lint_api_parity plays for operator-flag parity.
+
+IDENTIFIER-BY-NECESSITY
+------------------------
+The scan itself is identifier-by-necessity, not the behavior-pattern shape
+the paragraph above describes the acceptance criterion as: it is keyed on
+the three specific retired variable NAMES below, because the defect this
+lint closes is those three names' reintroduction verbatim (via a
+squash-merge conflict restoring the old block), not a class of constructs
+a behavior pattern could generalize over. A future guard mechanism reusing
+different variable names would need its own check.
 
 WHAT IS CHECKED
 ---------------
@@ -140,6 +150,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the upgrade temp-copy guard lint over upgrade.sh.
+
+    Exit codes: 0 no retired identifier appears as executable code; 1 one or
+    more do (printed); 2 usage error, or the target script was not found.
+    """
     args = _parse_args(argv)
 
     # Resolve the upgrade.sh path.

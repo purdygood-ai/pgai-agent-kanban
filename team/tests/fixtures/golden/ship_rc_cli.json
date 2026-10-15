@@ -1,0 +1,1003 @@
+{
+ "_about": "Pre-port CLI behaviour of ship-rc.sh on sandbox roots and repositories (scenarios), and the expected outcome of the scenarios whose behaviour changed on purpose (changed); see team/tests/integration/test_cm_ship_rc.py. Scenarios for a project the shared push-decision resolver cannot resolve (no project.cfg, no dev_tree_path in it) are recorded with the push gate applied: a skipped-unresolved-project line and no origin step.",
+ "changed": {
+  "ship-local-only": {
+   "outcome": {
+    "after": {
+     "files": {
+      "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false\n",
+      "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+     },
+     "head": "main",
+     "origin_refs": [
+      "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1"
+     ],
+     "refs": [
+      "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+      "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+     ],
+     "status": ""
+    },
+    "rc": 0,
+    "stderr": "Already on 'main'\n",
+    "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[ship-rc] Push policy: push_to_remote=false — skipping origin operations. Local ship only.\n[Step 1] Verifying rc/v0.4.0 exists locally...\n[push_to_remote=false] skipping origin check for ship-fixture: git ls-remote --exit-code --heads origin rc/v0.4.0\n  Confirmed: rc/v0.4.0 exists locally.\n[Step 2] Fetching origin and tags...\n[push_to_remote=false] skipping origin fetch for ship-fixture: git fetch origin --tags\n[Step 3] Checking out main and pulling...\n[push_to_remote=false] skipping origin pull for ship-fixture: git merge --ff-only origin/main\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[push_to_remote=false] skipping origin push for ship-fixture: git push origin main refs/tags/v0.4.0\n[Step 8] Deleting rc/v0.4.0 on origin...\n[push_to_remote=false] skipping origin push for ship-fixture: git push origin --delete rc/v0.4.0\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local; origin not touched)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created locally (push_to_remote=false: not pushed)\n  - rc/v0.4.0 deleted locally\n"
+   },
+   "reason": "push_to_remote = false used to be ignored, so a repository with no origin was refused at the origin branch check (exit 1); the port skips every origin step for such a project and ships locally"
+  }
+ },
+ "scenarios": {
+  "content-conflict": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main a987885c4b2f4c0c94f61a414966270cf4ccf7ab",
+     "refs/heads/rc/v0.4.0 95e949c9bed46de92b1641353ddabb89215ed596"
+    ],
+    "refs": [
+     "refs/heads/main a987885c4b2f4c0c94f61a414966270cf4ccf7ab",
+     "refs/heads/rc/v0.4.0 95e949c9bed46de92b1641353ddabb89215ed596"
+    ],
+    "status": "UU a.txt\nA  feature.txt\n"
+   },
+   "rc": 1,
+   "stderr": "Already on 'main'\n[ship-rc] Content conflict (UU) detected: a.txt — cannot auto-resolve.\n[ship-rc] UU content conflict(s) detected; cannot auto-resolve.\n[ship-rc] UD/DU paths (if any) will NOT be auto-resolved into a partial commit.\n\nERROR: git operation failed at step: git merge --squash rc/v0.4.0\nHalting before any further git operations.\nRecover manually by inspecting git state and re-running, or revert as needed.\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nAuto-merging a.txt\nCONFLICT (content): Merge conflict in a.txt\nSquash commit -- not updating HEAD\nAutomatic merge failed; fix conflicts and then commit the result.\n[ship-rc] Squash produced conflicts; inspecting git status...\n"
+  },
+  "delete-modify-auto-resolved": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 07707f6966455f69f7044c00bd535d281fc13199",
+     "refs/tags/v0.4.0 07707f6966455f69f7044c00bd535d281fc13199"
+    ],
+    "refs": [
+     "refs/heads/main 07707f6966455f69f7044c00bd535d281fc13199",
+     "refs/tags/v0.4.0 07707f6966455f69f7044c00bd535d281fc13199"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\nTo <BASE>/origin.git\n   1842b0a..07707f6  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nCONFLICT (modify/delete): f.txt deleted in HEAD and modified in rc/v0.4.0.  Version rc/v0.4.0 of f.txt left in tree.\nSquash commit -- not updating HEAD\nAutomatic merge failed; fix conflicts and then commit the result.\n[ship-rc] Squash produced conflicts; inspecting git status...\n[ship-rc] All conflicts are modify/delete (UD/DU); auto-resolving by taking main's side...\ncm-release: auto-resolved modify/delete: f.txt (took main's version)\n[ship-rc] Auto-resolve complete: 1 modify/delete path(s) resolved for squash: rc/v0.4.0 into main\n[Step 5] Committing squash on main...\n[main 07707f6] Release v0.4.0\n 2 files changed, 2 insertions(+)\n create mode 100644 f.txt\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was faeae22).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "dev-tree-from-environment": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[ship-rc] skipped-unresolved-project: project 'ship-fixture': missing dev-tree-path: <BASE>/kanban_root/projects/ship-fixture/project.cfg names no dev_tree_path (an inherited PGAI_DEV_TREE_PATH is never used for a push); nothing pushed and no remote contacted\n[Step 1] Verifying rc/v0.4.0 exists locally...\n[push_to_remote=false] skipping origin check for ship-fixture: git ls-remote --exit-code --heads origin rc/v0.4.0\n  Confirmed: rc/v0.4.0 exists locally.\n[Step 2] Fetching origin and tags...\n[push_to_remote=false] skipping origin fetch for ship-fixture: git fetch origin --tags\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\n[push_to_remote=false] skipping origin pull for ship-fixture: git merge --ff-only origin/main\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[push_to_remote=false] skipping origin push for ship-fixture: git push origin main refs/tags/v0.4.0\n[Step 8] Deleting rc/v0.4.0 on origin...\n[push_to_remote=false] skipping origin push for ship-fixture: git push origin --delete rc/v0.4.0\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local; origin not touched)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created locally (push_to_remote=false: not pushed)\n  - rc/v0.4.0 deleted locally\n"
+  },
+  "dirty-worktree": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": " M README.md\n"
+   },
+   "rc": 1,
+   "stderr": "ERROR: working tree is dirty. Commit or stash changes first.\n M README.md\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n"
+  },
+  "dry-run": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "ship-rc dry-run: no git operations will be performed.\n  Project:   ship-fixture\n  Version:   v0.4.0\n  RC branch: rc/v0.4.0\n  Main:      main\n  Tag:       v0.4.0\n  (dry-run: exiting before any git step)\n"
+  },
+  "dry-run-branch-prefix": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = ai_\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "ai_main",
+    "origin_refs": [
+     "refs/heads/ai_main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/ai_rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/ai_main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/ai_rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "ship-rc dry-run: no git operations will be performed.\n  Project:   ship-fixture\n  Version:   v0.4.0\n  RC branch: ai_rc/v0.4.0\n  Main:      ai_main\n  Tag:       ai_v0.4.0\n  (dry-run: exiting before any git step)\n"
+  },
+  "fidelity-divergence": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 048adfeacb7cffa49808b0addf41b47dae9ef5dd",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main 0b2edc09f0df131a34a80d4a8ba9e7a0edbbd563",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "Already on 'main'\nAutomatic merge went well; stopped before committing as requested\n\n[Step 5a] Fidelity gate: DIVERGENCE DETECTED — rc/v0.4.0 and main differ:\n hotfix.txt | 1 +\n 1 file changed, 1 insertion(+)\n\nERROR: Post-squash fidelity gate failed for v0.4.0: main contains commits\nnot present in rc/v0.4.0. A commit landed on main mid-RC.\nOperator must inspect the divergent paths shown above and resolve before re-running.\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nSquash commit -- not updating HEAD\n[Step 5] Committing squash on main...\n[main 0b2edc0] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n"
+  },
+  "help": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Usage: ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]\n\nShip a release candidate by squash-merging it directly into main (single-lane).\n\nBoth --project and --key are REQUIRED. Positional invocation is not supported.\n\nArguments:\n  --project <name>  Required. Project name; drives project resolution via the pp layer.\n  --key vX.Y.Z      Required. Release version in format vX.Y.Z (e.g. v0.5.0).\n  --dry-run         Print the plan (project, version, branch names) and exit 0.\n                    No git operations are performed. Safe to use from the API.\n  --help            Print this help and exit 0.\n\nBranch and tag prefixing\n------------------------\nWhen the project's project.cfg sets [project] branch_prefix (e.g. \"ai_\"),\nALL git refs operated on by this script are prefixed:\n\n  rc branch:     ai_rc/<version>    (instead of rc/<version>)\n  main:          ai_main            (instead of main)\n  tag:           ai_v<version>      (instead of v<version>)\n\nWhen branch_prefix is empty or absent (the common case for pure-AI shops),\nthis script behaves identically to the earlier un-prefixed version.\n\nThe script will error pre-flight if it cannot resolve the project context\nor if the prefixed RC branch does not exist locally and on origin.\n\nEnvironment variables\n---------------------\n  REPO_ROOT                    Override the repository root directory (default:\n                               per-project dev_tree_path from project.cfg, then\n                               global PGAI_DEV_TREE_PATH, then script's parent-parent)\n  PGAI_AGENT_KANBAN_ROOT_PATH  Path to kanban root (default: ~/pgai_agent_kanban)\n"
+  },
+  "help-short": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Usage: ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]\n\nShip a release candidate by squash-merging it directly into main (single-lane).\n\nBoth --project and --key are REQUIRED. Positional invocation is not supported.\n\nArguments:\n  --project <name>  Required. Project name; drives project resolution via the pp layer.\n  --key vX.Y.Z      Required. Release version in format vX.Y.Z (e.g. v0.5.0).\n  --dry-run         Print the plan (project, version, branch names) and exit 0.\n                    No git operations are performed. Safe to use from the API.\n  --help            Print this help and exit 0.\n\nBranch and tag prefixing\n------------------------\nWhen the project's project.cfg sets [project] branch_prefix (e.g. \"ai_\"),\nALL git refs operated on by this script are prefixed:\n\n  rc branch:     ai_rc/<version>    (instead of rc/<version>)\n  main:          ai_main            (instead of main)\n  tag:           ai_v<version>      (instead of v<version>)\n\nWhen branch_prefix is empty or absent (the common case for pure-AI shops),\nthis script behaves identically to the earlier un-prefixed version.\n\nThe script will error pre-flight if it cannot resolve the project context\nor if the prefixed RC branch does not exist locally and on origin.\n\nEnvironment variables\n---------------------\n  REPO_ROOT                    Override the repository root directory (default:\n                               per-project dev_tree_path from project.cfg, then\n                               global PGAI_DEV_TREE_PATH, then script's parent-parent)\n  PGAI_AGENT_KANBAN_ROOT_PATH  Path to kanban root (default: ~/pgai_agent_kanban)\n"
+  },
+  "hook-cfg-absolute-path": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n\n[hooks]\ncm_release_pre_tag_hook = <BASE>/ops-hooks/pre-tag.sh\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: <BASE>/ops-hooks/pre-tag.sh (source: cfg)\n[ship-rc] running hook cm-release-pre-tag...\n[hook cm-release-pre-tag] phase=pre-tag version=v0.4.0 project=ship-fixture\n[hook cm-release-pre-tag] project_root=<BASE>/kanban_root/projects/ship-fixture\n[hook cm-release-pre-tag] dev_tree=<BASE>/dev_repo rc=rc/v0.4.0 kanban=<BASE>/kanban_root\n[hook cm-release-pre-tag] cwd=<BASE>/dev_repo\n[hook cm-release-pre-tag] a line on stderr\n[hook cm-release-pre-tag] last line without a newline[ship-rc] hook cm-release-pre-tag: completed successfully\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "hook-cfg-absolute-path-missing-file": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n\n[hooks]\ncm_release_post_tag_hook = /nonexistent/ship-fixture-post-tag.sh\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: /nonexistent/ship-fixture-post-tag.sh (source: cfg)\n[ship-rc] hook cm-release-post-tag: not present, skipping\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "hook-in-repo-post-tag-not-executable": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": "?? .pgai/\n"
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n[cm-release] ERROR: in-repo hook: FAIL — hook file exists but is not executable\n[cm-release] ERROR:\n[cm-release] ERROR: Cause(s):\n[cm-release] ERROR:   - <BASE>/dev_repo/.pgai/hooks/cm-release-post-tag.sh — file mode denies execute permission\n[cm-release] ERROR:\n[cm-release] ERROR: To fix:\n[cm-release] ERROR:   1. chmod +x <BASE>/dev_repo/.pgai/hooks/cm-release-post-tag.sh\n[cm-release] ERROR:   2. Re-run scripts/cm/release.sh to re-resolve the post-tag hook.\n[cm-release] ERROR:\n[cm-release] ERROR: Rule: a hook file that exists at a resolved tier must be executable, or the release cannot invoke it deterministically.\n[ship-rc] WARNING: post-tag in-repo hook exists but is not executable — skipping (post-tag does not block release)\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "hook-in-repo-pre-squash-not-executable": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/refusal-ledger.md": "# Refusal Ledger — ship-fixture\n\nMost-recent-only. Every write REPLACES this file's entire content with exactly one record — the most recent refusal a dual-channel emitter recorded for this project. This is not an audit log; the wake log already keeps history (see team/SOP-core.md 'Gates and Refusals'). Read the current record with pgai_agent_kanban.lib.refusal_ledger.read_latest() rather than re-deriving it from this file's raw text.\n\n## Refusal: <TS> — ship-fixture — <SURFACE>\n- Context: <CONTEXT>\n- Error: ship-rc.pre-squash-hook-not-executable\n- Message: The cm-release-pre-squash in-repo hook exists but is not executable, so the squash cannot proceed safely.\n- Remedy: chmod +x the in-repo hook path printed above by cm_release_hooks.sh, commit the mode change, then re-run ship-rc.sh.\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": "?? .pgai/\n"
+   },
+   "rc": 1,
+   "stderr": "Already on 'main'\n[cm-release] ERROR: in-repo hook: FAIL — hook file exists but is not executable\n[cm-release] ERROR:\n[cm-release] ERROR: Cause(s):\n[cm-release] ERROR:   - <BASE>/dev_repo/.pgai/hooks/cm-release-pre-squash.sh — file mode denies execute permission\n[cm-release] ERROR:\n[cm-release] ERROR: To fix:\n[cm-release] ERROR:   1. chmod +x <BASE>/dev_repo/.pgai/hooks/cm-release-pre-squash.sh\n[cm-release] ERROR:   2. Re-run scripts/cm/release.sh to re-resolve the pre-squash hook.\n[cm-release] ERROR:\n[cm-release] ERROR: Rule: a hook file that exists at a resolved tier must be executable, or the release cannot invoke it deterministically.\n\n[ship-rc] HALT\nerror:   ship-rc.pre-squash-hook-not-executable\nmessage: The cm-release-pre-squash in-repo hook exists but is not executable, so the squash cannot proceed safely.\nremedy:  chmod +x the in-repo hook path printed above by cm_release_hooks.sh, commit the mode change, then re-run ship-rc.sh.\n\nHALT: ship-rc.sh stopped. The release has NOT been shipped.\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\n"
+  },
+  "hook-in-repo-pre-tag-not-executable": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/refusal-ledger.md": "# Refusal Ledger — ship-fixture\n\nMost-recent-only. Every write REPLACES this file's entire content with exactly one record — the most recent refusal a dual-channel emitter recorded for this project. This is not an audit log; the wake log already keeps history (see team/SOP-core.md 'Gates and Refusals'). Read the current record with pgai_agent_kanban.lib.refusal_ledger.read_latest() rather than re-deriving it from this file's raw text.\n\n## Refusal: <TS> — ship-fixture — <SURFACE>\n- Context: <CONTEXT>\n- Error: ship-rc.pre-tag-hook-not-executable\n- Message: The cm-release-pre-tag in-repo hook exists but is not executable, so the tag phase cannot run it.\n- Remedy: chmod +x the in-repo hook path printed above by cm_release_hooks.sh, commit the mode change, then re-run ship-rc.sh.\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": "?? .pgai/\n"
+   },
+   "rc": 1,
+   "stderr": "Already on 'main'\n[cm-release] ERROR: in-repo hook: FAIL — hook file exists but is not executable\n[cm-release] ERROR:\n[cm-release] ERROR: Cause(s):\n[cm-release] ERROR:   - <BASE>/dev_repo/.pgai/hooks/cm-release-pre-tag.sh — file mode denies execute permission\n[cm-release] ERROR:\n[cm-release] ERROR: To fix:\n[cm-release] ERROR:   1. chmod +x <BASE>/dev_repo/.pgai/hooks/cm-release-pre-tag.sh\n[cm-release] ERROR:   2. Re-run scripts/cm/release.sh to re-resolve the pre-tag hook.\n[cm-release] ERROR:\n[cm-release] ERROR: Rule: a hook file that exists at a resolved tier must be executable, or the release cannot invoke it deterministically.\n\n[ship-rc] HALT\nerror:   ship-rc.pre-tag-hook-not-executable\nmessage: The cm-release-pre-tag in-repo hook exists but is not executable, so the tag phase cannot run it.\nremedy:  chmod +x the in-repo hook path printed above by cm_release_hooks.sh, commit the mode change, then re-run ship-rc.sh.\n\nHALT: ship-rc.sh stopped. The release has NOT been shipped.\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\n"
+  },
+  "hook-in-repo-pre-tag-runs": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": "?? .pgai/\n"
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: <BASE>/dev_repo/.pgai/hooks/cm-release-pre-tag.sh (source: in-repo)\n[ship-rc] running hook cm-release-pre-tag...\n[hook cm-release-pre-tag] phase=pre-tag version=v0.4.0 project=ship-fixture\n[hook cm-release-pre-tag] project_root=<BASE>/kanban_root/projects/ship-fixture\n[hook cm-release-pre-tag] dev_tree=<BASE>/dev_repo rc=rc/v0.4.0 kanban=<BASE>/kanban_root\n[hook cm-release-pre-tag] cwd=<BASE>/dev_repo\n[hook cm-release-pre-tag] a line on stderr\n[hook cm-release-pre-tag] last line without a newline[ship-rc] hook cm-release-pre-tag: completed successfully\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "hook-post-tag-fails": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/hooks/cm-release-post-tag.sh": "#!/usr/bin/env bash\necho \"phase=post-tag version=$PGAI_TARGET_VERSION project=$PGAI_PROJECT_NAME\"\necho \"project_root=$PGAI_PROJECT_ROOT\"\necho \"dev_tree=$PGAI_DEV_TREE_PATH rc=$PGAI_RC_BRANCH kanban=$PGAI_KANBAN_ROOT\"\necho \"cwd=$(pwd)\"\necho \"a line on stderr\" >&2\nprintf 'last line without a newline'\nexit 5\n",
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n[ship-rc] WARNING: hook cm-release-post-tag failed (rc=5), continuing per --no-block\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-post-tag.sh (source: kanban-side)\n[ship-rc] running hook cm-release-post-tag...\n[hook cm-release-post-tag] phase=post-tag version=v0.4.0 project=ship-fixture\n[hook cm-release-post-tag] project_root=<BASE>/kanban_root/projects/ship-fixture\n[hook cm-release-post-tag] dev_tree=<BASE>/dev_repo rc=rc/v0.4.0 kanban=<BASE>/kanban_root\n[hook cm-release-post-tag] cwd=<BASE>/dev_repo\n[hook cm-release-post-tag] a line on stderr\n[hook cm-release-post-tag] last line without a newline[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "hook-pre-squash-fails": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/hooks/cm-release-pre-squash.sh": "#!/usr/bin/env bash\necho \"phase=pre-squash version=$PGAI_TARGET_VERSION project=$PGAI_PROJECT_NAME\"\necho \"project_root=$PGAI_PROJECT_ROOT\"\necho \"dev_tree=$PGAI_DEV_TREE_PATH rc=$PGAI_RC_BRANCH kanban=$PGAI_KANBAN_ROOT\"\necho \"cwd=$(pwd)\"\necho \"a line on stderr\" >&2\nprintf 'last line without a newline'\nexit 3\n",
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/refusal-ledger.md": "# Refusal Ledger — ship-fixture\n\nMost-recent-only. Every write REPLACES this file's entire content with exactly one record — the most recent refusal a dual-channel emitter recorded for this project. This is not an audit log; the wake log already keeps history (see team/SOP-core.md 'Gates and Refusals'). Read the current record with pgai_agent_kanban.lib.refusal_ledger.read_latest() rather than re-deriving it from this file's raw text.\n\n## Refusal: <TS> — ship-fixture — <SURFACE>\n- Context: <CONTEXT>\n- Error: ship-rc.pre-squash-hook-failed\n- Message: The cm-release-pre-squash hook exited non-zero (rc=1) for v0.4.0 — the squash cannot proceed safely.\n- Remedy: Inspect the [hook cm-release-pre-squash]-prefixed lines printed above for the hook's own diagnostic output, fix the hook, then re-run ship-rc.sh.\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "Already on 'main'\n[ship-rc] ERROR: hook cm-release-pre-squash failed (rc=3), blocking release\n[ship-rc] ERROR: see [hook cm-release-pre-squash] lines above for the hook's output\n\n[ship-rc] HALT\nerror:   ship-rc.pre-squash-hook-failed\nmessage: The cm-release-pre-squash hook exited non-zero (rc=1) for v0.4.0 — the squash cannot proceed safely.\nremedy:  Inspect the [hook cm-release-pre-squash]-prefixed lines printed above for the hook's own diagnostic output, fix the hook, then re-run ship-rc.sh.\n\nHALT: ship-rc.sh stopped. The release has NOT been shipped.\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-pre-squash.sh (source: kanban-side)\n[ship-rc] running hook cm-release-pre-squash...\n[hook cm-release-pre-squash] phase=pre-squash version=v0.4.0 project=ship-fixture\n[hook cm-release-pre-squash] project_root=<BASE>/kanban_root/projects/ship-fixture\n[hook cm-release-pre-squash] dev_tree=<BASE>/dev_repo rc=rc/v0.4.0 kanban=<BASE>/kanban_root\n[hook cm-release-pre-squash] cwd=<BASE>/dev_repo\n[hook cm-release-pre-squash] a line on stderr\n[hook cm-release-pre-squash] last line without a newline"
+  },
+  "hook-pre-squash-required-missing": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n\n[hooks]\ncm_release_pre_squash_hook_required = true\n",
+     "kanban_root/projects/ship-fixture/refusal-ledger.md": "# Refusal Ledger — ship-fixture\n\nMost-recent-only. Every write REPLACES this file's entire content with exactly one record — the most recent refusal a dual-channel emitter recorded for this project. This is not an audit log; the wake log already keeps history (see team/SOP-core.md 'Gates and Refusals'). Read the current record with pgai_agent_kanban.lib.refusal_ledger.read_latest() rather than re-deriving it from this file's raw text.\n\n## Refusal: <TS> — ship-fixture — <SURFACE>\n- Context: <CONTEXT>\n- Error: cm-release.hook-required-missing.pre-squash\n- Message: HALT before pre-squash phase: cm_release_pre_squash_hook_required=true but no hook was found at any tier. Searched: (cfg) <BASE>/kanban_root/projects/ship-fixture/project.cfg [hooks] cm_release_pre_squash_hook; (kanban-side) <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-pre-squash.sh; (in-repo) <BASE>/dev_repo/.pgai/hooks/cm-release-pre-squash.sh (dev tree working copy).\n- Remedy: Add the hook at one of the searched locations above, or set cm_release_pre_squash_hook_required=false in project.cfg, then re-run the release script.\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "Already on 'main'\n\n[ship-rc] HALT\nerror:   cm-release.hook-required-missing.pre-squash\nmessage: HALT before pre-squash phase: cm_release_pre_squash_hook_required=true but no hook was found at any tier. Searched: (cfg) <BASE>/kanban_root/projects/ship-fixture/project.cfg [hooks] cm_release_pre_squash_hook; (kanban-side) <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-pre-squash.sh; (in-repo) <BASE>/dev_repo/.pgai/hooks/cm-release-pre-squash.sh (dev tree working copy).\nremedy:  Add the hook at one of the searched locations above, or set cm_release_pre_squash_hook_required=false in project.cfg, then re-run the release script.\n\nHALT: ship-rc.sh stopped. The release has NOT been shipped.\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\n"
+  },
+  "hook-pre-tag-fails": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/hooks/cm-release-pre-tag.sh": "#!/usr/bin/env bash\necho \"phase=pre-tag version=$PGAI_TARGET_VERSION project=$PGAI_PROJECT_NAME\"\necho \"project_root=$PGAI_PROJECT_ROOT\"\necho \"dev_tree=$PGAI_DEV_TREE_PATH rc=$PGAI_RC_BRANCH kanban=$PGAI_KANBAN_ROOT\"\necho \"cwd=$(pwd)\"\necho \"a line on stderr\" >&2\nprintf 'last line without a newline'\nexit 4\n",
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "Already on 'main'\n[ship-rc] ERROR: hook cm-release-pre-tag failed (rc=4), blocking release\n[ship-rc] ERROR: see [hook cm-release-pre-tag] lines above for the hook's output\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-pre-tag.sh (source: kanban-side)\n[ship-rc] running hook cm-release-pre-tag...\n[hook cm-release-pre-tag] phase=pre-tag version=v0.4.0 project=ship-fixture\n[hook cm-release-pre-tag] project_root=<BASE>/kanban_root/projects/ship-fixture\n[hook cm-release-pre-tag] dev_tree=<BASE>/dev_repo rc=rc/v0.4.0 kanban=<BASE>/kanban_root\n[hook cm-release-pre-tag] cwd=<BASE>/dev_repo\n[hook cm-release-pre-tag] a line on stderr\n[hook cm-release-pre-tag] last line without a newline"
+  },
+  "hook-pre-tag-required-missing": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n\n[hooks]\ncm_release_pre_tag_hook_required = True\n",
+     "kanban_root/projects/ship-fixture/refusal-ledger.md": "# Refusal Ledger — ship-fixture\n\nMost-recent-only. Every write REPLACES this file's entire content with exactly one record — the most recent refusal a dual-channel emitter recorded for this project. This is not an audit log; the wake log already keeps history (see team/SOP-core.md 'Gates and Refusals'). Read the current record with pgai_agent_kanban.lib.refusal_ledger.read_latest() rather than re-deriving it from this file's raw text.\n\n## Refusal: <TS> — ship-fixture — <SURFACE>\n- Context: <CONTEXT>\n- Error: cm-release.hook-required-missing.pre-tag\n- Message: HALT before pre-tag phase: cm_release_pre_tag_hook_required=true but no hook was found at any tier. Searched: (cfg) <BASE>/kanban_root/projects/ship-fixture/project.cfg [hooks] cm_release_pre_tag_hook; (kanban-side) <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-pre-tag.sh; (in-repo) <BASE>/dev_repo/.pgai/hooks/cm-release-pre-tag.sh (dev tree working copy).\n- Remedy: Add the hook at one of the searched locations above, or set cm_release_pre_tag_hook_required=false in project.cfg, then re-run the release script.\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "Already on 'main'\n\n[ship-rc] HALT\nerror:   cm-release.hook-required-missing.pre-tag\nmessage: HALT before pre-tag phase: cm_release_pre_tag_hook_required=true but no hook was found at any tier. Searched: (cfg) <BASE>/kanban_root/projects/ship-fixture/project.cfg [hooks] cm_release_pre_tag_hook; (kanban-side) <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-pre-tag.sh; (in-repo) <BASE>/dev_repo/.pgai/hooks/cm-release-pre-tag.sh (dev tree working copy).\nremedy:  Add the hook at one of the searched locations above, or set cm_release_pre_tag_hook_required=false in project.cfg, then re-run the release script.\n\nHALT: ship-rc.sh stopped. The release has NOT been shipped.\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\n"
+  },
+  "hooks-all-pass": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/hooks/cm-release-post-tag.sh": "#!/usr/bin/env bash\necho \"phase=post-tag version=$PGAI_TARGET_VERSION project=$PGAI_PROJECT_NAME\"\necho \"project_root=$PGAI_PROJECT_ROOT\"\necho \"dev_tree=$PGAI_DEV_TREE_PATH rc=$PGAI_RC_BRANCH kanban=$PGAI_KANBAN_ROOT\"\necho \"cwd=$(pwd)\"\necho \"a line on stderr\" >&2\nprintf 'last line without a newline'\nexit 0\n",
+     "kanban_root/projects/ship-fixture/hooks/cm-release-pre-squash.sh": "#!/usr/bin/env bash\necho \"phase=pre-squash version=$PGAI_TARGET_VERSION project=$PGAI_PROJECT_NAME\"\necho \"project_root=$PGAI_PROJECT_ROOT\"\necho \"dev_tree=$PGAI_DEV_TREE_PATH rc=$PGAI_RC_BRANCH kanban=$PGAI_KANBAN_ROOT\"\necho \"cwd=$(pwd)\"\necho \"a line on stderr\" >&2\nprintf 'last line without a newline'\nexit 0\n",
+     "kanban_root/projects/ship-fixture/hooks/cm-release-pre-tag.sh": "#!/usr/bin/env bash\necho \"phase=pre-tag version=$PGAI_TARGET_VERSION project=$PGAI_PROJECT_NAME\"\necho \"project_root=$PGAI_PROJECT_ROOT\"\necho \"dev_tree=$PGAI_DEV_TREE_PATH rc=$PGAI_RC_BRANCH kanban=$PGAI_KANBAN_ROOT\"\necho \"cwd=$(pwd)\"\necho \"a line on stderr\" >&2\nprintf 'last line without a newline'\nexit 0\n",
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-pre-squash.sh (source: kanban-side)\n[ship-rc] running hook cm-release-pre-squash...\n[hook cm-release-pre-squash] phase=pre-squash version=v0.4.0 project=ship-fixture\n[hook cm-release-pre-squash] project_root=<BASE>/kanban_root/projects/ship-fixture\n[hook cm-release-pre-squash] dev_tree=<BASE>/dev_repo rc=rc/v0.4.0 kanban=<BASE>/kanban_root\n[hook cm-release-pre-squash] cwd=<BASE>/dev_repo\n[hook cm-release-pre-squash] a line on stderr\n[hook cm-release-pre-squash] last line without a newline[ship-rc] hook cm-release-pre-squash: completed successfully\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-pre-tag.sh (source: kanban-side)\n[ship-rc] running hook cm-release-pre-tag...\n[hook cm-release-pre-tag] phase=pre-tag version=v0.4.0 project=ship-fixture\n[hook cm-release-pre-tag] project_root=<BASE>/kanban_root/projects/ship-fixture\n[hook cm-release-pre-tag] dev_tree=<BASE>/dev_repo rc=rc/v0.4.0 kanban=<BASE>/kanban_root\n[hook cm-release-pre-tag] cwd=<BASE>/dev_repo\n[hook cm-release-pre-tag] a line on stderr\n[hook cm-release-pre-tag] last line without a newline[ship-rc] hook cm-release-pre-tag: completed successfully\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: <BASE>/kanban_root/projects/ship-fixture/hooks/cm-release-post-tag.sh (source: kanban-side)\n[ship-rc] running hook cm-release-post-tag...\n[hook cm-release-post-tag] phase=post-tag version=v0.4.0 project=ship-fixture\n[hook cm-release-post-tag] project_root=<BASE>/kanban_root/projects/ship-fixture\n[hook cm-release-post-tag] dev_tree=<BASE>/dev_repo rc=rc/v0.4.0 kanban=<BASE>/kanban_root\n[hook cm-release-post-tag] cwd=<BASE>/dev_repo\n[hook cm-release-post-tag] a line on stderr\n[hook cm-release-post-tag] last line without a newline[ship-rc] hook cm-release-post-tag: completed successfully\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "invalid-branch-prefix": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = bad/prefix\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "project_paths.sh: validate_branch_prefix: invalid branch_prefix 'bad/prefix' (allowed characters: a-z A-Z 0-9 _ -; spaces, slashes, dots, and other special characters are not permitted)\nproject_paths.sh: pp_branch_prefix: invalid branch_prefix in config for project 'ship-fixture'\n",
+   "stdout": ""
+  },
+  "invalid-version": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: invalid version format: '0.4'\nExpected format: vX.Y.Z (e.g. v0.5.0)\n",
+   "stdout": ""
+  },
+  "modify-delete-auto-resolved": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main da73b5c244ccc1725eeba59cfcfde2c8f969ef70",
+     "refs/tags/v0.4.0 da73b5c244ccc1725eeba59cfcfde2c8f969ef70"
+    ],
+    "refs": [
+     "refs/heads/main da73b5c244ccc1725eeba59cfcfde2c8f969ef70",
+     "refs/tags/v0.4.0 da73b5c244ccc1725eeba59cfcfde2c8f969ef70"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\nTo <BASE>/origin.git\n   66a088a..da73b5c  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nCONFLICT (modify/delete): f.txt deleted in rc/v0.4.0 and modified in HEAD.  Version HEAD of f.txt left in tree.\nSquash commit -- not updating HEAD\nAutomatic merge failed; fix conflicts and then commit the result.\n[ship-rc] Squash produced conflicts; inspecting git status...\n[ship-rc] All conflicts are modify/delete (UD/DU); auto-resolving by taking main's side...\ncm-release: auto-resolved modify/delete: f.txt (took main's deletion)\n[ship-rc] Auto-resolve complete: 1 modify/delete path(s) resolved for squash: rc/v0.4.0 into main\n[Step 5] Committing squash on main...\n[main da73b5c] Release v0.4.0\n 2 files changed, 1 insertion(+), 1 deletion(-)\n delete mode 100644 f.txt\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was d2b549d).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "not-a-repository": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: not in a git repository at <BASE>/not_a_repo\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[ship-rc] skipped-unresolved-project: project 'ship-fixture': missing dev-tree-path: <BASE>/kanban_root/projects/ship-fixture/project.cfg names no dev_tree_path (an inherited PGAI_DEV_TREE_PATH is never used for a push); nothing pushed and no remote contacted\n"
+  },
+  "project-from-environment": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "ship-rc dry-run: no git operations will be performed.\n  Project:   ship-fixture\n  Version:   v0.4.0\n  RC branch: rc/v0.4.0\n  Main:      main\n  Tag:       v0.4.0\n  (dry-run: exiting before any git step)\n"
+  },
+  "project-not-registered": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "error:   project_resolve.not_found\nmessage: pp_resolve_project_name: no project matches 'no-such-project' in <BASE>/kanban_root/projects.cfg.\nremedy:  Check the project name against projects.cfg (registered: ship-fixture, other-project).\n\nERROR: project context is required.\n  Pass --project <name>, or set PGAI_PROJECT_NAME=<name> in the environment.\n",
+   "stdout": ""
+  },
+  "project-prefix-resolves": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "ship-rc dry-run: no git operations will be performed.\n  Project:   ship-fixture\n  Version:   v0.4.0\n  RC branch: rc/v0.4.0\n  Main:      main\n  Tag:       v0.4.0\n  (dry-run: exiting before any git step)\n"
+  },
+  "rc-missing-locally": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: branch 'rc/v0.4.0' does not exist locally\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n"
+  },
+  "rc-missing-on-origin": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: branch 'rc/v0.4.0' does not exist on origin\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n"
+  },
+  "repo-root-override": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[ship-rc] skipped-unresolved-project: project 'ship-fixture': missing dev-tree-path: <BASE>/kanban_root/projects/ship-fixture/project.cfg names no dev_tree_path (an inherited PGAI_DEV_TREE_PATH is never used for a push); nothing pushed and no remote contacted\n[Step 1] Verifying rc/v0.4.0 exists locally...\n[push_to_remote=false] skipping origin check for ship-fixture: git ls-remote --exit-code --heads origin rc/v0.4.0\n  Confirmed: rc/v0.4.0 exists locally.\n[Step 2] Fetching origin and tags...\n[push_to_remote=false] skipping origin fetch for ship-fixture: git fetch origin --tags\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\n[push_to_remote=false] skipping origin pull for ship-fixture: git merge --ff-only origin/main\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[push_to_remote=false] skipping origin push for ship-fixture: git push origin main refs/tags/v0.4.0\n[Step 8] Deleting rc/v0.4.0 on origin...\n[push_to_remote=false] skipping origin push for ship-fixture: git push origin --delete rc/v0.4.0\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local; origin not touched)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created locally (push_to_remote=false: not pushed)\n  - rc/v0.4.0 deleted locally\n"
+  },
+  "ship": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "ship-branch-prefix": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = ai_\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "ai_main",
+    "origin_refs": [
+     "refs/heads/ai_main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/ai_v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/ai_main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/ai_v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'ai_main'\nTo <BASE>/origin.git\n   b59dac1..74eed53  ai_main -> ai_main\n * [new tag]         ai_v0.4.0 -> ai_v0.4.0\nTo <BASE>/origin.git\n - [deleted]         ai_rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    ai_rc/v0.4.0\n  Main:         ai_main\n  Tag:          ai_v0.4.0\n\n[Step 1] Verifying ai_rc/v0.4.0 exists locally and on origin...\n  Confirmed: ai_rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out ai_main and pulling...\nYour branch is up to date with 'origin/ai_main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging ai_rc/v0.4.0 into ai_main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on ai_main...\n[ai_main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying ai_rc/v0.4.0 tree matches ai_main after squash...\n[Step 5a] Fidelity gate: OK — ai_rc/v0.4.0 and ai_main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging ai_v0.4.0 on ai_main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing ai_main and refs/tags/ai_v0.4.0 to origin...\n[Step 8] Deleting ai_rc/v0.4.0 on origin...\n[Step 9] Deleting local branch ai_rc/v0.4.0...\nDeleted branch ai_rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  ai_v0.4.0  (on ai_main)\n  RC deleted: ai_rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - ai_rc/v0.4.0 squashed directly to ai_main (single-lane squash commit)\n  - Post-squash fidelity gate passed: ai_rc/v0.4.0 and ai_main trees are identical\n  - Tag ai_v0.4.0 created and pushed\n  - ai_rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "ship-from-rc-branch": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Switched to branch 'main'\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "ship-local-only": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \npush_to_remote = false\n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: branch 'rc/v0.4.0' does not exist on origin\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n"
+  },
+  "ship-release-state-already-reset": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  RC fields already none.\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "ship-release-state-missing": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\nTo <BASE>/origin.git\n   b59dac1..74eed53  main -> main\n * [new tag]         v0.4.0 -> v0.4.0\nTo <BASE>/origin.git\n - [deleted]         rc/v0.4.0\n  WARNING: release-state.md not found: <BASE>/kanban_root/projects/ship-fixture/release-state.md\n  Skipping reconciliation.\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[Step 1] Verifying rc/v0.4.0 exists locally and on origin...\n  Confirmed: rc/v0.4.0 exists locally and on origin.\n[Step 2] Fetching origin and tags...\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\nAlready up to date.\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[Step 8] Deleting rc/v0.4.0 on origin...\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local + origin)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created and pushed\n  - rc/v0.4.0 deleted from origin and locally\n"
+  },
+  "ship-twice": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: tag 'v0.4.0' already exists locally\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n"
+  },
+  "ship-without-project-cfg": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nv0.4.0\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac",
+     "refs/tags/v0.4.0 74eed537e39051e9a9f6fee9ddb9ae98cd37b1ac"
+    ],
+    "status": ""
+   },
+   "rc": 0,
+   "stderr": "Already on 'main'\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n[ship-rc] skipped-unresolved-project: project 'ship-fixture': missing project-cfg: <BASE>/kanban_root/projects/ship-fixture/project.cfg does not exist; nothing pushed and no remote contacted\n[Step 1] Verifying rc/v0.4.0 exists locally...\n[push_to_remote=false] skipping origin check for ship-fixture: git ls-remote --exit-code --heads origin rc/v0.4.0\n  Confirmed: rc/v0.4.0 exists locally.\n[Step 2] Fetching origin and tags...\n[push_to_remote=false] skipping origin fetch for ship-fixture: git fetch origin --tags\n[Step 3] Checking out main and pulling...\nYour branch is up to date with 'origin/main'.\n[push_to_remote=false] skipping origin pull for ship-fixture: git merge --ff-only origin/main\n[Step 3b] Running pre-squash hook (if present)...\npre-squash hook: none configured\n[Step 4] Squash-merging rc/v0.4.0 into main...\nUpdating b59dac1..61d3dc9\nFast-forward\nSquash commit -- not updating HEAD\n feature.txt | 1 +\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5] Committing squash on main...\n[main 74eed53] Release v0.4.0\n 1 file changed, 1 insertion(+)\n create mode 100644 feature.txt\n[Step 5a] Fidelity gate: verifying rc/v0.4.0 tree matches main after squash...\n[Step 5a] Fidelity gate: OK — rc/v0.4.0 and main are identical.\n[Step 5b] Running pre-tag hook (if present)...\npre-tag hook: none configured\n[Step 6] Tagging v0.4.0 on main...\n[Step 6b] Running post-tag hook (if present)...\npost-tag hook: none configured\n[Step 7] Pushing main and refs/tags/v0.4.0 to origin...\n[push_to_remote=false] skipping origin push for ship-fixture: git push origin main refs/tags/v0.4.0\n[Step 8] Deleting rc/v0.4.0 on origin...\n[push_to_remote=false] skipping origin push for ship-fixture: git push origin --delete rc/v0.4.0\n[Step 9] Deleting local branch rc/v0.4.0...\nDeleted branch rc/v0.4.0 (was 61d3dc9).\n[Post-ship] Reconciling release-state.md...\n  Active RC         -> none  (was: v0.4.0)\n  RC Opened At      -> none  (was: 2026-01-01T00:00:00+00:00)\n  RC Opened By Task -> none  (was: CM-20260101-000-open)\n  Last Released     -> v0.4.0  (was: v0.3.2)\n[Post-ship] Checking for a HALT-AFTER sentinel to spend at RC close...\n  no HALT-AFTER sentinel present at either scope; nothing to spend.\n  NOTE: The CM release task (if one exists) is not auto-closed by this script.\n  If a CM task for v0.4.0 remains open, mark it DONE manually.\n\n\nRelease complete.\n  Version:    v0.4.0\n  Tagged as:  v0.4.0  (on main)\n  RC deleted: rc/v0.4.0 (local; origin not touched)\n\nSummary of what shipped:\n  - rc/v0.4.0 squashed directly to main (single-lane squash commit)\n  - Post-squash fidelity gate passed: rc/v0.4.0 and main trees are identical\n  - Tag v0.4.0 created locally (push_to_remote=false: not pushed)\n  - rc/v0.4.0 deleted locally\n"
+  },
+  "tag-exists": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7",
+     "refs/tags/v0.4.0 b59dac1e82ffecc13db8ac53426cb2c2dd8574e1"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: tag 'v0.4.0' already exists locally\n",
+   "stdout": "Shipping release: v0.4.0 (project: ship-fixture)\n  RC branch:    rc/v0.4.0\n  Main:         main\n  Tag:          v0.4.0\n\n"
+  },
+  "usage-key-without-value": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: --key requires a value\n\nUsage: ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      release version (required; format: vX.Y.Z)\n  --dry-run         print plan and exit 0; no git operations performed\n  --help            print full documentation\n",
+   "stdout": ""
+  },
+  "usage-missing-key": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: missing required flag --key vX.Y.Z\n\nUsage: ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      release version (required; format: vX.Y.Z)\n  --dry-run         print plan and exit 0; no git operations performed\n  --help            print full documentation\n",
+   "stdout": ""
+  },
+  "usage-missing-project": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: missing required flag --project <name>\n\nUsage: ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      release version (required; format: vX.Y.Z)\n  --dry-run         print plan and exit 0; no git operations performed\n  --help            print full documentation\n",
+   "stdout": ""
+  },
+  "usage-positional": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: positional arguments are not supported; use --project and --key flags\n\nUsage: ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      release version (required; format: vX.Y.Z)\n  --dry-run         print plan and exit 0; no git operations performed\n  --help            print full documentation\n",
+   "stdout": ""
+  },
+  "usage-project-without-value": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: --project requires a value\n\nUsage: ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      release version (required; format: vX.Y.Z)\n  --dry-run         print plan and exit 0; no git operations performed\n  --help            print full documentation\n",
+   "stdout": ""
+  },
+  "usage-unknown-flag": {
+   "after": {
+    "files": {
+     "kanban_root/projects/ship-fixture/project.cfg": "[project]\nproject_name = ship-fixture\ndev_tree_path = <BASE>/dev_repo\nworkflow_type = release\nbranch_prefix = \n",
+     "kanban_root/projects/ship-fixture/release-state.md": "# Release State\n\n## Active RC\nv0.4.0\n\n## RC Opened At\n2026-01-01T00:00:00+00:00\n\n## RC Opened By Task\nCM-20260101-000-open\n\n## Last Released\nv0.3.2\n\n## HALT Event\n- at: 2026-01-02T03:04:05+00:00\n- reason: an appended block every rewrite keeps\n"
+    },
+    "head": "main",
+    "origin_refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "refs": [
+     "refs/heads/main b59dac1e82ffecc13db8ac53426cb2c2dd8574e1",
+     "refs/heads/rc/v0.4.0 61d3dc9f8484e6fc55d1a669bb80e50d7b9fbcc7"
+    ],
+    "status": ""
+   },
+   "rc": 1,
+   "stderr": "ERROR: unknown flag: --bogus\n\nUsage: ship-rc.sh --project <name> --key vX.Y.Z [--dry-run] [--help]\n\n  --project <name>  project name (required)\n  --key vX.Y.Z      release version (required; format: vX.Y.Z)\n  --dry-run         print plan and exit 0; no git operations performed\n  --help            print full documentation\n",
+   "stdout": ""
+  }
+ }
+}

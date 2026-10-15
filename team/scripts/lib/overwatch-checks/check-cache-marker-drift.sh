@@ -13,8 +13,9 @@
 # bundled (e.g., to add missing content or revive a previously-empty file) and
 # resets ## Status back to "open", but the cache entry is still "[x]".
 #
-# Per SOP.md: "Status is authoritative; backlog markers are derived." The
-# discovery pipeline already handles drift at bundle time, but stale "[x]"
+# Per SOP-core.md ("Per-Agent Queues and Marker Correctness"): derived
+# caches are not gates -- status is authoritative, backlog markers are
+# derived. The discovery pipeline already handles drift at bundle time, but stale "[x]"
 # entries with Status=open can confuse humans reading the backlog cache.
 # OVERWATCH proactively resets these entries to "[ ]" (pending) so the
 # cache reflects reality.
@@ -381,6 +382,9 @@ overwatch_check_cache_marker_drift() {
             return 0
         elif (( fix_exit == 4 )); then
             echo "check-cache-marker-drift: per-repo flock contended; aborting" >&2
+            return 0
+        elif (( fix_exit == 5 )); then
+            echo "check-cache-marker-drift: fix deferred: HALT present; aborting" >&2
             return 0
         elif (( fix_exit != 0 )); then
             echo "check-cache-marker-drift: reset failed for ${item_id} (exit ${fix_exit})" >&2

@@ -183,23 +183,27 @@ def test_get_config_install_cfg_ignores_unknown_keys(
 def test_get_config_env_var_wins_over_install_cfg(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Environment variables override install config.cfg values."""
+    """Environment variables override install config.cfg values when the
+    caller passes no explicit kanban_root (the ambient-environment path)."""
     (tmp_path / "config.cfg").write_text(
         "PGAI_REQUIREMENTS_DIR=/from-cfg\n", encoding="utf-8"
     )
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
     monkeypatch.setenv("PGAI_REQUIREMENTS_DIR", "/from-env")
     monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
-    result = get_config(kanban_root=str(tmp_path))
+    result = get_config(kanban_root=None)
     assert result["PGAI_REQUIREMENTS_DIR"] == "/from-env"
 
 
 def test_get_config_env_var_wins_over_default(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Environment variables override computed defaults."""
+    """Environment variables override computed defaults when the caller
+    passes no explicit kanban_root (the ambient-environment path)."""
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
     monkeypatch.setenv("PGAI_TASKS_DIR", "/env-override/tasks")
     monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
-    result = get_config(kanban_root=str(tmp_path))
+    result = get_config(kanban_root=None)
     assert result["PGAI_TASKS_DIR"] == "/env-override/tasks"
 
 
@@ -238,13 +242,15 @@ def test_get_config_resolves_root_from_env_when_arg_is_none(
 def test_get_config_project_root_overrides_kanban_root_scoped_paths(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When PGAI_PROJECT_ROOT is set, runtime state paths are scoped to the project root."""
+    """When PGAI_PROJECT_ROOT is set and the caller passes no explicit
+    kanban_root, runtime state paths are scoped to the project root."""
     project_root = tmp_path / "projects" / "my-project"
     project_root.mkdir(parents=True)
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
     monkeypatch.setenv("PGAI_PROJECT_ROOT", str(project_root))
     monkeypatch.delenv("PGAI_REQUIREMENTS_DIR", raising=False)
     monkeypatch.delenv("PGAI_TASKS_DIR", raising=False)
-    result = get_config(kanban_root=str(tmp_path))
+    result = get_config(kanban_root=None)
     # Paths that were kanban-root-scoped should now be project-root-scoped
     assert result["PGAI_REQUIREMENTS_DIR"] == str(project_root / "requirements")
     assert result["PGAI_TASKS_DIR"] == str(project_root / "tasks")
@@ -253,10 +259,124 @@ def test_get_config_project_root_overrides_kanban_root_scoped_paths(
 def test_get_config_env_var_still_wins_over_project_root(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Env vars take precedence even when PGAI_PROJECT_ROOT is set."""
+    """Env vars take precedence over PGAI_PROJECT_ROOT scoping when the
+    caller passes no explicit kanban_root (the ambient-environment path)."""
     project_root = tmp_path / "projects" / "my-project"
     project_root.mkdir(parents=True)
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
     monkeypatch.setenv("PGAI_PROJECT_ROOT", str(project_root))
     monkeypatch.setenv("PGAI_TASKS_DIR", "/hardcoded/from-env")
-    result = get_config(kanban_root=str(tmp_path))
+    result = get_config(kanban_root=None)
     assert result["PGAI_TASKS_DIR"] == "/hardcoded/from-env"
+
+
+# ---------------------------------------------------------------------------
+# get_config() — explicit kanban_root precedence layer
+# ---------------------------------------------------------------------------
+#
+# An explicit kanban_root is the CLI-flag / caller-named case (e.g.
+# pm_materialize.py's --team-root). It gets a precedence layer of its own,
+# above PGAI_PROJECT_ROOT scoping and the matching per-key environment
+# variable, for the None-defaulted PGAI_*_DIR keys — see the module
+# docstring. The tests above cover the no-override (kanban_root=None) path;
+# these cover the explicit-override path.
+
+
+# The None-defaulted PGAI_*_DIR keys and the root-relative suffix each
+# resolves to. Mirrors the suffix_map inside get_config(); kept here as
+# fixture data rather than imported so the test independently pins down
+# what the corrected loader is expected to produce.
+_ROOT_DERIVED_DIR_SUFFIXES = {
+    "PGAI_REQUIREMENTS_DIR": "requirements",
+    "PGAI_PRIORITY_DIR": "tasks/queues/priority",
+    "PGAI_ARCHIVE_DIR": "tasks/archive",
+    "PGAI_BRIEFS_DIR": "briefs",
+    "PGAI_TASKS_DIR": "tasks",
+    "PGAI_LOGS_DIR": "logs",
+}
+
+
+@pytest.mark.parametrize("dir_key", sorted(_ROOT_DERIVED_DIR_SUFFIXES))
+def test_get_config_explicit_root_wins_over_conflicting_env_var(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, dir_key: str
+) -> None:
+    """get_config(kanban_root=X) returns every None-defaulted PGAI_*_DIR key
+    under X even when the matching environment variable names somewhere
+    else entirely — an explicit --team-root must
+    outrank the ambient environment every wake session exports."""
+    monkeypatch.setenv(dir_key, "/somewhere/the/caller/did/not/name")
+    monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
+    result = get_config(kanban_root=str(tmp_path))
+    assert result[dir_key] == str(tmp_path / _ROOT_DERIVED_DIR_SUFFIXES[dir_key])
+    assert result["KANBAN_ROOT"] == str(tmp_path)
+
+
+def test_get_config_explicit_root_wins_over_project_root_env(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit kanban_root outranks PGAI_PROJECT_ROOT scoping too: the
+    directories still resolve under the explicit root, not the project
+    root named by the ambient environment."""
+    project_root = tmp_path / "elsewhere" / "some-other-project"
+    project_root.mkdir(parents=True)
+    monkeypatch.setenv("PGAI_PROJECT_ROOT", str(project_root))
+    monkeypatch.delenv("PGAI_TASKS_DIR", raising=False)
+    monkeypatch.delenv("PGAI_REQUIREMENTS_DIR", raising=False)
+    result = get_config(kanban_root=str(tmp_path))
+    assert result["PGAI_TASKS_DIR"] == str(tmp_path / "tasks")
+    assert result["PGAI_REQUIREMENTS_DIR"] == str(tmp_path / "requirements")
+
+
+def test_get_config_explicit_root_wins_over_both_project_root_and_dir_env(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit kanban_root outranks PGAI_PROJECT_ROOT scoping and a
+    directly-conflicting PGAI_TASKS_DIR simultaneously — the exact
+    combination that once let ten task folders get
+    written into the live install despite an explicit --team-root."""
+    project_root = tmp_path / "elsewhere" / "some-other-project"
+    project_root.mkdir(parents=True)
+    monkeypatch.setenv("PGAI_PROJECT_ROOT", str(project_root))
+    monkeypatch.setenv(
+        "PGAI_TASKS_DIR", str(tmp_path / "live-root" / "projects" / "pgai-agent-kanban" / "tasks")
+    )
+    result = get_config(kanban_root=str(tmp_path))
+    assert result["PGAI_TASKS_DIR"] == str(tmp_path / "tasks")
+    assert result["KANBAN_ROOT"] == str(tmp_path)
+
+
+def test_get_config_explicit_root_wins_over_user_wide_cfg(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit kanban_root outranks a user-wide ~/.config/pgai-kanban.cfg
+    entry for the None-defaulted PGAI_*_DIR keys too: that file
+    is ambient, home-directory-scoped configuration, not data the caller
+    placed under the root it named, so it must not silently redirect a
+    root-derived key any more than an environment variable may."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".config").mkdir(parents=True)
+    (fake_home / ".config" / "pgai-kanban.cfg").write_text(
+        "PGAI_REQUIREMENTS_DIR=/from-user-wide-cfg\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(pathlib.Path, "home", lambda: fake_home)
+    monkeypatch.delenv("PGAI_REQUIREMENTS_DIR", raising=False)
+    monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
+    root = tmp_path / "root"
+    root.mkdir()
+    result = get_config(kanban_root=str(root))
+    assert result["PGAI_REQUIREMENTS_DIR"] == str(root / "requirements")
+
+
+def test_get_config_explicit_root_still_honours_install_cfg(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit kanban_root outranks ambient environment, but not the
+    install cfg living inside the named root itself — that file is data
+    the caller placed under the root it named, not ambient environment."""
+    (tmp_path / "config.cfg").write_text(
+        "PGAI_REQUIREMENTS_DIR=/custom/requirements\n", encoding="utf-8"
+    )
+    monkeypatch.delenv("PGAI_REQUIREMENTS_DIR", raising=False)
+    monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
+    result = get_config(kanban_root=str(tmp_path))
+    assert result["PGAI_REQUIREMENTS_DIR"] == "/custom/requirements"

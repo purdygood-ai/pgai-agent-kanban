@@ -85,7 +85,7 @@ Declares what the workflow expects as input.
 
 Context names are not filenames. They are resolved by the runtime to actual paths or values. Common context names:
 
-- `dev_tree_path` -- path to the development tree (e.g., `/home/rocky/develop/pgai-agent-kanban`)
+- `dev_tree_path` -- path to the development tree (e.g., `~/develop/<project>`)
 - `git_repo_url` -- SSH or HTTPS URL of the git repository
 
 ### `agents` (required, object)
@@ -275,7 +275,7 @@ Reference variables use curly-brace syntax: `{variable_name}`. They are resolved
 | Variable           | Source                                | Example Value                |
 |--------------------|---------------------------------------|------------------------------|
 | `{version}`        | Version string from requirements or auto-incremented from PROJECT.md | `v0.16.0`, `3` |
-| `{task_id}`        | Unique task identifier assigned by PM | `CLAUDE-CODER-20260428-050`  |
+| `{task_id}`        | Unique task identifier assigned by PM | e.g. `CODER-20260428-050-add-login` |
 | `{deliverable_name}` | Name of the deliverable output file | `sam-and-rusty`              |
 | `{section_name}`   | Section identifier within a deliverable | `chapter-1`, `outline`     |
 | `{project_name}`   | Project name from PROJECT.md          | `kids-story-creek`           |
@@ -464,7 +464,7 @@ versioning: from_requirements
 
 1. **open-rc** (CM): Creates the RC branch `rc/v0.16.0` from the prefixed main branch. The `create_branch` operation handles the git checkout and push.
 
-2. **implement** (CODER): The `foreach: requirements.tickets` directive generates one ticket per requirement item. Each ticket gets its own feature branch (`feature/CLAUDE-CODER-20260428-050`, etc.), branched from the RC. The coder implements, commits, and merges back into the RC branch.
+2. **implement** (CODER): The `foreach: requirements.tickets` directive generates one ticket per requirement item. Each ticket gets its own feature branch named for its task ID (for example `feature/CODER-20260428-050-add-login`), branched from the RC. The coder implements, commits, and merges back into the RC branch.
 
 3. **verify** (TESTER): Runs the test suite against the RC branch. Produces `report.md` as its deliverable. The `autonomous_criterion: required` field means the tester must explicitly verify that the build ran without manual intervention.
 

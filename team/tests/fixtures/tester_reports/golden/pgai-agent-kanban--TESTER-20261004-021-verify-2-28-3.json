@@ -1,0 +1,38 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "I verified release candidate v2.28.3 against\n`requirements/v2.28.3-priority-bundle-20261004.md`. That file bundles one\nitem, PRIORITY-0007 (\"Let the REST deep-verify and cold-build-now routes\nselect container images\"). The RC holds three task merges. CODER-20261004-017\nadded the optional `image` field to `DeepVerifyBody`/`ColdBuildNowBody`, with\npre-dispatch validation in a new `pgai_agent_kanban/lib/container_images.py`.\nCODER-20261004-018 published ICD 1.14.0 with a frozen baseline and\nregenerated the API reference. WRITER-20261004-019 updated the operator prose\nin `docs/operator-api.md`, `docs/docker.md` and `docs/README.md`.\n\nAll 17 changed files were reviewed against ai_main 074ce362. Both gated runners\nexited 0 (unit 7836 passed / 43 skipped; integration 646 passed / 1 skipped),\nwith zero lint findings. Every criterion in the requirements doc and in\nPRIORITY-0007 is met for the inputs it names. One behavioral probe outside\nthose named inputs found a defect: the REST layer's pre-dispatch image check\nsplits a comma list differently from the harness. A value with an empty comma\nslot is therefore accepted at the HTTP layer and refused later by the detached\nharness. It was filed as BUG-0542 (medium).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "REST image pre-dispatch check splits comma lists differently from the harness",
+      "heading": "Finding 1: REST image pre-dispatch check splits comma lists differently from the harness",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one new helper and its test)\n**Filed As:** BUG-0542-rest-image-split-diverges-from-harness (Path C-A — filed as BUG: code defect)\n**Regression:** no\n**Integrity:** none\n**Filed By:** TESTER (autonomous Path C) — the REST deep-verify and cold-build-now routes accept an image list with an empty slot such as \"debian,,rocky9\" and report the run as started, but the harness then refuses that same value inside the detached run, where no HTTP caller can see it.\n\nTraces to PRIORITY-0007 scope: \"validated against the manifest the same way\n(an unknown name gets the `container_tier.unknown_image` refusal)\". It also\ntraces to the stated purpose of the pre-dispatch check in `operations.py`: \"A\ndetached child's own refusal would land in a log file no HTTP caller reads, so\nthe check runs one layer earlier.\"\n\n`container_images.split_image_request` splits on `[,\\s]+` and drops empty\nparts. `container_tier_select_images` splits with `IFS=$', \\t' read -r -a`,\nwhich keeps an empty field between adjacent commas or before a leading comma,\nthen refuses `''` as undeclared. Observed (dry_run, both routes, nothing\nspawned):\n\n| `image`            | route                                     | harness, same `--image` value |\n|--------------------|-------------------------------------------|-------------------------------|\n| `\"debian,,rocky9\"` | 200, argv `--image debian,,rocky9`        | exit 3, `container_tier.unknown_image`, names `''` |\n| `\",debian\"`        | 200, argv `--image ,debian`               | exit 3, same |\n| `\" \"`              | 422 `container_tier.unknown_image`        | zero names: lists images, builds nothing (exit 0) |\n\nThe harness side was exercised by sourcing `team/scripts/lib/container_tier.sh`\nin a sandbox and calling `container_tier_take_args` +\n`container_tier_select_images`. These are library functions only: no harness\nscript was invoked and no engine was called (Step 5d). The third row is the\nstricter direction and is documented as a design choice in CODER-017's\nsummary. It is noted in the bug as \"keep and document, or align\". It is not a\nseparate defect.\n\nEffect: no image is built and nothing is corrupted. The harness still refuses.\nBut the caller gets `200 run started` for a run that refuses, which is the\nexact failure the pre-dispatch check was added to remove. The shipped library\ntest `test_request_entries_split_like_the_harness` uses hand-written\nexpectations and has no empty-slot case, so the suite stays green. Severity:\nmedium per SOP-core \"Rating a Finding\" (incorrect behavior; the workaround is\nto send well-formed lists). It is new code in this RC, but it is not a\nregression of anything that worked in v2.28.2. Before this RC the field did\nnot exist and the route passed no `--image`.",
+      "filed_as": "BUG-0542",
+      "filed_by": "TESTER (autonomous Path C) — the REST deep-verify and cold-build-now routes accept an image list with an empty slot such as \"debian,,rocky9\" and report the run as started, but the harness then refuses that same value inside the detached run, where no HTTP caller can see it.",
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one new helper and its test)",
+        "filed_as": "BUG-0542-rest-image-split-diverges-from-harness (Path C-A — filed as BUG: code defect)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_by": "TESTER (autonomous Path C) — the REST deep-verify and cold-build-now routes accept an image list with an empty slot such as \"debian,,rocky9\" and report the run as started, but the harness then refuses that same value inside the detached run, where no HTTP caller can see it."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

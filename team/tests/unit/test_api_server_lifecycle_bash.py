@@ -37,12 +37,37 @@ Absolute kanban_root contract
 The resolved kanban root (from env or --kanban-root) is always absolute.
 The /health endpoint's kanban_root field starts with '/'.
 
+Target verification before any signal
+--------------------------------------
+stop only signals a pid whose command line names the API entrypoint module
+(pgai_agent_kanban.api.main).  An unrelated listener on the API port is
+refused dual-channel and left alive; a pidfile whose pid is alive but belongs
+to a non-API process (a reused pid) reads as not running for status and stop.
+Every fake server process these tests start therefore carries that module
+name as a trailing, ignored argv entry (see _fake_process_argv), and the
+tests for the refusal paths start their fakes WITHOUT it.
+
+Launch environment
+------------------
+start launches the server with the PYTHONPATH the script exported: its own
+package root (the parent of scripts/) first, the caller's entries after it,
+and nothing from PGAI_DEV_TREE_PATH.
+
+Port resolution
+---------------
+The script and the server take the port from one source: PGAI_API_PORT when
+set, else <kanban_root>/kanban.cfg [api] port, else 8300.  With the override
+unset, status and stop probe the kanban.cfg port (an orphan there is found
+and stopped); with it set, the server binds the override and status and stop
+probe it; the stop-target guard holds on whichever port was resolved.
+
 Port constraint
 ---------------
-All tests use an OS-assigned ephemeral port via the PGAI_API_PORT env var.
-Port 8300 is never used in tests.
+All tests use an OS-assigned ephemeral port, via the PGAI_API_PORT env var or
+via <kanban_root>/kanban.cfg [api] port with the env var unset.  Port 8300 is
+never used in tests.
 
-Test naming convention (SOP.md Anti-pattern 6):
+Test naming convention (roles/TESTER.md Anti-pattern 6):
   Names describe behavior, never bug IDs or scaffolding labels.
 """
 
@@ -51,6 +76,7 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -69,12 +95,17 @@ from tests.unit.shell_harness import run_bash
 _API_SERVER_SH = "scripts/api-server.sh"
 
 # Absolute path helpers for constructing synthetic no-shell-env sandboxes.
-_TEAM_SCRIPTS_DIR = pathlib.Path(__file__).parent.parent.parent / "scripts"
+_TEAM_ROOT = pathlib.Path(__file__).parent.parent.parent
+_TEAM_SCRIPTS_DIR = _TEAM_ROOT / "scripts"
 _REAL_API_SERVER_SH = _TEAM_SCRIPTS_DIR / "api-server.sh"
 _REAL_ENV_BOOTSTRAP_SH = _TEAM_SCRIPTS_DIR / "lib" / "env_bootstrap.sh"
 
 # Production default port — must never appear in test bindings.
 _PRODUCTION_DEFAULT_PORT = 8300
+
+# The module api-server.sh launches, and the identity its stop path requires
+# on a target's command line before it signals anything.
+_API_ENTRYPOINT = "pgai_agent_kanban.api.main"
 
 
 # ---------------------------------------------------------------------------
@@ -95,14 +126,42 @@ def _find_free_port() -> int:
     )
 
 
-def _start_fake_listener(port: int) -> subprocess.Popen:
+def _fake_process_argv(script: str, as_api_server: bool = True) -> list[str]:
+    """Build the argv for a fake process running *script* under python -c.
+
+    With *as_api_server* true (the default) the argv ends with the API
+    entrypoint module name — an argument the script never reads, but one that
+    makes the process's command line name the module, which is what
+    api-server.sh checks before it signals a pid.  Pass False to build a
+    process that api-server.sh must treat as NOT the server.
+    """
+    argv = [sys.executable, "-c", script]
+    if as_api_server:
+        argv.append(_API_ENTRYPOINT)
+    return argv
+
+
+def _start_idle_process(as_api_server: bool = True) -> subprocess.Popen:
+    """Spawn a process that sleeps and holds no port.
+
+    Stands in for the tracked (pidfile) server process in tests that do not
+    need a bound port.  The caller must terminate and wait on it.
+    """
+    return subprocess.Popen(
+        _fake_process_argv("import time\nwhile True:\n    time.sleep(1)\n", as_api_server)
+    )
+
+
+def _start_fake_listener(port: int, as_api_server: bool = True) -> subprocess.Popen:
     """Spawn a subprocess that binds *port* on 127.0.0.1 and holds it open.
 
     The subprocess writes "READY:<port>" to stdout once the socket is bound.
     The caller must kill and wait on the returned Popen object.
 
     Args:
-        port: The port to bind.
+        port:          The port to bind.
+        as_api_server: Whether the command line should name the API
+                       entrypoint (see _fake_process_argv).
 
     Returns:
         The running subprocess.Popen instance.
@@ -119,7 +178,7 @@ def _start_fake_listener(port: int) -> subprocess.Popen:
             time.sleep(1)
     """)
     proc = subprocess.Popen(
-        [sys.executable, "-c", script],
+        _fake_process_argv(script, as_api_server),
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
@@ -136,7 +195,8 @@ def _invoke_api_server(
     tmp_path: pathlib.Path,
     kanban_root: pathlib.Path,
     subcommand: str,
-    port: int,
+    port: int | None,
+    extra_env: dict[str, str] | None = None,
 ) -> "run_bash.__class__":  # type: ignore[name-defined]
     """Invoke api-server.sh with the given subcommand against a synthetic root.
 
@@ -144,7 +204,10 @@ def _invoke_api_server(
         tmp_path:     pytest tmp_path for temp file placement.
         kanban_root:  The fake kanban root; pidfile ends up under run/api/.
         subcommand:   One of: start, stop, status.
-        port:         The port api-server.sh should manage.
+        port:         The port passed as PGAI_API_PORT.  None runs the script
+                      with PGAI_API_PORT removed from its environment, so the
+                      port comes from <kanban_root>/kanban.cfg [api] port.
+        extra_env:    Further environment overrides for the script.
 
     Returns:
         BashResult with stdout, stderr, returncode.
@@ -157,11 +220,17 @@ def _invoke_api_server(
     env = {
         "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
         "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path),
-        "PGAI_API_PORT": str(port),
     }
+    launcher = "bash"
+    if port is None:
+        launcher = "env -u PGAI_API_PORT bash"
+    else:
+        env["PGAI_API_PORT"] = str(port)
+    if extra_env:
+        env.update(extra_env)
     return run_bash(
         tmp_path,
-        f"bash {_API_SERVER_SH} {subcommand} --kanban-root {kanban_root!s}",
+        f"{launcher} {_API_SERVER_SH} {subcommand} --kanban-root {kanban_root!s}",
         extra_env=env,
         timeout=15,
     )
@@ -187,7 +256,7 @@ def test_status_reports_running_when_pidfile_points_to_live_process(
     pidfile = run_dir / "api-server.pid"
 
     # Start a real process and record its PID.
-    sleeper = subprocess.Popen(["sleep", "60"])
+    sleeper = _start_idle_process()
     try:
         pidfile.write_text(str(sleeper.pid) + "\n", encoding="utf-8")
 
@@ -219,7 +288,7 @@ def test_stop_terminates_tracked_process_and_removes_pidfile(
     run_dir.mkdir(parents=True, exist_ok=True)
     pidfile = run_dir / "api-server.pid"
 
-    sleeper = subprocess.Popen(["sleep", "60"])
+    sleeper = _start_idle_process()
     try:
         pidfile.write_text(str(sleeper.pid) + "\n", encoding="utf-8")
 
@@ -261,7 +330,7 @@ def test_start_is_noop_when_tracked_server_is_running(
     run_dir.mkdir(parents=True, exist_ok=True)
     pidfile = run_dir / "api-server.pid"
 
-    sleeper = subprocess.Popen(["sleep", "60"])
+    sleeper = _start_idle_process()
     try:
         pidfile.write_text(str(sleeper.pid) + "\n", encoding="utf-8")
 
@@ -668,11 +737,12 @@ def test_health_kanban_root_is_absolute_path() -> None:
     from pgai_agent_kanban.api.app import create_app
     from pgai_agent_kanban.api.config import ApiConfig
 
-    # anti-pattern-allowlist: 2 (justification: value is used as an assertion
-    # subject only — no file I/O occurs at this path; the test verifies that
-    # a path starting with '/' is reported as absolute, so a literal absolute
-    # path string is the minimal, correct input for this check)
-    abs_root = pathlib.Path("/tmp/kanban_root_test")
+    # No file I/O occurs at this path — the test only verifies that an
+    # absolute path is reported as absolute by /health, so any absolute
+    # path string is a correct input. Deliberately not under /tmp: nothing
+    # here is created, read, or deleted, so there is no reason to route it
+    # through a temp-dir helper.
+    abs_root = pathlib.Path("/nonexistent/kanban_root_absolute_path_check")
     cfg = ApiConfig(kanban_root=abs_root)
     app = create_app(cfg)
 
@@ -777,7 +847,7 @@ def _start_fake_group_listener(port: int) -> subprocess.Popen:
         "    pass\n"
     )
     proc = subprocess.Popen(
-        [sys.executable, "-c", parent_script],
+        _fake_process_argv(parent_script),
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         # start_new_session puts the parent in its own process group so that
@@ -935,7 +1005,7 @@ def test_stop_reports_failure_and_exits_nonzero_when_port_stays_bound(
     stubborn: subprocess.Popen | None = None
     try:
         stubborn = subprocess.Popen(
-            [sys.executable, "-c", script],
+            _fake_process_argv(script),
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -1021,3 +1091,462 @@ def test_orphan_stop_confirms_port_free_before_reporting_success(
         if fake_listener is not None and fake_listener.poll() is None:
             fake_listener.terminate()
             fake_listener.wait(timeout=5)
+
+
+# ---------------------------------------------------------------------------
+# Launch environment: start keeps the PYTHONPATH the script exported
+# ---------------------------------------------------------------------------
+
+
+def _launched_pythonpath_entries(pid: int) -> list[str]:
+    """Return the PYTHONPATH entries of process *pid* as it was launched."""
+    environ = pathlib.Path(f"/proc/{pid}/environ").read_bytes()
+    for item in environ.split(b"\0"):
+        if item.startswith(b"PYTHONPATH="):
+            return item.decode("utf-8", errors="replace")[len("PYTHONPATH="):].split(os.pathsep)
+    return []
+
+
+def test_start_launches_server_with_exported_pythonpath_preserved(
+    tmp_path: pathlib.Path,
+) -> None:
+    """start launches the server with the PYTHONPATH the script exported.
+
+    The script puts its own package root (the parent of scripts/) first and
+    keeps the caller's entries after it; the launch does not replace that
+    value, and PGAI_DEV_TREE_PATH contributes nothing.  Proven against the
+    real server process: its environment is read from /proc after start.
+    """
+    port = _find_free_port()
+    kanban_root = tmp_path / "kanban_root"
+    kanban_root.mkdir(parents=True, exist_ok=True)
+    # PGAI_API_PORT (set by _invoke_api_server) wins over kanban.cfg for the
+    # script and the server alike; kanban.cfg names the same port so the
+    # server's host setting is explicit.
+    (kanban_root / "kanban.cfg").write_text(
+        f"[api]\nhost = 127.0.0.1\nport = {port}\n", encoding="utf-8"
+    )
+    pidfile = kanban_root / "run" / "api" / "api-server.pid"
+
+    # A decoy dev tree that must NOT reach the launched process, and an
+    # inherited PYTHONPATH entry that MUST survive the launch.
+    decoy_dev_tree = tmp_path / "decoy_dev_tree"
+    (decoy_dev_tree / "team").mkdir(parents=True, exist_ok=True)
+    inherited_entry = str(tmp_path / "inherited_pythonpath_entry")
+    launch_env = {
+        "PGAI_DEV_TREE_PATH": str(decoy_dev_tree),
+        "PYTHONPATH": inherited_entry,
+    }
+
+    server_pid: int | None = None
+    try:
+        result = _invoke_api_server(tmp_path, kanban_root, "start", port, launch_env)
+        assert result.returncode == 0, (
+            f"start returned {result.returncode} (expected 0); "
+            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+        )
+        assert pidfile.exists(), f"start did not write the pidfile {pidfile}"
+        server_pid = int(pidfile.read_text(encoding="utf-8").strip())
+
+        entries = _launched_pythonpath_entries(server_pid)
+        assert entries, f"launched process {server_pid} has no PYTHONPATH in its environment"
+        assert pathlib.Path(entries[0]).resolve() == _TEAM_ROOT.resolve(), (
+            f"first PYTHONPATH entry of the launched server is {entries[0]!r}; "
+            f"expected the script's own package root {_TEAM_ROOT!s}"
+        )
+        assert inherited_entry in entries, (
+            f"the inherited PYTHONPATH entry {inherited_entry!r} was dropped at launch; "
+            f"launched PYTHONPATH: {entries!r}"
+        )
+        assert str(decoy_dev_tree / "team") not in entries, (
+            f"PGAI_DEV_TREE_PATH reached the launched PYTHONPATH: {entries!r}"
+        )
+    finally:
+        stop = _invoke_api_server(tmp_path, kanban_root, "stop", port, launch_env)
+        if server_pid is not None:
+            try:
+                os.killpg(server_pid, signal.SIGKILL)
+            except (ProcessLookupError, OSError, PermissionError):
+                pass
+        assert stop.returncode == 0, (
+            f"stop returned {stop.returncode} after the real server was started; "
+            f"stdout: {stop.stdout!r}; stderr: {stop.stderr!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Target verification: stop never signals a pid that is not the API server
+# ---------------------------------------------------------------------------
+
+
+def test_stop_refuses_unrelated_listener_on_port_and_leaves_it_alive(
+    tmp_path: pathlib.Path,
+) -> None:
+    """stop refuses dual-channel, exits non-zero and signals nothing when the
+    port holder's command line does not name the API entrypoint.
+
+    Setup: an unrelated listener on the API port, no pidfile.  The refusal
+    must name the pid and its command line; the listener must still be alive
+    and still answering afterwards.
+    """
+    port = _find_free_port()
+    kanban_root = tmp_path / "kanban_root"
+    kanban_root.mkdir(parents=True, exist_ok=True)
+
+    unrelated: subprocess.Popen | None = None
+    try:
+        unrelated = _start_fake_listener(port, as_api_server=False)
+
+        result = _invoke_api_server(tmp_path, kanban_root, "stop", port)
+
+        assert result.returncode != 0, (
+            f"stop returned 0 (expected non-zero) against an unrelated listener; "
+            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+        )
+        assert "error:   api-server.stop.target_not_api_server" in result.stderr, (
+            f"stop did not refuse with the dual-channel error key; stderr: {result.stderr!r}"
+        )
+        assert "remedy:" in result.stderr, (
+            f"stop's refusal carries no remedy line; stderr: {result.stderr!r}"
+        )
+        assert str(unrelated.pid) in result.stderr, (
+            f"refusal does not name the pid {unrelated.pid}; stderr: {result.stderr!r}"
+        )
+        assert sys.executable in result.stderr, (
+            f"refusal does not quote the target's command line (expected {sys.executable!r}); "
+            f"stderr: {result.stderr!r}"
+        )
+
+        time.sleep(0.5)
+        assert unrelated.poll() is None, (
+            f"unrelated listener {unrelated.pid} is dead after stop; stop must not signal it."
+        )
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            pass  # Still accepting connections — expected.
+    finally:
+        if unrelated is not None and unrelated.poll() is None:
+            unrelated.terminate()
+            unrelated.wait(timeout=5)
+
+
+def test_status_reports_not_running_when_pidfile_pid_is_reused_by_non_api_process(
+    tmp_path: pathlib.Path,
+) -> None:
+    """status treats a pidfile whose pid is alive but not the API server as stale.
+
+    Setup: pidfile naming a live process whose command line does not name the
+    entrypoint, port free.  status must report 'not running' (exit 1), remove
+    the stale pidfile, and leave the process alive.
+    """
+    port = _find_free_port()
+    kanban_root = tmp_path / "kanban_root"
+    run_dir = kanban_root / "run" / "api"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pidfile = run_dir / "api-server.pid"
+
+    bystander = _start_idle_process(as_api_server=False)
+    try:
+        pidfile.write_text(str(bystander.pid) + "\n", encoding="utf-8")
+
+        result = _invoke_api_server(tmp_path, kanban_root, "status", port)
+
+        assert result.returncode == 1, (
+            f"status returned {result.returncode} (expected 1) for a reused pid; "
+            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+        )
+        assert "not running" in result.stdout, (
+            f"status did not report 'not running' for a reused pid; stdout: {result.stdout!r}"
+        )
+        assert not pidfile.exists(), (
+            f"stale pidfile {pidfile} survived status although the port is free."
+        )
+        assert bystander.poll() is None, (
+            f"process {bystander.pid} died during status; status must signal nothing."
+        )
+    finally:
+        if bystander.poll() is None:
+            bystander.terminate()
+            bystander.wait(timeout=5)
+
+
+def test_stop_signals_nothing_when_pidfile_pid_is_reused_by_non_api_process(
+    tmp_path: pathlib.Path,
+) -> None:
+    """stop signals nothing when the pidfile names a live non-API process.
+
+    Setup: pidfile naming a live process whose command line does not name the
+    entrypoint, port free.  stop must report the server as not running, exit
+    0, and leave the process alive.
+    """
+    port = _find_free_port()
+    kanban_root = tmp_path / "kanban_root"
+    run_dir = kanban_root / "run" / "api"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pidfile = run_dir / "api-server.pid"
+
+    bystander = _start_idle_process(as_api_server=False)
+    try:
+        pidfile.write_text(str(bystander.pid) + "\n", encoding="utf-8")
+
+        result = _invoke_api_server(tmp_path, kanban_root, "stop", port)
+
+        assert result.returncode == 0, (
+            f"stop returned {result.returncode} (expected 0) for a reused pid; "
+            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+        )
+        assert "not running" in result.stdout, (
+            f"stop did not report the server as not running; stdout: {result.stdout!r}"
+        )
+        time.sleep(0.5)
+        assert bystander.poll() is None, (
+            f"process {bystander.pid} died during stop; stop must signal nothing "
+            "for a pid that is not the API server."
+        )
+    finally:
+        if bystander.poll() is None:
+            bystander.terminate()
+            bystander.wait(timeout=5)
+
+
+# ---------------------------------------------------------------------------
+# Port resolution: PGAI_API_PORT if set, else kanban.cfg [api] port, else 8300
+# ---------------------------------------------------------------------------
+
+
+def _write_api_port_cfg(kanban_root: pathlib.Path, port: int) -> None:
+    """Write <kanban_root>/kanban.cfg with a loopback [api] host and *port*."""
+    kanban_root.mkdir(parents=True, exist_ok=True)
+    (kanban_root / "kanban.cfg").write_text(
+        f"[api]\nhost = 127.0.0.1\nport = {port}\n", encoding="utf-8"
+    )
+
+
+def _port_accepts_connections(port: int) -> bool:
+    """Return True when something on 127.0.0.1:*port* accepts a connection."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _wait_until_port_accepts(port: int, timeout: float = 10.0) -> bool:
+    """Poll until 127.0.0.1:*port* accepts a connection or *timeout* elapses."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _port_accepts_connections(port):
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _kill_server_group(pidfile: pathlib.Path, server_pid: int | None) -> None:
+    """Best-effort SIGKILL of a real server's process group after a test."""
+    pids = {server_pid} if server_pid is not None else set()
+    if pidfile.exists():
+        try:
+            pids.add(int(pidfile.read_text(encoding="utf-8").strip()))
+        except ValueError:
+            pass
+    for pid in pids:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, OSError, PermissionError):
+            pass
+
+
+def test_status_and_stop_find_orphan_on_kanban_cfg_port_when_env_override_unset(
+    tmp_path: pathlib.Path,
+) -> None:
+    """With only kanban.cfg [api] port = N set, start binds N and, after the
+    pidfile is lost, status reports the server on N and stop stops it.
+
+    PGAI_API_PORT is removed from the script's environment for every call, so
+    N can reach the script only through kanban.cfg.
+    """
+    port = _find_free_port()
+    kanban_root = tmp_path / "kanban_root"
+    _write_api_port_cfg(kanban_root, port)
+    pidfile = kanban_root / "run" / "api" / "api-server.pid"
+
+    server_pid: int | None = None
+    try:
+        start = _invoke_api_server(tmp_path, kanban_root, "start", None)
+        assert start.returncode == 0, (
+            f"start returned {start.returncode}; "
+            f"stdout: {start.stdout!r}; stderr: {start.stderr!r}"
+        )
+        server_pid = int(pidfile.read_text(encoding="utf-8").strip())
+        assert _wait_until_port_accepts(port), (
+            f"the server started from kanban.cfg [api] port = {port} is not "
+            f"listening on {port}; stderr: {start.stderr!r}"
+        )
+
+        # Lose the pidfile, as after a crash or a removed run/ directory.
+        pidfile.unlink()
+
+        status = _invoke_api_server(tmp_path, kanban_root, "status", None)
+        assert status.returncode == 0, (
+            f"status returned {status.returncode} with an orphan on the "
+            f"kanban.cfg port {port}; stdout: {status.stdout!r}; stderr: {status.stderr!r}"
+        )
+        assert "not running" not in status.stdout, (
+            f"status said 'not running' while the server holds the kanban.cfg "
+            f"port {port}; stdout: {status.stdout!r}"
+        )
+        assert f"port {port} held by PID {server_pid}" in status.stdout, (
+            f"status did not report the orphan PID {server_pid} on port {port}; "
+            f"stdout: {status.stdout!r}"
+        )
+
+        stop = _invoke_api_server(tmp_path, kanban_root, "stop", None)
+        assert stop.returncode == 0, (
+            f"stop returned {stop.returncode}; "
+            f"stdout: {stop.stdout!r}; stderr: {stop.stderr!r}"
+        )
+        assert f"port {port} held by unmanaged PID {server_pid}" in stop.stdout, (
+            f"stop did not act on the orphan on the kanban.cfg port {port}; "
+            f"stdout: {stop.stdout!r}"
+        )
+        assert not _port_accepts_connections(port), (
+            f"port {port} still accepts connections after stop; the orphan survived."
+        )
+    finally:
+        _kill_server_group(pidfile, server_pid)
+
+
+def test_env_port_override_is_bound_by_server_and_probed_by_status_and_stop(
+    tmp_path: pathlib.Path,
+) -> None:
+    """With PGAI_API_PORT = M and kanban.cfg [api] port = N, the server binds
+    M (not N), and status and stop probe M.
+    """
+    cfg_port = _find_free_port()
+    env_port = _find_free_port()
+    while env_port == cfg_port:
+        env_port = _find_free_port()
+    kanban_root = tmp_path / "kanban_root"
+    _write_api_port_cfg(kanban_root, cfg_port)
+    pidfile = kanban_root / "run" / "api" / "api-server.pid"
+
+    server_pid: int | None = None
+    try:
+        start = _invoke_api_server(tmp_path, kanban_root, "start", env_port)
+        assert start.returncode == 0, (
+            f"start returned {start.returncode}; "
+            f"stdout: {start.stdout!r}; stderr: {start.stderr!r}"
+        )
+        server_pid = int(pidfile.read_text(encoding="utf-8").strip())
+        assert _wait_until_port_accepts(env_port), (
+            f"the server did not bind the PGAI_API_PORT override {env_port}; "
+            f"stderr: {start.stderr!r}"
+        )
+        assert not _port_accepts_connections(cfg_port), (
+            f"the server bound the kanban.cfg port {cfg_port} although "
+            f"PGAI_API_PORT={env_port} was set."
+        )
+
+        pidfile.unlink()
+
+        status = _invoke_api_server(tmp_path, kanban_root, "status", env_port)
+        assert status.returncode == 0 and f"port {env_port} held by PID {server_pid}" in status.stdout, (
+            f"status did not probe the override port {env_port}; rc={status.returncode}; "
+            f"stdout: {status.stdout!r}; stderr: {status.stderr!r}"
+        )
+
+        stop = _invoke_api_server(tmp_path, kanban_root, "stop", env_port)
+        assert stop.returncode == 0, (
+            f"stop returned {stop.returncode}; "
+            f"stdout: {stop.stdout!r}; stderr: {stop.stderr!r}"
+        )
+        assert f"port {env_port} held by unmanaged PID {server_pid}" in stop.stdout, (
+            f"stop did not probe the override port {env_port}; stdout: {stop.stdout!r}"
+        )
+        assert not _port_accepts_connections(env_port), (
+            f"port {env_port} still accepts connections after stop."
+        )
+    finally:
+        _kill_server_group(pidfile, server_pid)
+
+
+def test_stop_refuses_unrelated_listener_on_kanban_cfg_port(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The stop-target guard holds on the port resolved from kanban.cfg: an
+    unrelated listener there is refused (exit 1) and left alive.
+    """
+    port = _find_free_port()
+    kanban_root = tmp_path / "kanban_root"
+    _write_api_port_cfg(kanban_root, port)
+
+    unrelated: subprocess.Popen | None = None
+    try:
+        unrelated = _start_fake_listener(port, as_api_server=False)
+
+        result = _invoke_api_server(tmp_path, kanban_root, "stop", None)
+
+        assert result.returncode == 1, (
+            f"stop returned {result.returncode} (expected 1) against an unrelated "
+            f"listener on the kanban.cfg port {port}; "
+            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+        )
+        assert "error:   api-server.stop.target_not_api_server" in result.stderr, (
+            f"stop did not refuse with the dual-channel error key; stderr: {result.stderr!r}"
+        )
+        assert f"on port {port}" in result.stderr, (
+            f"the refusal does not name the kanban.cfg port {port}; stderr: {result.stderr!r}"
+        )
+        time.sleep(0.5)
+        assert unrelated.poll() is None, (
+            f"the unrelated listener {unrelated.pid} was killed by a refused stop."
+        )
+    finally:
+        if unrelated is not None and unrelated.poll() is None:
+            unrelated.terminate()
+            unrelated.wait(timeout=5)
+
+
+@pytest.mark.parametrize(
+    ("env_value", "cfg_port", "expected"),
+    [
+        (None, 18411, 18411),      # no override: kanban.cfg wins
+        ("18412", 18411, 18412),   # override set: it wins over kanban.cfg
+        ("  ", 18411, 18411),      # blank override reads as unset
+        ("not-a-port", 18411, 18411),  # non-integer override is ignored
+        ("18412", None, 18412),    # override with no kanban.cfg at all
+        (None, None, _PRODUCTION_DEFAULT_PORT),  # neither: built-in default
+    ],
+)
+def test_load_api_config_port_precedence(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    env_value: str | None,
+    cfg_port: int | None,
+    expected: int,
+) -> None:
+    """load_api_config resolves the port as PGAI_API_PORT, else kanban.cfg
+    [api] port, else 8300; a non-integer override is named on stderr.
+    """
+    from pgai_agent_kanban.api.config import load_api_config
+
+    kanban_root = tmp_path / "kanban_root"
+    kanban_root.mkdir(parents=True, exist_ok=True)
+    if cfg_port is not None:
+        _write_api_port_cfg(kanban_root, cfg_port)
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(kanban_root))
+    monkeypatch.chdir(tmp_path)  # no ./kanban.cfg fallback in play
+    if env_value is None:
+        monkeypatch.delenv("PGAI_API_PORT", raising=False)
+    else:
+        monkeypatch.setenv("PGAI_API_PORT", env_value)
+
+    assert load_api_config().port == expected
+
+    stderr = capsys.readouterr().err
+    if env_value == "not-a-port":
+        assert "PGAI_API_PORT='not-a-port' is not an integer port" in stderr, (
+            f"a non-integer override was ignored silently; stderr: {stderr!r}"
+        )
+    else:
+        assert "PGAI_API_PORT" not in stderr, f"unexpected warning: {stderr!r}"

@@ -46,7 +46,7 @@ lands under `projects/pgai-three-bears/artifacts/`.
 next** — the chain runs one release candidate at a time per project, so a clean
 sequence is one-in, one-out.
 
-### 1. The story (v0.0.1)
+### 1. The story — v0.0.1
 
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
@@ -56,7 +56,7 @@ scripts/intake.sh --project pgai-three-bears \
 Watch: PM decomposes → WRITER writes the bedtime story → CM finalizes. Check
 `projects/pgai-three-bears/artifacts/` for the first published version.
 
-### 2. Add a friendly fox at the stream (v0.0.2)
+### 2. Add a friendly fox at the stream — v0.0.2
 
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
@@ -66,7 +66,7 @@ scripts/intake.sh --project pgai-three-bears \
 Watch: the story is revised to introduce the fox. A new artifact version
 publishes.
 
-### 3. Add an interior scene (v0.0.3)
+### 3. Add an interior scene — v0.0.3
 
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
@@ -74,17 +74,17 @@ scripts/intake.sh --project pgai-three-bears \
   --file demos/three-bears-demo/intake/v0.0.3-bears-add-interior-scene.md
 ```
 
-### 4. Remove the fox (v0.0.4)
+### 4. Remove the fox — v0.0.4
 
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-three-bears \
   --file demos/three-bears-demo/intake/v0.0.4-bears-remove-fox.md
 ```
-This is the "changed my mind" step — the fox we added in v0.0.2 comes back out.
+This is the "changed my mind" step — the fox from the v0.0.2 revision comes back out.
 A real document evolves like this.
 
-### 5. Restore the fox (v0.0.5)
+### 5. Restore the fox — v0.0.5
 
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
@@ -106,6 +106,16 @@ And back in again. By the end you have five published versions in
   restore content, and each change is its own published version with full
   history.
 - Where published documents land: `projects/pgai-three-bears/artifacts/`.
+
+---
+
+## Walkthrough
+
+**[One document version, end to end](document-workflow-walkthrough.md)**
+follows a single revision from `intake.sh` to its published file. It says
+what to run and what you should see at every stage: PM decomposition, each
+WRITER deliverable, CM's publish step, and how a second version lands beside
+the first without changing it.
 
 When you're done, you can remove the project (`scripts/remove-project.sh
 --project pgai-three-bears`) and delete its directory — it was entirely local.

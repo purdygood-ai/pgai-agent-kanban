@@ -1,0 +1,373 @@
+# team/config/operator_verbs.manifest
+#
+# Single source of truth for the operator verb set: every verb an operator
+# can invoke, its script, its declared flag vocabulary, whether it mutates
+# state, its idempotence class, its REST twin (or, on a planned row only,
+# an explicit marker that no twin exists yet), its read|action enforcement
+# class, a reference to its REST twin's response schema, and whether the
+# REST twin and the CLI share one Python function. Before this
+# file, the verb set was asserted in four places that drifted
+# independently: each script's own OPERATOR_VALID_FLAGS array, the
+# hardcoded _API_PARITY_MAP inside lint_api_parity.py, the per-command
+# sections of docs/operator-commands.md, and the routes declared in the API
+# routers. This file replaces the first two as the source of truth;
+# team/scripts/lint_operator_verb_manifest.py is the reconciliation check
+# that keeps it honest against the other two (the scripts themselves and
+# the routers) every run.  docs/operator-commands.md is prose for humans,
+# not machine-checked against this file -- keeping that document in sync
+# with this manifest's rows is a manual documentation-maintenance step,
+# not a mechanical one.
+#
+# Readers: team/scripts/lib/operator_verb_manifest.sh (bash) and
+# team/pgai_agent_kanban/lib/operator_verb_manifest.py (Python) are the ONLY
+# two places that parse this file. Every other consumer -- the
+# reconciliation lint, lint_api_parity.py, the test suite -- imports/sources
+# one of those two readers instead of re-parsing this file a second time.
+#
+# Parse rule: a line is a DATA line only when its first tab-delimited field
+# is exactly "V". Every other line -- blank, or starting with anything else,
+# including this header block -- is a comment and MUST be ignored by
+# readers. '#' is used for comments here purely by convention (matching
+# team/config/dashboard_windows.census); readers must not special-case '#'
+# itself, only the "first field is V" rule.
+#
+# V (verb) record -- 12 fields after the sigil:
+#   V  <verb>  <status>  <script>  <flags>  <mutates>  <idempotence>
+#      <rest_method>  <rest_route>  <rest_body_model>  <class>  <schema_ref>
+#      <impl>
+#
+#   verb            The verb name an operator types (e.g. "halt").
+#
+#   status          "active" -- the script named in <script> exists in the
+#                   tree today, and the row declares its REST twin: every
+#                   REST-describing column (<rest_method> through
+#                   <schema_ref>) carries a real value. An active row with
+#                   "ABSENT" in <rest_method>/<rest_route> is refused by
+#                   lint_api_parity.py (its verb_missing_route class): a
+#                   script an operator can run that no HTTP caller can
+#                   reach is the drift this census exists to prevent.
+#                   "planned" -- this verb belongs to the operator verb
+#                   set but no script exists yet; see that verb's own
+#                   notes below. A "planned" row carries
+#                   "-" in every column from <script> through <idempotence>
+#                   -- there is nothing yet to describe -- and "ABSENT" in
+#                   every REST-describing column (<rest_method> through
+#                   <schema_ref>). A "planned" row is the ONLY row that may
+#                   carry ABSENT REST columns: with no script yet there is
+#                   nothing to twin. A reader deciding "does this verb have
+#                   a REST twin" still reads the REST columns alone without
+#                   special-casing status first; only the script-
+#                   describing columns use "-" to mark "no script yet" as
+#                   a distinct condition from "no REST twin yet". <class>
+#                   itself is a script-describing column (a verb's
+#                   read|action bucket is meaningless before the verb's
+#                   own behaviour exists to classify) and so stays "-" like
+#                   its neighbours through <idempotence>.
+#                   The reconciliation check never requires a "planned"
+#                   verb's script to exist; it only requires the row to
+#                   flip to "active" with real values once the verb ships.
+#
+#   script          Path to the verb's script, relative to team/ (e.g.
+#                   "scripts/halt.sh"). Dashboard-internal scripts that are
+#                   still operator-invocable live under scripts/dashboard/
+#                   (e.g. "scripts/dashboard/show-queues.sh"). "-" for a
+#                   planned verb.
+#
+#   flags           The verb's declared flag vocabulary, pipe-separated, in
+#                   the order the script itself declares them. For a script
+#                   using the shared OPERATOR_VALID_FLAGS=(...) array
+#                   (team/scripts/lib/operator_args.sh), this is that array
+#                   verbatim, including both "help" and "h" when a script
+#                   lists both. Four scripts in this file (ship-rc.sh,
+#                   scripts/dashboard/show-metrics.sh, scripts/dashboard/
+#                   agent-metrics.sh, scripts/cm/cancel-rc.sh) parse their
+#                   own arguments by hand instead of declaring
+#                   OPERATOR_VALID_FLAGS; the reconciliation check trusts
+#                   this column for each of them rather than re-deriving
+#                   it, since there is no declarative array to diff
+#                   against (team/pgai_agent_kanban/lib/
+#                   operator_verb_manifest.py's NO_OPERATOR_VALID_FLAGS_
+#                   ARRAY names all four). verify-rc-state.sh and
+#                   scripts/dashboard/show-queues.sh both declare
+#                   OPERATOR_VALID_FLAGS and are cross-checked like every
+#                   other "active"
+#                   row against the script's own array on every
+#                   reconciliation run. "-" for a planned verb.
+#
+#   mutates         "yes" if invoking the verb can change on-disk or
+#                   in-process state; "no" for a read-only verb. "-" for a
+#                   planned verb.
+#
+#   idempotence     "idempotent" -- re-running the verb with the same
+#                   arguments after a successful run produces the same end
+#                   state without erroring or duplicating an effect.
+#                   "non-idempotent" -- a second run either refuses (e.g.
+#                   intake.sh's no-clobber guard) or produces a new/
+#                   different effect (e.g. wake-now.sh firing another wake,
+#                   deep-verify.sh appending another ledger entry).
+#                   "read-only" -- mutates=no; idempotence is not a
+#                   meaningful axis for a verb that never changes state.
+#                   "-" for a planned verb. This column is descriptive
+#                   metadata carried over from a targeted reading of each
+#                   script's own comments and exit-code tables; a dedicated
+#                   per-verb behavioural fixture matrix is the authoritative
+#                   source for idempotence -- treat a mismatch there as the
+#                   correction, not this column, as authoritative going
+#                   forward.
+#
+#   rest_method     "GET" or "POST" -- every active verb has a REST twin.
+#                   "ABSENT" only on a "planned" row, where no route fronts
+#                   the verb because no script exists yet; an active row
+#                   carrying ABSENT here fails lint_api_parity.py.
+#
+#   rest_route      The route path (e.g. "/operations/halt", "/show");
+#                   "ABSENT" only on a "planned" row, exactly as for
+#                   <rest_method>. "/operations/*"
+#                   routes live in team/pgai_agent_kanban/api/routers/
+#                   operations.py; bare routes (e.g. "/show", "/verdicts",
+#                   "/metrics", "/agent-metrics") live in
+#                   team/pgai_agent_kanban/api/reads.py.
+#
+#   rest_body_model The Pydantic request body model class name (e.g.
+#                   "HaltBody") when the route both exists AND takes a JSON
+#                   body whose fields should be held to script-flag parity
+#                   by lint_api_parity.py. "NONE" when the route exists but
+#                   has no fields meaningful to flag-parity checking --
+#                   either it takes query parameters instead of a JSON body
+#                   (GET /show, GET /verdicts, GET /metrics, GET
+#                   /agent-metrics), or its body is accepted but
+#                   deliberately ignored (HaltGlobalBody for halt-global /
+#                   unhalt-global, which take no project or key). "ABSENT"
+#                   when rest_method/rest_route are also "ABSENT" -- a
+#                   "planned" row, never an active one.
+#                   lint_api_parity.py's flag-to-body-field parity check
+#                   runs only over rows where this column is a real class
+#                   name -- "NONE" and "ABSENT" rows are excluded from that
+#                   check by construction, matching the exact set the old
+#                   hardcoded _API_PARITY_MAP covered (15 pairs).
+#
+#   class           "read" or "action" for an active verb -- the exact
+#                   read|action vocabulary the REST-parity contract uses
+#                   to split the verb estate
+#                   into its two enforcement groups: a "read" verb's REST
+#                   twin (once it exists) must return the SAME resolved
+#                   data the CLI renders through one shared resolver, two
+#                   renderers; an "action" verb's REST twin must accept the
+#                   CLI's own parameters and enforce the SAME refusals
+#                   dual-channel. Today this column agrees with <mutates>
+#                   verb-for-verb (mutates=no <-> read, mutates=yes <->
+#                   action) because every verb the estate carries today is
+#                   cleanly one or the other, but the two columns are
+#                   independently authored and answer different questions
+#                   -- <mutates> is a fact about the SCRIPT's own on-disk
+#                   effect, <class> is which parity-enforcement bucket the
+#                   census places the verb in -- so a future verb whose
+#                   parity treatment does not track its mutation fact has
+#                   somewhere to say so without overloading <mutates>.
+#                   "-" for a planned verb (see the <status> entry above).
+#
+#   schema_ref      A reference to the shape of the REST twin's JSON
+#                   response body. "ShellEnvelope" names the standard
+#                   ``{"exit_code": int, "stdout": str, "stderr": str,
+#                   "warnings": list[str]}`` envelope every plain shell-out
+#                   read route returns (team/pgai_agent_kanban/api/reads.py's
+#                   own ``_make_envelope()``). "DualChannelShellEnvelope"
+#                   names the same envelope EXTENDED on a refused call with
+#                   the script's own dual-channel triple lifted out of
+#                   stderr as top-level keys -- ``{"exit_code", "stdout",
+#                   "stderr", "error", "message", "remedy", "warnings"}`` --
+#                   the shape EVERY action route returns, because the
+#                   action class requires the CLI's refusals to reach an
+#                   HTTP caller as JSON error/message/remedy
+#                   (routers/operations.py's
+#                   ``_make_dual_channel_envelope()``; a script that refuses
+#                   with plain stderr has that text lifted as ``message``
+#                   under the route's stable ``<verb>.refused`` fallback
+#                   key). An API-layer refusal on an action route (a
+#                   missing required field, a confirmation not given)
+#                   carries the same three keys at 422. The success body,
+#                   including the hand-built "started" narration the
+#                   detached-dispatch routes -- POST /operations/deep-verify,
+#                   POST /operations/cold-build-now, POST /operations/
+#                   wake-now's bg/all path -- return before their subprocess
+#                   completes, is the plain four-key envelope. Its required
+#                   key set is the UNION of the success and refusal shapes,
+#                   like the read-verb unions below. A
+#                   named class (e.g. "VerdictsResponse",
+#                   "AgentMetricsResponse") identifies a route whose body is
+#                   a custom, non-envelope shape documented in full in that
+#                   route's own handler docstring in reads.py -- this
+#                   column names the shape, it does not re-describe its
+#                   fields a second time. "ABSENT" when rest_method/
+#                   rest_route are also "ABSENT" (mirrors rest_body_model's
+#                   own convention) -- that is, only on a "planned" row. Where
+#                   a route offers a second, richer machine-readable
+#                   variant behind a query flag (e.g. GET /metrics's
+#                   ``?format=json`` mode returns a bare JSON array, not the
+#                   envelope) this column records the route's PRIMARY
+#                   contract -- the shape returned with no such flag
+#                   supplied -- and the secondary shape is documented only
+#                   in that route's own handler.
+#
+#   impl            How the REST twin and the CLI script reach the verb's
+#                   behaviour. "module:<dotted.module.function>" (e.g.
+#                   "module:pgai_agent_kanban.ops.read.get_release_state")
+#                   -- the route calls that one Python function directly
+#                   and starts no shell_out or subprocess on the way, and
+#                   the CLI script reaches the SAME function through
+#                   team/scripts/lib/pp_run_ops.sh (a "pp_run_ops <module>
+#                   <function>" call, or a pp_pythonpath import of the
+#                   function). "shell" -- every other row: the route shells
+#                   to the script, or the two surfaces are not yet proven
+#                   to share one function through pp_run_ops. "-" on a
+#                   planned row. Both readers parse the column; the
+#                   grammar has one implementation,
+#                   operator_verb_manifest.parse_impl(), which
+#                   lint_operator_verb_manifest.py uses to report a
+#                   malformed or missing value.
+#                   team/scripts/lint_api_route_impl.py verifies every
+#                   "module:" row against the route and the script, and
+#                   holds the number of "shell" rows to the baseline in
+#                   team/config/api-route-impl-baseline.txt: the count may
+#                   fall, never rise. A row flips from "shell" to
+#                   "module:" in the same change that moves its route and
+#                   CLI onto the shared function. A verb whose whole job
+#                   is to start a process or lane (wake-now) stays
+#                   "shell" and is listed, with its reason, in
+#                   team/config/api-route-impl-launchers.txt; the lint
+#                   reports it apart from the shell rows still to port.
+#
+# A note on "why": GET /verdicts calls resolve_verdicts in
+# team/pgai_agent_kanban/ops/verdict.py in process -- the function
+# scripts/why.sh (and its machine-readable sibling
+# scripts/verdict-report.sh) reaches through pp_run_ops. This is the real
+# REST twin for why, not merely an adjacent read verb: both surfaces
+# resolve through the exact same function, so a dashboard and a terminal
+# can never disagree about what a lane's verdict is (the parity
+# guarantee docs/operator-commands.md's "why" section documents under "The
+# same verdicts over HTTP"), and docs/operator-commands.md already
+# documents GET /verdicts as why's published HTTP contract. why's REST
+# columns below point at GET /verdicts / NONE (no body -- query params
+# only) rather than staying ABSENT; its schema_ref is "VerdictsResponse",
+# not "ShellEnvelope" -- the endpoint's body is {"verdicts": [...],
+# "warnings": [...]}, never exit_code/stdout/stderr. ?details=true extends
+# the same twin to why.sh --details' full diagnostic pane: the response
+# gains "posture", "release_locks", and "queue_tails", rendered from the
+# same resolved details why.sh --details' text sections are -- never a
+# second derivation of lock provenance, queue state, or deferral
+# posture. VerdictsResponse's required key set is therefore the UNION of
+# both shapes (see team/scripts/lint_api_parity.py's own comment on that
+# constant), not either shape alone.
+#
+# A note on rc-metrics and agent-metrics: both verbs already had a working
+# REST twin (GET /metrics, GET /agent-metrics in team/pgai_agent_kanban/
+# api/reads.py) before this row existed -- the API shipped ahead of the
+# census that is supposed to be the single source of truth for the verb
+# estate. The census's row-completeness rule (every operator verb the
+# estate exposes gets a row) is what closes that gap; no route changed to
+# add these two rows. agent-metrics.sh's
+# response is a custom object, not the shell envelope, so its schema_ref
+# is "AgentMetricsResponse"; rc-metrics' default (non-``?format=json``)
+# response is the four-key envelope around the stdout show-metrics.sh
+# prints, so its schema_ref is "ShellEnvelope". Both rows are "module:"
+# rows: GET /metrics calls pgai_agent_kanban.lib.metrics.show_metrics in
+# process and show-metrics.sh reaches it through pp_run_ops; GET
+# /agent-metrics calls compute_agent_averages (the averaging function of
+# pgai_agent_kanban.lib.agent_metrics, re-exported by
+# pgai_agent_kanban.lib.metrics) and agent-metrics.sh reaches it through
+# pp_run_ops pgai_agent_kanban.lib.metrics compute_agent_averages, whose
+# renderer calls it for every project block.
+#
+# A note on release-state and deep-verify-status: both are read verbs of
+# the REST-parity contract (release-state.md's four fields; the deep-verify
+# ledger's entries and current status). Their CLI scripts,
+# scripts/release-state.sh and scripts/deep-verify-status.sh, are each a
+# thin renderer over the exact function its REST twin calls
+# (pgai_agent_kanban.ops.read.get_release_state / get_deep_verify_status)
+# -- one resolver, two renderers, never a second derivation. Both rows are
+# "active" with real values.
+#
+# A note on the action rows: every one of them declares
+# "DualChannelShellEnvelope" -- the action class's own contract is that the
+# REST twin enforces the CLI's refusals dual-channel, so a route returning
+# the plain four-key envelope on a refusal is the drift the parity gate's
+# schema check reports. Four rows earned particular notes. halt-after's
+# twin lifts the script's own --until refusals (halt-after.until_malformed,
+# halt-after.until_scope_mismatch) to top-level keys so the action-parity
+# fixtures can assert the same machine key over HTTP and CLI. cold-build-now.sh
+# is a named alias that execs deep-verify.sh --project NAME, so POST
+# /operations/cold-build-now takes deep-verify's detached dispatch (returns
+# once the child starts, never with a verdict). cancel-rc's function,
+# pgai_agent_kanban.cm.cancel.cancel_rc, which scripts/cm/cancel-rc.sh and
+# POST /operations/cancel-rc share, refuses with plain stderr lines rather
+# than the dual-channel emitter, so its twin surfaces that text as "message"
+# under the stable fallback key "cancel_rc.refused"; its interactive
+# "Proceed?" prompt has no HTTP equivalent, so the body's "yes" field is
+# the confirmation and the route refuses 422 without it. Its "force" field
+# (--force) is a separate parameter that bypasses only the Active-RC
+# mismatch check and never confirms. release-locks has TWO REST surfaces for its two
+# modes: this row names the verb's mutating --release/--force mode, POST
+# /operations/release-locks, whose body model is what the flag-to-body
+# parity check holds to the script's flags; the read-only listing mode (no
+# --release) is GET /release-locks in reads.py, which stays registered in
+# team/config/operator_verb_census_exempt.txt as the documented second
+# route of an already-censused script rather than a second census row --
+# this file carries exactly one REST twin per verb. The row's impl names
+# pgai_agent_kanban.ops.locks.release_lock, the function POST
+# /operations/release-locks and release-locks.sh --release share; the
+# listing mode's GET route and the script's no-flag run share that
+# module's list_locks the same way.
+#
+# Reading in bash: source team/scripts/lib/operator_verb_manifest.sh and
+# call its ovm_* functions. Reading in Python: import
+# pgai_agent_kanban.lib.operator_verb_manifest and call load_manifest() or
+# get_verb(). Do not hand-parse this file a second time in either language.
+
+V	halt	active	scripts/halt.sh	project|help	yes	idempotent	POST	/operations/halt	HaltBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.halt
+V	unhalt	active	scripts/unhalt.sh	project|help	yes	idempotent	POST	/operations/unhalt	HaltBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.unhalt
+V	halt-global	active	scripts/halt-global.sh	help	yes	idempotent	POST	/operations/halt-global	NONE	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.halt_global
+V	unhalt-global	active	scripts/unhalt-global.sh	help	yes	idempotent	POST	/operations/unhalt-global	NONE	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.unhalt_global
+V	halt-after	active	scripts/halt-after.sh	project|key|until|help	yes	idempotent	POST	/operations/halt-after	HaltAfterBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.halt_after
+V	defer	active	scripts/defer.sh	project|until|help	yes	idempotent	POST	/operations/defer	DeferBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.defer
+V	undefer	active	scripts/undefer.sh	project|help	yes	idempotent	POST	/operations/undefer	UndeferBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.undefer
+V	deep-verify	active	scripts/deep-verify.sh	project|scheduled|help	yes	non-idempotent	POST	/operations/deep-verify	DeepVerifyBody	action	DualChannelShellEnvelope	shell
+V	cold-build-now	active	scripts/cold-build-now.sh	project|help	yes	non-idempotent	POST	/operations/cold-build-now	ColdBuildNowBody	action	DualChannelShellEnvelope	shell
+V	wake-now	active	scripts/wake-now.sh	agent|all|bg|help	yes	non-idempotent	POST	/operations/wake-now	WakeNowBody	action	DualChannelShellEnvelope	shell
+V	show	active	scripts/show.sh	project|key|file|help	no	read-only	GET	/show	NONE	read	ShellEnvelope	module:pgai_agent_kanban.ops.read.get_task_status
+V	show-queues	active	scripts/dashboard/show-queues.sh	details|project|kanban-root|help	no	read-only	GET	/show-queues	NONE	read	ShellEnvelope	module:pgai_agent_kanban.ops.read.get_queues
+V	why	active	scripts/why.sh	project|details|help	no	read-only	GET	/verdicts	NONE	read	VerdictsResponse	module:pgai_agent_kanban.ops.verdict.resolve_verdicts
+V	release-locks	active	scripts/release-locks.sh	release|force|help	yes	idempotent	POST	/operations/release-locks	ReleaseLocksBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.locks.release_lock
+V	unwind-rc	active	scripts/unwind-rc.sh	project|key|dry-run|confirm|force|help	yes	idempotent	POST	/operations/unwind-rc	UnwindRcBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.cm.unwind.unwind_rc
+V	verify-rc-state	active	scripts/verify-rc-state.sh	help|verbose	no	read-only	GET	/verify-rc-state	NONE	read	ShellEnvelope	module:pgai_agent_kanban.ops.rc_state.verify_rc_state
+V	reset	active	scripts/reset.sh	project|key|keep-artifacts|force|help	yes	idempotent	POST	/operations/reset	ResetBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.reset_item
+V	close	active	scripts/close.sh	project|key|state|note|dry-run|help	yes	idempotent	POST	/operations/close	CloseBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.close_item
+V	wontdo	active	scripts/wontdo.sh	project|key|help	yes	idempotent	POST	/operations/wontdo	WontdoBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.wontdo_item
+V	delete	active	scripts/delete.sh	project|key|force|dry-run|help	yes	non-idempotent	POST	/operations/delete	DeleteBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.delete_item
+V	intake	active	scripts/intake.sh	project|file|help	yes	non-idempotent	POST	/operations/intake	IntakeBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.deposit_intake
+V	set-version-ceiling	active	scripts/set-version-ceiling.sh	project|show|minor|major|no-minor|no-major|dry-run|help	yes	idempotent	POST	/operations/set-version-ceiling	SetVersionCeilingBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.set_version_ceiling
+V	switch-provider	active	scripts/switch-provider.sh	provider|help	yes	idempotent	POST	/operations/switch-provider	SwitchProviderBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.switch_provider
+# create-project's idempotence column reads "non-idempotent", corrected
+# from an inherited "idempotent" default: the script's own regression test
+# (team/tests/integration/test_create_project.py::
+# test_create_project_refuses_duplicate_project_directory) locks in a
+# non-zero exit when the target directory already exists, which is the
+# exact state a same-arguments re-run produces -- a deliberate,
+# already-shipped safety contract, not a bug to fix. Per this column's own
+# header above ("treat a mismatch there as the correction, not this
+# column"), the metadata is corrected to match the verified behaviour.
+V	create-project	active	scripts/create-project.sh	project|dry-run|help|workflow-type|max-patch|max-minor|max-major|git-remote|priority|color|no-migrate|dev-tree|dev-tree-path|git-repo|git-repo-url|h	yes	non-idempotent	POST	/operations/create-project	CreateProjectBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.projects.create_project
+V	add-project	active	scripts/add-project.sh	project|dry-run|help|priority|color|no-migrate|h	yes	idempotent	POST	/operations/add-project	AddProjectBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.projects.add_project
+V	remove-project	active	scripts/remove-project.sh	project|force|dry-run|help	yes	idempotent	POST	/operations/remove-project	RemoveProjectBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.projects.remove_project
+V	ship-rc	active	scripts/ship-rc.sh	project|key|dry-run|help	yes	non-idempotent	POST	/operations/ship-rc	ShipRcBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.cm.ship.ship_rc
+V	rc-metrics	active	scripts/dashboard/show-metrics.sh	project|last|history-csv|per-agent|kanban-root|no-color|help	no	read-only	GET	/metrics	NONE	read	ShellEnvelope	module:pgai_agent_kanban.lib.metrics.show_metrics
+V	agent-metrics	active	scripts/dashboard/agent-metrics.sh	project|window|last|all|since|kanban-root|no-color|help	no	read-only	GET	/agent-metrics	NONE	read	AgentMetricsResponse	module:pgai_agent_kanban.lib.metrics.compute_agent_averages
+V	cancel-rc	active	scripts/cm/cancel-rc.sh	help|project|key|yes|force	yes	idempotent	POST	/operations/cancel-rc	CancelRcBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.cm.cancel.cancel_rc
+V	release-state	active	scripts/release-state.sh	project|help	no	read-only	GET	/release-state	NONE	read	ReleaseStateResponse	module:pgai_agent_kanban.ops.read.get_release_state
+V	deep-verify-status	active	scripts/deep-verify-status.sh	project|help	no	read-only	GET	/deep-verify-status	NONE	read	DeepVerifyStatusResponse	module:pgai_agent_kanban.ops.read.get_deep_verify_status
+# archive's twin, POST /operations/archive, calls run_archive in process for
+# all four of the script's modes: plan then apply, --dry-run (the route's
+# dry_run returns the plan itself, the text archive.sh --dry-run prints,
+# rather than a description of the CLI call), --restore, and
+# --reconcile-queues (reconcile_queues, with or without dry_run). A second
+# run moves nothing, so the row is "idempotent".
+V	archive	active	scripts/archive.sh	project|dry-run|count|restore|reconcile-queues|help	yes	idempotent	POST	/operations/archive	ArchiveBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.archive.run.run_archive

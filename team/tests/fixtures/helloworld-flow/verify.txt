@@ -1,0 +1,5 @@
+stage: verify
+result: PASS
+check: python3 hello.py -> exact stdout "Hello, World!"
+check: python3 -m pytest test_hello.py -> exit 0
+check: python3 -m py_compile hello.py -> exit 0

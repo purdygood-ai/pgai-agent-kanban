@@ -1,0 +1,113 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified `ai_rc/v2.26.7` (a16dc7a5) against `requirements/v2.26.7-bugfix-bundle-20260930.md`: BUG-0474 (wake status readers misread an empty `## State` as the next section) plus the BUG-0473 provenance hygiene ride-along, implemented by CODER-20260930-032/033/034/035. The diff against `ai_main` (c10d4f73) is 22 files (+1177/-77) in 9 commits. Both gated runners exit 0. Every acceptance criterion in the bundle, in both bugs and in the four tickets passes, and each fixed reader was exercised in a sandbox on ai_main and on the RC, with the original failure and populated regressions. Behavioral probing next to the fix found one defect this RC changed: OVERWATCH's transient requeue now deletes the `## Blockers` section when `## Labels` is empty and not last. It also confirmed three pre-existing defects of the same class: old-shape writers, CM/verifier readers outside the ticketed files, and a stale test copy. All four are filed via Path C (autonomous follow-up filing — non-blocking) as bugs. None corrupts a standard-shaped status file or breaks the release pipeline.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Transient requeue deletes the Blockers section after an empty Labels section",
+      "heading": "Finding 1: Transient requeue deletes the Blockers section after an empty Labels section",
+      "level": 4,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one embedded writer in one OVERWATCH check)\n**Filed As:** BUG-0475-transient-requeue-deletes-blockers-section (Path C-A — filed as BUG)\n**Filed By:** TESTER (autonomous Path C) — when OVERWATCH requeues a task whose status file has an empty Labels section, the requeue now deletes the Blockers section that follows it.\n**Regression:** yes\n**Integrity:** none\n\n`check-transient-api-error.sh` now reads `## Labels` with the new boundary, but writes through its local `replace_section()`, which still uses the old `(^## X\\s*\\n)(.*?)(\\n+##|\\Z)` pattern with `re.S`. Same input (`## Labels` empty, followed by `## Blockers|real blocker text`), extracted heredoc run on both refs:\n- ai_main: the TRANSIENT label was lost (Labels stays empty), and `## Blockers` survived as `none`.\n- RC: `## Labels||TRANSIENT||## Needs Human|no`. **`## Blockers` is gone.** A later `task-status.sh --blockers x` on that task refuses with `task-status.missing-section`.\n\nThe RC's reader fix changed the failure from a lost label to a lost section. The trigger needs a non-standard status file (an empty, non-last `## Labels`; the requeue path itself appends Labels at the end), so this is rated medium. CODER-20260930-034 reported the writer shape as out of scope. Neither the unit suite nor the new tests cover this case.",
+      "filed_as": "BUG-0475",
+      "filed_by": "TESTER (autonomous Path C) — when OVERWATCH requeues a task whose status file has an empty Labels section, the requeue now deletes the Blockers section that follows it.",
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one embedded writer in one OVERWATCH check)",
+        "filed_as": "BUG-0475-transient-requeue-deletes-blockers-section (Path C-A — filed as BUG)",
+        "filed_by": "TESTER (autonomous Path C) — when OVERWATCH requeues a task whose status file has an empty Labels section, the requeue now deletes the Blockers section that follows it.",
+        "regression": "yes",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Old-shape section writers outside the wake state library delete the next section",
+      "heading": "Finding 2: Old-shape section writers outside the wake state library delete the next section",
+      "level": 4,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the same regex class has now produced findings in v2.26.5, v2.26.6 and v2.26.7)\n**Filed As:** BUG-0476-section-writers-delete-next-section (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — three writers outside the wake state library still delete the following section when the section they rewrite is empty.\n\n`overwatch_protocol.sh` `transient_retry_write` and `zero_progress_record`, and `wake_project.sh` `_update_readme_feature_branch`. Sandbox runs: `## Zero Progress`, `## Needs Human` and `## Workflow Type` (respectively) are deleted. ai_main and the RC produce identical output, so this predates the RC. It is the BUG-0472 class, which was fixed only in `wake_task_state.sh`.",
+      "filed_as": "BUG-0476",
+      "filed_by": "TESTER (autonomous Path C) — three writers outside the wake state library still delete the following section when the section they rewrite is empty.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the same regex class has now produced findings in v2.26.5, v2.26.6 and v2.26.7)",
+        "filed_as": "BUG-0476-section-writers-delete-next-section (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — three writers outside the wake state library still delete the following section when the section they rewrite is empty."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "CM and verifier scripts still read an empty section as the next section",
+      "heading": "Finding 3: CM and verifier scripts still read an empty section as the next section",
+      "level": 4,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (same recurring class; the RC's probe was scoped to named files and missed `team/scripts/cm/`)\n**Filed As:** BUG-0477-cm-section-readers-misread-empty (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — several release-machinery and verifier scripts still read an empty markdown section as the text of the next section.\n\nBUG-0474's Files Involved asks for \"any other `## <Heading>\\s*\\n(.*?)` reader\" to be checked. A tree-wide grep finds old-shape readers in `cm/open-doc.sh:206` (Last Released; returns `'## RC Opened At\\nnone'` for an empty non-last field and would write it back into release-state.md), `cm/finalize.sh:212` (`read_md_field`: an empty `## Artifact Name` becomes `## Output Formats\\nmarkdown`), `cm/finalize.sh:244` and `cm/promote_bundled_items.py:642` (Target Version; practically harmless), and `verify-blocked-task-guard.sh:168,173` (a copy of the wake_driver guard that was not updated alongside it). These predate the RC. BUG-0474's own acceptance criteria are met; this is a Step 6.11 spot-check finding.",
+      "filed_as": "BUG-0477",
+      "filed_by": "TESTER (autonomous Path C) — several release-machinery and verifier scripts still read an empty markdown section as the text of the next section.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (same recurring class; the RC's probe was scoped to named files and missed `team/scripts/cm/`)",
+        "filed_as": "BUG-0477-cm-section-readers-misread-empty (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — several release-machinery and verifier scripts still read an empty markdown section as the text of the next section."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Census unit test runs a stale hand-copied regex",
+      "heading": "Finding 4: Census unit test runs a stale hand-copied regex",
+      "level": 4,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one test file)\n**Filed As:** BUG-0478-census-test-mirror-stale (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the census unit test checks its own copy of the census code, and that copy no longer matches the shipped code.\n\n`team/tests/unit/test_census_closure.py:99` (`_run_census`) still uses `^##\\s+Inputs\\s*\\n(.*?)(?=\\n##|\\Z)`, while `wake_lifecycle.sh:601` now uses the section-body boundary. For `## Inputs` (empty) followed by a section citing the requirements path, the copy counts the task and the shipped code does not. The suite is green against logic that no longer ships (test fidelity). CODER-20260930-033 flagged it under Possible Stale Assertions.",
+      "filed_as": "BUG-0478",
+      "filed_by": "TESTER (autonomous Path C) — the census unit test checks its own copy of the census code, and that copy no longer matches the shipped code.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one test file)",
+        "filed_as": "BUG-0478-census-test-mirror-stale (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the census unit test checks its own copy of the census code, and that copy no longer matches the shipped code."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

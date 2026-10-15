@@ -33,28 +33,34 @@
 # -----------------------------------------------------------------------
 # REQUIRED pseudocron.env EXPORTS
 # -----------------------------------------------------------------------
-# When paired with install-pseudocron.sh, pseudocron.env must contain:
+# PGAI_AGENT_KANBAN_ROOT_PATH is NOT a pseudocron.env setting: it must be
+# exported in the environment pseudocron.py is LAUNCHED from (pseudocron.py
+# reads it to find this schedule and exits 1 naming it when unset), and
+# every job inherits it from there.
 #
-#   export PGAI_AGENT_KANBAN_ROOT_PATH=/path/to/pgai_agent_kanban
-#       # Full path to the installed kanban root.  All wake scripts derive
-#       # their paths from this variable.
+# pseudocron.env then needs only what the launch environment lacks:
 #
 #   export PATH=/usr/local/bin:/usr/bin:/bin
-#       # Ensure wake-batch.sh and its dependencies are on PATH.
-#       # Adjust if claude or other tools are installed to non-standard paths.
+#       # Default: inherited from the launching environment. A PATH set in
+#       # pseudocron.env REPLACES it (no $PATH expansion), so list everything
+#       # the jobs need: a python3 of version 3.12+ and the claude CLI (and
+#       # the codex CLI if that provider is active).
 #
-#   export HOME=/home/your-user
-#       # Required when pseudocron is launched from a system init (systemd unit,
-#       # etc.) that does not set HOME.  Wake scripts and claude may need HOME.
+#   export HOME=/srv/kanban
+#       # Default: inherited. Set it when pseudocron is launched from a system
+#       # init (systemd unit, etc.) that does not set HOME; the claude and
+#       # codex CLIs read their credentials under $HOME.
 #
-#   export ANTHROPIC_API_KEY=<your-api-key>
-#       # Anthropic API key consumed by claude.  Required unless the API key
-#       # is injected via another mechanism (e.g. a secrets manager wrapper).
+# No credential is required: the default oauth mode uses the CLI's own login
+# (claude login / codex login), and API keys belong in the secrets file
+# (see secrets_example), never in pseudocron.env.
 #
 # Optional: override a role's model (per-role; provider-agnostic)
-#   export PGAI_CODER_MODEL=<model-id>
-#   export PGAI_PM_MODEL=<model-id>
-#       # Recognized roles: PM, CODER, WRITER, TESTER, CM
+#   export PGAI_CODER_MODEL=claude-sonnet-5-5
+#       # Recognized roles: PM, CODER, WRITER, TESTER, CM, PO
+#       # Default: unset, and the model comes from kanban.cfg
+#       # [models.<provider>] <role>, then [models.<provider>] default, then
+#       # the provider CLI's own default.
 #
 # Copy team/scripts/pseudocron.env.example to
 # $PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.env and fill in real values.
@@ -249,6 +255,16 @@
 59 scripts/wake-batch.sh --agent=writer --sleep=21 >> logs/cron-writer.log 2>&1
 
 # =============================================================================
+# OVERWATCH JOBS — the same two jobs every crontab tier schedules
+# =============================================================================
+# The sweep runs hourly at minute 30, as in the crontab tiers. The daily
+# OVERWATCH wake runs at 03:30 local time: pseudocron has no hour field, so
+# the job carries its own hour guard (pseudocron runs every command through
+# bash -c, so the test is ordinary shell).
+30 scripts/overwatch-sweep.sh >> logs/cron-overwatch-sweep.log 2>&1
+30 [ "$(date +%H)" = "03" ] && scripts/wake-batch.sh --agent=overwatch --sleep=0 --max-tasks=1 >> logs/cron-overwatch.log 2>&1
+
+# =============================================================================
 # MAINTENANCE JOBS
 # =============================================================================
 # Note: pseudocron fires a job every time the matching minute occurs within
@@ -259,6 +275,8 @@
 
 # --- Cleanup script (fires hourly at minute 0; use a date-guard wrapper
 #     for weekly semantics equivalent to crontab's "0 4 * * 0") ---
+#     With no --project, cleanup.sh runs once per project registered in
+#     projects.cfg; add --project <name> to clean a single project.
 # 0 scripts/cleanup/cleanup.sh >> logs/cron-cleanup.log 2>&1
 
 # --- Log cleanup (fires hourly at minute 30; use a date-guard wrapper

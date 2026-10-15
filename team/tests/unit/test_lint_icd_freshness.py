@@ -81,6 +81,10 @@ class TestIcdFreshnessPositive:
         Args:
             capsys: pytest capture fixture used to inspect stdout/stderr.
         """
+        # Deliberately exercises the real docs/api/icd.json and
+        # docs/api/ICD_VERSION (not a fixture): the freshness check's whole
+        # purpose is to validate this specific committed pair, so there is
+        # no isolated fixture substitute that would test the same thing.
         result = _lint.check_freshness(
             icd_path=_ICD_ARTIFACT,
             version_file=_ICD_VERSION_FILE,

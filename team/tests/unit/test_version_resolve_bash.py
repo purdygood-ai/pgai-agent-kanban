@@ -3,7 +3,7 @@ test_version_resolve_bash.py
 =============================
 Behavioral unit tests for team/scripts/lib/version_resolve.sh — the shared
 version-tag resolution and clean-source laydown mechanism sourceable by both
-install.sh and team/scripts/upgrade.sh (CODER-20260728-020).
+install.sh and team/scripts/upgrade.sh.
 
 WHAT IS TESTED
 --------------
@@ -41,6 +41,18 @@ import subprocess
 import pytest
 
 from tests.unit.shell_harness import run_bash
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="version-resolve-bash")
 
 _LIB = "scripts/lib/version_resolve.sh"
 

@@ -1,7 +1,7 @@
 # BUG-0001-movement-requires-held-key
 
 **Bug ID:** BUG-0001-movement-requires-held-key
-**Filed By:** operator (Rocky)
+**Filed By:** operator
 **Severity:** medium
 
 ## Status

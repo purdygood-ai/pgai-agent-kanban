@@ -17,7 +17,13 @@
 #   2b. Self-locate: derive install root from _PGAI_TEMP_SH_DIR (two dirs up) and
 #       try that kanban.cfg when PGAI_AGENT_KANBAN_ROOT_PATH is unset/empty.
 #   3. Last-resort fallback /tmp/pgai_kanban_tmp — when config is unreadable.
-# The resolver NEVER returns empty or '/'.
+# The resolver NEVER returns empty or a value naming the filesystem root:
+# a resolved value that canonicalises to '/' (the bare string, '///', a
+# '/x/..' shape, or any other spelling of the top of the filesystem) is
+# rejected exactly like the empty string and replaced by the tier-3
+# fallback, so no caller can be handed the whole filesystem as its scratch
+# root. Consumers may still canonicalise for their own comparisons, but
+# they never need to in order to trust that invariant.
 #
 # Per-project temp directories
 # ----------------------------
@@ -39,6 +45,10 @@
 # Install-wide (no project context) functions
 # -------------------------------------------
 #   pgai_temp_dir              — echo the resolved root dir, creating it if needed
+#   pgai_configured_temp_root  — echo the root kanban.cfg (or its fallback)
+#                                 configures, ignoring any per-invocation
+#                                 PGAI_AGENT_KANBAN_TEMP_DIR override; read-only,
+#                                 does not create the directory
 #   pgai_temp_subdir <name>    — echo/create a named subdir under the root
 #   pgai_mktemp [prefix]       — mktemp a file inside the root
 #   pgai_mktemp_d [prefix]     — mktemp -d a directory inside the root
@@ -63,6 +73,119 @@ _PGAI_TEMP_SH_LOADED=1
 _PGAI_TEMP_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---------------------------------------------------------------------------
+# _pgai_temp_root_names_filesystem_root <path>
+# Internal: true (exit 0) when <path> is empty or canonicalises to the
+# filesystem root -- the bare '/', a run of slashes ('///'), a trailing-dot or
+# parent-reference spelling ('/.', '/tmp/..'), or anything else realpath -m
+# collapses to '/'. This is the one test behind the resolvers' "never empty
+# or '/'" safety invariant: comparing the raw string against the literal '/'
+# alone lets '///' through, which names the same directory and would hand a
+# cleanup helper the whole filesystem as its root.
+#
+# realpath -m never touches the filesystem (no component has to exist) and
+# only the canonical form is compared -- the resolver still echoes the
+# configured spelling unchanged when it passes, so a symlinked /tmp is not
+# rewritten to its target. Where realpath is unavailable the check falls back
+# to collapsing slash runs and stripping a trailing slash, which still
+# catches the '///' and '/.' spellings.
+# ---------------------------------------------------------------------------
+_pgai_temp_root_names_filesystem_root() {
+    local _p="${1:-}"
+    [[ -z "$_p" ]] && return 0
+    local _canon
+    if _canon="$(realpath -m -- "$_p" 2>/dev/null)" && [[ -n "$_canon" ]]; then
+        [[ "$_canon" == "/" ]] && return 0
+        return 1
+    fi
+    # Fallback canonicalisation: collapse '//' runs, drop a trailing '/.' or '/'.
+    while [[ "$_p" == *//* ]]; do _p="${_p//\/\//\/}"; done
+    _p="${_p%/.}"
+    [[ "$_p" != "/" ]] && _p="${_p%/}"
+    [[ -z "$_p" || "$_p" == "/" ]]
+}
+
+# ---------------------------------------------------------------------------
+# _pgai_temp_dir_from_config
+# Internal: resolves the framework temp root purely from kanban.cfg's
+# [paths] tmp_root/tmp_subdir (tier 2a), its self-locate fallback (tier 2b),
+# or the hard-coded last resort (tier 3) — the exact three tiers
+# pgai_temp_dir falls through to once its own tier-1 env-var check finds
+# nothing set. Factored out so a caller that needs "the root the framework
+# itself would produce, independent of what THIS invocation's
+# PGAI_AGENT_KANBAN_TEMP_DIR happens to be set to" (pgai_configured_temp_root,
+# below) shares this exact resolution rather than re-deriving it — the two
+# functions would otherwise drift the moment one tier changed and the other
+# did not. Never returns empty or a value that canonicalises to '/' (see
+# _pgai_temp_root_names_filesystem_root), matching pgai_temp_dir's own
+# safety invariant on the value it ultimately echoes.
+#
+# PRINCIPLE: every kanban entry point must establish its own environment by
+# sourcing shell-env before calling pgai_temp_dir (wake scripts do this;
+# create.sh mirrors that). This self-locate sub-tier is the defensive
+# backstop for any caller whose PGAI_AGENT_KANBAN_ROOT_PATH is unset.
+#
+# Sub-tier 2a: locate kanban.cfg via PGAI_AGENT_KANBAN_ROOT_PATH (the live
+# install root) when available.
+# Sub-tier 2b (self-locate): when PGAI_AGENT_KANBAN_ROOT_PATH is unset/empty,
+# derive the install root from _PGAI_TEMP_SH_DIR (captured at source time as
+# <install>/team/scripts/lib). The install root is two directories up. Try
+# that path's kanban.cfg before falling to Tier 3. This protects callers such
+# as dashboard pane scripts that may not inherit the full framework env.
+# Must NOT use BASH_SOURCE inside the function — _PGAI_TEMP_SH_DIR is the
+# correct reference (captured at source time with BASH_SOURCE, safe there).
+# ---------------------------------------------------------------------------
+_pgai_temp_dir_from_config() {
+    local _cfg_dir="${PGAI_AGENT_KANBAN_ROOT_PATH:-}"
+    local _tmp_root="" _tmp_subdir=""
+
+    # Sub-tier 2a: env-var points to a readable kanban.cfg.
+    if [[ -n "$_cfg_dir" && -r "${_cfg_dir}/kanban.cfg" ]]; then
+        # Source ini_parser.sh only if read_ini is not already available.
+        if ! command -v read_ini >/dev/null 2>&1; then
+            # shellcheck source=ini_parser.sh
+            source "${_PGAI_TEMP_SH_DIR}/ini_parser.sh"
+        fi
+        _tmp_root="$(read_ini "${_cfg_dir}/kanban.cfg" paths tmp_root "")"
+        _tmp_subdir="$(read_ini "${_cfg_dir}/kanban.cfg" paths tmp_subdir "")"
+    fi
+
+    # Sub-tier 2b: self-locate fallback when env var was unset/empty or its
+    # kanban.cfg was unreadable (i.e. _tmp_root still empty).
+    if [[ -z "$_tmp_root" ]]; then
+        local _self_root
+        # _PGAI_TEMP_SH_DIR is <install>/team/scripts/lib; install root is two up.
+        _self_root="$(cd "${_PGAI_TEMP_SH_DIR}/../.." && pwd)"
+        if [[ -r "${_self_root}/kanban.cfg" ]]; then
+            if ! command -v read_ini >/dev/null 2>&1; then
+                # shellcheck source=ini_parser.sh
+                source "${_PGAI_TEMP_SH_DIR}/ini_parser.sh"
+            fi
+            _tmp_root="$(read_ini "${_self_root}/kanban.cfg" paths tmp_root "")"
+            _tmp_subdir="$(read_ini "${_self_root}/kanban.cfg" paths tmp_subdir "")"
+        fi
+    fi
+
+    local dir
+    if [[ -n "$_tmp_root" && -n "$_tmp_subdir" ]]; then
+        dir="${_tmp_root}/${_tmp_subdir}"
+    else
+        # Tier 3: last-resort fallback — config absent or unreadable.
+        # anti-pattern-allowlist: 2 (justification: this IS the resolver's documented fallback; the literal is intentional and must remain here as the hard-coded safety net)
+        dir="/tmp/pgai_kanban_tmp"
+    fi
+
+    # Safety invariant: this resolver must never return empty or a value that
+    # canonicalises to the filesystem root (a configured tmp_root of '/' with
+    # a tmp_subdir of '/' would otherwise pass a raw-string test as '///').
+    if _pgai_temp_root_names_filesystem_root "$dir"; then
+        # anti-pattern-allowlist: 2 (justification: safety invariant fallback in the resolver itself; intentional hard-coded sentinel, not a caller site)
+        dir="/tmp/pgai_kanban_tmp"
+    fi
+
+    printf '%s' "$dir"
+}
+
+# ---------------------------------------------------------------------------
 # pgai_temp_dir
 # Echo the resolved framework temp root directory and ensure it exists.
 # Returns the path (always ends without a trailing slash).
@@ -72,7 +195,8 @@ _PGAI_TEMP_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   2a. ${tmp_root}/${tmp_subdir} from kanban.cfg via PGAI_AGENT_KANBAN_ROOT_PATH.
 #   2b. Self-locate: install root derived from _PGAI_TEMP_SH_DIR/../..
 #   3. Hard fallback /tmp/pgai_kanban_tmp (config unreadable / absent).
-# Never returns empty or '/'.
+# Never returns empty or a value that canonicalises to '/' -- the tier-1
+# override is held to the same invariant as the configured tiers.
 # ---------------------------------------------------------------------------
 pgai_temp_dir() {
     local dir
@@ -81,69 +205,45 @@ pgai_temp_dir() {
     if [[ -n "${PGAI_AGENT_KANBAN_TEMP_DIR:-}" ]]; then
         dir="${PGAI_AGENT_KANBAN_TEMP_DIR}"
     else
-        # Tier 2: read tmp_root and tmp_subdir from kanban.cfg [paths].
-        #
-        # PRINCIPLE: every kanban entry point must establish its own environment
-        # by sourcing shell-env before calling pgai_temp_dir (wake scripts do this;
-        # create.sh mirrors that).  This self-locate sub-tier is the defensive
-        # backstop for any caller whose PGAI_AGENT_KANBAN_ROOT_PATH is unset.
-        #
-        # Sub-tier 2a: locate kanban.cfg via PGAI_AGENT_KANBAN_ROOT_PATH (the live
-        # install root) when available.
-        # Sub-tier 2b (self-locate): when PGAI_AGENT_KANBAN_ROOT_PATH is unset/empty,
-        # derive the install root from _PGAI_TEMP_SH_DIR (captured at source time as
-        # <install>/team/scripts/lib).  The install root is two directories up.  Try
-        # that path's kanban.cfg before falling to Tier 3.  This protects callers such
-        # as dashboard pane scripts that may not inherit the full framework env.
-        # Must NOT use BASH_SOURCE inside the function — _PGAI_TEMP_SH_DIR is the
-        # correct reference (captured at source time with BASH_SOURCE, safe there).
-        local _cfg_dir="${PGAI_AGENT_KANBAN_ROOT_PATH:-}"
-        local _tmp_root="" _tmp_subdir=""
-
-        # Sub-tier 2a: env-var points to a readable kanban.cfg.
-        if [[ -n "$_cfg_dir" && -r "${_cfg_dir}/kanban.cfg" ]]; then
-            # Source ini_parser.sh only if read_ini is not already available.
-            if ! command -v read_ini >/dev/null 2>&1; then
-                # shellcheck source=ini_parser.sh
-                source "${_PGAI_TEMP_SH_DIR}/ini_parser.sh"
-            fi
-            _tmp_root="$(read_ini "${_cfg_dir}/kanban.cfg" paths tmp_root "")"
-            _tmp_subdir="$(read_ini "${_cfg_dir}/kanban.cfg" paths tmp_subdir "")"
-        fi
-
-        # Sub-tier 2b: self-locate fallback when env var was unset/empty or its
-        # kanban.cfg was unreadable (i.e. _tmp_root still empty).
-        if [[ -z "$_tmp_root" ]]; then
-            local _self_root
-            # _PGAI_TEMP_SH_DIR is <install>/team/scripts/lib; install root is two up.
-            _self_root="$(cd "${_PGAI_TEMP_SH_DIR}/../.." && pwd)"
-            if [[ -r "${_self_root}/kanban.cfg" ]]; then
-                if ! command -v read_ini >/dev/null 2>&1; then
-                    # shellcheck source=ini_parser.sh
-                    source "${_PGAI_TEMP_SH_DIR}/ini_parser.sh"
-                fi
-                _tmp_root="$(read_ini "${_self_root}/kanban.cfg" paths tmp_root "")"
-                _tmp_subdir="$(read_ini "${_self_root}/kanban.cfg" paths tmp_subdir "")"
-            fi
-        fi
-
-        if [[ -n "$_tmp_root" && -n "$_tmp_subdir" ]]; then
-            dir="${_tmp_root}/${_tmp_subdir}"
-        else
-            # Tier 3: last-resort fallback — config absent or unreadable.
-            # anti-pattern-allowlist: 2 (justification: this IS the resolver's documented fallback; the literal is intentional and must remain here as the hard-coded safety net)
-            dir="/tmp/pgai_kanban_tmp"
-        fi
+        dir="$(_pgai_temp_dir_from_config)"
     fi
 
-    # Safety invariant: resolver must never return empty or root '/'.
-    if [[ -z "$dir" || "$dir" == "/" ]]; then
+    # Safety invariant: resolver must never return empty or a value that
+    # canonicalises to the filesystem root.
+    if _pgai_temp_root_names_filesystem_root "$dir"; then
         # anti-pattern-allowlist: 2 (justification: safety invariant fallback in the resolver itself; intentional hard-coded sentinel, not a caller site)
         dir="/tmp/pgai_kanban_tmp"
     fi
 
     mkdir -p "$dir"
     echo "$dir"
+}
+
+# ---------------------------------------------------------------------------
+# pgai_configured_temp_root
+# Echo the framework temp root exactly as kanban.cfg (or its self-locate /
+# hard-coded fallback) configures it — deliberately IGNORING any
+# PGAI_AGENT_KANBAN_TEMP_DIR override present in the current environment.
+#
+# Use this, never pgai_temp_dir, when the question is "did the framework
+# itself produce this root" rather than "what root should THIS invocation
+# use". team/scripts/lib/git_boundary_guard.sh's fixture-local exemption is
+# the first caller: it must tell the framework's own per-project scratch
+# layout (pgai_project_temp_dir's <root>/projects/<name>) apart from a
+# configured PGAI_AGENT_KANBAN_TEMP_DIR that merely happens to share that
+# two-component shape — a value inferred from the configured root's own
+# text can never prove the root came from the framework, only a value the
+# framework produces by a path the configured override cannot move can.
+#
+# Never returns empty or a value that canonicalises to '/' -- the same
+# safety invariant pgai_temp_dir enforces on its own final answer, tested
+# by _pgai_temp_root_names_filesystem_root so that '///' and '/x/..' are
+# rejected along with the bare '/'. Read-only: unlike pgai_temp_dir, this
+# does not create the directory — a caller comparing paths has no need to
+# bring a root into existence just to ask whether it is the framework's own.
+# ---------------------------------------------------------------------------
+pgai_configured_temp_root() {
+    _pgai_temp_dir_from_config
 }
 
 # ---------------------------------------------------------------------------
@@ -245,6 +345,20 @@ pgai_temp_cleanup() {
 #   - The resolved temp root is empty, '/', or '/tmp' bare.
 #   - The resolved tests path equals the temp root itself.
 #
+# Permission-tolerant: an aborted or crashed earlier run can leave
+# a directory mode 0555 (no write bit) under the tests/ subtree — a bare
+# `rm -rf` cannot unlink files out of a directory it cannot write to, and
+# under a caller's `set -euo pipefail` that turns a purely cosmetic
+# housekeeping failure into the caller's own fatal exit.  Before removing,
+# this function restores owner-write on every directory in the subtree
+# (`chmod -R u+w`), which only ever touches paths strictly inside the
+# already-validated tests_path — never anything the guards above refused.
+# If removal still fails after that recovery attempt (a permission problem
+# chmod itself cannot fix, e.g. a directory this process does not own), the
+# function narrates the exact path to stderr and returns non-zero rather
+# than deleting nothing silently; it is the caller's job to treat that as a
+# non-fatal warning rather than a runner-wide failure.
+#
 # The tests/ directory itself is removed entirely (rm -rf), mirroring the
 # behaviour of pgai_temp_cleanup on a subdirectory.
 #
@@ -279,7 +393,22 @@ pgai_temp_cleanup_tests() {
 
     # Remove the tests/ subtree only if it exists.  No error when absent.
     if [[ -e "$tests_path" ]]; then
-        rm -rf "$tests_path"
+        # Restore owner-write on every directory in the subtree before
+        # removing, so a read-only leftover from an earlier aborted run
+        # doesn't block the sweep.  Safe: $tests_path was
+        # validated above to sit strictly inside the configured temp root,
+        # so this only ever restores permissions on the framework's own
+        # scratch, never anything outside it.
+        chmod -R u+w "$tests_path" 2>/dev/null || true
+        # rm's own stderr is left unsuppressed here (unlike the chmod
+        # above) so a leftover the permission recovery genuinely could not
+        # fix still names its own specific path via rm's native
+        # "cannot remove '<path>': <reason>" line, in addition to the
+        # summary below.
+        if ! rm -rf "$tests_path"; then
+            echo "temp.sh: pgai_temp_cleanup_tests: could not fully remove '${tests_path}' even after restoring write permission — leaving it in place for manual inspection" >&2
+            return 1
+        fi
     fi
 }
 
@@ -768,8 +897,21 @@ _pgai_listener_scan_matches() {
 pgai_listener_snapshot() {
     local project_subtree="${1:-${PGAI_PROJECT_TEMP_SUBTREE:-}}"
     project_subtree="${project_subtree%/}"
-    _pgai_listener_scan_matches "${project_subtree}" 2>/dev/null \
-        | awk -F'\t' '{print $1}' | sort -un
+    # Capture into a variable rather than piping _pgai_listener_scan_matches
+    # directly into awk/sort: under a caller's `set -e -o pipefail` (every
+    # gated runner sources this file under strict mode), a bare pipeline
+    # propagates ANY non-zero exit code from its first stage -- including
+    # the scanner's documented "neither ss nor lsof available" return of 2
+    # -- and aborts the whole calling script right here, silently, before
+    # pytest ever launches. The `&& ... || ...` form below neutralizes that:
+    # the compound list always exits 0 for `set -e` purposes, regardless of
+    # what the scanner returned, matching this function's own "always
+    # returns 0, empty snapshot is valid output" contract.
+    local scan_output=""
+    scan_output="$(_pgai_listener_scan_matches "${project_subtree}" 2>/dev/null)" && true || true
+    if [[ -n "${scan_output}" ]]; then
+        printf '%s\n' "${scan_output}" | awk -F'\t' '{print $1}' | sort -un
+    fi
     return 0
 }
 
@@ -892,9 +1034,14 @@ pgai_listener_cleanliness_check() {
         fi
     fi
 
+    # `cmd && status=0 || status=$?` rather than a bare `var=$(cmd); status=$?`:
+    # under a caller's `set -e` (every gated runner sources this file under
+    # strict mode), a plain failing assignment aborts the calling script on
+    # THIS line, before the status==2 handling below -- built to catch this
+    # exact case -- ever runs. See the matching fix and comment in
+    # pgai_listener_snapshot() above for the sibling defect this mirrors.
     local scan_output scan_status
-    scan_output="$(_pgai_listener_scan_matches "${project_subtree}")"
-    scan_status=$?
+    scan_output="$(_pgai_listener_scan_matches "${project_subtree}")" && scan_status=0 || scan_status=$?
     if [[ ${scan_status} -eq 2 ]]; then
         # Neither ss nor lsof is available — skip the check rather than block the run.
         echo "[pgai-listener] WARNING: neither ss nor lsof found; skipping listener cleanliness check." >&2
@@ -1006,8 +1153,15 @@ wake_tmp_litter_take_snapshot() {
 # pre-dispatch snapshot and report new entries that are not on the allowlist
 # or under the framework temp root.
 #
-# Reporting only — never deletes anything. Fire-and-forget: any internal
-# error is logged and the function returns 0 so the wake tail is unaffected.
+# Never deletes anything itself — an arbitrary bare-/tmp entry could be
+# something another concurrent process still needs, so unilateral removal
+# from a fire-and-forget teardown step is its own hazard. Instead, every
+# report (status.md, the log line, and the OVERWATCH actions.log entry)
+# carries a runnable `rm -f` remedy naming the exact entries found, so the
+# violation does not simply persist narrated-and-ignored: the operator or
+# the next session has a copy-pasteable command rather than having to
+# reconstruct one from the file list. Fire-and-forget: any internal error is
+# logged and the function returns 0 so the wake tail is unaffected.
 #
 # Arguments:
 #   $1  snapshot_file        — path written by wake_tmp_litter_take_snapshot
@@ -1019,8 +1173,10 @@ wake_tmp_litter_take_snapshot() {
 #   $6  kanban_root          — kanban root directory (for overwatch actions.log)
 #
 # Side effects when litter is found:
-#   - Appends a `## Temp Litter` section to status.md naming each file
-#   - Calls log_func_name with a one-line summary
+#   - Appends a `## Temp Litter` section to status.md naming each file and
+#     a `remedy:` line carrying the runnable `rm -f` command
+#   - Calls log_func_name with a one-line summary that also carries the
+#     remedy command
 #   - Appends one info entry to <kanban_root>/projects/<project_name>/overwatch/actions.log
 #
 # Allowlist (entries created during the session are NOT flagged):
@@ -1116,6 +1272,16 @@ wake_tmp_litter_check_and_report() {
         exit 0
     fi
 
+    # Build the runnable removal remedy up front so both the status.md
+    # section and the log summary carry the identical command. The check
+    # stays report-only -- it never deletes anything itself (a fire-and-forget
+    # teardown step touching arbitrary bare-/tmp entries by itself would be
+    # its own hazard) -- but a violation that is only narrated and never
+    # acted on just persists, which is the gap this remedy closes: the
+    # operator (or the next session) has a copy-pasteable command instead of
+    # having to reconstruct one from the file list.
+    local _remedy="rm -f ${litter[*]}"
+
     # --- Report to status.md ---
     if [[ -f "$task_status_path" ]]; then
         {
@@ -1123,12 +1289,13 @@ wake_tmp_litter_check_and_report() {
             for _lf in "${litter[@]}"; do
                 printf 'created %s — SOP Temporary File Convention\n' "$_lf"
             done
+            printf 'remedy: %s\n' "$_remedy"
         } >> "$task_status_path" 2>/dev/null || true
     fi
 
     # --- Log one summary line ---
     local _count="${#litter[@]}"
-    local _summary="litter check: ${task_id} left ${_count} bare /tmp entry(ies): ${litter[*]}"
+    local _summary="litter check: ${task_id} left ${_count} bare /tmp entry(ies): ${litter[*]} — remedy: ${_remedy}"
     if [[ -n "$log_func" ]] && command -v "$log_func" >/dev/null 2>&1; then
         "$log_func" "$_summary"
     else

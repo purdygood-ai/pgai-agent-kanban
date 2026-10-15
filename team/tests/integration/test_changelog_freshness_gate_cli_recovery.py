@@ -117,7 +117,7 @@ def _gate_subprocess_env(tmp_path: pathlib.Path) -> dict:
 
     PGAI_AGENT_KANBAN_TEMP_DIR is pinned under tmp_path so the gate's own temp
     usage (_get_temp_root() in lint_changelog_freshness.py) cannot depend on
-    ambient environment state (SOP.md Test Authoring Guidelines Anti-pattern 2).
+    ambient environment state (roles/TESTER.md Test Authoring Guidelines Anti-pattern 2).
     PGAI_LINT_CHANGELOG_MODE is explicitly absent so the gate runs in strict
     byte-compare mode regardless of which branch this worktree is on.
 

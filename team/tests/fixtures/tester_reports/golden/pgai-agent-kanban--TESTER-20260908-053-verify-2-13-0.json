@@ -1,0 +1,308 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "high",
+  "summary": "v2.13.0 makes bug deferral a configuration posture. Four `[release]` keys\n(`deferred_bugs`, `deferred_bug_level`, `defer_piggyback`, `deep_verify`) are\nregistered and validated, a four-tier resolver answers \"what is the posture and\nwhere did it come from\" (campaign file > project.cfg > kanban.cfg > default),\na `DEFER-LOW-BUGS` campaign file overlays the posture until a named release and\nis spent by CM at ship, discovery holds deferred bugs back from opening an RC\nand carries them onto a bundle a higher-severity bug already triggered, and the\ndashboard, status bar and a new `why.sh` verb report the resolved posture.\n\nVerification covered the full release methodology: pre-flight merge check, both\ngated runners, coverage, lint findings ingestion, deep-verify freshness, and\nSteps 6.1 through 6.14. The functional core of the release is genuinely good --\nevery precedence tier, every refusal, the arm/spend/undefer lifecycle, the\nseverity matrix, the status-bar text and the card glyphs were exercised\nbehaviorally in a throwaway sandbox root and all behaved exactly as specified.\n\nTwo things stop this being a clean pass. First, the unit gated runner exits 1\non this tree: a one-line `command -v` availability guard added to\n`config_loader.sh` is misread by the dual-channel-pair lint as a malformed\nemitter call, and the test that asserts the tree produces zero lint findings\nfails. The same lint reports zero offenders on `ai_main`, so this is a\nregression this RC introduces in its own certification gate. Second, the\npiggyback deliverable shipped only half of what the requirements specify: the\ncarry and its narration work, but the \"consolidated, <=K CODER tasks, default\nK=2, grouped by area\" cap does not exist anywhere, and PM's role file -- which\ntwo shipped documents claim consolidates on the ride-along annotation -- was\nnever told the annotation exists.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "unit gated runner exits 1 -- dual-channel lint misreads a `command -v` guard as an emitter call",
+      "heading": "Finding 1: unit gated runner exits 1 -- dual-channel lint misreads a `command -v` guard as an emitter call",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** high (regression: the suite passed at v2.12.1 and fails at v2.13.0)\n**Regression:** yes (verified against the baseline -- see evidence below)\n**Integrity Damage:** no\n**Filed As:** BUG-0206 (Path C-A -- filed as BUG -- code defect / regression / test failure)\n\n`lint_dual_channel_pair` reports exactly one offender on the RC tree:\n\n```\nteam/scripts/lib/config_loader.sh:153 - pgai_emit_error_contract call is missing the remedy field(s)\n```\n\nLine 153 is not a call. It is the bootstrap guard this RC added:\n\n```bash\n153: if ! command -v pgai_emit_error_contract >/dev/null 2>&1; then\n154:     # shellcheck source=error_contract.sh\n155:     source \"$(dirname \"${BASH_SOURCE[0]}\")/error_contract.sh\"\n156: fi\n```\n\nThe four real emitter calls in the same file (lines 290, 314, 336, 366) each\nsupply error, message and remedy correctly -- I read all four. The lint's bash\ncall-site scanner has no skip for `command -v` / `type` / `declare -F`\noperands, so it reads the identifier as an invocation with one argument.\n\nBaseline evidence (this is what makes `Regression: yes` a verified value rather\nthan a default): `git archive ai_main | tar -x -C <tmpdir>` then\n`python3 team/scripts/lint_dual_channel_pair.py` in that tree prints\n`OK - 209 file(s) checked, 0 offenders` and exits 0. `config_loader.sh` on\n`ai_main` contains no occurrence of `pgai_emit_error_contract` at all. The lint\nand its test are byte-identical between the two trees -- `git diff --stat\nai_main..ai_rc/v2.13.0 -- team/scripts/lint_dual_channel_pair.py\nteam/tests/unit/test_lint_dual_channel_pair.py` is empty.\n\nNote the internal inconsistency this exposes: `defer_low_bugs.sh`, added in the\nsame RC, sources `error_contract.sh` unconditionally -- commit `5529852`\n(\"Source error_contract.sh unconditionally in defer_low_bugs.sh\") changed it to\ndo so -- while `config_loader.sh` kept the guarded form. Either shape should be\nallowed; the lint should not be the thing that decides.",
+      "filed_as": "BUG-0206",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "high",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "high (regression: the suite passed at v2.12.1 and fails at v2.13.0)",
+        "regression": "yes (verified against the baseline -- see evidence below)",
+        "filed_as": "BUG-0206 (Path C-A -- filed as BUG -- code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "piggyback carry ships without the specified task cap, and PM was never told the annotation exists",
+      "heading": "Finding 2: piggyback carry ships without the specified task cap, and PM was never told the annotation exists",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks, or 1 WRITER task if the cap lands in PM.md)\n**Systemic Risk:** medium (a real defect that ships and the next iteration fixes; nothing regresses)\n**Regression:** yes (this RC's changes produced the incomplete implementation; the capability did not exist before, so nothing that previously worked has stopped)\n**Integrity Damage:** no\n**Filed As:** BUG-0208 (Path C-A)\n\nThe requirements doc specifies the carry twice -- Deliverables: \"carry ALL\ndeferred bugs along (consolidated, <=K CODER tasks, default K=2, grouped by\narea)\"; Acceptance: \"deferred lows ride iff piggyback=true (consolidated <=K\ntasks, narrated)\".\n\nWhat shipped and works (verified by reading `discovery_steps.sh` and the new\nintegration fixtures): the carry itself, the per-item ride-along annotation\nwritten by `discovery_state.sh`, and the narration\n`discovery_step_bugs: piggybacking N deferred bugs (trigger: BUG-XXXX <severity>)`\nat `discovery_steps.sh:323`, matching the requirements string exactly.\n\nWhat did not ship: any K. `grep -rn 'K=2\\|piggyback_max\\|max_consolidat' team/ docs/`\nreturns nothing; there is no config key, no constant, no default of 2, and no\ngrouping-by-area logic. `git diff --stat ai_main..ai_rc/v2.13.0 -- team/roles/`\nis empty, and `grep -n 'ride-along\\|piggyback' team/roles/PM.md` finds nothing --\nyet `team/scripts/lib/discovery_state.sh:629` states \"PM (team/roles/PM.md)\nparses this exact string to recognise a ride-along and consolidate it into a\nhygiene ticket rather than a headline one\" and `team/SOP-core.md:285` states\n\"annotated as a ride-along on the trigger so PM consolidates it\". Two shipped\ndocuments describe a PM behavior that PM's role file does not define.\n\nThe practical consequence: nothing bounds how many CODER tickets a carried\nbacklog decomposes into. A trigger carrying fifteen deferred lows can produce\nfifteen headline tickets -- the outcome the cap was specified to prevent.",
+      "filed_as": "BUG-0208",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks, or 1 WRITER task if the cap lands in PM.md)",
+        "systemic_risk": "medium (a real defect that ships and the next iteration fixes; nothing regresses)",
+        "regression": "yes (this RC's changes produced the incomplete implementation; the capability did not exist before, so nothing that previously worked has stopped)",
+        "filed_as": "BUG-0208 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "shipped config templates and loader header state the new keys are not read for behavior",
+      "heading": "Finding 3: shipped config templates and loader header state the new keys are not read for behavior",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 WRITER task)\n**Systemic Risk:** low (documentation that steers an operator away from a working feature; nothing breaks)\n**Regression:** yes (the false statements are introduced by this RC)\n**Integrity Damage:** no\n**Filed As:** BUG-0209 (Path C-A)\n\n`kanban.cfg_example` and `project.cfg_example` both carry, in the `[release]`\ndeferral block: \"This ticket registers the keys and their validation only --\nnothing reads them for behavior yet.\" `project.cfg_example` adds \"a\nproject.cfg-vs-kanban.cfg precedence resolver (mirroring max_rc_retries above)\nis later work.\" `team/scripts/lib/config_loader.sh:169-175` repeats both claims.\n\nAll of it is false in the tree that ships it. The resolver is\n`team/scripts/lib/defer_low_bugs.sh`, present in the same release; discovery\n(`discovery_steps.sh:271`), the CM spend stage, the dashboard renderers and\n`why.sh` all read the resolved posture. `team/SOP-core.md` documents the\nbehavior correctly, so the templates contradict the governance document beside\nthem. These are first-ticket comments that later tickets in the same release\ninvalidated and nobody revised.",
+      "filed_as": "BUG-0209",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 WRITER task)",
+        "systemic_risk": "low (documentation that steers an operator away from a working feature; nothing breaks)",
+        "regression": "yes (the false statements are introduced by this RC)",
+        "filed_as": "BUG-0209 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "the refusal an operator actually meets does not name the accepted set",
+      "heading": "Finding 4: the refusal an operator actually meets does not name the accepted set",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (hygiene -- the refusal is loud and names the file and the bad value; only the vocabulary is missing)\n**Regression:** yes (introduced by this RC's new resolver)\n**Integrity Damage:** no\n**Filed As:** BUG-0210 (Path C-A)\n\nThe requirements state the doctrine twice -- Deliverables: \"loader refuses\nunknown values loud, naming the accepted set -- BUG-0107 doctrine\"; Acceptance:\n\"Loader: unknown value for any key refuses loud with the accepted set\".\n\n`config_loader.sh` honours it. Observed:\n\n```\nremedy:  Set [release] deferred_bugs to one of: true|false in <cfg> ('on'/'off' are not accepted spellings).\n```\n\n`defer_low_bugs.sh` -- the path every runtime consumer takes -- does not.\nObserved in a sandbox root with `defer_piggyback = maybe` in `project.cfg`:\n\n```\nerror:   defer_low_bugs.invalid_release_value\nmessage: [release] defer_piggyback='maybe' in <cfg> is not a recognized value.\nremedy:  Fix or remove [release] defer_piggyback in <cfg> so it inherits kanban.cfg or the built-in default.\n```\n\nThe refusal is loud, dual-channel and never falls through to a lower tier -- the\nimportant half of the doctrine holds. Only the accepted set is absent. The two\npaths also duplicate the validators (`_defer_low_bugs_validate_bool` /\n`_defer_low_bugs_validate_level` re-implement `_config_loader_validate_release_bool` /\n`_config_loader_validate_deferred_bug_level`), which is how they drifted.",
+      "filed_as": "BUG-0210",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (hygiene -- the refusal is loud and names the file and the bad value; only the vocabulary is missing)",
+        "regression": "yes (introduced by this RC's new resolver)",
+        "filed_as": "BUG-0210 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "deferral posture resolver -- four-tier precedence",
+      "heading": "Finding 5: deferral posture resolver -- four-tier precedence",
+      "level": 3,
+      "body": "**Category:** pass\n\nExercised in a throwaway sandbox root (`PGAI_AGENT_KANBAN_ROOT_PATH` and\n`KANBAN_ROOT` repointed per the live-install safety rule; the operator's kanban\nroot was never written to). Every tier resolves and reports its own source:\n\n| Setup | `deferred_bugs` | source | `deferred_bug_level` | source |\n|---|---|---|---|---|\n| nothing set | false | default | low | default |\n| kanban.cfg only | true | kanban.cfg | medium | kanban.cfg |\n| + project.cfg override | true | kanban.cfg | high | project.cfg |\n| + project-scoped campaign file | true | **campaign file** | high | project.cfg |\n\nThe campaign file overrides `deferred_bugs` only and leaves the other two keys\nresolving through their own tiers, exactly as the requirements and\n`team/SOP-core.md` say. `defer_until=v2.20.0` / `defer_until_source=campaign file`\nappear only when a file is live.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "malformed-flag handling -- never silently off",
+      "heading": "Finding 6: malformed-flag handling -- never silently off",
+      "level": 3,
+      "body": "**Category:** pass\n\nThree unparseable shapes were triggered and all three refuse loud, non-zero,\nwithout falling through to a lower tier or resolving to \"deferral off\":\n\n- `until=2.20` -> `defer_low_bugs.campaign_file_malformed_until`, exit 1.\n- empty file -> `defer_low_bugs.campaign_file_unparseable`, exit 1.\n- `defer.sh --until 2.20` -> `defer.malformed_until`, exit 1, nothing written to disk.\n\n`on` for a boolean is refused (`defer_low_bugs.invalid_release_value`, exit 1);\n`urgent` for the severity enum is refused the same way. All refusals carry the\nfull error/message/remedy triple.\n\nOne behavior worth recording without categorising it as a finding: an invalid\nvalue in `kanban.cfg` that is shadowed by a valid `project.cfg` value for the\nsame key is never reached and never refused. That is a defensible reading of\n\"the value is never used\", and it matches how `max_rc_retries` behaves.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "campaign-file lifecycle -- arm, explain, spend, clear",
+      "heading": "Finding 7: campaign-file lifecycle -- arm, explain, spend, clear",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `defer.sh --project demo --until 2.20.0` normalises the leading `v`, writes\n  `until=v2.20.0`, and prints the path it wrote.\n- `why.sh --project demo` names every value and its tier, and the campaign\n  file's path alongside the `until` target.\n- `cm_release_spend_campaign_file` at ship of `v2.19.0` leaves the file in place\n  (\"still in force\"); at `v2.20.0` it removes the file and appends a\n  `## Campaign Spend Event` block to `release-state.md`; at `v3.0.0` against an\n  `until=v2.20.0` file it also spends -- the latching `>=` works, so a skipped\n  target does not strand the file.\n- A malformed file at ship time is narrated as a finding, left in place for a\n  later ship, and never fails the release (exit 0).\n- `undefer.sh` removes the file and is idempotent (second run exits 0 with\n  \"nothing to clear\").\n- The root-scoped `$KANBAN_ROOT/DEFER-LOW-BUGS` is deliberately never spent by a\n  single project's release, and `docs/operator-commands.md:388` plus\n  `team/SOP-core.md:279` both say so. Consistent and documented.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "discovery severity matrix and the never-lie surface contract",
+      "heading": "Finding 8: discovery severity matrix and the never-lie surface contract",
+      "level": 3,
+      "body": "**Category:** pass\n\nWith three open bugs in a sandbox project (`BUG-0001` low, `BUG-0002` low,\n`BUG-0003` medium), `dashboard_defer_scope` -- which wraps the same\n`_disc_deferred_bug_summary` discovery itself uses, so the bar cannot disagree\nwith the pipeline by construction -- returns:\n\n| Posture | held back |\n|---|---|\n| `deferred_bugs=true`, level `low` | BUG-0001, BUG-0002 |\n| `deferred_bugs=true`, level `medium` | BUG-0001, BUG-0002, BUG-0003 |\n| `deferred_bugs=true`, level `high` | all three (nothing can trigger an RC) |\n| `deferred_bugs=false` | none |\n\nStatus bar, `NO_COLOR`: `BUGS DEFERRED 2 (<=low)` rendered with the real U+2264\ncharacter, and with a campaign file live `BUGS DEFERRED 2 (<=low) until v2.20.0`.\nBoth match the requirements string exactly. With an unparseable flag the segment\nbecomes `DEFER CONFIG <path>` (with `GLYPH_WARNING` in colour mode) -- the count\nis never rendered from a posture that could not be resolved.\n\nCard glyphs, colour mode: the raised-hand glyph on BUG-0001 and BUG-0002 only,\nnone on BUG-0003; with an unparseable campaign file every open card carries the\nwarning glyph instead of a guessed deferred/not-deferred icon. Icon truth holds.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "pre-flight merge verification",
+      "heading": "Finding 9: pre-flight merge verification",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll 13 RC-cycle tasks (PM-005, CODER-041..050, WRITER-051, CM-052) are DONE with\n`Needs Human: no`. Every feature branch has been deleted post-merge (normal\nCODER/WRITER lifecycle), so Checks 1 and 2 are skipped for each per the role\nfile's branch-lifecycle note. No unmerged branch, no BUG-92 zero-commit anomaly,\nno empty commits in the RC (`git log --no-merges` + per-commit stat check).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "release-state and version drift (Step 6.1)",
+      "heading": "Finding 10: release-state and version drift (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`## Active RC: v2.13.0`, opened `2026-09-08T18:47:13+00:00` by\n`CM-20260908-052-open-rc-2-13-0`. `## Last Released: v2.12.1`, well-formed.\n`v2.13.0 > v2.12.1` by semver. `ai_rc/v2.13.0` exists and the worktree HEAD\nmatches it. No drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "release-lifecycle simulation (Step 6.8)",
+      "heading": "Finding 11: release-lifecycle simulation (Step 6.8)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe RC touches `team/scripts/cm/release.sh` and\n`team/scripts/lib/cm/release_finalize.sh`, so the trigger condition applies.\n`python3 -m pytest tests/integration/test_cm_release_synthetic.py -q` ->\n15 passed in 30.95s.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "gate census and skip-cites-real-bug (Steps 6.9, 6.13)",
+      "heading": "Finding 12: gate census and skip-cites-real-bug (Steps 6.9, 6.13)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_gate_census_compliance.py` -> `OK - 32 file(s)\nchecked, 0 offenders` (113 census-anchored sites exempted). Every new refusal in\nthis RC carries a `# CENSUS-ANCHOR:` marker, a class comment and a matching\nLocator Index line -- `docs/blocking-site-census.md` was updated in the same\nrelease.\n\nSkip gate: no placeholder `BUG-SKIP-*` IDs in `team/tests/` (the only grep hits\nare archived coverage run logs under `team/tests/artifacts/`, not live skips),\nand every `BUG-NNNN` cited in a skip annotation resolves to a real file in\n`bugs/`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "coding-standards spot-check (Step 6.14)",
+      "heading": "Finding 13: coding-standards spot-check (Step 6.14)",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe three new operator verbs all ship a `--help` that exits 0 and describes\ntheir behavior. One caveat: `defer.sh --help` renders its own flag as a bare\n`  --until` in the Options block, because\n`operator_args_render_help_for_flags` only has built-in descriptions for the\neight canonical flags and falls back to printing the flag name alone for\nanything else. The value and its meaning are described in the trailing prose\n(\"The --until flag names the release the deferral lifts at (vX.Y.Z)\"), so\ndirective 6 is satisfied in substance. Recorded as an observation about the\nshared helper, not filed.\n\nProvenance (directive 8) is a real miss and is covered separately -- see the\nLint Findings section and gaps.md Gap 5.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "high"
+  }
+}

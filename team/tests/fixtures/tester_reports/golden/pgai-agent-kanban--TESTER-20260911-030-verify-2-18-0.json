@@ -1,0 +1,232 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "v2.18.0 is a deliberately thin conformance release against the `v2.18.0-deep-verify-tier`\nbrief. Four of the brief's five deliverables already shipped at v2.17.0 and earlier —\n`team/scripts/deep-verify.sh`, `deep-verify-freshness-check.sh`, `cold-build-now.sh`,\n`team/pgai_agent_kanban/deep_verify/`, the `testing-only` workflow plugin, TESTER Step 5d's\nno-container RC rule, `pp_deep_verify_mode` / `pp_deep_verify_offhours_window`, and the\npromotion-playbook step — and PM declined to manufacture re-implementation tickets for\nshipped work. The RC therefore contains exactly three work commits across five files:\n`create-project.sh` now scaffolds a `[release]` section naming both DEEP-VERIFY keys\n(commented out), `project.cfg_example` gains the off-hours key, `REPORT-TEMPLATE.md` gains\nthe mandatory `## Deep-Verify Freshness` section, and a new unit test locks that template\nand `team/roles/TESTER.md` into agreement on the section and its verdict vocabulary.\n\nBoth gated runners exited 0 (unit: 3828 passed / 3 skipped in 537 s; integration:\n445 passed / 1 skipped in 402 s). Verification went beyond structural checks: the\nproject-creation script was executed against a throwaway kanban root and its generated\n`project.cfg` inspected and fed back through both resolvers; the new regression test was\nmutation-tested with three independent mutations and produced three distinct failures; the\npre-release freshness gate was driven to a real refusal; and the scheduled-dispatch path\nwas driven to a real refusal on a bad config value. No container engine was started at any\npoint (Step 5d).\n\nOne defect was found and it was introduced by this RC. The `[release]` comment block that\n`create-project.sh` now writes into every new `project.cfg` states that `true|false` are\naccepted aliases for `deep_verify`, and names `pp_deep_verify_mode()` as the reader — but\nthat function refuses both values, and `deep-verify.sh --scheduled` turns the refusal into\n`deep_verify.invalid_schedule_mode` and runs no lane for the project. An operator who\nfollows the freshly scaffolded guidance switches their weekly DEEP-VERIFY lane off. Filed\nas BUG-0243 (Path C-A — filed as BUG: code defect / regression / test failure). Everything\nelse in the brief verified clean.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "`deep_verify` true/false aliases are refused by the resolver the newly scaffolded comment names",
+      "heading": "Finding 1 — `deep_verify` true/false aliases are refused by the resolver the newly scaffolded comment names",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a real defect an operator can hit; it steers them into a refusal and switches their weekly lane off, but chain state and data are untouched and the fix is ordinary next-iteration work)\n**Regression:** yes (this RC's change to `create-project.sh` is what produced the defect — before v2.18.0 the generated `project.cfg` carried no `[release]` section and made no claim at all; the underlying reader-vocabulary split predates the RC)\n**Integrity Damage:** no\n**Filed As:** BUG-0243 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`team/scripts/create-project.sh` now writes this into every generated `project.cfg`:\n\n```\n# deep_verify: this project's DEEP-VERIFY scheduled-dispatch cadence —\n# read by pp_deep_verify_mode() (team/scripts/lib/project_paths.sh).\n# Accepted: weekly|off (true|false also accepted as aliases: true=weekly,\n# false=off). Default: weekly\n```\n\n`pp_deep_verify_mode` accepts exactly `weekly` and `off` and fails loud on anything else.\nReproduced end to end against a throwaway kanban root:\n\n1. `create-project.sh --project probe --workflow-type release` -> generated `[release]`\n   block carries the alias claim above.\n2. Set `deep_verify = true` (following the generated comment).\n3. `pp_deep_verify_mode` -> `rc=1`, empty stdout, stderr\n   `unrecognized value 'true' ... (expected 'weekly' or 'off'; blank/absent defaults to 'weekly')`.\n4. `deep-verify.sh --scheduled` -> `error: deep_verify.invalid_schedule_mode`, exit 1, no\n   lane run for that project. The refusal's own remedy line contradicts the comment the\n   project was scaffolded with.\n5. `deep_verify = false` behaves identically.\n\nTwo shipped readers of the same key disagree: `team/scripts/lib/config_loader.sh` accepts\n`weekly|true` and `off|false` (documented there as a deliberate exception), while\n`pp_deep_verify_mode` — the one the scheduled path actually consults — accepts only\n`weekly|off`. `team/SOP.md` (\"The per-project switch\") names `weekly`/`off` and no aliases.\n`project.cfg_example` and `config_loader.sh`'s refusal remedy carry the same alias claim\nand predate this RC; what v2.18.0 changed is that the claim is now written into every new\nproject's own config next to a citation of the function that refuses it.\n\nBlast radius is bounded: `deep-verify.sh --scheduled`'s fan-out loop deliberately does not\nabort on one project's failure, so a misconfigured project does not hide another project's\nresult. The new integration test `TestCreateProjectDeepVerifyReleaseSection` asserts the\ngenerated comment names `weekly|off` and `Default: weekly` but asserts nothing about the\nalias sentence, which is why the mismatch shipped green.",
+      "filed_as": "BUG-0243",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a real defect an operator can hit; it steers them into a refusal and switches their weekly lane off, but chain state and data are untouched and the fix is ordinary next-iteration work)",
+        "regression": "yes (this RC's change to `create-project.sh` is what produced the defect — before v2.18.0 the generated `project.cfg` carried no `[release]` section and made no claim at all; the underlying reader-vocabulary split predates the RC)",
+        "filed_as": "BUG-0243 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Deliverable: cold-build out of per-RC verification entirely",
+      "heading": "Finding 2 — Deliverable: cold-build out of per-RC verification entirely",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/roles/TESTER.md` Step 5d in the RC tree states the rule directly (\"TESTER runs no\ncontainer build, starts no container engine, and calls neither `run-cold-build-tests.sh`\nnor `deep-verify.sh`\"). `tests/unit/test_runner_pytest_scope_excludes_cold_build.py`\n(8 tests) is green in this run, and `lint_orphan_tests` reports `tests/cold` as a collected\nroot kept outside the two gated runners' pytest scope. This verification run started no\ncontainer engine; the only Docker-adjacent work either runner performed was\n`lint_dockerfile_static` (3 Dockerfiles, 0 violations), which is a text scan.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Deliverable: `deep-verify.sh --project <name>` on-demand umbrella verb",
+      "heading": "Finding 3 — Deliverable: `deep-verify.sh --project <name>` on-demand umbrella verb",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe verb ships and is executable, with `cold-build-now.sh` as its named alias and\n`team/pgai_agent_kanban/deep_verify/{classify,ledger,freshness,schedule,bug_filer}.py`\nbehind it. The brief's outcomes are covered by green tests in this run:\n`test_deep_verify_rc_isolation.py` (never touches an open release RC),\n`test_deep_verify_bug_reaches_discovery_bundle.py` (findings file bugs that reach the\nloop), `test_deep_verify_run.py`, `test_deep_verify_installed_shape.py`.\n\n*Caveat:* the brief specifies the verb \"runs as a testing-only workflow RC (git ro,\nfinalize=report)\". The shipped implementation is a standalone script, not a workflow RC;\nthe `testing-only` plugin does exist separately at `team/workflows/testing-only/` with\nexactly `git_mode = ro` and `finalize = report`. The brief's stated *outcomes* (bugs filed\nfor the loop, open release RCs untouched) are met by the implementation actually shipped,\nand `team/SOP.md`'s DEEP-VERIFY section documents that shape as canonical, so this is\nrecorded as a mechanism deviation rather than a gap.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "caveat": "the brief specifies the verb \"runs as a testing-only workflow RC (git ro,"
+      },
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Deliverable: `deep_verify` + off-hours keys in `project.cfg`, scaffolded by `create-project.sh`",
+      "heading": "Finding 4 — Deliverable: `deep_verify` + off-hours keys in `project.cfg`, scaffolded by `create-project.sh`",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nBehaviorally verified against a throwaway kanban root (never the live install): the\ngenerated `project.cfg` contains a real `[release]` INI header, both keys commented out,\nand both resolvers return the shipped defaults for the generated project\n(`pp_deep_verify_mode` -> `weekly`, `pp_deep_verify_offhours_window` -> `03:00-03:59`) —\nso the scaffolding changed no resolution behavior for new or existing projects.\n`project.cfg_example` gains the matching off-hours block. Guard behavior exercised\ndirectly: an explicit `off` resolves to `off`; a malformed window (`banana`) passes through\nthe bash reader unvalidated by design and is caught by\n`pgai_agent_kanban.deep_verify.schedule.resolve_offhours_window`, which falls back to\n`03:00-03:59` and returns an explanatory message, exactly as both the SOP and the generated\ncomment promise; an unrecognized mode value fails loud rather than being guessed.\n\n*Caveat 1:* the accepted-value wording on the `deep_verify` key is wrong — Finding 1.\n\n*Caveat 2:* the brief specifies \"`deep_verify=true` in project.cfg enables the weekly\nscheduled run … default false\". The shipped tier is opt-**out**: values are `weekly|off`,\ndefault `weekly`. PM recorded this deviation deliberately, on the ground that `team/SOP.md`\n(\"The per-project switch\") argues the opt-out default explicitly and outranks a\nrequirements doc under Instruction Precedence. Verification concurs with that reading and\nrecords it rather than filing it as a gap — but the shipped default is the opposite\npolarity from the brief's literal text, and an operator reading only the brief would expect\nnew projects to be silent by default when in fact they are scheduled by default.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "caveat_1": "the accepted-value wording on the `deep_verify` key is wrong — Finding 1.",
+        "caveat_2": "the brief specifies \"`deep_verify=true` in project.cfg enables the weekly"
+      },
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Deliverable: pre-release law refuses without a fresh green deep-verify result",
+      "heading": "Finding 5 — Deliverable: pre-release law refuses without a fresh green deep-verify result",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/scripts/deep-verify-freshness-check.sh` is a named step in\n`docs/promotion-playbook.md`. The refusal was triggered, not inferred: run for\n`--project pgai-agent-kanban --version v2.18.0` against the live ledger it exits **1** with\na complete dual-channel contract — `error: freshness_gate.failed_to_build`, a plain-language\nmessage naming the project, the record timestamp and the failing pairs, and a runnable\nremedy (`team/scripts/deep-verify.sh --project pgai-agent-kanban`). The age threshold is\nconfigurable via `PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS` (default 7). A malformed\n`--version` is refused loud (`'2.18' is not well-formed semver (expected vX.Y.Z)`) rather\nthan guessed. `tests/integration/test_deep_verify_freshness_check.py` (14 tests) is green.\nThe check wrote nothing and started no lane.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Deliverable: freshness on the record in every TESTER report",
+      "heading": "Finding 6 — Deliverable: freshness on the record in every TESTER report",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/templates/agent/REPORT-TEMPLATE.md` now carries a `## Deep-Verify Freshness` section\nplaced immediately before `## Recommendation`, stating that the line is a fact and never a\nverdict, that it is mandatory for any tree shipping Dockerfiles including never-run and\nlast-result-red cases, that a tree shipping no Dockerfiles omits the section, and that the\nverdict word is the ledger's own (`built` / `failed-to-build` / `could-not-attempt`, never\nPASS/FAIL). It defers to `team/roles/TESTER.md` Step 5d for form selection rather than\nduplicating it.\n\nThe new regression test `team/tests/unit/test_report_template_freshness_agreement.py`\n(5 tests) asserts against the shipped documents, not a fixture copy. It was\n**mutation-tested** in a scratch copy of `team/`, three independent mutations, three\ndistinct failures:\n\n| Mutation | Test that failed |\n|---|---|\n| Renamed the template heading to `## Deep Verify Freshness` | `test_report_template_carries_the_deep_verify_freshness_heading` |\n| Respelled `` `failed-to-build` `` as `` `failed_to_build` `` in the template | `test_verdict_word_is_spelled_identically_in_both_documents[failed-to-build]` |\n| Renamed the heading in TESTER.md's Step 9 report-fields list | `test_tester_role_names_the_same_heading_in_its_report_fields_list` |\n\nThe guard is real, not a tautology. This report itself carries the mandatory section below.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Acceptance: weekly fixture fires in-window",
+      "heading": "Finding 7 — Acceptance: weekly fixture fires in-window",
+      "level": 3,
+      "body": "**Category:** pass\n\n`tests/unit/test_deep_verify_schedule.py` and\n`tests/integration/test_deep_verify_scheduled_dispatch.py` (7 tests) are green in this run,\ncovering the self-gate (ledger at least seven days old AND inside the project's off-hours\nwindow). Confirmed directly that the live project's `deep_verify = off` now resolves\ncorrectly through `pp_deep_verify_mode` (prior BUG-0171, which had the key in the wrong INI\nsection, is repaired), and that `deep-verify.sh --scheduled` fans out without aborting on a\nsingle project's failure.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Release-state drift check (Step 6.1)",
+      "heading": "Finding 8 — Release-state drift check (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_last_released_version` (git tags, `ai_`-prefixed) returns `v2.17.0`;\n`semver_gt v2.18.0 v2.17.0` holds. `release-state.md` reads `Active RC: v2.18.0`,\n`RC Opened By Task: CM-20260911-029-open-rc-2-18-0`, `Last Released: v2.17.0` — a\nwell-formed `vX.Y.Z` value. The `ai_rc/v2.18.0` branch exists and the worktree HEAD equals\nit. No drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Constraint and hygiene negative checks (Steps 6.9, 6.13, 6.14)",
+      "heading": "Finding 9 — Constraint and hygiene negative checks (Steps 6.9, 6.13, 6.14)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`create-project.sh` retains `set -euo pipefail` and passes `bash -n`. No credential-shaped\nliterals anywhere in the RC diff. The skip-cites-real-bug grep-gate is clean: no\nplaceholder skip IDs in `team/tests/` (the only `BUG-NNNN` string hits are inside archived\ncoverage run logs under `team/tests/artifacts/`), and every cited bug ID resolves to a real\nfile in `bugs/`; the runners' own `lint_skip_bug_gate` agrees. Coding-standards spot-check\nof the diff sites: no new operational value hardcoded, no duplicated `lib/` implementation,\nno new script requiring `--help`. The one version reference in the new comment header\n(`[release] — DEEP-VERIFY scheduled-dispatch settings (v2.18.0+)`) matches the existing\nconvention in the shipped `project.cfg` (`(v2.0.0+)` on the retry-ceiling block) and is not\nflagged by the authoritative `lint_hygiene` run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Prerequisite dependency graph (Step 6.10)",
+      "heading": "Finding 10 — Prerequisite dependency graph (Step 6.10)",
+      "level": 3,
+      "body": "**Category:** pass\n\nSix tasks, acyclic, every referenced task ID exists as a task folder, bookends correct\n(`CM-…-029-open-rc` first with no prerequisites; `TESTER-…-030` then `CM-…-032-release`\nlast), sequence numbers unique and non-colliding. All three prerequisite tasks are `DONE`\nwith `Needs Human: no`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

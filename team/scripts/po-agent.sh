@@ -92,12 +92,8 @@ if [[ -f "$_SCRIPT_DIR/lib/task_ids.sh" ]]; then
 fi
 
 # --- Clean exit handling ---
-cleanup_on_exit() {
-  local exit_code=$?
-  jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
-  wait 2>/dev/null || true
-  exit $exit_code
-}
+# shellcheck source=lib/script_common.sh
+source "$_SCRIPT_DIR/lib/script_common.sh"
 trap cleanup_on_exit EXIT
 
 # --- Defaults ---

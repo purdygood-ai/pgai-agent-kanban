@@ -296,7 +296,7 @@ else
 
     # AC-b: git worktree list must not show the removed worktree
     WT_LIST=$(git -C "$FIXTURE_REPO" worktree list 2>/dev/null || true)
-    if echo "$WT_LIST" | grep -qF "$TASK_ID"; then
+    if grep -qF "$TASK_ID" <<< "$WT_LIST"; then
         fail "AC-b (prune): worktree '${TASK_ID}' still listed in 'git worktree list' after teardown"
     else
         pass "AC-b (prune): worktree '${TASK_ID}' not listed in 'git worktree list' after teardown"
@@ -378,7 +378,7 @@ else
 
     # AC-f: git worktree list must not show the removed worktree
     WT_LIST_B=$(git -C "$FIXTURE_REPO_B" worktree list 2>/dev/null || true)
-    if echo "$WT_LIST_B" | grep -qF "$TASK_ID_B"; then
+    if grep -qF "$TASK_ID_B" <<< "$WT_LIST_B"; then
         fail "AC-f (prune): BLOCKED-path worktree '${TASK_ID_B}' still in 'git worktree list'"
     else
         pass "AC-f (prune): BLOCKED-path worktree '${TASK_ID_B}' not in 'git worktree list'"
@@ -406,7 +406,7 @@ _TMP_NEW=""
 if [[ -n "$_TMP_AFTER" ]]; then
     while IFS= read -r _item; do
         if [[ -z "$_item" ]]; then continue; fi
-        if ! echo "$_TMP_BEFORE" | grep -qxF "$_item"; then
+        if ! grep -qxF "$_item" <<< "$_TMP_BEFORE"; then
             _TMP_NEW="${_TMP_NEW}${_item}"$'\n'
         fi
     done <<< "$_TMP_AFTER"

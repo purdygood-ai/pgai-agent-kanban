@@ -1,6 +1,8 @@
 # pgai-agent-kanban — Architecture
 
-**Companion:** `SOP.md` for operational procedures. `OVERVIEW.md` for the autonomy principle.
+**Companion:** [team/SOP-core.md](team/SOP-core.md) for the shared law. [team/OVERVIEW.md](team/OVERVIEW.md) for the autonomy principle.
+
+**Where you are standing.** This is a repository document, like [README.md](README.md). `install.sh` does not deposit it at the kanban root — an installed root receives the governance tree plus the `docs/` pages named in `team/config/docs-manifest.txt`. Every path below is written from the repository checkout unless it is explicitly labelled a live-install path.
 
 ---
 
@@ -11,9 +13,9 @@ An autonomous, single-operator task-decomposition framework. You drop a requirem
 Two properties make it distinctive:
 
 1. **Self-building as a usage pattern.** The framework ships its own releases through its own pipeline — but only because an operator registered the framework's repo as an ordinary project. The framework itself does not know which project is its own source; self-build is a way you can use the kanban, not a feature inside it.
-2. **Provider-abstracted.** Which LLM executes a task is a runtime selection, not a property of the work. The framework is built so the active provider is a config value; Claude is the production provider today. The Codex lane is exercised and ships experimental (see docs/codex-known-issues.md); the Gemini lane is designed for but not yet exercised.
+2. **Provider-abstracted.** Which LLM executes a task is a runtime selection, not a property of the work. The active provider is a config value; Claude is the production provider today, and the Codex lane ships experimental (see [docs/codex-known-issues.md](docs/codex-known-issues.md)).
 
-The economics: a single VPS (~$200/year of hardware) plus LLM API tokens as the only variable cost. Hardware is solved; the architecture is solved and code-complete.
+The economics: one host you already run, plus LLM API tokens as the only variable cost. Nothing in this system needs a cluster.
 
 ---
 
@@ -37,26 +39,27 @@ The economics: a single VPS (~$200/year of hardware) plus LLM API tokens as the 
 
 ## The Agents
 
-Six specialized roles plus one observer. Each runs as a separate subagent with a dedicated role file. One agent of each type runs at a time per repo (per-agent wake locks).
+Seven role files ship under `team/roles/`. Six are the pipeline that advances a release candidate; the seventh is a horizontal observer that never advances one. Each runs as a separate subagent with a dedicated role file, and one agent of each type runs at a time per repo (per-agent wake locks).
 
 | Agent | Invocation | Purpose |
 |---|---|---|
-| `PO` | Human-invoked | Translates briefs and architecture into requirements documents. The only role with significant human collaboration. |
+| `PO` | Operator-invoked (`scripts/po-agent.sh`) | Validates a human-authored brief and expands it into a requirements document. The only role with significant human collaboration; no cron line ships for it. |
 | `PM` | Wake script (`pm` queue) | Decomposes requirements into tickets across agent queues. Single-shot per ticket; the materializer is idempotent (hash-marker). |
 | `CODER` | Wake script (`coder` queue) | Implements features against the open RC branch in a per-task git worktree. Local-only git operations. |
-| `WRITER` | Wake script (`writer` queue) | Prose deliverables: release notes, documents, marketing copy. Same git contract as CODER. |
+| `WRITER` | Wake script (`writer` queue) | Standalone documents: guides, role files, SOPs, release notes, long-form prose. Same git contract as CODER. |
 | `TESTER` | Wake script (`tester` queue) | Verifies the RC against requirements. Files findings to `bugs/` and a structured report. Observation-only — never creates kanban tickets. Halts the chain only on pre-flight failure. |
 | `CM` | Wake script (`cm` queue) | Branch/merge/tag mechanics. Applies ship/no-ship policy. The sole agent that touches origin. |
+| `OVERWATCH` | Wake script (`overwatch`), plus a separate sweep runner | Horizontal self-monitor outside the RC pipeline. Tier 1 is a deterministic bash sweep over every registered project; Tier 2 is an LLM deep-clean that files quality bugs for anything outside the auto-fix whitelist. An on-BLOCK trigger wakes it when any task transitions to `BLOCKED`. It never advances a release. |
 
-PO is the only human-invoked agent. Once requirements docs exist, the rest of the pipeline is autonomous.
+PO is the only agent an operator starts by hand. Once requirements docs exist, the rest of the pipeline is autonomous.
+
+Each role also carries a governance reading manifest at `team/read-order/<role>.txt` — seven manifests, one per role file. See [Governance Stack](#governance-stack).
 
 ### Task IDs
 
-Format: `<AGENT>-YYYYMMDD-NNN-slug`. No provider prefix — which LLM ran a task is recorded in that task's `tokens.json` and `status.md`, not in the ID. Examples:
+Format: `<AGENT>-YYYYMMDD-NNN-slug`. No provider prefix — which LLM ran a task is recorded in that task's `tokens.json` and `status.md`, not in the ID. Examples: `CODER-20260412-001-add-login-endpoint`, `TESTER-20260412-004-verify-login-flow`, `CM-20260412-005-open-rc-v1.2.0`.
 
-- `CODER-20260609-003-config-loader-sot`
-- `TESTER-20260609-008-verify-worktree-isolation`
-- `CM-20260609-001-open-rc-v0.57.0`
+The framework also parses the older `CLAUDE-<AGENT>-...` form in task folders and queue entries; no existing task folder is ever renamed.
 
 ---
 
@@ -66,7 +69,9 @@ The single source of truth for "what does the system work on next." Runs per-pro
 
 ```
 ITERATION START
-  Guard: if a HALT file is present (global or per-project), block.
+  Guard: project.cfg must be readable.
+  Guard: per-project HALT (projects/<name>/HALT) — blocks this project.
+  Guard: global HALT ($KANBAN_ROOT/HALT) — blocks every project.
   Guard: if an Active RC exists for this project, exit. One RC at a time.
         │
         ▼
@@ -105,7 +110,7 @@ Two halt scopes, both honored by the pipeline:
 - **Global** — `$KANBAN_ROOT/HALT`. Blocks all projects.
 - **Per-project** — `projects/<name>/HALT`. Blocks only that project.
 
-A `HALT-AFTER` token (`projects/<name>/HALT-AFTER`, e.g. `rc` or `rc:vX.Y.Z`) drains the current RC to completion, then promotes itself to a full HALT — the timing-agnostic way to stop "after the current release ships."
+A `HALT-AFTER` token (`projects/<name>/HALT-AFTER`, e.g. `rc` or `rc:vX.Y.Z`) drains the current RC to completion, then promotes itself to a full HALT — the timing-agnostic way to stop "after the current release ships." The token vocabulary and the drain semantics are owned by `team/SOP-core.md`.
 
 ### Modes
 
@@ -126,7 +131,7 @@ Requirements doc picked up by pipeline
 PM decomposes → CM-open + N×CODER + N×WRITER + TESTER + CM-release
         │
         ▼
-CM-open creates rc/<branch_prefix>vX.Y.Z, updates release-state.md
+CM-open creates <branch_prefix>rc/vX.Y.Z, updates release-state.md
         │
         ▼
 CODER/WRITER work in per-task git worktrees off the RC branch,
@@ -155,7 +160,7 @@ TESTER produces a structured report with categorized findings (`pass`, `pass-wit
 
 ### CM: apply policy, don't second-guess
 
-CM's default on a release task is to ship. It refuses only when TESTER is BLOCKED, a prerequisite task is missing/incomplete, or the release script fails. Known bugs, gaps, and imperfect work are not reasons to refuse — the system ships and iterates.
+CM's default on a release task is to ship. It refuses only when TESTER is BLOCKED, a prerequisite task is missing/incomplete, or the release script fails. Known bugs, gaps, and imperfect work are not reasons to refuse — the system ships and iterates. The full HALT trigger list is owned by `team/roles/CM.md`.
 
 ### Project-specific CM-release hooks
 
@@ -165,10 +170,10 @@ Projects supply finalization scripts the framework discovers and runs:
 projects/<name>/hooks/
 ├── cm-release-pre-squash.sh   # before squash to develop
 ├── cm-release-pre-tag.sh      # before tag
-└── cm-release-post-tag.sh     # after tag (best-effort, non-blocking)
+└── cm-release-post-tag.sh     # after tag, before the tag is pushed
 ```
 
-Pre-squash/pre-tag failures block the release; post-tag failures are logged. Projects without a `hooks/` directory behave as the framework default.
+A pre-squash or pre-tag hook that fails — or that exists but is not executable — HALTs the release. A post-tag hook failure is a logged warning only and does not block: the tag already exists locally by then. Projects without a `hooks/` directory behave as the framework default.
 
 ---
 
@@ -200,17 +205,19 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-${_dev_tree_path}}"
 
 Required keys that are missing fail loudly. There is no silent fallback to a wrong default. This eliminates a class of bugs where divergent ad-hoc config resolution in different scripts produced inconsistent behavior between the dev tree and the live install.
 
+The loader carries its own Key Registry — the accepted section/key set with each key's status and default. That registry, not this document, is the inventory; the doc-truth lint reconciles every key a document names against it. Which file a given setting belongs in is the placement rule in `HOW_TO.md`.
+
 ### Temp root resolution
 
-A single resolver (`temp.sh`) provides the temp directory for all transient output, routed through one function rather than scattered `mktemp`/`/tmp` calls. Resolution order:
+A single resolver (`temp.sh`) provides the temp directory for all transient output, routed through one set of `pgai_temp_*` helpers rather than scattered `mktemp`/`/tmp` calls. Resolution order, highest precedence first:
 
-1. `PP_TEMP_DIR` (exported by `pp_load_config` for the active project), else
-2. `${tmp_root}/${tmp_subdir}` from `kanban.cfg [paths]`, else
-3. a safe default.
+1. `PGAI_AGENT_KANBAN_TEMP_DIR` — if already set in the environment, used as-is.
+2. `${tmp_root}/${tmp_subdir}` from `kanban.cfg [paths]`, located through `PGAI_AGENT_KANBAN_ROOT_PATH`, or by the library self-locating its own install root when that variable is unset.
+3. A last-resort fallback, used only when the config is unreadable.
 
-The resolver never returns empty or `/`. ~68 call sites route through it. This makes the framework's temp footprint configurable and relocatable, and keeps transient files out of shared `/tmp`.
+The resolver never returns empty or `/`. When `pp_load_config` has run for a project, `PP_TEMP_DIR` holds that project's own temp path and the project-aware helpers place files there. The result: the framework's temp footprint is configurable and relocatable, and transient files stay out of shared `/tmp`.
 
-**TMPDIR bridge** : the config loader exports `TMPDIR` derived from the resolved `PGAI_AGENT_KANBAN_TEMP_DIR`, so standard tooling — `mktemp`, Python's `tempfile`, anything POSIX — lands in the framework temp root by default rather than bare `/tmp`. The bridge is a downstream consumer of the single resolver, not a second resolution site: `kanban.cfg [paths] tmp_root + tmp_subdir` remains the only place the value is configured. 
+**TMPDIR bridge**: the config loader exports `TMPDIR` derived from the resolved temp root, so standard tooling — `mktemp`, Python's `tempfile`, anything POSIX — lands in the framework temp root by default rather than bare `/tmp`. The bridge is a downstream consumer of the single resolver, not a second resolution site: `kanban.cfg [paths] tmp_root + tmp_subdir` remains the only place the value is configured.
 
 ---
 
@@ -222,28 +229,42 @@ One installation hosts multiple independent projects. Each has its own state, ca
 $KANBAN_ROOT/                       # Shared infrastructure (live install: no team/ prefix)
 ├── DIRECTIVES.md                   # Top-level safety rules
 ├── OVERVIEW.md                     # Autonomy principle
-├── SOP.md                          # Operational procedures
-├── README.md                       # Entry point
+├── SOP-core.md                     # Shared law
+├── README.md                       # Installed entry point (from team/README.md)
 ├── HALT                            # Global halt flag (when present)
 ├── kanban.cfg                      # Global config ([providers] active, [paths], [debug], ...)
+├── projects.cfg                    # Project registry
 ├── scripts/                        # All bash scripts and libs
-├── pm-agent/                       # PM tooling, materializer
+├── pm-agent/                       # PM tooling, materializer, token aggregation
+├── pgai_agent_kanban/              # The Python package (API, libs, CM modules)
+├── halt_after/                     # HALT-AFTER token and drain logic
 ├── roles/                          # Role files
-├── workflows/                      # Workflow YAML definitions
+├── read-order/                     # Per-role governance manifests (<role>.txt)
+├── workflows/                      # Workflow-type plugins
+├── demos/                          # The four shipped demos
+├── templates/                      # Install templates (crontab, pseudocron tiers)
+├── config/                         # Manifests and censuses (verbs, docs, dashboard windows)
+├── docs/                           # The docs/ pages named in team/config/docs-manifest.txt
+├── logs/                           # Cron and wake logs
 └── projects/                       # Per-project state
     └── <project-name>/
         ├── project.cfg             # dev_tree_path, git_repo_url, workflow_type, branch_prefix, ceilings, [debug]
-        ├── hooks/                  # Project-specific CM-release hooks
+        ├── hooks/                  # Project-specific CM-release hooks (optional)
         ├── tasks/                  # Task folders + queues
         ├── requirements/           # Requirements docs
         ├── priority/               # Priority intake
         ├── bugs/                   # Bug reports (TESTER + operator filed)
+        ├── release-notes/          # Authored release notes, one file per version
         ├── artifacts/              # Per-project deliverables (document workflow output)
+        ├── metrics/                # Per-RC metric rollups
+        ├── usage/                  # Token and cost rollups
+        ├── logs/                   # Per-project agent and sweep logs
         ├── HALT / HALT-AFTER       # Per-project halt flags (when present)
+        ├── deep-verify-ledger.md   # Append-only DEEP-VERIFY tier record
         └── release-state.md        # Active RC, last released version
 ```
 
-**Dev tree vs. live install.** The source tree (`~/develop/pgai-agent-kanban`) carries a `team/` prefix (`team/scripts/...`). The installed tree (`$KANBAN_ROOT`, e.g. `~/pgai_agent_kanban`) drops it (`scripts/...`). Role files, SOP, and operator instructions use live-install paths.
+**Dev tree vs. live install.** The source tree (`~/develop/pgai-agent-kanban`) carries a `team/` prefix (`team/scripts/...`). The installed tree (`$KANBAN_ROOT`, e.g. `~/pgai_agent_kanban`) drops it (`scripts/...`). Role files, `SOP-core.md`, read-order manifest lines, and operator instructions all use live-install paths. This document and [README.md](README.md) are the exception: they are repository documents and use repository paths.
 
 **Shared vs. per-project.** Shared at the root: tooling, governance docs, workflow definitions, global config. Per-project under `projects/<name>/`: all runtime state. The line: if a file describes the *system* it is shared; if it describes the *work* it is per-project.
 
@@ -253,10 +274,10 @@ Each project owns its own dev-tree checkout, declared in `project.cfg` as `dev_t
 
 ### Per-project branch prefix
 
-Each project sets `branch_prefix` in `project.cfg`:
+Each project sets `branch_prefix` in `project.cfg`. The prefix is applied to the branch's leading segment and to tag names — never to the version inside an RC branch path:
 
-- **Empty** → the standard convention: `main`, `develop`, `rc/vX.Y.Z`, `feature/<task-id>`.
-- **`ai_`** → an isolated lane: `ai_main`, `ai_develop`, `ai_rc/ai_vX.Y.Z`, tags prefixed. Lets the kanban manage a project whose human `main` branch must stay untouched.
+- **Empty** → the standard convention: `main`, `develop`, `rc/vX.Y.Z`, `feature/<task-id>`, tags `vX.Y.Z`.
+- **`ai_`** → an isolated lane: `ai_main`, `ai_develop`, `ai_rc/vX.Y.Z`, `ai_feature/<task-id>`, tags `ai_vX.Y.Z`. Lets the kanban manage a project whose human `main` branch must stay untouched.
 
 CM is the sole origin-toucher and only via managed scripts (open-rc, release); it refuses to push base branches as a safety invariant. The operator sets up base branches via `init-project-git-repo.sh` — not CM.
 
@@ -264,9 +285,11 @@ CM is the sole origin-toucher and only via managed scripts (open-rc, release); i
 
 ## Provider Abstraction
 
-The active LLM provider is a runtime selection, read from `kanban.cfg [providers] active`. Wake scripts for each provider can be wired so only the active one does work; the others exit immediately on a stagger tick.
+The active LLM provider is a runtime selection, read from `kanban.cfg [providers] active`. Each provider has its own wake script under `scripts/wake/`; the dispatcher runs the active one and the others exit immediately on a stagger tick.
 
-**Current reality:** Claude is the production provider. The Codex lane is exercised — a managed project has shipped end-to-end on Codex with OAuth — and ships experimental (see docs/codex-known-issues.md for the known rough edges). The Gemini lane is designed-for (provider-neutral task IDs, queues, and role files; per-provider wake-script structure; provider-aware token capture and pricing) but not yet exercised in production. Adding a provider is a wake-script + pricing-table change, not a refactor.
+**Current reality.** Two provider wake scripts ship: `wake/claude.sh` and `wake/codex.sh`. Claude is the production provider. The Codex lane is exercised — a managed project has shipped end-to-end on Codex with OAuth — and ships experimental (see [docs/codex-known-issues.md](docs/codex-known-issues.md) for the known rough edges). A Gemini lane is designed for but not shipped: `switch-provider.sh` and the `[providers] active` reader accept `gemini` as a name, but `kanban.cfg` has no model section for it and `scripts/wake/` holds no Gemini script, so selecting it gives the dispatcher nothing to run. `[providers] available` defaults to `claude codex` accordingly.
+
+What makes adding a provider a wake-script-plus-pricing-table change rather than a refactor is that nothing above the wake layer is provider-shaped: task IDs, queues, role files, and the task folder are all provider-neutral.
 
 Token capture is provider-aware: each task's `tokens.json` records `provider`, `model`, agent, RC, token counts, and timing, so cost rollups break down per provider when more than one is in use.
 
@@ -278,12 +301,13 @@ A workflow type is a plugin — a directory under `$KANBAN_ROOT/workflows/<name>
 
 ### Plugin shape
 
-Each plugin is a directory with two files:
+A plugin has two layers. Layer 1 is required; Layer 2 is optional.
 
 ```
 $KANBAN_ROOT/workflows/<name>/
-├── workflow.cfg   # manifest — capabilities and status
-└── workflow.sh    # eight bash hooks the engine calls
+├── workflow.cfg    # Layer 1, required — manifest: capabilities and status
+├── workflow.sh     # Layer 1, required — eight bash hooks the engine calls
+└── pipeline.yaml   # Layer 2, optional — a declarative PM decomposition pipeline
 ```
 
 The manifest (`workflow.cfg`) declares:
@@ -292,6 +316,8 @@ The manifest (`workflow.cfg`) declares:
 - `[capabilities] version_semantics` (`semver` | `label` | `none`), `git_mode` (`none` | `ro` | `rw`), `finalize` (`tag` | `publish` | `report`), `agents` (comma-separated ordered roster)
 
 The hook set (`workflow.sh`) defines eight `wf_*` functions: `wf_git_mode`, `wf_resolve_target_version`, `wf_pre_task`, `wf_post_task`, `wf_finalize`, `wf_agents`, `wf_bundle_source_branch`, `wf_dashboard_render`. Each hook does one thing. Policy lives inside the hook; the engine never dispatches on a type-name switch.
+
+The `pipeline.yaml` format — what inputs a pipeline needs, which agents participate, what steps run in order — is specified field by field in `team/workflows/SCHEMA.md`. Of the three shipped plugins, `release` and `document` carry one; `testing-only` does not.
 
 ### Discovery
 
@@ -305,26 +331,26 @@ The dispatcher is fail-closed on every load-time error:
 - Missing or malformed `workflow.cfg` → BLOCKED with the manifest problem named.
 - `status = scaffold` (or any value other than the literal `ready`) → BLOCKED with the type name in the reason.
 
-This deliberately replaces the pre-v1.1 behavior in which the wake scripts defaulted to `release` on parse failure. Misconfigurations that used to silently succeed now fail loud; correct configurations behave byte-identically.
+No misconfiguration silently falls back to `release`: a broken or unknown type stops with its reason named, and a correct configuration routes exactly as it declares.
 
 ### Upgrade-survival contract
 
 The framework's `upgrade.sh --force` refreshes shipped plugins in place and leaves operator-authored plugins untouched. The mechanism is an overlay copy (`cp -r "$src/." "$dst/"`) that copies files present in the new install onto the live tree; directories absent from the source tree are not affected. An operator-authored `$KANBAN_ROOT/workflows/acme-deploy/` survives every upgrade byte-identical.
 
-The one hazard: a custom plugin whose name collides with a shipped plugin (`release`, `document`, `testing-only`) is silently overwritten on upgrade. The generator refuses those names, `validate-workflow.sh` documents the rule, and `docs/public-contract.md` states the recommendation to use org-prefixed names.
+The one hazard: a custom plugin whose name collides with a shipped plugin (`release`, `document`, `testing-only`) is silently overwritten on upgrade. The generator refuses those names, `validate-workflow.sh` documents the rule, and [docs/public-contract.md](docs/public-contract.md) states the recommendation to use org-prefixed names.
 
-The upgrade-survival guarantee is a stable 1.x contract — see [docs/public-contract.md](docs/public-contract.md).
+The upgrade-survival guarantee is a stable contract — see [docs/public-contract.md](docs/public-contract.md).
 
 ### Shipped plugins
 
-| Workflow | Status | Description |
+| Workflow | Capabilities | Description |
 |---|---|---|
-| `release` | Shipped | Software release with the git RC branch lifecycle. `version_semantics=semver`, `git_mode=rw`, `finalize=tag`, `agents=pm,coder,writer,tester,cm`. The default; where most daily activity happens. |
-| `document` | Shipped | Prose/document deliverables. `version_semantics=semver`, `finalize=publish`. Drives off the requirement's semver `## Target Version`; publishes to `projects/<name>/artifacts/v<semver>-<name>.<ext>` (versioned library, every version kept). |
-| `testing-only` | Shipped | Runs a project's test suites at a named ref. `version_semantics=label`, `git_mode=ro`, `finalize=report`, `agents=pm,tester`. Label semantics: the version is a name for the report artifact only — never enters release-state, never triggers ceiling checks, and the dashboard renders label items by open/running/done. No CM step. |
-| (operator-authored) | Custom | Any org-authored plugin under `$KANBAN_ROOT/workflows/<name>/` — see [docs/creating-a-workflow.md](docs/creating-a-workflow.md). |
+| `release` | `version_semantics=semver`, `git_mode=rw`, `finalize=tag`, `agents=pm,coder,writer,tester,cm` | Software release with the git RC branch lifecycle. The default; where most daily activity happens. |
+| `document` | `version_semantics=semver`, `git_mode=none`, `finalize=publish`, `agents=pm,writer,tester,cm` | Prose/document deliverables. Drives off the requirement's semver `## Target Version`; publishes to `projects/<name>/artifacts/v<semver>-<artifact-name>.<ext>` (versioned library, every version kept). |
+| `testing-only` | `version_semantics=label`, `git_mode=ro`, `finalize=report`, `agents=pm,tester` | Runs a project's test suites at a named ref. Label semantics: the version is a name for the report artifact only — never enters release-state, never triggers ceiling checks, and the dashboard renders label items by open/running/done. No CM step. |
+| (operator-authored) | declared by the plugin | Any org-authored plugin under `$KANBAN_ROOT/workflows/<name>/` — see [docs/creating-a-workflow.md](docs/creating-a-workflow.md). |
 
-The agent roles work across all workflow types; their specialization adapts to the workflow context by reading capability flags (TESTER runs unit tests for `release`, verifies completeness against an outline for `document`, runs the project's test suite for `testing-only`).
+All three shipped plugins carry `status = ready`. The agent roles work across every workflow type; their specialization adapts to the workflow context by reading capability flags (TESTER runs unit tests for `release`, verifies completeness against an outline for `document`, runs the project's test suite for `testing-only`).
 
 For the full authoring walkthrough — live-operator (no git) and contributor (dev tree) paths — see [docs/creating-a-workflow.md](docs/creating-a-workflow.md).
 
@@ -332,11 +358,13 @@ For the full authoring walkthrough — live-operator (no git) and contributor (d
 
 ## Branch and Git Conventions
 
+Branch names below are shown without a prefix. A project with a non-empty `branch_prefix` carries it on the leading segment, as described under [Per-project branch prefix](#per-project-branch-prefix).
+
 | Branch | Purpose | Creator | Deleter |
 |---|---|---|---|
-| `main` (or `<prefix>main`) | Tagged releases only | exists | never |
-| `develop` (or `<prefix>develop`) | Integration buffer | exists | never |
-| `rc/vX.Y.Z` (prefixed per project) | Active release candidate | CM (open-rc) | CM (release) |
+| `main` | Tagged releases only | exists | never |
+| `develop` | Integration buffer | exists | never |
+| `rc/vX.Y.Z` | Active release candidate | CM (open-rc) | CM (release) |
 | `feature/<task-id>` | Single task, in a worktree | CODER/WRITER | self, after merge |
 
 **Git contract per agent:** PO, PM, TESTER are read-only on git. CODER and WRITER do local-only operations in per-task worktrees (branch, commit, merge `--no-ff`; never fetch or push). CM is the sole origin-toucher — pulls on RC open, squash-merges RC → develop → main on release, pushes tags, deletes the RC.
@@ -364,6 +392,8 @@ BACKLOG → WAITING → WORKING → DONE
 
 There is deliberately no "needs human review" state. If something needs human eyes it is BLOCKED with a clear reason. Accumulating review items is the death of autonomy.
 
+The canonical write path for a state change is the status-writer tool, not a hand-edit — `team/SOP-core.md` owns that procedure.
+
 ### Task folder shape
 
 ```
@@ -386,7 +416,9 @@ Per-project file; CM is the only writer. Tracks Active RC, RC-opened time/task, 
 
 ## Cost Visibility
 
-Token usage is captured per-task (`tokens.json`) and rolled up per-day and per-RC by `aggregate_tokens.py`. Pricing is keyed by provider → model. Operator surfaces: a `cost-report.sh` CLI (day/RC/month scopes) and a dashboard metrics window. Because capture is provider-aware, switching providers makes the per-provider cost delta visible empirically. RC metrics measure the kanban's own task executions only — the operator's interactive usage does not contaminate them.
+Token usage is captured per-task (`tokens.json`) and rolled up per-day and per-RC by `pm-agent/aggregate_tokens.py`. Pricing is keyed by provider → model. Operator surfaces: a `cost-report.sh` CLI (day/RC/month scopes) and a dashboard metrics window. Because capture is provider-aware, switching providers makes the per-provider cost delta visible empirically. RC metrics measure the kanban's own task executions only — the operator's interactive usage does not contaminate them.
+
+The same per-RC rollups under `projects/<name>/metrics/rc/` are the source the measured-pace figures in [README.md](README.md) are generated from; no pace claim in either document is hand-written.
 
 ---
 
@@ -394,7 +426,7 @@ Token usage is captured per-task (`tokens.json`) and rolled up per-day and per-R
 
 Two interchangeable schedulers drive the continuous mode:
 
-- **System cron** — the default; per-agent entries on a stagger (e.g. PM at :00/:05, CM at :01/:06).
+- **System cron** — the default. The installed crontab fires each pipeline agent every two minutes on a sub-minute stagger: PM, CM, and TESTER on even minutes (`--sleep=0/21/42`), CODER and WRITER on odd minutes (`--sleep=0/21`). OVERWATCH gets two lines of its own — an hourly Tier-1 sweep and a daily Tier-2 wake — plus separate cleanup entries. The annotated template is `team/templates/install/crontab.example`; `install-crontab.sh` installs it.
 - **Pseudocron** — a self-contained scheduler for hosts without usable cron (containers, restricted environments), installed via `install-pseudocron.sh` with small/medium/large tier templates and parity with the system-cron tiers.
 
 ---
@@ -416,7 +448,7 @@ iteration cannot absorb.
   quality findings map to ship-with-concerns; the release ships and
   the next bundle heals.
 - **The census.** Every halting site in the shipped tree is
-  inventoried in docs/blocking-site-census.md and classified
+  inventoried in [docs/blocking-site-census.md](docs/blocking-site-census.md) and classified
   BLOCK-WORTHY / CONVERT / AGENT-RESOLVABLE; a census lint
   (quality-class, like everything else) keeps new gates honest. New
   gates declare their class in a code comment and speak dual-channel.
@@ -428,20 +460,31 @@ iteration cannot absorb.
   work merged (with branch-history evidence accepted when the feature
   branch was already tidied), worktree clean. Wording concerns belong
   to verification time, one loop later.
+- **Doc truth.** A separate lint holds the documents to the same
+  standard as the code: every command a document cites must exist in
+  the tree and answer `--help`, every configuration key it names must
+  be in the loader's Key Registry, and every dashboard window it
+  describes must match the window census.
+
+The three census classes and the new-gate rule are law in `team/SOP-core.md`; this section is the architectural summary, not the canon.
 
 ## Governance Stack
 
-Reading order; every agent reads top-down before processing a task. Each layer narrows scope.
+Each role declares its own governance reading list in a manifest at `read-order/<role>.txt`. The wake composer resolves that manifest and assembles the agent's prompt from it, in manifest order. **A document not named in a role's manifest is not read by that role** — there is no implicit stack behind the manifests.
+
+Seven manifests ship, one per role in the catalog (the six pipeline agents plus OVERWATCH). Each currently names the same five-document shape, differing only in its role file:
 
 1. **DIRECTIVES.md** — top-level safety rules
 2. **OVERVIEW.md** — autonomy principle
-3. **SOP.md** — operational procedures
+3. **SOP-core.md** — shared law
 4. **README.md** — kanban entry point
-5. **Per-project README.md** (when present)
-6. **roles/<AGENT>.md** — the agent's role
-7. **Task README.md** — what this task is
-8. **Task status.md** — current state
-9. **Requirements doc / context paths** — what to actually do
+5. **roles/<AGENT>.md** — the agent's role
+
+That uniformity is a starting point, not a constraint; the mechanism exists so the lists can diverge per role. Two things the composer supplies that no manifest may name: the **per-project README.md**, spliced in after the kanban README when the active project has one (its existence is a runtime fact), and the **task folder** — `README.md`, `status.md`, and the ticket's context paths — which is assembled from the task, not the manifest.
+
+Resolution degrades rather than refuses. A manifest line naming a missing file is skipped and narrated; a role whose manifest resolves to zero files falls back to the hardcoded five-document list above, with a `read_order:` line in the wake log recording the degradation. Prompt assembly is not a gate.
+
+Each role also carries a byte budget under `kanban.cfg [governance]`, reported on demand by `scripts/lint_governance_byte_budgets.sh`. The lint narrates and always exits 0: an over-budget role costs tokens, not correctness, so it is a quality finding and quality findings never stop the loop. Full mechanism — manifest format, resolver contract, budget units, add-a-doc procedure — is in [docs/read-order-manifests.md](docs/read-order-manifests.md); the reading order as law is in `SOP-core.md`, "Required Read Order For Assigned Work."
 
 Role files are written without provider-specific language. The same `CODER.md` applies whichever provider is active; provider quirks (if any) are addressed in the wake-script prompt prelude, not in role files.
 
@@ -463,10 +506,10 @@ The kanban is one project among several under `projects/`; the self-build is one
 
 ## What's Stable
 
-These are stable architectural commitments — the load-bearing contracts other parts of the system are built against:
+These are stable architectural commitments — the load-bearing contracts other parts of the system are built against. The operator-facing version of this list, with the compatibility promise attached, is [docs/public-contract.md](docs/public-contract.md).
 
 - Task folder shape; the six-state machine (no REVIEW)
-- Governance stack reading order
+- Manifest-declared governance reading order (`read-order/<role>.txt`), with the composer's fallback when a manifest resolves to nothing
 - Single-threaded execution per repo; local-only git for non-CM agents; CM as sole origin-toucher
 - File system as source of truth; git as history
 - Config single-source-of-truth precedence (env > cfg > default, fail-loud)
@@ -477,4 +520,4 @@ These are stable architectural commitments — the load-bearing contracts other 
 
 ---
 
-*This document is the architectural contract. SOP.md is the procedure. Role files are the per-agent specifications.*
+*This document is the architectural contract. SOP-core.md is the shared law. Role files are the per-agent specifications and procedure.*

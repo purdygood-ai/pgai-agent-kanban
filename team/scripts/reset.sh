@@ -79,6 +79,8 @@ source "${_SCRIPT_DIR}/lib/project_paths.sh"
 source "${_SCRIPT_DIR}/lib/worktree.sh"
 # shellcheck source=lib/pp_run_ops.sh
 source "${_SCRIPT_DIR}/lib/pp_run_ops.sh"
+# shellcheck source=lib/script_common.sh
+source "${_SCRIPT_DIR}/lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Declared flag vocabulary for this script.
@@ -86,41 +88,46 @@ source "${_SCRIPT_DIR}/lib/pp_run_ops.sh"
 # ---------------------------------------------------------------------------
 OPERATOR_VALID_FLAGS=(project key keep-artifacts force help)
 
+# --keep-artifacts is outside the canonical vocabulary, so its help line is
+# given here.
+declare -A OPERATOR_FLAG_HELP=(
+    [keep-artifacts]="  --keep-artifacts   Preserve the task's artifacts/ contents (default: clear them; agent-task resets only)"
+)
+
 # ---------------------------------------------------------------------------
 # Usage / --help
 # ---------------------------------------------------------------------------
-_usage() {
-    operator_args_render_help_for_flags \
-        "$(basename "$0")" \
-        "Reset agent tasks or intake items to re-pickable state (operator power tool)." \
-        OPERATOR_VALID_FLAGS \
-        "  (--force is the stale-worktree cleanup flag: clears any residual" \
-        "   worktree registration and on-disk path before resetting the task;" \
-        "   without --force a detected stale worktree causes a warning and" \
-        "   non-zero exit.  Agent-task resets only.)" \
-        "" \
-        "         value: full item key (see formats):" \
-        "                 Agent task:   ROLE-YYYYMMDD-NNN[-slug] (role in prefix)" \
-        "                 Bug intake:   BUG-NNNN" \
-        "                 Priority:     PRIORITY-NNNN" \
-        "                 Requirement:  version string (e.g. v0.1.2)" \
-        "" \
-        "Examples:" \
-        "  $(basename "$0") --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN-some-slug" \
-        "  $(basename "$0") --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN" \
-        "  $(basename "$0") --project pgai-agent-kanban --key BUG-NNNN" \
-        "  $(basename "$0") --project pgai-agent-kanban --key PRIORITY-NNNN" \
-        "  $(basename "$0") --project pgai-agent-kanban --key v0.1.2" \
-        "" \
-        "Exit codes:" \
-        "  0  reset completed" \
-        "  1  usage error or key not found / ambiguous" \
-        "  2  WORKING state refusal (agent-task resets only); or stale worktree" \
-        "     detected without --force (recipe printed to stderr)" \
-        "  3  key not found" \
-        "  4  --force aborted: on-disk worktree path is a mount target" \
-        "     (blocking mount name printed to stderr)"
-}
+# Usage text as data (per lib/script_common.sh's print_usage_and_exit contract).
+_USAGE_TEXT="$(operator_args_render_help_for_flags \
+    "$(basename "$0")" \
+    "Reset agent tasks or intake items to re-pickable state (operator power tool)." \
+    OPERATOR_VALID_FLAGS \
+    "  (--force is the stale-worktree cleanup flag: clears any residual" \
+    "   worktree registration and on-disk path before resetting the task;" \
+    "   without --force a detected stale worktree causes a warning and" \
+    "   non-zero exit.  Agent-task resets only.)" \
+    "" \
+    "         value: full item key (see formats):" \
+    "                 Agent task:   ROLE-YYYYMMDD-NNN[-slug] (role in prefix)" \
+    "                 Bug intake:   BUG-NNNN" \
+    "                 Priority:     PRIORITY-NNNN" \
+    "                 Requirement:  version string (e.g. v0.1.2)" \
+    "" \
+    "Examples:" \
+    "  $(basename "$0") --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN-some-slug" \
+    "  $(basename "$0") --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN" \
+    "  $(basename "$0") --project pgai-agent-kanban --key BUG-NNNN" \
+    "  $(basename "$0") --project pgai-agent-kanban --key PRIORITY-NNNN" \
+    "  $(basename "$0") --project pgai-agent-kanban --key v0.1.2" \
+    "" \
+    "Exit codes:" \
+    "  0  reset completed" \
+    "  1  usage error or key not found / ambiguous" \
+    "  2  WORKING state refusal (agent-task resets only); or stale worktree" \
+    "     detected without --force (recipe printed to stderr)" \
+    "  3  key not found" \
+    "  4  --force aborted: on-disk worktree path is a mount target" \
+    "     (blocking mount name printed to stderr)")"
 
 # ---------------------------------------------------------------------------
 # Parse arguments manually.
@@ -141,12 +148,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --project)
-            [[ -z "${2:-}" ]] && { echo "ERROR: --project requires a value" >&2; echo "" >&2; _usage >&2; exit 1; }
+            [[ -z "${2:-}" ]] && { echo "ERROR: --project requires a value" >&2; echo "" >&2; print_usage_and_exit 1 "$_USAGE_TEXT"; }
             _project_value="$2"
             shift 2
             ;;
         --key)
-            [[ -z "${2:-}" ]] && { echo "ERROR: --key requires a value" >&2; echo "" >&2; _usage >&2; exit 1; }
+            [[ -z "${2:-}" ]] && { echo "ERROR: --key requires a value" >&2; echo "" >&2; print_usage_and_exit 1 "$_USAGE_TEXT"; }
             _key_value="$2"
             shift 2
             ;;
@@ -161,16 +168,14 @@ while [[ $# -gt 0 ]]; do
         *)
             printf 'reset.sh: unknown argument: %s\n' "$1" >&2
             printf '\n' >&2
-            _usage >&2
-            exit 1
+            print_usage_and_exit 1 "$_USAGE_TEXT"
             ;;
     esac
 done
 
 # Show help early (after parsing so --help can appear anywhere).
 if [[ "${_show_help}" == "true" ]]; then
-    _usage
-    exit 0
+    print_usage_and_exit 0 "$_USAGE_TEXT"
 fi
 
 # Reject any flag not in the declared vocabulary (belt-and-suspenders; the
@@ -187,8 +192,7 @@ _missing_flags=()
 if [[ ${#_missing_flags[@]} -gt 0 ]]; then
     echo "ERROR: missing required flag(s): ${_missing_flags[*]}" >&2
     echo "" >&2
-    _usage >&2
-    exit 1
+    print_usage_and_exit 1 "$_USAGE_TEXT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -196,6 +200,9 @@ fi
 # ---------------------------------------------------------------------------
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
+
+# --- Resolve project name by exact match then unambiguous prefix ---
+_project_value="$(pp_resolve_project_name "${_project_value}")" || exit 1
 
 _project_root="$(pp_project_root "${_project_value}")" || exit 1
 

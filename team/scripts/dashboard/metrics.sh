@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# dashboard-metrics.sh
+# metrics.sh
 # Renders the Metrics pane for the pgai kanban dashboard.
 #
 # Displays two sections:
 #   Section 1: Today — per-project summary (RCs shipped, wall time, tokens, tasks)
-#   Section 2: Current RC — per-project open RC progress (tasks done/total, elapsed, tokens so far)
+#   Section 2: Current RC — per-project open RC progress (tasks done/total, elapsed, blocked minutes, tokens so far)
 #
 # Reads from:
 #   projects/<name>/metrics/day/<YYYY-MM-DD>.json  (today block)
 #   projects/<name>/metrics/rc/<v>.json             (current RC block)
 #   projects/<name>/release-state.md               (active RC discovery)
 #
-# Designed to run under `watch -t -c -n $REFRESH_INTERVAL dashboard-metrics.sh`
-# in the tmux Metrics window created by dashboard-create.sh.
+# Designed to run under `watch -t -c -n $REFRESH_INTERVAL metrics.sh`
+# in the tmux Metrics window created by dashboard/create.sh.
 # The -c flag in watch preserves ANSI color sequences (truecolor safe).
 # This script does NOT use `clear` at the top level — truecolor is preserved
 # because watch -c handles screen clearing itself.
 #
 # Usage:
-#   dashboard-metrics.sh [--kanban-root <path>] [--no-color]
+#   metrics.sh [--kanban-root <path>] [--no-color]
 #
 # Options:
 #   --kanban-root <path>   Override the kanban root directory
@@ -59,7 +59,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -40
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:33}"
       exit 0
       ;;
     *)
@@ -78,6 +83,10 @@ source "${SCRIPT_DIR}/../lib/project_paths.sh"
 
 # shellcheck source=lib/projects.sh
 source "${SCRIPT_DIR}/../lib/projects.sh"
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh).
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # ANSI color support (honor NO_COLOR, TERM=dumb, and --no-color flag)
@@ -89,61 +98,21 @@ if [[ "$NO_COLOR_ARG" == "true" ]] || \
   USE_COLOR=false
 fi
 
-_c() {
-  [[ "$USE_COLOR" != "true" ]] && { printf ''; return; }
-  case "$1" in
-    bold)    printf '\033[1m' ;;
-    dim)     printf '\033[2m' ;;
-    reset)   printf '\033[0m' ;;
-    cyan)    printf '\033[0;36m' ;;
-    green)   printf '\033[0;32m' ;;
-    yellow)  printf '\033[0;33m' ;;
-    white)   printf '\033[0;37m' ;;
-    *)       printf '' ;;
-  esac
-}
-
-RESET="$(_c reset)"
-BOLD="$(_c bold)"
-DIM="$(_c dim)"
-CYAN="$(_c cyan)"
-GREEN="$(_c green)"
-YELLOW="$(_c yellow)"
+RESET="$(ansi_code reset)"
+BOLD="$(ansi_code bold)"
+DIM="$(ansi_code dim)"
+CYAN="$(ansi_code cyan)"
+GREEN="$(ansi_code green)"
+YELLOW="$(ansi_code yellow)"
 
 # ---------------------------------------------------------------------------
-# Section header helper (matches dashboard-metadata.sh visual style)
+# Shared helpers: section_header (lib/dashboard_common.sh) and
+# release_state_section, the release-state.md field reader (lib/cm/common.sh).
 # ---------------------------------------------------------------------------
-section_header() {
-  local title="$1"
-  printf '%s%s%s\n' "${CYAN}${BOLD}" "=== ${title} ===" "$RESET"
-}
-
-# ---------------------------------------------------------------------------
-# Helper: read Active RC from release-state.md
-# Returns empty string if none.
-# Liberal parse — read first ## Active RC header only, trim whitespace,
-# validate: accept only vX.Y.Z semver; anything else (empty, malformed, 'none') → "".
-# ---------------------------------------------------------------------------
-_active_rc() {
-  local project_name="$1"
-  local release_state
-  release_state="$(KANBAN_ROOT="$KANBAN_ROOT" pp_project_root "$project_name" 2>/dev/null)/release-state.md" || { echo ""; return; }
-
-  if [[ ! -f "$release_state" ]]; then
-    echo ""
-    return
-  fi
-
-  local rc
-  rc="$(awk '/^##[[:space:]]+Active RC/{found=1;next} found && /^[[:space:]]*$/{next} found{print; exit}' \
-        "$release_state" 2>/dev/null | tr -d '[:space:]')"
-
-  if [[ "$rc" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "$rc"
-  else
-    echo ""
-  fi
-}
+# shellcheck source=../lib/dashboard_common.sh
+source "${SCRIPT_DIR}/../lib/dashboard_common.sh"
+# shellcheck source=../lib/cm/common.sh
+source "${SCRIPT_DIR}/../lib/cm/common.sh"
 
 # ---------------------------------------------------------------------------
 # Helper: find the per-day metrics rollup file for a project.
@@ -200,9 +169,11 @@ _render_metrics_python() {
   local today_date="$2"
   local projects_json="$3"
 
-  python3 - "$use_color" "$today_date" "$projects_json" <<'PY_EOF'
+  python3 - "$use_color" "$today_date" "$projects_json" \
+      "$RESET" "$BOLD" "$DIM" "$CYAN" "$GREEN" "$YELLOW" "${SCRIPT_DIR}/../lib" \
+      <<'PY_EOF'
 """
-Inline metrics renderer for dashboard-metrics.sh.
+Inline metrics renderer for dashboard/metrics.sh.
 Receives project descriptors JSON as sys.argv[3].
 Emits the complete Metrics pane output.
 
@@ -210,6 +181,13 @@ sys.argv:
   1  use_color       "true" or "false"
   2  today_date      YYYY-MM-DD
   3  projects_json   JSON array of project descriptor dicts
+  4-9  RESET, BOLD, DIM, CYAN, GREEN, YELLOW -- already the single-sourced
+       escapes (or "" in NO_COLOR mode) computed by the bash caller via
+       ansi_code() (team/scripts/lib/script_common.sh); threaded through
+       argv rather than a second hand-transcribed copy of the same table.
+  10  lib_dir         SCRIPT_DIR/../lib, threaded through argv so this
+       heredoc (no __file__ of its own) can import the shared
+       thousands-separator formatter, team/scripts/lib/number_format.py.
 """
 
 from __future__ import annotations
@@ -220,21 +198,17 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-
 use_color     = sys.argv[1] == "true"
 today_date    = sys.argv[2]
 projects_json = sys.argv[3]
 
-# ANSI helpers — only emit escapes when use_color is True
-def _esc(code: str) -> str:
-    return code if use_color else ""
+RESET, BOLD, DIM, CYAN, GREEN, YELLOW = sys.argv[4:10]
 
-RESET  = _esc("\033[0m")
-BOLD   = _esc("\033[1m")
-DIM    = _esc("\033[2m")
-CYAN   = _esc("\033[0;36m")
-GREEN  = _esc("\033[0;32m")
-YELLOW = _esc("\033[0;33m")
+# sys.argv[10] is the lib/ directory (SCRIPT_DIR/../lib), threaded through
+# argv the same way the color escapes are above -- this heredoc has no
+# __file__ of its own to self-locate lib/ from.
+sys.path.insert(0, sys.argv[10])
+from number_format import format_int  # noqa: E402
 
 
 def section_header(title: str) -> str:
@@ -303,6 +277,17 @@ def fmt_elapsed_since(opened_at: str | None) -> str:
         return "(unknown)"
 
 
+def fmt_blocked(minutes: int | float | None) -> str:
+    """Format the current RC's blocked-minutes figure beside its elapsed
+    time. An RC with no ledger yet, or whose rollup predates this field,
+    reads back as a real 0 -- never blank, never a placeholder -- because
+    "no blocking observed" is itself a measured figure for the pane in
+    progress."""
+    if minutes is None:
+        return "0"
+    return format_int(minutes)
+
+
 def load_json(path: str | None) -> dict[str, Any] | None:
     if not path:
         return None
@@ -368,7 +353,7 @@ else:
             print(f"    RCs shipped:  {rc_label}")
             print(f"    Wall time:    {fmt_wall_time(wall_min)}")
             print(f"    Tokens:       {tok_str}")
-            print(f"    Tasks:        {tasks_total}")
+            print(f"    Tasks:        {format_int(tasks_total)}")
 
         print()
 
@@ -398,10 +383,12 @@ else:
 
             rc_data = load_json(rc_file)
             if rc_data is None:
-                # No rollup yet — use elapsed from opened_at only
+                # No rollup yet — use elapsed from opened_at only, and no
+                # ledger reading exists either: a real 0, not a blank.
                 elapsed = fmt_elapsed_since(opened_at)
                 print(f"    Tasks:    (no data yet)")
                 print(f"    Elapsed:  {elapsed}")
+                print(f"    Blocked:  {fmt_blocked(None)}")
                 print(f"    Tokens:   (no data yet)")
             else:
                 tok       = rc_data.get("tokens", {}).get("total", {})
@@ -416,11 +403,13 @@ else:
                 wall_min  = rc_data.get("wall_time_minutes")
                 # opened_at comes from release-state.md (passed by caller)
                 elapsed   = fmt_wall_time(wall_min) if wall_min is not None else fmt_elapsed_since(opened_at)
+                blocked   = fmt_blocked(rc_data.get("blocked_minutes"))
 
                 tok_str   = fmt_tokens(tot_tok)
 
-                print(f"    Tasks:    {t_total} done")
+                print(f"    Tasks:    {format_int(t_total)} done")
                 print(f"    Elapsed:  {elapsed}")
+                print(f"    Blocked:  {blocked}")
                 print(f"    Tokens:   {tok_str} (so far)")
 
             print()
@@ -456,21 +445,26 @@ _build_project_descriptors_json() {
     local _day_file _rc _rc_file _opened_at _proj_root _release_state
 
     _day_file="$(_day_metrics_file "$_proj" "$TODAY")"
-    _rc="$(_active_rc "$_proj")"
+    _rc=""
     _rc_file=""
     _opened_at=""
 
+    # Active RC and RC Opened At in one read of the project's release-state.md:
+    # _rc is a vX.Y.Z version or "" (no RC); _opened_at is the value as
+    # written, or "" when the heading or value is missing.
+    _proj_root="$(KANBAN_ROOT="$KANBAN_ROOT" pp_project_root "$_proj" 2>/dev/null)" || _proj_root=""
+    if [[ -n "$_proj_root" ]]; then
+      _release_state="$(release_state_section "${_proj_root}/release-state.md" "Active RC" "RC Opened At")" || true
+      { IFS= read -r _rc || true; IFS= read -r _opened_at || true; } <<< "$_release_state"
+      _rc="${_rc//[[:space:]]/}"
+      [[ "$_rc" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || _rc=""
+    fi
+
     if [[ -n "$_rc" ]]; then
       _rc_file="$(_rc_metrics_file "$_proj" "$_rc")"
-      # Read opened_at from release-state.md
-      _proj_root="$(KANBAN_ROOT="$KANBAN_ROOT" pp_project_root "$_proj" 2>/dev/null)" || _proj_root=""
-      _release_state="${_proj_root}/release-state.md"
-      if [[ -f "$_release_state" ]]; then
-        _opened_at="$(awk '/^##[[:space:]]+RC Opened At/{found=1;next} found && /^[[:space:]]*$/{next} found{print; exit}' \
-          "$_release_state" 2>/dev/null | tr -d '[:space:]')" || _opened_at=""
-        # If the value starts with # it's a missing field
-        [[ "$_opened_at" == \#* ]] && _opened_at=""
-      fi
+      _opened_at="${_opened_at//[[:space:]]/}"
+    else
+      _opened_at=""
     fi
 
     [[ "$first" == "false" ]] && printf ','

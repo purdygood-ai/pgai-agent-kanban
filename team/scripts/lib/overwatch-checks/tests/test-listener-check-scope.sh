@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # team/scripts/lib/overwatch-checks/tests/test-listener-check-scope.sh
 #
-# Regression test for BUG-0015: pgai_listener_cleanliness_check scope narrowing.
+# Verifies pgai_listener_cleanliness_check's scope narrowing: a listener is
+# flagged only when its cwd sits under the project's own subtree, never a
+# sibling project's.
 #
 # Verifies the acceptance criteria:
 #   1. A listener whose cwd is under a SIBLING project's subtree is NOT flagged
@@ -281,9 +283,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 5: Prefix-collision regression (BUG-0017) — a sibling project whose
-#         name is a proper prefix extension of this project's name is NOT
-#         flagged when the check is scoped to this project.
+# TEST 5: Prefix-collision — a sibling project whose name is a proper
+#         prefix extension of this project's name is NOT flagged when the
+#         check is scoped to this project.
 #
 # Setup:
 #   - This project's subtree: FIXTURE_DIR/t5-root/projects/pgai-agent-kanban
@@ -300,7 +302,7 @@ fi
 #   the cmdline argument "pgai-agent-kanban-ui/...".
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== TEST 5: Prefix-collision (BUG-0017) — sibling with prefix-matching name not flagged ==="
+echo "=== TEST 5: Prefix-collision — sibling with prefix-matching name not flagged ==="
 
 T5_TEMP_ROOT="${FIXTURE_DIR}/t5-root"
 T5_OWN_SUBTREE="${T5_TEMP_ROOT}/projects/pgai-agent-kanban"
@@ -335,7 +337,7 @@ fi
 
 if echo "${T5_OUT}" | grep -q "\[pgai-listener\] FAIL"; then
     _fail "prefix-collision-not-flagged/no-fail-message" \
-        "FAIL message emitted for sibling-with-prefix-name listener (BUG-0017 regression). output: ${T5_OUT}"
+        "FAIL message emitted for sibling-with-prefix-name listener. output: ${T5_OUT}"
 else
     _pass "prefix-collision-not-flagged/no-fail-message"
 fi

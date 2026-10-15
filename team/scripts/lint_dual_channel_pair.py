@@ -129,6 +129,28 @@ _EXAMPLE_REMEDY_TEXT = (
     "diagnosed above is resolved"
 )
 
+# Availability-probe command heads this lint recognizes: a bare emitter
+# identifier immediately following one of these heads (as the head's sole
+# operand) is being tested for existence, not invoked. This is the
+# idiomatic guarded-self-source shape (`if ! command -v <emitter>
+# >/dev/null 2>&1; then source ...; fi`) that bootstraps the emitter before
+# it is known to exist -- not a call site missing its fields. The four
+# spellings below -- 'command -v NAME', 'type NAME', 'type -t NAME', and
+# 'declare -F NAME' -- are the probe family this lint supports; a fifth
+# spelling not on this list is still treated as a call (silence over a
+# false accusation runs the other way here: an unrecognized probe form is
+# scanned as a real call, which can only ever over-report, never hide a
+# genuine malformed call). Each pattern is anchored to the text
+# immediately preceding the identifier match -- via `$` -- and excludes a
+# leading `$` on the head word so a variable expansion that merely happens
+# to read `$type` or `$command` is never mistaken for the builtin.
+_PROBE_TAIL_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?<![\w$])command\s+-v\s+['\"]?$"),
+    re.compile(r"(?<![\w$])type\s+-t\s+['\"]?$"),
+    re.compile(r"(?<![\w$])type\s+['\"]?$"),
+    re.compile(r"(?<![\w$])declare\s+-F\s+['\"]?$"),
+)
+
 
 @dataclass
 class _Finding:
@@ -227,6 +249,24 @@ def _tokenize_bash_args(statement: str) -> Optional[list[str]]:
         return None
 
 
+def _is_availability_probe_operand(prefix: str) -> bool:
+    """Return True when *prefix* -- the line text up to (not including) the
+    identifier match -- ends with one of the ``_PROBE_TAIL_PATTERNS``
+    availability-probe heads, meaning the identifier is the probe's operand
+    rather than a call to it.
+
+    Matching against the tail of the raw line (rather than tokenizing a
+    quote-bounded clause) deliberately looks through constructs such as
+    ``[[ "$(type -t NAME)" != "function" ]]`` where the probe sits inside a
+    command substitution: the probe head is still the words immediately
+    before the identifier, regardless of the quoting and parens wrapped
+    around it. What matters for classifying this occurrence is only "what
+    are the words right before the name" -- not the surrounding statement
+    shape.
+    """
+    return any(pattern.search(prefix) for pattern in _PROBE_TAIL_PATTERNS)
+
+
 def _bash_call_finding(path: Path, line_no: int, func_name: str, tokens: Optional[list[str]]) -> Optional[_Finding]:
     if tokens is None:
         return None
@@ -255,6 +295,11 @@ def _scan_bash_file(path: Path) -> list[_Finding]:
         if col >= len(stripped_line):
             # The match falls inside a '#' comment on its own line -- not a
             # real call site, just prose mentioning the function name.
+            continue
+        if _is_availability_probe_operand(stripped_line[:col]):
+            # The identifier is the operand of an availability probe (the
+            # guarded self-source bootstrap idiom), not an invocation of the
+            # emitter -- not a real call site.
             continue
         statement = _extract_bash_statement(text, match.end())
         tokens = _tokenize_bash_args(statement)
@@ -506,6 +551,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Run the dual-channel pair lint, printing each finding and its JSON array.
+
+    Exit codes: 0 always, whatever was found (quality class); 2 usage error
+    (argparse).
+    """
     args = _parse_args(argv)
 
     script_dir = Path(__file__).resolve().parent  # team/scripts/

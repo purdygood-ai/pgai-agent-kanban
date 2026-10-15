@@ -12,7 +12,10 @@ Acceptance criteria exercised:
 
   (1) Functional: stamp_model_field upserts ## Model correctly —
       creates the section when absent; overwrites only the body when
-      present; all other status fields preserved byte-identically.
+      present; fills an empty, non-last section in place; all other
+      status fields preserved byte-identically.  These tests source the
+      shipped wake_task_state.sh and call its stamp_model_field, so a
+      change to the shipped writer changes what they observe.
 
   (2) Per-role override: the stamped value equals the model string
       resolved by the wake script's model-selection logic, which honors
@@ -32,17 +35,32 @@ All tests use synthetic environments and never touch the live kanban root.
 from __future__ import annotations
 
 import pathlib
-import re
+import subprocess
 import textwrap
 
 import pytest
 
+from tests.fixtures.log_stub import make_log_stub_fragment
+
 # ---------------------------------------------------------------------------
 # Paths relative to team/ (pytest cwd when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
-_CLAUDE_SH = pathlib.Path("scripts/wake/claude.sh")
-_CODEX_SH = pathlib.Path("scripts/wake/codex.sh")
-_WAKE_COMMON_SH = pathlib.Path("scripts/lib/wake_common.sh")
+# This model-stamp block now lives once in the shared wake driver's invoke
+# stage, sourced by both wake/claude.sh and wake/codex.sh (v2.9.20-engine-
+# decomposition: process_one_task's inline body was lifted
+# out of wake/claude.sh; wake/codex.sh now sources the
+# same shared driver instead of carrying its own inline copy). Both
+# constants below point at the one shared file the block now lives in.
+_CLAUDE_SH = pathlib.Path("scripts/lib/wake_driver_invoke.sh")
+_CODEX_SH = pathlib.Path("scripts/lib/wake_driver_invoke.sh")
+# stamp_model_field lives in wake_task_state.sh (sourced by wake_common.sh),
+# the dedicated stage file for the wake's task-state functions.
+_WAKE_TASK_STATE_SH = pathlib.Path("scripts/lib/wake_task_state.sh")
+# Absolute path to the same lib, for sourcing it from a bash subprocess.  This
+# file lives at team/tests/unit/, so three parents up is team/.
+_WAKE_TASK_STATE_LIB = (
+    pathlib.Path(__file__).resolve().parent.parent.parent / "scripts" / "lib" / "wake_task_state.sh"
+)
 
 # Anchor comment that begins the wake-stamp block in both siblings.
 _STAMP_ANCHOR = "# --- Wake-stamp resolved model into status.md ## Model section ---"
@@ -55,51 +73,49 @@ _STAMP_FUNC_DEF = "stamp_model_field()"
 
 
 # ---------------------------------------------------------------------------
-# Pure-Python implementation of stamp_model_field, mirroring the logic
-# embedded in wake_common.sh.  Used by functional tests directly rather
-# than shelling out to bash (avoids SCRIPT_DIR dependency from wake_common.sh).
+# Helper: run the shipped stamp_model_field.
 # ---------------------------------------------------------------------------
 
-def _stamp_model_field(status_path: pathlib.Path, model_value: str) -> None:
-    """Python re-implementation of stamp_model_field from wake_common.sh.
+def _run_shipped_stamp(
+    tmp_path: pathlib.Path, status_path: pathlib.Path, model_value: str
+) -> None:
+    """Run the shipped stamp_model_field from wake_task_state.sh on *status_path*.
 
-    Upserts the ## Model section in a status.md file:
-    - If ## Model exists: replaces its body only.
-    - If absent: inserts after ## Role, or ## Participant as fallback, or at end.
-    All other sections are preserved byte-identically.
+    The real lib is sourced in a bash subprocess (it self-sources
+    atomic_write.sh), with log() replaced by the faithful stub and every
+    kanban path pointed under *tmp_path*, so a change to the shipped writer
+    changes what these tests observe.  The shipped function is best-effort:
+    on a failed rewrite it prints a warning to stderr and returns 0, leaving
+    the file untouched.  That warning is asserted absent so a silent no-op
+    fails here rather than surfacing only as a missing section below.
     """
-    text = status_path.read_text()
-    model_value = model_value.strip()
-
-    # If ## Model section already exists, replace its body (section-scoped update).
-    if re.search(r'^## Model\s*$', text, flags=re.M):
-        text_new, n = re.subn(
-            r'(^## Model\s*\n)(.*?)(\n+##|\Z)',
-            lambda m: m.group(1) + model_value + "\n" + (m.group(3) if m.group(3) else ''),
-            text,
-            flags=re.S | re.M,
-        )
-        assert n > 0, "stamp_model_field: found ## Model header but subn matched 0 times"
-        status_path.write_text(text_new)
-        return
-
-    # Section absent — insert after ## Role, or ## Participant, or at end.
-    new_section = f"## Model\n{model_value}\n"
-    for anchor in (r'^(## Role\s*\n.*?)(\n+##)', r'^(## Participant\s*\n.*?)(\n+##)'):
-        text_new, n = re.subn(
-            anchor,
-            lambda m: m.group(1) + "\n\n" + new_section + "\n" + m.group(2).lstrip('\n'),
-            text,
-            count=1,
-            flags=re.S | re.M,
-        )
-        if n > 0:
-            text_new = re.sub(r'\n{3,}', '\n\n', text_new)
-            status_path.write_text(text_new)
-            return
-
-    # Fallback: append at end.
-    status_path.write_text(text.rstrip('\n') + "\n\n" + new_section)
+    temp_dir = tmp_path / "kanban_temp"
+    temp_dir.mkdir(exist_ok=True)
+    script = textwrap.dedent(f"""\
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export PGAI_AGENT_KANBAN_TEMP_DIR="{temp_dir}"
+        unset PGAI_AGENT_KANBAN_ROOT_PATH PGAI_PROJECT_ROOT PGAI_TASKS_DIR
+        KANBAN_ROOT="{temp_dir}"
+        BACKLOG="{tmp_path / 'coder_backlog.md'}"
+        {make_log_stub_fragment(tmp_path / 'wake.log')}
+        source "{_WAKE_TASK_STATE_LIB}"
+        stamp_model_field "$1" "$2"
+    """)
+    proc = subprocess.run(
+        ["bash", "-c", script, "stamp", str(status_path), model_value],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, (
+        f"stamp_model_field exited {proc.returncode} on {status_path}\n"
+        f"stdout={proc.stdout}\nstderr={proc.stderr}"
+    )
+    assert "stamp_model_field failed" not in proc.stderr, (
+        f"stamp_model_field reported a failed rewrite of {status_path}\n"
+        f"stderr={proc.stderr}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +163,7 @@ def test_stamp_inserts_model_section_when_absent(tmp_path: pathlib.Path) -> None
         "## Role\nCODER\n\n## State\nBACKLOG\n"
     )
 
-    _stamp_model_field(status, "claude-fable-5")
+    _run_shipped_stamp(tmp_path, status, "claude-fable-5")
 
     content = status.read_text()
     assert "## Model\nclaude-fable-5\n" in content, (
@@ -173,7 +189,7 @@ def test_stamp_overwrites_model_body_only(tmp_path: pathlib.Path) -> None:
         "## Model\nold-model-name\n\n## State\nBACKLOG\n\n## Summary\nTBD\n"
     )
 
-    _stamp_model_field(status, "claude-sonnet-4-6")
+    _run_shipped_stamp(tmp_path, status, "claude-sonnet-4-6")
 
     content = status.read_text()
     assert "## Model\nclaude-sonnet-4-6\n" in content, (
@@ -232,7 +248,7 @@ def test_stamp_preserves_all_other_fields(tmp_path: pathlib.Path) -> None:
     status = tmp_path / "status.md"
     status.write_text(original)
 
-    _stamp_model_field(status, "claude-fable-5")
+    _run_shipped_stamp(tmp_path, status, "claude-fable-5")
 
     content = status.read_text()
     # Model stamped
@@ -258,6 +274,32 @@ def test_stamp_preserves_all_other_fields(tmp_path: pathlib.Path) -> None:
         )
 
 
+def test_stamp_fills_empty_non_last_model_and_keeps_following_sections(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Fixture (1d): an empty ## Model followed by another section is filled in place.
+
+    The body of an empty section must stop at the next heading; a boundary
+    that runs past it would swallow ## State and every section after it.
+    """
+    status = tmp_path / "status.md"
+    status.write_text("## Role\nTESTER\n\n## Model\n\n## State\nWORKING\n")
+
+    _run_shipped_stamp(tmp_path, status, "X")
+
+    content = status.read_text()
+    assert "## Model\nX\n" in content, (
+        f"Empty ## Model was not filled with the stamped value.\nStatus file:\n{content}"
+    )
+    assert "## State\nWORKING" in content, (
+        f"## State following an empty ## Model did not survive the stamp.\n"
+        f"Status file:\n{content}"
+    )
+    assert content == "## Role\nTESTER\n\n## Model\nX\n\n## State\nWORKING\n", (
+        f"Stamping an empty ## Model changed more than its body.\nStatus file:\n{content!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # (2) Per-role override: stamped value equals the resolved model
 # ---------------------------------------------------------------------------
@@ -274,7 +316,7 @@ def test_stamp_honors_per_role_model(tmp_path: pathlib.Path) -> None:
     status.write_text("# Status\n\n## Role\nPM\n\n## State\nBACKLOG\n")
 
     pm_model = "claude-fable-5"
-    _stamp_model_field(status, pm_model)
+    _run_shipped_stamp(tmp_path, status, pm_model)
 
     content = status.read_text()
     assert f"## Model\n{pm_model}\n" in content, (
@@ -291,7 +333,7 @@ def test_stamp_different_roles_get_different_models(tmp_path: pathlib.Path) -> N
             f"# Status\n\n## Role\n{role}\n\n## State\nBACKLOG\n"
         )
 
-        _stamp_model_field(status_path, model)
+        _run_shipped_stamp(tmp_path, status_path, model)
 
         content = status_path.read_text()
         assert f"## Model\n{model}\n" in content, (
@@ -355,10 +397,11 @@ def test_stamp_call_present_in_sibling(sibling: pathlib.Path) -> None:
 
 
 def test_stamp_func_defined_in_wake_common() -> None:
-    """Structural: stamp_model_field() is defined in scripts/lib/wake_common.sh."""
-    content = _WAKE_COMMON_SH.read_text(encoding="utf-8")
+    """Structural: stamp_model_field() is defined in scripts/lib/wake_task_state.sh
+    (the task-state stage wake_common.sh sources)."""
+    content = _WAKE_TASK_STATE_SH.read_text(encoding="utf-8")
     assert _STAMP_FUNC_DEF in content, (
-        f"Function definition {_STAMP_FUNC_DEF!r} not found in {_WAKE_COMMON_SH}. "
+        f"Function definition {_STAMP_FUNC_DEF!r} not found in {_WAKE_TASK_STATE_SH}. "
         "stamp_model_field must be defined in the shared lib."
     )
 

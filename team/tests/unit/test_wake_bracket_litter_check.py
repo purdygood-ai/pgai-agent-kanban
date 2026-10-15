@@ -12,7 +12,7 @@ Acceptance criteria exercised:
       neither sibling contains an inline copy of the extracted bracket
       logic (pre-dispatch snapshot block or post-session check block).
 
-  (2) Session litter: a session that creates /tmp/tester_fixture.log
+  (2) Session litter: a session that creates a bare-/tmp file
       → status.md gains a `## Temp Litter` section naming the file exactly;
       a one-line wake log entry is present; the file SURVIVES on disk
       (load-bearing negative — report-only, no deletion).
@@ -44,10 +44,32 @@ import os
 import pathlib
 import textwrap
 import time
+import uuid
 
 import pytest
 
 from tests.unit.shell_harness import run_bash
+
+# ---------------------------------------------------------------------------
+# Real bare-/tmp fixture helper
+# ---------------------------------------------------------------------------
+#
+# wake_tmp_litter_check_and_report (scripts/lib/temp.sh) scans REAL top-level
+# bare /tmp entries and deliberately EXCLUDES both the framework temp root
+# and pytest's own tmp_path (which nests under /tmp/pytest-of-*, itself on
+# the check's own allowlist) from that scan. A fixture proving the check
+# detects real litter therefore cannot route through either sanctioned
+# mechanism without testing nothing — landing directly under bare /tmp is
+# this module's subject matter, not a bypass of the temp-path contract.
+# team/scripts/lint_test_anti_patterns.py carries a narrow, filename-scoped
+# allowance for exactly this reasoning (_AP2_BARE_TMP_SUBJECT_MATTER_WHITELIST).
+#
+# Every call embeds a fresh uuid4 suffix so concurrent test runs (and repeat
+# runs against an already-dirty host) never plant the same path — the
+# collision a fixed literal name would otherwise make possible.
+def _bare_tmp_probe(prefix: str) -> pathlib.Path:
+    """Return a fresh, real bare-/tmp path for a litter-check fixture."""
+    return pathlib.Path(f"/tmp/{prefix}-{uuid.uuid4().hex[:10]}")
 
 # ---------------------------------------------------------------------------
 # Paths relative to team/ (pytest cwd when run via run-unit-tests.sh)
@@ -165,12 +187,28 @@ def test_markers_still_present_in_siblings() -> None:
     Regression guard: the section-header comment markers for both bracket
     regions must still be present in both siblings (the comments remain as
     section labels even though the implementation lives in the shared lib).
+
+    v2.9.20-engine-decomposition split both siblings' own copies of these
+    two markers across two different shared-driver stage files, sourced by
+    both claude.sh and codex.sh: the pre-dispatch snapshot lives in the
+    invoke stage (wake_driver_invoke.sh) and the post-session check lives
+    one stage later, in the finalize stage (wake_driver_finalize.sh).
+    Both claude.sh and codex.sh were moved onto the shared driver.
     """
-    for sibling in (_CLAUDE_SH, _CODEX_SH):
+    pre_dispatch_sources = (
+        pathlib.Path("scripts/lib/wake_driver_invoke.sh"),
+    )
+    for sibling in pre_dispatch_sources:
         content = sibling.read_text(encoding="utf-8")
         assert _PRE_DISPATCH_MARKER in content, (
             f"Pre-dispatch marker '{_PRE_DISPATCH_MARKER}' missing from {sibling}."
         )
+
+    post_session_sources = (
+        pathlib.Path("scripts/lib/wake_driver_finalize.sh"),
+    )
+    for sibling in post_session_sources:
+        content = sibling.read_text(encoding="utf-8")
         assert _POST_SESSION_MARKER in content, (
             f"Post-session marker '{_POST_SESSION_MARKER}' missing from {sibling}."
         )
@@ -272,7 +310,7 @@ def _run_check_and_report(
 
 def test_session_litter_reported_in_status_md(tmp_path: pathlib.Path) -> None:
     """
-    Fixture (2a): a session that creates /tmp/tester_fixture.log during the
+    Fixture (2a): a session that creates a bare-/tmp file during the
     session → status.md gains a `## Temp Litter` section naming the file.
     """
     task_id = "TEST-LITTER-001"
@@ -290,8 +328,8 @@ def test_session_litter_reported_in_status_md(tmp_path: pathlib.Path) -> None:
     assert snapshot_file.exists(), "Snapshot file was not created."
 
     # Simulate a /tmp entry created during the session.
-    # anti-pattern-allowlist: 2 (justification: intentional bare /tmp fixture — the wake-bracket litter check only fires on bare /tmp entries; verifying its behavior requires planting one)
-    litter_file = pathlib.Path("/tmp/tester_fixture.log")
+    litter_file = _bare_tmp_probe("tester_fixture")
+    litter_path_str = str(litter_file)
     try:
         litter_file.write_text("test litter\n", encoding="utf-8")
         # Post-session check.
@@ -315,15 +353,15 @@ def test_session_litter_reported_in_status_md(tmp_path: pathlib.Path) -> None:
             "status.md does not contain '## Temp Litter' section.\n"
             f"status.md contents:\n{status_text}"
         )
-        assert "/tmp/tester_fixture.log" in status_text, (
-            "status.md does not name /tmp/tester_fixture.log in the Temp Litter section.\n"
+        assert litter_path_str in status_text, (
+            f"status.md does not name {litter_path_str} in the Temp Litter section.\n"
             f"status.md contents:\n{status_text}"
         )
 
         # Verify wake log line is present.
         assert log_capture.exists(), "Log capture file was not written."
         log_text = log_capture.read_text(encoding="utf-8")
-        assert "tester_fixture.log" in log_text, (
+        assert litter_file.name in log_text, (
             "Wake log does not mention the litter file.\n"
             f"Log capture:\n{log_text}"
         )
@@ -331,9 +369,69 @@ def test_session_litter_reported_in_status_md(tmp_path: pathlib.Path) -> None:
     finally:
         # CRITICAL: the file must survive — report-only, never deleted.
         assert litter_file.exists(), (
-            "VIOLATION: /tmp/tester_fixture.log was deleted by the litter check. "
+            f"VIOLATION: {litter_path_str} was deleted by the litter check. "
             "The check must be report-only and must NEVER delete files."
         )
+        litter_file.unlink(missing_ok=True)
+
+
+def test_litter_report_carries_a_runnable_removal_remedy(tmp_path: pathlib.Path) -> None:
+    """
+    The litter check must not merely narrate what it found and leave it in
+    place forever -- it must also emit a runnable command that removes the
+    entry. This fixture plants a bare-/tmp file, drives the teardown path,
+    and asserts both status.md and the wake log line carry a `rm -f`
+    command naming the exact litter path. The file itself must still
+    survive the check (report-only, per the (2)/(2b) fixtures above);
+    running the emitted remedy is what actually clears it, deliberately
+    left to the operator or the next session rather than auto-deleted here.
+    """
+    task_id = "TEST-LITTER-REMEDY"
+    task_status = tmp_path / "status.md"
+    snapshot_file = tmp_path / "snap" / "pre_dispatch"
+    _write_status_md(task_status)
+
+    epoch_before = int(time.time()) - 1
+    _run_take_snapshot(tmp_path, snapshot_file, epoch_before)
+
+    litter_file = _bare_tmp_probe("tester_fixture_remedy")
+    try:
+        litter_file.write_text("remedy test\n", encoding="utf-8")
+        log_cap = tmp_path / "lc.txt"
+        script = (_temp_sh_preamble(tmp_path) + textwrap.dedent(f"""\
+            log() {{ echo "$*" >> "{log_cap}"; }}
+            wake_tmp_litter_check_and_report \\
+                "{snapshot_file}" "{task_status}" "{task_id}" "log" \\
+                "proj" "{tmp_path / 'kanban'}"
+        """))
+        result = run_bash(tmp_path, script)
+        assert result.returncode == 0, f"check_and_report failed: {result.stderr}"
+
+        litter_path_str = str(litter_file)
+        expected_remedy = f"rm -f {litter_path_str}"
+
+        status_text = task_status.read_text(encoding="utf-8")
+        assert expected_remedy in status_text, (
+            f"status.md '## Temp Litter' section does not carry the runnable "
+            f"remedy {expected_remedy!r}.\nstatus.md contents:\n{status_text}"
+        )
+
+        log_text = log_cap.read_text(encoding="utf-8")
+        assert expected_remedy in log_text, (
+            f"wake log line does not carry the runnable remedy {expected_remedy!r}.\n"
+            f"Log capture:\n{log_text}"
+        )
+
+        # The remedy is genuinely runnable and genuinely removes the entry --
+        # exercised here directly rather than assumed from the string shape.
+        remedy_result = run_bash(tmp_path, expected_remedy)
+        assert remedy_result.returncode == 0, (
+            f"remedy command {expected_remedy!r} did not exit 0: {remedy_result.stderr}"
+        )
+        assert not litter_file.exists(), (
+            "remedy command ran but the litter file still exists on disk."
+        )
+    finally:
         litter_file.unlink(missing_ok=True)
 
 
@@ -350,8 +448,7 @@ def test_litter_file_survives_on_disk(tmp_path: pathlib.Path) -> None:
     epoch_before = int(time.time()) - 1
     _run_take_snapshot(tmp_path, snapshot_file, epoch_before)
 
-    # anti-pattern-allowlist: 2 (justification: intentional bare /tmp fixture — the wake-bracket litter check only fires on bare /tmp entries; verifying its behavior requires planting one)
-    litter_file = pathlib.Path("/tmp/tester_fixture_survive.log")
+    litter_file = _bare_tmp_probe("tester_fixture_survive")
     try:
         litter_file.write_text("survive test\n", encoding="utf-8")
         log_cap = tmp_path / "lc.txt"
@@ -422,8 +519,7 @@ def test_pre_existing_tmp_entry_not_flagged(tmp_path: pathlib.Path) -> None:
     snapshot_file = tmp_path / "snap" / "pre_dispatch"
     _write_status_md(task_status)
 
-    # anti-pattern-allowlist: 2 (justification: intentional bare /tmp fixture — the wake-bracket litter check only fires on bare /tmp entries; verifying its behavior requires planting one)
-    pre_existing = pathlib.Path("/tmp/tester_pre_existing_check.log")
+    pre_existing = _bare_tmp_probe("tester_pre_existing_check")
     try:
         pre_existing.write_text("pre-existing\n", encoding="utf-8")
         # Snapshot AFTER the pre-existing file is created; epoch set AFTER
@@ -447,7 +543,7 @@ def test_pre_existing_tmp_entry_not_flagged(tmp_path: pathlib.Path) -> None:
         # Verify it was either captured in snapshot OR the age-filter excluded it.
         # Either way, no Temp Litter section should reference it.
         if "## Temp Litter" in status_text:
-            assert "tester_pre_existing_check.log" not in status_text, (
+            assert pre_existing.name not in status_text, (
                 "Pre-existing /tmp entry was incorrectly flagged as litter.\n"
                 f"status.md:\n{status_text}"
             )
@@ -474,7 +570,11 @@ def test_allowlist_entries_not_flagged(tmp_path: pathlib.Path, pattern: str) -> 
     epoch_before = int(time.time()) - 1
     _run_take_snapshot(tmp_path, snapshot_file, epoch_before)
 
-    allowlist_entry = pathlib.Path(f"/tmp/{pattern}")
+    # _bare_tmp_probe appends a uuid4 suffix, so the directory still starts
+    # with the allowlisted prefix (systemd-/tmux-/pytest-of-, which the
+    # production check matches via a glob prefix, not an exact name) while
+    # remaining collision-safe across concurrent runs of this parametrized test.
+    allowlist_entry = _bare_tmp_probe(pattern)
     try:
         allowlist_entry.mkdir(exist_ok=True)
 
@@ -648,8 +748,11 @@ def test_take_snapshot_has_epoch_header(tmp_path: pathlib.Path) -> None:
 
 def test_take_snapshot_refuses_bare_tmp_path(tmp_path: pathlib.Path) -> None:
     """wake_tmp_litter_take_snapshot refuses to write directly to /tmp."""
-    # anti-pattern-allowlist: 2 (justification: intentional bare /tmp fixture — the wake-bracket litter check only fires on bare /tmp entries; verifying its behavior requires planting one)
-    snapshot_file = pathlib.Path("/tmp/bad_snapshot_file")
+    # The refusal is keyed on the PARENT directory being /tmp itself, so the
+    # probe's basename does not need to be unique here — the function refuses
+    # before anything is ever written. _bare_tmp_probe is still used for
+    # consistency with every other real bare-/tmp path in this module.
+    snapshot_file = _bare_tmp_probe("bad_snapshot_file")
     result = _run_take_snapshot(tmp_path, snapshot_file)
     # Should fail (non-zero) when the parent is /tmp itself.
     assert result.returncode != 0, (
@@ -676,8 +779,7 @@ def test_overwatch_actions_log_written_on_litter(tmp_path: pathlib.Path) -> None
     epoch_before = int(time.time()) - 1
     _run_take_snapshot(tmp_path, snapshot_file, epoch_before)
 
-    # anti-pattern-allowlist: 2 (justification: intentional bare /tmp fixture — the wake-bracket litter check only fires on bare /tmp entries; verifying its behavior requires planting one)
-    litter_file = pathlib.Path("/tmp/tester_ow_log.log")
+    litter_file = _bare_tmp_probe("tester_ow_log")
     try:
         litter_file.write_text("ow log test\n", encoding="utf-8")
         log_cap = tmp_path / "lc.txt"

@@ -46,6 +46,27 @@ runs occur.
 The post-suite pgai_temp_cleanup_all call in run-*.sh handles any remaining
 artifacts after a successful session.
 
+Loopback test-client host
+-------------------------
+All tests are wrapped by an autouse _loopback_test_client_host fixture that
+gives every ``TestClient`` built without an explicit ``base_url`` a loopback
+one (``http://127.0.0.1``) in place of Starlette's ``http://testserver``.
+The operator API refuses any request whose Host header is not a loopback
+name, and it carries no allowance for a test host; pointing the client at a
+loopback name is the one fixture-level adjustment that keeps the suite
+running against the production allow-list.  A test that passes its own
+``base_url`` (to send a deliberately foreign Host, say) is left alone.
+
+Live projects/ guard
+--------------------
+Session-scoped hooks (pytest_sessionstart / pytest_sessionfinish) record the
+names under the invoking shell's $PGAI_AGENT_KANBAN_ROOT_PATH/projects/
+before any test runs and fail the run (exit 1), naming each one, when the
+listing gained an entry that was not there at start and that the root's
+projects.cfg does not register. Pre-existing entries and projects registered
+while the suite runs are never reported. See the section's own comment
+below.
+
 Crontab sandbox (an earlier defect)
 ---------------------------
 All tests are wrapped by an autouse _sandbox_crontab fixture that places a
@@ -69,6 +90,7 @@ import pathlib
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 
 import pytest
@@ -201,6 +223,67 @@ def pytest_configure(config):  # noqa: ARG001
                 f"Fix the PYTEST_DEBUG_TEMPROOT value to continue.",
                 returncode=3,
             )
+
+
+# ---------------------------------------------------------------------------
+# Deliberate-order seam for the order-coupling self-test
+# ---------------------------------------------------------------------------
+#
+# team/scripts/verify-test-order-independence.sh drives this hook to run the
+# collected estate in an order other than pytest's own default (import/file
+# discovery order), so that its two runs can be diffed for verdict
+# differences without depending on a third-party ordering plugin.
+#
+# PGAI_TEST_ORDER accepted values (unset/anything else is a no-op — the
+# default collection order pytest would have used regardless). Both
+# recognized values first canonicalise the collected item list (sort it by
+# nodeid) before reordering it, so the result depends only on the set of
+# collected tests, never on what order an earlier collection-hook plugin
+# (pytest-randomly is the one observed in practice) already put them in:
+#   reverse        — canonicalise, then reverse the list end-to-end.
+#   shuffle:<seed> — canonicalise, then deterministically shuffle the list
+#                    using stdlib random.Random(<seed>), so a specific
+#                    divergence can be reproduced by re-running with the
+#                    same seed and no other flag — the canonicalisation
+#                    step is what makes that reproduction hold even when
+#                    pytest-randomly has already reordered the list before
+#                    this hook runs.
+_PGAI_TEST_ORDER_ENV_VAR = "PGAI_TEST_ORDER"
+
+
+def pytest_collection_modifyitems(config, items):  # noqa: ARG001
+    """Reorder the collected test items when PGAI_TEST_ORDER requests it.
+
+    This never runs for a normal invocation (the env var is unset), so it
+    changes nothing about how run-unit-tests.sh / run-integration-tests.sh
+    behave today. It exists solely so the order-coupling self-test can
+    request a materially different execution order, and so an engineer
+    chasing an order-coupled failure can reproduce a specific divergence by
+    re-running with the same shuffle seed — using only pytest's own
+    collection hook and the standard library, no new test dependency.
+
+    Both recognized values canonicalise the list (sort by nodeid) before
+    reordering it. Without that step, the requested order is a function of
+    whatever order the items arrived in — and when a third-party ordering
+    plugin such as pytest-randomly is active, that arrival order changes on
+    every run, so the same seed would produce a different permutation each
+    time and "reverse" would not mean the reverse of anything stable.
+    """
+    order = os.environ.get(_PGAI_TEST_ORDER_ENV_VAR, "").strip()
+    if not order:
+        return
+    if order != "reverse" and not order.startswith("shuffle:"):
+        # Unrecognized value: leave collection order untouched rather than
+        # guessing what the caller meant.
+        return
+    items.sort(key=lambda item: item.nodeid)
+    if order == "reverse":
+        items.reverse()
+        return
+    import random
+
+    seed = order.split(":", 1)[1]
+    random.Random(seed).shuffle(items)
 
 
 def pgai_mkdtemp(suffix: str = "") -> str:
@@ -396,6 +479,35 @@ def _block_live_kanban_writes(monkeypatch, tmp_path):
     test_cm_release_synthetic) can use their own monkeypatch.setenv inside the
     test — that override stacks on top of this autouse fixture and applies for
     that specific test.
+
+    KANBAN_ROOT: the legacy bash-only alias every team/scripts/lib/
+    project_paths.sh function reads directly (never PGAI_AGENT_KANBAN_ROOT_PATH
+    -- see project_paths.sh's _pp_kanban_root) is redirected here too. It is
+    ambient in a real agent's own shell (exported by shell-env, inherited by
+    every subprocess including a pytest run), so leaving it untouched would
+    let any bash-side test that omits its own explicit KANBAN_ROOT override --
+    most notably a refusal recorded through team/scripts/lib/refusal_ledger.sh
+    -- silently resolve to and overwrite the live install's
+    projects/<project>/refusal-ledger.md. Redirecting it here, alongside
+    PGAI_AGENT_KANBAN_ROOT_PATH above, closes that gap the same way for every
+    test rather than requiring each one to remember its own override.
+
+    PGAI_PROJECT_ROOT: removed, not repointed. A wake exports it as the live
+    install's projects/<project> directory, and it outranks both root names
+    for every helper that honours it, so a sandbox that repoints the roots
+    but inherits it still resolves the operator's project folder -- the
+    sandbox recipe clears it (projects/pgai-agent-kanban/README.md,
+    "Live-install safety"). A test that exercises it sets its own value.
+
+    PGAI_DEV_TREE_PATH: removed, not repointed. The gated runners export it
+    as the operator's real checkout, whose origin is the real remote, so a
+    subprocess that inherits it can run git against that checkout -- an
+    OVERWATCH sweep check that falls back to it would ls-remote and push the
+    checkout's tags. Removing it leaves code that needs the source tree to
+    self-locate from its own file (each tree finds itself), and leaves a
+    script that needs a dev tree to read it from the sandbox's own config. A
+    test that exercises dev-tree resolution sets its own throwaway path with
+    monkeypatch.setenv or a subprocess env, on top of this removal.
     """
     safe_root = tmp_path / "_default_kanban_safe_root"
     safe_root.mkdir(parents=True, exist_ok=True)
@@ -411,8 +523,136 @@ def _block_live_kanban_writes(monkeypatch, tmp_path):
 
     monkeypatch.setenv("PGAI_TASKS_DIR", str(safe_root / "tasks"))
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(safe_root))
+    monkeypatch.setenv("KANBAN_ROOT", str(safe_root))
     monkeypatch.delenv("PGAI_QUEUE_DIR", raising=False)
     monkeypatch.delenv("PGAI_RELEASE_STATE_PATH", raising=False)
+    monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("PGAI_DEV_TREE_PATH", raising=False)
+
+
+# ---------------------------------------------------------------------------
+# Live projects/ guard: session-scoped
+# ---------------------------------------------------------------------------
+#
+# _block_live_kanban_writes above redirects the root names for every test,
+# but only for the test's own call: collection-time code, a wide-scoped
+# fixture, or a subprocess handed an environment snapshot taken before the
+# redirect can still resolve the operator's live root. The guard below is
+# the backstop for the one write class that is never legitimate from a
+# test: a new entry directly under the live $PGAI_AGENT_KANBAN_ROOT_PATH/
+# projects/ (a refusal ledger for a fixture project, an empty project
+# folder).
+#
+#   - pytest_sessionstart records the root the invoking shell named
+#     (PGAI_AGENT_KANBAN_ROOT_PATH, then the KANBAN_ROOT alias -- the same
+#     order the gated runners' sentinel snapshot uses) and the names under
+#     its projects/ at that moment, before any test runs.
+#   - pytest_sessionfinish lists projects/ again. A name present at start is
+#     never reported, and neither is a new name the root's projects.cfg now
+#     registers -- an operator registering a project while the suite runs
+#     is a legitimate concurrent action, not a leak. Every other new name
+#     fails the run (exit 1), each one named.
+#
+# Under pytest-xdist only the controller runs it: it brackets every
+# worker, so one report covers the session. With no root named at all the
+# guard has nothing to watch and stays inactive. It reports and never
+# deletes: removing a leaked folder is the operator's call.
+
+_LIVE_PROJECTS_GUARD_KEY = pytest.StashKey[dict]()
+
+
+def live_projects_guard_root() -> pathlib.Path | None:
+    """The kanban root the invoking shell names, or None when it names none."""
+    raw = (
+        os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "").strip()
+        or os.environ.get("KANBAN_ROOT", "").strip()
+    )
+    return pathlib.Path(raw) if raw else None
+
+
+def live_projects_listing(root: pathlib.Path) -> set[str]:
+    """Names directly under *root*/projects/ (empty when it does not exist)."""
+    try:
+        return {entry.name for entry in (root / "projects").iterdir()}
+    except (FileNotFoundError, NotADirectoryError):
+        return set()
+
+
+def _registered_project_names(root: pathlib.Path) -> set[str]:
+    """Projects *root*/projects.cfg registers; empty when absent or unreadable."""
+    try:
+        from pgai_agent_kanban.lib.ini import projects_registry
+
+        return {entry.name for entry in projects_registry(root)}
+    except Exception:  # noqa: BLE001 - an unreadable registry explains nothing
+        return set()
+
+
+def unexplained_live_project_entries(root: pathlib.Path, before: set[str]) -> list[str]:
+    """New names under *root*/projects/ since *before* that projects.cfg
+    does not register, sorted. Pre-existing names and newly registered
+    projects are explained; everything else is a leak."""
+    added = live_projects_listing(root) - set(before)
+    return sorted(added - _registered_project_names(root))
+
+
+def live_projects_guard_report(root: pathlib.Path, entries: list[str]) -> str:
+    """The dual-channel refusal text for *entries* leaked under *root*."""
+    from pgai_agent_kanban.lib.error_contract import format_error_contract
+
+    paths = [str(root / "projects" / name) for name in entries]
+    return format_error_contract(
+        "tests.live_projects_leak",
+        "this test run created "
+        f"{len(entries)} unregistered entr{'y' if len(entries) == 1 else 'ies'} under the "
+        f"live kanban root's projects/ ({root}): {', '.join(entries)}. A test or a tool "
+        "it ran resolved the live root instead of its sandbox; run the test that "
+        "writes them through the sandbox recipe (docs/test-authoring-guidelines.md "
+        "'Live-install safety'). Nothing was removed.",
+        f"ls -la --time-style=full-iso {' '.join(paths)}",
+    )
+
+
+def pytest_sessionstart(session):
+    """Record the live projects/ listing before any test runs (see above)."""
+    if hasattr(session.config, "workerinput"):
+        return
+    root = live_projects_guard_root()
+    if root is None:
+        return
+    session.config.stash[_LIVE_PROJECTS_GUARD_KEY] = {
+        "root": root,
+        "before": live_projects_listing(root),
+        "leaked": [],
+    }
+
+
+def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
+    """Fail the run, naming each unexplained new entry under live projects/."""
+    state = session.config.stash.get(_LIVE_PROJECTS_GUARD_KEY, None)
+    if not state:
+        return
+    leaked = unexplained_live_project_entries(state["root"], state["before"])
+    if not leaked:
+        return
+    state["leaked"] = leaked
+    # CENSUS CLASS BLOCK-WORTHY (docs/blocking-site-census.md): a suite that
+    # wrote into the operator's live install is not an isolated verification
+    # run; its green cannot stand. Reported, never repaired.
+    # CENSUS-ANCHOR: tests-conftest-live-projects-leak-01
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    if session.config.pluginmanager.get_plugin("terminalreporter") is None:
+        sys.stderr.write(live_projects_guard_report(state["root"], leaked) + "\n")
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
+    """Print the live projects/ guard's report in the run's summary."""
+    state = config.stash.get(_LIVE_PROJECTS_GUARD_KEY, None)
+    if not state or not state["leaked"]:
+        return
+    terminalreporter.section("live kanban root projects/ guard", sep="=", red=True)
+    for line in live_projects_guard_report(state["root"], state["leaked"]).splitlines():
+        terminalreporter.line(line, red=True)
 
 
 # ---------------------------------------------------------------------------
@@ -516,3 +756,53 @@ def _sandbox_crontab(monkeypatch, tmp_path):
     # _run_crontab() calls the stub directly, bypassing PATH resolution.
     # This is the default seam engagement that was missing before an earlier defect.
     monkeypatch.setenv("PGAI_CRONTAB_CMD", str(stub_path))
+
+
+# ---------------------------------------------------------------------------
+# Loopback test-client host: autouse fixture
+# ---------------------------------------------------------------------------
+
+_LOOPBACK_TEST_CLIENT_BASE_URL = "http://127.0.0.1"
+
+
+@pytest.fixture(autouse=True)
+def _loopback_test_client_host(monkeypatch):
+    """
+    Autouse fixture: default every ``TestClient`` to a loopback ``base_url``.
+
+    Starlette's ``TestClient`` defaults ``base_url`` to ``http://testserver``,
+    so every request it sends carries ``Host: testserver``.  The operator API
+    refuses a non-loopback Host on every route (the DNS-rebinding guard in
+    ``pgai_agent_kanban.api.app``) and deliberately carries no allowance for
+    a test host -- widening the allow-list is the exposure the guard closes.
+    This fixture makes the client honest instead: a ``TestClient`` built
+    without an explicit ``base_url`` gets ``http://127.0.0.1``, the same Host
+    an operator's curl or browser sends, so the suite exercises the
+    production allow-list as-is.
+
+    Only the default is changed.  A client constructed with its own
+    ``base_url`` -- positionally or by keyword -- keeps it, which is how a
+    test sends a deliberately foreign Host to prove the refusal.  A
+    ``Host`` header passed per-request also still wins over ``base_url``.
+
+    The import is deferred and the fixture is a no-op when FastAPI is not
+    installed, so bash-only tests never pay for the dependency.
+    """
+    try:
+        from fastapi.testclient import TestClient
+    except ImportError:  # pragma: no cover - API extras absent
+        yield
+        return
+
+    original_init = TestClient.__init__
+
+    def _init_with_loopback_default(self, *args, **kwargs):
+        # Signature: TestClient(app, base_url=..., ...) -- base_url is the
+        # second positional parameter, so a second positional arg is an
+        # explicit base_url and is respected.
+        if len(args) < 2 and "base_url" not in kwargs:
+            kwargs["base_url"] = _LOOPBACK_TEST_CLIENT_BASE_URL
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(TestClient, "__init__", _init_with_loopback_default)
+    yield

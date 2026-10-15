@@ -8,10 +8,23 @@
 #
 # Format: standard INI. Comments start with # or ; — both are ignored.
 # Values don't need quotes. Parsed by team/scripts/lib/ini_parser.sh::read_ini.
+# An inline comment after a value ("max_runtime_seconds = 300 # five min")
+# is stripped, and so is the carriage return of a CRLF-saved file. A value
+# that itself begins with # or ; (a "#" status glyph, say) is kept.
 #
-# Every key shown below is set to its current default. Edit any line to
-# override; lines you remove or comment out fall back to the same default
-# value baked into the framework.
+# Most keys shown below are set to their current default ("Default: X"):
+# edit any line to override; lines you remove or comment out fall back to
+# that same value baked into the framework. A key whose comment says
+# "Shipped value: X" instead ships a value the code does not fall back to
+# on its own; its comment says what removing it does.
+#
+# Every section and key is checked against the loader's Key Registry
+# (team/scripts/lib/config_loader.sh). One it does not know draws a WARNING
+# naming the nearest known name — a misspelled key still falls back to its
+# default, but never silently, and never stops a wake. The [wake] integer
+# keys are the exception to "anything goes": their value must be decimal
+# digits only ("300", never "300s" or "6h"), or the load refuses with an
+# error naming the key, the value, and the edit that fixes it.
 #
 # Companion files at the kanban root:
 #   secrets         Sensitive credentials (OAuth tokens, API keys). Gitignored.
@@ -28,18 +41,21 @@
 # Total rows rendered per dashboard column. Floor and ceiling for sparse-
 # vs full-column layouts; the framework picks somewhere in this range based
 # on how many projects are registered.
+# Default: min_rows_per_column 13, max_rows_per_column 34
 min_rows_per_column = 13
 max_rows_per_column = 34
 
 # Per-project row allocation within a column. With many projects the
 # allocation shrinks from the ceiling toward the floor.
+# Default: min_rows_per_project 3, max_rows_per_project 8
 min_rows_per_project = 3
-max_rows_per_project = 13
+max_rows_per_project = 8
 
 # Global fallback for the per-project "items shown per column" cap. The
 # corresponding per-project override lives in projects.cfg [project:NAME].
 # When the queue is longer than this, the last visible row reads
 # "... and N more".
+# Default: 20
 max_rows = 20
 
 # Marker character for dashboard status tags. Unicode "■" (U+25A0) by
@@ -51,7 +67,75 @@ max_rows = 20
 # Common values (copy-paste one):  ■ ● ◆ ▲ ▪ •  — or any ASCII char: # * + o
 # To create unicode glyph; in VI, type => Ctrl-V u<the unicode character>
 # The default glyph below is => Ctrl-V u25a0
+# Default: ■
 dashboard_status_glyph = ■
+
+# Staleness bound (seconds) for the per-tick render snapshot cache shared by
+# twin dashboard views (team/scripts/dashboard/lib/snapshot.sh) — e.g. the
+# operator window's aggregated board columns and the visibility window's
+# per-column panes, or a drill-N pane and the overview's per-project loop
+# scanning the same project. A pane never renders a cached snapshot older
+# than this bound; past it, the pane falls back to a direct render (narrated
+# to stderr) and refreshes the cache for the next reader. Overridable per
+# invocation with PGAI_DASHBOARD_SNAPSHOT_TTL_SECONDS.
+# Default: 5
+snapshot_ttl_seconds = 5
+
+# Per-agent read bound (line count) for the schedule window's event band
+# (team/scripts/dashboard/event-band.sh). Each agent's cron-<agent>.log is
+# tail-read to its last N lines before classification, so render cost
+# tracks this bound rather than the log's total historical size — a
+# never-rotated, years-long log costs nothing extra. Sized against the
+# fleet's measured volume (roughly 28,000 lines/day across the five live
+# logs, ~5,600/day/agent average); 20000 gives headroom for a single
+# agent's busiest days. Overridable per invocation with
+# PGAI_DASHBOARD_EVENT_BAND_READ_BOUND_LINES.
+# Default: 20000
+event_band_read_bound_lines = 20000
+
+# tmux session name the dashboard scripts create, attach to and kill
+# (scripts/dashboard/create.sh, kill.sh). Change it to run a second
+# dashboard beside the first. Overridable per invocation with
+# PGAI_DASHBOARD_SESSION_NAME.
+# Default: pgai-kanban-dashboard
+session_name = pgai-kanban-dashboard
+
+# Seconds between dashboard pane refreshes (scripts/dashboard/create.sh).
+# A whole number from 1 to 3600; anything else falls back to the default
+# with a warning. Overridable per invocation with
+# PGAI_DASHBOARD_REFRESH_SECONDS.
+# Default: 5
+refresh_seconds = 5
+
+# Rows each board column renders in the column, metadata, legend, queue,
+# status-window and progress panes. A positive whole number; anything else
+# falls back to the default with a warning. Overridable per invocation
+# with DASHBOARD_ROWS_PER_COLUMN.
+# Default: 21
+rows_per_column = 21
+
+# Pane colours, by colour name (black, red, green, yellow, blue, magenta,
+# cyan, white); a name outside that list renders the text uncoloured.
+# Each is overridable per invocation with the matching
+# PGAI_DASHBOARD_COLOR_<KEY> variable (color_done -> PGAI_DASHBOARD_COLOR_DONE).
+# DONE items. Default: green
+color_done = green
+# WORKING items. Default: yellow
+color_working = yellow
+# BLOCKED items. Default: red
+color_blocked = red
+# WAITING items in the queue pane. Default: yellow
+color_waiting = yellow
+# Labels and column titles. Default: cyan
+color_label = cyan
+# De-emphasised text in the multi-project view. Default: white
+color_dim = white
+# Header text in the multi-project view. Default: cyan
+color_header = cyan
+# HALT warning in the multi-project view. Default: red
+color_halt = red
+# OK indicator in the multi-project view. Default: green
+color_ok = green
 
 
 # ---------------------------------------------------------------------------
@@ -67,19 +151,23 @@ dashboard_status_glyph = ■
 # Default: automatic
 pm_mode = automatic
 
-# Seconds before an agent lock is considered stale and eligible for
-# cleanup.
-# Default: 3600
-agent_lock_timeout_seconds = 3600
-
 
 # ---------------------------------------------------------------------------
 # [paths] — directory layout and filesystem paths
 # ---------------------------------------------------------------------------
 [paths]
 
-# Dev tree: the local git dev tree of the pgai-agent-kanban.
-# OPTIONAL:  only need to use when running "scripts/upgrade.sh"
+# Dev tree: the local git dev tree of the pgai-agent-kanban, used by
+# "scripts/upgrade.sh".
+# It is also the last-resort dev tree for any project whose own project.cfg
+# [project] dev_tree_path is empty. A project's dev tree resolves in this
+# order: its project.cfg [project] dev_tree_path, then the PGAI_DEV_TREE_PATH
+# environment variable, then this key. The CM scripts open-rc.sh,
+# cancel-rc.sh and release.sh export PGAI_DEV_TREE_PATH from this key when it
+# is not already set, and unwind-rc.sh reads it the same way. On a
+# multi-project install, setting it points every project that lacks its own
+# dev_tree_path at this one tree, so leave it empty there and set
+# dev_tree_path in each project's project.cfg instead.
 # A missing or empty value is NOT an error — it simply means no global dev tree
 # is configured. Scripts that genuinely need a dev tree call require_dev_tree()
 # from scripts/lib/dev_tree.sh and report a clear per-consumer error.
@@ -126,13 +214,6 @@ tmp_subdir = pgai_kanban_tmp
 # Default: claude
 active = claude
 
-# Initial provider value written by install.sh on a fresh install
-# (when no kanban.cfg exists yet). After install, the "active" key
-# above is the canonical runtime source.
-# Valid: claude, codex
-# Default: claude
-initial = claude
-
 # Providers whose role files install.sh deploys to ~/.<provider>/agents/.
 # Providers whose CLI binary is not on PATH are skipped with a log line —
 # install.sh never errors out for a missing CLI.
@@ -146,8 +227,9 @@ available = claude codex
 #           don't accidentally override OAuth flows.
 #   apikey: A traditional API key (ANTHROPIC_API_KEY) is expected in the
 #           secrets file. OAuth token variables are left untouched.
-# Default: oauth `claude login`
-# continue to work without any change to their secrets file).
+# Accepted: oauth|apikey.
+# Default: oauth (an install that has used `claude login` keeps working with
+#          no change to its secrets file).
 # Note: for codex you need to logout and log back in to switch between
 #       ai_auth_mode because codex will not just look for the API key
 #       env variable when switching to "apikey mode"
@@ -157,9 +239,10 @@ ai_auth_mode = oauth
 # (reasoning) feature on agent invocations. Some older HTTP proxies
 # reject responses carrying thinking blocks, failing every agent
 # call; set false on such deployments to pass the provider's
-# thinking-disable flag. Generic across providers: applies to the
-# claude lane today and maps to equivalent switches on other
-# provider lanes as they mature. Default: true.
+# thinking-disable flag. Read by the Claude provider only today.
+# Accepted: true|false; any other value fails every Claude-lane agent call,
+# naming this key.
+# Default: true
 llm_thinking_enabled = true
 
 # llm_effort — global reasoning-effort level passed to the provider CLI on
@@ -177,10 +260,22 @@ llm_thinking_enabled = true
 # Supported values vary by model — not every model on every provider
 # accepts every level below. Consult the target model's documentation
 # before setting a value outside the common low/medium/high range.
-# Valid: minimal, low, medium, high, xhigh, max (validated at load; an
-#        unrecognized value fails loud naming this key)
+# Valid: depends on the active provider ([providers] active) — each
+#        provider declares its own list (PROVIDER_EFFORT_VALUES in
+#        scripts/lib/provider_<name>.sh):
+#          claude: low, medium, high, xhigh, max
+#          codex:  minimal, low, medium, high, xhigh
+#        Validated at load against the active provider's list; a value it
+#        does not accept fails loud naming this key, the value and the list.
+#        A provider that declares no list (for example a test-only stub
+#        provider) is not validated: the value is passed through unchanged
+#        and config load prints one stderr line saying so for each role it
+#        resolves the value for, so a single llm_effort value prints one
+#        line per role (up to six: PM, CODER, WRITER, TESTER, CM, PO). The
+#        same applies to an exported PGAI_<ROLE>_EFFORT.
 # Default: absent (no effort resolved; provider default applies)
-# llm_effort = medium
+# Example: llm_effort = medium
+# llm_effort =
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +295,26 @@ llm_thinking_enabled = true
 # Default: docker
 docker_exe = docker
 
+# Name of the long-running kanban container that scripts/container-up.sh
+# starts, scripts/container-down.sh stops and scripts/container-status.sh
+# reports on. Each script's --name flag overrides this value for that run.
+# Default: pgai-kanban
+container_name = pgai-kanban
+
+# Image scripts/container-up.sh runs. The script never builds or pulls it:
+# create it first with docker/build.sh <flavor>, which tags
+# pgai-kanban:<flavor> and pgai-kanban:latest. The script's --image-tag
+# flag overrides this value for that run.
+# Default: pgai-kanban:latest
+image = pgai-kanban:latest
+
+# Seconds scripts/container-down.sh waits for agent sessions already running
+# in the container to exit before it stops and removes the container anyway.
+# Whole seconds, decimal digits only. The script's --now flag overrides
+# this value by skipping the wait entirely.
+# Default: 1800 (30 minutes)
+container_stop_timeout_seconds = 1800
+
 
 # ---------------------------------------------------------------------------
 # [wake] — wake-script tunables (loaded into env vars at wake startup)
@@ -209,12 +324,22 @@ docker_exe = docker
 # then consumed by the existing wake-loop code paths.
 [wake]
 
+# Every integer key in this section (all but stop_on_blocked and stop_file)
+# must be decimal digits only. A unit suffix, sign, or trailing text — or an
+# environment override such as MAX_TASK_SECONDS=90m — refuses at load time
+# with error key config_loader.wake.not_an_integer rather than reaching the
+# wake loop's arithmetic. An empty value takes the key's default.
+
 # Max tasks the wake loop will process in one firing before exiting.
 # Prevents one agent from monopolizing the cron slot.
 # Default: 5
 max_tasks_per_wake = 5
 
 # Max walltime (seconds) before the wake loop exits even if tasks remain.
+# The outermost of the three runtime ceilings, which must nest
+# task < project <= batch (max_task_seconds < max_project_seconds <= this).
+# A task dispatched late in the batch is capped at the remaining batch
+# budget, so the batch ends within this value plus kill_grace_seconds.
 # Default: 14400 (4 hours)
 max_runtime_seconds = 14400
 
@@ -229,8 +354,20 @@ pause_between_tasks = 5
 # Default: true
 stop_on_blocked = true
 
-# Touch this file to gracefully stop the current wake batch after the
-# in-flight task completes; one-shot — the file self-deletes once consumed.
+# Operator stop file. Touch it to stop the wake batches gracefully.
+#   Scope:   every running batch of every agent, across every registered
+#            project, plus any batch that starts while the file exists.
+#   Effect:  each batch stops at its next task boundary -- the in-flight
+#            task runs to completion, nothing further is dispatched, and
+#            the batch exits 0 naming this path in its log.
+#   Checked: before each task within a project, before each project,
+#            before the end-of-iteration contention retry pass, and
+#            between attempts while a wake waits for the repo lock
+#            (lock_wait_seconds below).
+#   Removal: yours alone. No wake ever deletes or renames the file; while
+#            it exists every new batch exits at its first boundary without
+#            dispatching. Remove it (rm) to let dispatch resume.
+# Lighter than a HALT flag, which stops a wake before task selection.
 # Default: <framework temp root>/wakeup/stop  (under PGAI_AGENT_KANBAN_TEMP_DIR)
 # stop_file =
 
@@ -240,16 +377,39 @@ stop_on_blocked = true
 # Default: 15
 pm_max_tasks = 15
 
-# Hard per-task wall-clock timeout (seconds). When the provider CLI (claude,
-# codex, etc.) has been running for this many seconds without completing, the
-# wake script sends SIGTERM.  If the process does not exit within
-# kill_grace_seconds, SIGKILL is sent.  After the kill, the existing
-# agent-exit path marks the task BLOCKED with the reason:
+# Hard per-task wall-clock timeout (seconds). The provider CLI (claude,
+# codex, etc.) runs in a process group of its own, so when it has been
+# running for this many seconds without completing the wake script sends
+# SIGTERM to that whole group -- the CLI and every tool it spawned.  If any
+# member is still alive after kill_grace_seconds, SIGKILL is sent to the
+# group.  The wake then waits for the group to be empty before it marks the
+# task BLOCKED with the reason:
 #   "exceeded max_task_seconds (<N>s)"
 # so operators can distinguish a stuck-agent kill from an ordinary crash.
-# The worktree is torn down and the lock is released normally.
+# Only once no member remains is the worktree torn down and the lock released.
 #
-# Set to 0 to disable the hard timeout (rely on MAX_RUNTIME_SECONDS alone).
+# Nesting invariant: task < project <= batch.  This value must be strictly
+# less than max_project_seconds and max_runtime_seconds; a value at or above
+# either (equality included) draws a startup WARNING naming the invariant.
+# The timeout actually armed for a task is the smallest of this value, the
+# remaining project budget and the remaining batch budget, computed when the
+# task is dispatched -- so with all three set equal, a task dispatched late
+# in the batch is preempted at the batch cap instead of running its full
+# per-task allowance past it.  A task stopped at a limit the remaining
+# project or batch budget set (below this value) ran out of wake time, not
+# of its own allowance: it returns to BACKLOG with Needs Human: no and no
+# Block Record, to run again with a full budget, so it neither spends
+# OVERWATCH's per_task_timeout requeue nor counts toward a block storm.
+# Only a kill at this value itself is BLOCKED as a per-task timeout.
+# The watchdog compares wall-clock time against
+# an absolute deadline taken at launch, and its fire line names the real
+# elapsed seconds against the limit.
+#
+# Set to 0 to disable this per-task bound alone; the remaining project and
+# batch budgets still cap every task.
+# While the timeout's watchdog polls a running task it also refreshes the
+# held repo lock's mtime, and this value is an addend of the stale-lock
+# age floor — see the [locks] section below for both.
 # Override at invocation: MAX_TASK_SECONDS=<N> wake-batch.sh ...
 # Default: 5400 (90 minutes)
 max_task_seconds = 5400
@@ -264,18 +424,22 @@ max_task_seconds = 5400
 # The wake log names the bound that tripped — "(task)", "(project)", or
 # "(batch)" — so operators can tell which limit fired at a glance.
 #
-# Three bounds nest: task <= project <= batch.  A WARNING is logged at startup
-# if this invariant is violated by the configured values.
+# Three bounds nest: task < project <= batch.  A WARNING is logged at startup
+# if this invariant is violated by the configured values -- including when
+# max_task_seconds merely EQUALS this value or max_runtime_seconds, since an
+# equal per-task limit lets one task consume the whole budget.
 #
 # Set to 0 to disable the per-project cap (each project can run up to the full
 # batch budget).
 # Override at invocation: MAX_PROJECT_SECONDS=<N> wake-batch.sh ...
-# Default: 14400 (same as max_runtime_seconds for single-project backward compat)
+# Default: the value of max_runtime_seconds (14400 when that is at its default)
 max_project_seconds = 14400
 
 # Seconds between SIGTERM and SIGKILL when the per-task timeout fires.
 # Gives the provider CLI time to flush logs and clean up temp state before
-# the hard kill.
+# the hard kill.  Both signals go to the provider's whole process group; the
+# grace window is measured against the group, not just the CLI's own pid, and
+# the same window bounds how long finalization waits for the group to empty.
 # Override at invocation: KILL_GRACE_SECONDS=<N> wake-batch.sh ...
 # Default: 30
 kill_grace_seconds = 30
@@ -293,30 +457,180 @@ kill_grace_seconds = 30
 # Default: 3
 transient_retry_cap = 3
 
+# How long, in seconds, dispatch to a provider pauses after the provider
+# reports its account usage limit without a reset time the wake can read.
+# Only the provider CLI's own usage-limit message counts: a line of the
+# agent's log tail that opens with it ("Claude AI usage limit reached|<epoch>",
+# "You've hit your limit · resets 3pm", "5-hour limit reached ∙ resets 4pm",
+# optionally after an "Error:" label). Agent prose that merely mentions the
+# usage limit, or this key, pauses nothing. When the output does state a
+# reset ("resets 3pm (America/New_York)", "try again in 2h 30m", an epoch
+# or ISO time) the pause lasts until then instead. The pause is fleet-wide
+# for that provider: every role in every project stops dispatching to it,
+# and the task that hit the limit returns to BACKLOG. Its first 3 usage-limit
+# requeues since it last moved under its own power count against neither
+# ## Transient Retry (transient_retry_cap above) nor ## Zero Progress; they
+# are counted in the task's ## Usage Limit Requeue record, and each further
+# one counts as a zero-progress cycle (zero_progress_cap below), so the task
+# escalates rather than cycling forever. The 3 is fixed, not a key. The wake
+# log narrates the pause and its end; the marker is
+# <kanban root>/provider-pause/<provider>.pause, and removing it resumes
+# dispatch early.
+# Whole seconds, decimal digits only.
+# Override at invocation: USAGE_LIMIT_PAUSE_SECONDS=<N> wake-batch.sh ...
+# Default: 3600
+usage_limit_pause_seconds = 3600
+
+# Ceiling for the durable ## Zero Progress status.md record — a SEPARATE
+# counter from transient_retry_cap above. Where transient_retry_cap counts
+# retries of a specific, log-detected transient provider error, this counts
+# consecutive cycles where a task was found (or left) in WORKING with NO
+# forward motion at all: an orphaned task whose prior agent process died
+# with no live process to resume it (reconcile_stale_active), or an agent
+# that exited without ever moving the task out of WORKING and without a
+# transient signature in its log (handle_working_after_exit's non-transient
+# fallback). While the count is below this cap the wake reconciler keeps
+# resetting the task to BACKLOG for another attempt; once the count reaches
+# this cap the task is left BLOCKED with Needs Human=yes instead — a task
+# that has learned nothing in N consecutive attempts is not healed by
+# another attempt. Any cycle where the task's own state moves under its own
+# power resets the count to zero.
+# Override at invocation: ZERO_PROGRESS_CAP=<N> wake-batch.sh ...
+# Default: 3
+zero_progress_cap = 3
+
+# Window, in seconds, for telling a systemic block storm from a single
+# task-local block, measured back from now. When two or more human-gated
+# blocks sharing the same reason_code were blocked within this window, the
+# dispatch gate holds the whole project; a lone block gates only the tasks
+# that depend on it, which their own prerequisites already do. The storm
+# ends by itself once those blocks are older than the window. The agent
+# catch-all reason code agent_unclassified never forms a storm. Raise it to
+# treat blocks spread further apart as one storm; lower it to require them
+# closer together.
+# Whole seconds, decimal digits only.
+# Override at invocation: BLOCK_STORM_WINDOW=<N> wake-batch.sh ...
+# Default: 3600
+block_storm_window = 3600
+
+# The longest, in seconds, the blocked-task dispatch gate holds a project
+# (a block storm or a systemic reason code below), measured from the block
+# that began the hold. The hold lifts by itself at that time even if no one
+# has resolved the blocks; the wake log line for a held project names when.
+# A block arriving during a hold does not extend it; one arriving after it
+# lifted begins a new hold. OVERWATCH is never held.
+# Whole seconds, decimal digits only.
+# Override at invocation: BLOCK_HOLD_CAP=<N> wake-batch.sh ...
+# Default: 3600
+block_hold_cap = 3600
+
+# Block Record reason codes that are systemic on their own: one human-gated
+# block (BLOCKED, Needs Human: yes) carrying any of them holds task dispatch
+# for every role in its project except OVERWATCH, with no storm needed. The
+# defaults are the configuration and plugin faults that block the next task
+# of any role the same way. Comma- or space-separated; "none" empties the
+# list, so only a storm (block_storm_window above) holds dispatch. A blank or
+# removed line means the default list. A code outside the Block Record
+# vocabulary is warned about on the wake's stderr and ignored. List every
+# accepted code with:
+#   python3 -m pgai_agent_kanban.overwatch.block_record codes
+# Override at invocation: SYSTEMIC_BLOCK_REASONS=<codes> wake-batch.sh ...
+# Default: invalid_effort_config,workflow_type_unparseable,plugin_load_failed,branch_prefix_failed,invalid_assignment
+systemic_block_reasons = invalid_effort_config,workflow_type_unparseable,plugin_load_failed,branch_prefix_failed,invalid_assignment
+
+# How long a wake waits for the project's repo lock when another wake chain
+# holds it, in seconds. A chain holds the lock for its whole run, and an
+# idle one (an empty queue, a PM wake that finds nothing to discover) lets
+# go within a minute or two; roles fire on a staggered cron, so a wake that
+# gave up at once could meet that same short holder at every firing. The
+# wake retries with backoff (1s, doubling to 8s between attempts) until the
+# lock frees or this many seconds pass, then defers the project to the
+# end-of-iteration retry and, failing that, to its next firing.
+#   Waited on: only a holder whose lock record names a wake chain
+#              (op=wake-chain:<project>). Any other holder -- an OVERWATCH
+#              repair, an operator tool, a lock with no record -- and a
+#              refused acquisition defer at once, as before.
+#   Bounded:   never past the batch's remaining max_runtime_seconds; the
+#              wait stops as soon as the operator stop_file appears. One
+#              budget per project per firing: the end-of-iteration retry
+#              waits only for what the first attempt left unused.
+# 0 makes every acquisition a single attempt. Whole seconds, decimal digits
+# only.
+# Override at invocation: LOCK_WAIT_SECONDS=<N> wake-batch.sh ...
+# Default: 120
+lock_wait_seconds = 120
+
+# Lock-starvation guard: how many consecutive firings a role may end
+# deferred on repo-lock contention while it has a BACKLOG task in its own
+# queue before the wake logs a starvation WARNING. From that firing until
+# the role takes the lock (or has no BACKLOG task left), every PM wake for
+# the project skips its discovery pipeline while that role's task is ready,
+# so PM stops taking the lock for discovery. No task state changes and no
+# HALT is written. The count is per project and per role, persists across
+# firings under <kanban root>/locks/lock-starvation/<project>/<role>.state,
+# and resets when the role takes the lock or defers with no BACKLOG task.
+# 0 turns the guard off. Whole number, decimal digits only.
+# Override at invocation: LOCK_STARVATION_FIRINGS=<N> wake-batch.sh ...
+# Default: 3
+lock_starvation_firings = 3
+
+# Model preflight memo (codex provider). Before a firing dispatches its first
+# task, the codex provider checks the configured model with one short
+# `codex exec` turn -- a real model request. A PASS is remembered per model
+# for this many seconds, so further firings inside the window dispatch
+# without repeating it; a FAIL is never remembered. A firing whose queue
+# holds no dispatchable task runs no preflight at all. 0 checks on every
+# firing that has a task to dispatch. The claude provider does not use it.
+# The memo lives under <temp root>/provider_codex/.
+# Whole seconds, decimal digits only.
+# Override at invocation: MODEL_PREFLIGHT_TTL_SECONDS=<N> wake-batch.sh ...
+# Default: 3600
+model_preflight_ttl_seconds = 3600
+
+# Upper bound on that codex preflight call. The call runs while the wake
+# holds the project's repo lock, so a `codex exec` that hangs (network, an
+# auth prompt) is stopped after this many seconds (SIGTERM, then SIGKILL 5
+# seconds later); the preflight then fails, no task is dispatched this
+# firing, and the lock is released. 0 removes the bound.
+# Whole seconds, decimal digits only.
+# Override at invocation: MODEL_PREFLIGHT_TIMEOUT_SECONDS=<N> wake-batch.sh ...
+# Default: 60
+model_preflight_timeout_seconds = 60
+
 
 # ---------------------------------------------------------------------------
-# [models.<provider>] — per-role, per-provider model overrides
+# [models.<provider>] — per-role, per-provider model selection
 # ---------------------------------------------------------------------------
 # Each role's tasks invoke the model configured for the ACTIVE provider
-# ([providers] active). Loaded as PGAI_<ROLE>_MODEL env vars at wake startup.
-# Selection precedence (highest first):
-#   1. ## Model Override field in the task README
-#   2. PGAI_<ROLE>_MODEL env var (populated from the active provider's section here)
-#      - role-specific key wins over the provider-level default below
-#      - provider default fills in for any role left unset
-#   3. Provider CLI built-in default (a warning is logged when this path is taken)
-# All keys ship empty — model names change over time; set during configuration.
-# Model IDs are PROVIDER-SPECIFIC.
+# ([providers] active). Loaded as PGAI_<ROLE>_MODEL env vars at wake startup;
+# a PGAI_<ROLE>_MODEL already exported in the environment wins over this file.
+# Resolution order (highest first):
+#   1. The task README's ## Model Override field (task-level override)
+#   2. The role's own key below (pm, coder, writer, tester, cm, po)
+#   3. The section's default key
+#   4. The provider CLI's own default — only when 2 and 3 are both empty; a
+#      warning is logged when this path is taken
+# Each section ships a default model and leaves every per-role key empty, so
+# every role runs on the section default until you choose otherwise. A role
+# that needs deeper reasoning usually raises its effort through [providers]
+# llm_effort rather than switching model.
+# Model IDs are PROVIDER-SPECIFIC and change over time: check the model names
+# your CLI currently lists before setting or keeping one. These shipped
+# values reach only a fresh install's kanban.cfg: install copies this file
+# only when kanban.cfg is absent, and upgrade refreshes kanban.cfg_example
+# but never an existing kanban.cfg.
 
 [models.claude]
-# default = model used for any role below left unset.
-#   Leave blank to let the provider CLI choose its own default (a warning is
-#   logged when a role has no model). Set to your provider's current model.
-#   Model names change over time, so this is intentionally unset at install.
-#   Example (verify the current name for your CLI): claude-sonnet-5
-default =
-# Per-role overrides (optional). Unset roles fall back to default above.
-# Examples: claude-sonnet-5, claude-opus-5, claude-fable-5
+# default: the model any role below left empty runs on.
+#   Shipped value: claude-sonnet-5-5. An empty value lets the provider CLI
+#   choose its own default, and a warning is logged when a role has no model.
+#   The model set here (or per-role below, or a task-level ## Model Override)
+#   is the model that actually performs the task -- the shipped subagent
+#   wrappers under subagents/ carry no frontmatter model key of their own, so
+#   nothing in the wrapper can override what this file configures.
+default = claude-sonnet-5-5
+# Per-role keys: each one's Default: empty (provider default applies).
+# Example (per role): coder = claude-opus-5-5
 pm =
 coder =
 writer =
@@ -325,14 +639,12 @@ cm =
 po =
 
 [models.codex]
-# default = model used for any role below left unset.
-#   Leave blank to let the provider CLI choose its own default (a warning is
-#   logged when a role has no model). Set to your provider's current model.
-#   Model names change over time, so this is intentionally unset at install.
-#   Example (verify the current name for your CLI): gpt-5.6-luna
-default =
-# Per-role overrides (optional). Unset roles fall back to default above.
-# Examples: gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol
+# default: the model any role below left empty runs on.
+#   Shipped value: gpt-6.1-sol. An empty value lets the provider CLI choose
+#   its own default, and a warning is logged when a role has no model.
+default = gpt-6.1-sol
+# Per-role keys: each one's Default: empty (provider default applies).
+# Example (per role): tester = gpt-6.1-sol
 pm =
 coder =
 writer =
@@ -346,8 +658,21 @@ po =
 # ---------------------------------------------------------------------------
 [cleanup]
 
-# Days to keep archived task folders and log files before cleanup.sh
-# removes them. Set to 0 to disable automatic retention sweep.
+# cleanup.sh reads the three keys below on every run. An environment
+# variable set in the calling shell wins over the value here:
+# PGAI_CLEANUP_RETENTION_DAYS, PGAI_CLEANUP_TRIVIAL_LOG_BYTES and
+# PGAI_CLEANUP_TRIVIAL_LOG_HOURS respectively.
+
+# Days to keep wake log files before cleanup.sh deletes them (Step 1), and
+# briefs before it moves them to the briefs archive (Step 5). Task folders
+# are never deleted by cleanup.sh at any age: finished tasks, bugs,
+# priorities and shipped requirements leave the live project only through
+# the archive run ([archive] archive_count below, scripts/archive.sh),
+# which moves them to archive/<project>/ and can restore them.
+# An older kanban.cfg may carry this setting as [paths]
+# cleanup_retention_days instead. cleanup.sh still honours that spelling
+# when this key is absent, with one deprecation warning per run; move the
+# value here and delete the [paths] line.
 # Default: 30
 retention_days = 30
 
@@ -365,39 +690,485 @@ trivial_log_hours = 6
 
 
 # ---------------------------------------------------------------------------
-# [release] — release-engine retry ceiling (v2.0.0+)
+# [governance] — per-role governance byte budgets
 # ---------------------------------------------------------------------------
-# Consumed by pp_max_rc_retries() (team/scripts/lib/project_paths.sh), the
-# reader OVERWATCH's resolution matcher and ceiling terminal path use to cap
-# how many times one bundle family (same cargo set, rebundled under a new
-# patch number) may be auto-resolved via cancel-and-rebundle before the
-# block escalates to HALT-hard with the full retry history.
+# Every wake assembles a role's governance reading list (DIRECTIVES.md,
+# OVERVIEW.md, SOP-core.md, the kanban README, and the role file) per
+# team/read-order/<role>.txt. team/scripts/lint_governance_byte_budgets.sh
+# resolves that manifest, sums the on-disk byte size of the assembled list,
+# and compares it against the budget_bytes_<role> key below, one key per
+# role in the seven-role catalog (the six RC pipeline agents plus
+# OVERWATCH).
+#
+# Units are BYTES ONLY — do not mix KB and bytes in the same key. Each
+# comment below states the rough KB equivalent for a human reader; the key
+# value itself is always the exact byte count.
+#
+# This is a narrating check, not a gate: an over-budget role is reported
+# and the lint still exits 0 regardless. It exists to surface rulebook
+# growth at the moment it happens rather than in a token meter three RCs
+# later — see team/scripts/lint_governance_byte_budgets.sh and SOP-core.md's
+# "Quality findings never stop the loop" principle.
+#
+# Removing a role's key (or leaving it absent) is not an error: that role
+# is reported "unbudgeted" and the lint still exits 0.
+#
+# HEADROOM POLICY: every key below is set to the smallest multiple of 4096
+# bytes (4KB) that sits at least one full 4KB block above the role's
+# assembled byte total, measured by
+# `cd team && bash scripts/lint_governance_byte_budgets.sh --kanban-cfg
+# ../kanban.cfg_example` against the current tree. A flat percentage was
+# rejected because it shrinks in absolute bytes for the leanest roles right
+# when they can least afford it; a fixed byte margin was rejected because it
+# does not round to a number a human can reason about at a glance. The
+# 4KB-block rule gives every role at least one block (~4-8KB depending on
+# how close the assembled total sits to a block boundary) of slack, so a
+# single added sentence does not immediately re-break the ceiling. When a
+# role's assembled total grows past its current budget, re-run the lint
+# command above and apply this same rule to derive the next value — do not
+# hand-pick a number.
+[governance]
+
+# CODER budget: 76KB — re-baselined against an assembled total of
+# 71143 bytes (previous 69632-byte budget was 1511 bytes over; see
+# headroom policy above).
+# Shipped value: 77824. No in-code default (absent = role reported
+# unbudgeted; the lint never fails).
+budget_bytes_coder = 77824
+
+# TESTER budget: 116KB — re-baselined against an assembled total of
+# 112455 bytes, measured after the SOP-core.md growth and the latest
+# roles/TESTER.md corrections; the stack sat 1863 bytes over the previous
+# 110592-byte budget, so the growth is carried deliberately under the
+# headroom policy above rather than trimmed. TESTER carries the largest
+# role file in the catalog (verification procedures), so its budget stays
+# the largest of the seven.
+# Shipped value: 118784. No in-code default (absent = role reported
+# unbudgeted; the lint never fails).
+budget_bytes_tester = 118784
+
+# PO budget: 72KB — re-baselined against an assembled total of 67631
+# bytes (previous 65536-byte budget was 2095 bytes over after SOP-core.md
+# and OVERVIEW.md grew; see headroom policy above). PO's role file is
+# still the leanest in the catalog (brief expansion only).
+# Shipped value: 73728. No in-code default (absent = role reported
+# unbudgeted; the lint never fails).
+budget_bytes_po = 73728
+
+# PM budget: 88KB — re-baselined against an assembled total of 83130
+# bytes (previous 81920-byte budget was 1210 bytes over; see headroom
+# policy above).
+# Shipped value: 90112. No in-code default (absent = role reported
+# unbudgeted; the lint never fails).
+budget_bytes_pm = 90112
+
+# WRITER budget: 76KB — re-baselined against an assembled total
+# of 70453 bytes (previous 69632-byte budget was 821 bytes over; see
+# headroom policy above).
+# Shipped value: 77824. No in-code default (absent = role reported
+# unbudgeted; the lint never fails).
+budget_bytes_writer = 77824
+
+# CM budget: 100KB — re-baselined against an assembled total of 95180
+# bytes, which sat 972 bytes over the previous 94208-byte budget after
+# CM's governance stack grew. The growth is carried deliberately under
+# the headroom policy above rather than trimmed, because CM's reading
+# list is governance procedure and those files take fact fixes only.
+# CM's role file is the release-operations procedure (branch/tag/ship
+# mechanics), the most procedurally dense of the six pipeline roles
+# after TESTER, so it keeps the largest margin of the non-TESTER roles.
+# Shipped value: 102400. No in-code default (absent = role reported
+# unbudgeted; the lint never fails).
+budget_bytes_cm = 102400
+
+# OVERWATCH budget: 88KB — re-baselined against an assembled total of
+# 84289 bytes (previous 81920-byte budget was 2369 bytes over; see
+# headroom policy above). OVERWATCH sits outside the six-agent pipeline
+# but is included in every read-order manifest and byte budget for
+# catalog completeness.
+# Shipped value: 90112. No in-code default (absent = role reported
+# unbudgeted; the lint never fails).
+budget_bytes_overwatch = 90112
+
+
+# ---------------------------------------------------------------------------
+# [release] — release-engine settings shared with project.cfg
+# ---------------------------------------------------------------------------
+# The kanban-wide values for: the RC retry ceiling (max_rc_retries), the
+# bug-deferral posture (deferred_bugs, deferred_bug_level, defer_piggyback),
+# the DEEP-VERIFY cadence and window (deep_verify,
+# deep_verify_offhours_window), OVERWATCH's autonomous-resolution switch
+# (overwatch_resolve), the ship posture (ship_posture,
+# ship_posture_confirm_remote) and the container-tier image selection
+# (container_images). Every key here except container_images can be
+# overridden by a project's own project.cfg [release] section — see
+# project.cfg_example.
 [release]
 
-# Kanban-wide default retry ceiling. Per-project override lives in each
-# project's project.cfg under the same [release] section — see
+# max_rc_retries: the kanban-wide retry ceiling, consumed by
+# pp_max_rc_retries() (team/scripts/lib/project_paths.sh), the reader
+# OVERWATCH's resolution matcher and ceiling terminal path use to cap how
+# many times one bundle family (same cargo set, rebundled under a new patch
+# number) may be auto-resolved via cancel-and-rebundle before the block
+# escalates to HALT-hard with the full retry history. Per-project override
+# lives in each project's project.cfg under the same [release] section — see
 # project.cfg_example. The self-build project (pgai-agent-kanban) MUST set
-# an explicit override (recommended: 1) rather than inherit this default:
+# an explicit override (recommended: 1) rather than inherit this value:
 # the kanban auto-recycling its own failed self-modifications is the
 # compounding-error case that a tighter ceiling exists to contain; managed
-# projects are blast-radius-contained and can safely use the shipped default.
+# projects are blast-radius-contained and can safely use the shipped value.
 #
 # The reader fails loud (non-zero, narrated) rather than silently assuming
-# this default when the key is absent from BOTH kanban.cfg and the
+# a value when the key is absent from BOTH kanban.cfg and the
 # resolving project's project.cfg — see pp_max_rc_retries() docstring.
-# Default: 3
+# Shipped value: 3. No in-code default: absent from both kanban.cfg and
+# project.cfg makes the resolver fail loud.
 max_rc_retries = 3
+
+# --- Deferral posture --------------------------------------------------------
+# Four keys governing whether low-severity bugs wait instead of setting the
+# release tempo. All four are read by team/scripts/lib/config_loader.sh's
+# load_config() and validated at load time: an unrecognized value refuses
+# loud naming the accepted set, never resolving silently into a posture
+# nobody asked for. Booleans are spelled true/false ONLY — 'on'/'off' are
+# refused. Kanban-wide defaults here; a project's own project.cfg [release]
+# section may override any of the four — see project.cfg_example.
+
+# deferred_bugs: master switch — whether bugs are deferred at all.
+# false = every bug opens its own RC immediately, as if deferral did not
+# exist. true = bugs at or below deferred_bug_level wait instead of
+# triggering a release.
+# Accepted: true|false. Default: false
+deferred_bugs = false
+
+# deferred_bug_level: the highest severity that waits. A bug AT OR BELOW
+# this severity is deferred (when deferred_bugs=true); a bug ABOVE it still
+# triggers a bugfix RC normally. Setting this to 'high' defers every bug —
+# the consequence is that NO bug can ever trigger an RC on its own while
+# level=high, since there is no severity left above it to do the
+# triggering; bugs only run once the level is lowered or deferral is
+# turned off.
+# 'critical' is deliberately NOT an accepted value here, even though the
+# discovery pipeline's severity ranker recognises critical as a real rung
+# above high: critical is the severity SOP-core.md's "Rating a Finding"
+# defines as build-blocking, and this key names the highest rung an
+# operator may configure the gate to WAIT ON. A critical bug is never
+# deferred at any accepted level — there is no way to configure otherwise.
+# Accepted: low|medium|high. Default: low
+deferred_bug_level = low
+
+# defer_piggyback: when a bug ABOVE deferred_bug_level triggers an RC,
+# whether every currently-deferred bug rides along with it (consolidated
+# onto that RC) rather than waiting for its own future release.
+# false = the triggering bug ships alone; deferred bugs keep waiting.
+# Accepted: true|false. Default: true
+defer_piggyback = true
+
+# deep_verify: the kanban-wide DEEP-VERIFY scheduled-dispatch cadence.
+# Read by pp_deep_verify_mode() (team/scripts/lib/project_paths.sh) and the
+# deep-verify status read, which take a project's own project.cfg [release]
+# deep_verify first, then this value, then weekly. Set off here to turn
+# scheduled DEEP-VERIFY off for every project that does not set its own.
+# Validated at load like the three keys above: an unrecognized value
+# refuses loud naming this file and the key. This key is the one exception
+# to the boolean-strictness rule: true|false are accepted as aliases
+# alongside the word spellings — true=weekly, false=off.
+# Accepted: weekly|off (or true|false). Default: weekly
+deep_verify = weekly
+
+# deep_verify_offhours_window: the kanban-wide daily UTC window in which a
+# scheduled DEEP-VERIFY run may fire. Read by
+# pp_deep_verify_offhours_window() (team/scripts/lib/project_paths.sh),
+# which takes a project's own project.cfg [release]
+# deep_verify_offhours_window first, then this value, then 03:00-03:59. A
+# malformed value counts as absent: one warning line names the file and the
+# value, and the next source applies. Never a refusal.
+# Accepted: HH:MM-HH:MM (UTC). Default: 03:00-03:59
+# deep_verify_offhours_window = 03:00-03:59
+
+# overwatch_resolve: the fleet-wide default for whether OVERWATCH may act
+# autonomously on a resolvable CM block, rather than only observing and
+# raising Needs Human as today. Read by pp_overwatch_resolve()
+# (team/scripts/lib/project_paths.sh) and its Python counterpart
+# resolve_overwatch_resolve() (team/pgai_agent_kanban/overwatch/
+# resolution_matrix.py), which check a project's own project.cfg [release]
+# overwatch_resolve first and fall back to this kanban-wide default when
+# that project's key is absent — see project.cfg_example for the
+# per-project override.
+#
+# Turning this on authorises OVERWATCH to execute its documented recovery
+# playbooks (Lane A: rewrite-and-recycle a bad-fix regression; Lane B: ship
+# a HALT whose cause matches a declared operator INTENT.md entry) without
+# waiting for a human — see team/roles/OVERWATCH.md, "Autonomous Block
+# Resolution". Everything else still escalates to Needs Human exactly as
+# today, unconditionally, whatever this key is set to.
+#
+# Unlike max_rc_retries above, absence is never an error and never means
+# "on" — the key is commented out here on purpose so a fresh install ships
+# dark: absent, blank, or unreadable resolves to false. Only an
+# unrecognized non-boolean value (a typo, 'yes') refuses loud rather than
+# guessing.
+# Accepted: true|false. Default: false (absent/blank/unreadable -> false)
+# overwatch_resolve = false
+
+# --- Ship posture ------------------------------------------------------------
+# ship_posture: how CM answers a ship-policy trigger that would otherwise
+# HALT the release.
+#   matrix — apply the ship-policy matrix as written: every HALT row halts.
+#   always — ship through the triggers the posture covers, marking the
+#            release NON-FUNCTIONAL and recording what it would have stopped
+#            on; every other HALT still halts. Suited to a local-only lane,
+#            where a tag is a checkpoint nothing installs until the operator
+#            chooses, and the next bundle fixes what the last tag got wrong.
+#            The covered triggers: 2 (systemic risk high, not clear to ship)
+#            and 3 (serious concerns plus a large fix) ship with release-notes
+#            Status NON-FUNCTIONAL and a Known Issues warning naming the bugs
+#            behind the stop; 8 (the last three releases all NON-FUNCTIONAL)
+#            files one bug naming the pattern and ships. Each appends an
+#            '## Auto-Ship Event' to the project's release-state.md
+#            (cm/release.sh, team/scripts/lib/cm/release_ship_posture.sh)
+#            and puts one line under the release notes' '## Known Issues':
+#            'Auto-shipped under ship_posture=always (would have halted:
+#            trigger N — <error key>)'.
+#            Trigger 1, the unrecognized-input rows and the mechanical
+#            triggers 4-11 halt exactly as under matrix.
+# Read by pp_ship_posture() (team/scripts/lib/project_paths.sh) and its
+# Python counterpart resolve_ship_posture() (team/pgai_agent_kanban/
+# overwatch/resolution_matrix.py), which check a project's own project.cfg
+# [release] ship_posture first and fall back to this kanban-wide value when
+# that project's key is absent or blank — see project.cfg_example for the
+# per-project override.
+#
+# An unrecognized value (a typo such as 'alwasy') resolves to matrix and
+# prints one warning line naming the file and the value. It is never a
+# refusal: the caller carries on under matrix.
+# Accepted: matrix|always. Default: matrix (absent/blank -> matrix)
+ship_posture = matrix
+
+# ship_posture_confirm_remote: the remote-lane guard on ship_posture. On a
+# project whose project.cfg [project] push_to_remote is true (the default),
+# ship_posture = always takes effect only when this key is also exactly
+# true; anything else (absent, blank, false, a typo) resolves the posture
+# to matrix and prints one warning line, so a lane that publishes to origin
+# never slips into always by accident. On a push_to_remote = false lane
+# this key is not consulted. Read through the same project.cfg-then-
+# kanban.cfg chain as ship_posture — setting it here confirms always for
+# every remote lane that inherits it, so prefer the per-project override.
+# Example (remote lane opting in): true
+# Accepted: true|false. Default: false (absent/blank -> false)
+# ship_posture_confirm_remote = false
+
+# container_images: the default image selection for the operator-only
+# container-tier harnesses (deep-verify.sh, cold-build-now.sh,
+# run-cold-build-tests.sh, run-three-host-matrix.sh,
+# harness/strangers-path-check.sh) when they are run without --image.
+# Names come from team/config/container-images.txt (debian, rocky9),
+# separated by commas or spaces, or "all" for every declared image. A
+# name the manifest does not declare is refused when a harness runs.
+# Absent or empty: a harness run without --image lists the available
+# images and builds nothing. Scheduled deep-verify runs (--scheduled) pass
+# no --image, so they build only what this key selects. A REST
+# POST /operations/deep-verify or /operations/cold-build-now call selects
+# its own images with the optional body field "image" (a list of names, or
+# "all"), passed as --image; this key is the fallback when that field is
+# omitted. Read from kanban.cfg only (not project.cfg). The harnesses
+# still require operator authorization (PGAI_CONTAINER_TIER=1 or
+# --operator-approved; for the REST routes, PGAI_CONTAINER_TIER=1 in the
+# API server's environment); neither this key nor the "image" field
+# grants it.
+# Example: container_images = all
+# Default: empty (no default selection)
+container_images =
 
 
 # ---------------------------------------------------------------------------
-# [api] — operator REST API settings (localhost-only; v1.2.0+)
+# [locks] — advisory-lock staleness settings
+# ---------------------------------------------------------------------------
+[locks]
+
+# Kanban-wide default for the repo-wake lock's contention-path staleness
+# classifier (team/scripts/lib/lock_provenance.sh's pgai_lock_acquire).
+# When a waiter loses the contention race for a lock, it reaps the
+# existing lock and proceeds instead of deferring forever only when the
+# lock carries no provenance record at all AND its file is older than a
+# few seconds (a record this library
+# writes appears at the lock path atomically, so a provenance-less file
+# is a writer outside the helper or a non-atomic release; the freshness
+# condition keeps one that is still mid-flight from being reaped before
+# its record lands — the constant and its reasoning live in
+# lock_provenance.sh's header, not here, because no deployment would
+# want a different value). A holder that died has already lost its flock,
+# so its record is simply replaced by the next acquirer; a lost race under
+# a record whose pid is no longer running means some other process still
+# holds the flock (a child that inherited the lock descriptor, or a holder
+# in another pid namespace), and the waiter defers, narrating
+# lock.provenance.orphan_holder with the pids that hold the file open.
+# A lock whose holder pid is ALIVE is never reaped on age. Past the DERIVED
+# threshold described below the waiter narrates that holder as overdue
+# (lock.provenance.holder_overdue) and defers to it exactly as to any
+# live holder: the wake chain refreshes its held lock's mtime while a
+# task runs, so an aged live holder has stopped refreshing — wedged, or
+# running with max_task_seconds = 0 — and the remedy the narration names
+# is team/scripts/release-locks.sh --release <name> --force, which signals
+# the holder to release its own lock. Deleting a live holder's file would
+# not stop it, only seat a second chain beside it. A live, recent,
+# well-provenanced holder is deferred exactly as before this key existed.
+#
+# This key alone is NOT the effective threshold. The value
+# pgai_lock_stale_age_threshold_seconds actually uses is:
+#
+#     max(this_key * 120s/period, [wake] max_runtime_seconds
+#                                  + [wake] max_task_seconds
+#                                  + [wake] kill_grace_seconds + 120s margin)
+#
+# A wake chain can legitimately hold this lock for its entire batch — up
+# to max_runtime_seconds (checked only between tasks), plus the whole
+# max_task_seconds of the last task dispatched under that cap, plus up to
+# kill_grace_seconds more while it is still alive and cleaning up after a
+# SIGTERM — so the threshold is never armed smaller than that real chain
+# budget, however this key is configured. With the shipped [wake] defaults
+# (max_runtime_seconds=14400, max_task_seconds=5400, kill_grace_seconds=30)
+# the floor is 19950s (~5h32m), which exceeds this key's own shipped
+# default (3 periods = 360s) — so in the shipped configuration, the
+# chain-budget floor is what actually governs, not this key. Raising this
+# key past the floor's equivalent period count makes it the effective
+# value again. A value that still resolves below the floor is CLAMPED to
+# the floor rather than honored verbatim or refused — narrated
+# dual-channel to stderr naming the floor, never a silent substitution.
+#
+# Every reap, and every overdue-holder deferral, narrates dual-channel to
+# stderr naming the evidence (holder pid, age and the full derivation, or
+# the missing provenance) — never silent, and never the seconds value
+# alone.
+#
+# The same derived threshold also drives team/scripts/why.sh's STUCK-LOCK
+# verdict and its --details lock pane (team/pgai_agent_kanban/ops/verdict.py),
+# both of which display the derivation alongside the number — read through
+# pgai_agent_kanban.ops.locks.project_stale_age_threshold, the Python form
+# of this key's accessor (pgai_lock_stale_age_threshold_seconds /
+# _derivation), never a second threshold.
+#
+# Per-project override lives in each project's project.cfg under the same
+# [locks] section — see project.cfg_example. Absence from BOTH this file
+# and a resolving project's project.cfg is never an error: the reader
+# (pp_stale_lock_reap_after_wake_periods() in
+# team/scripts/lib/project_paths.sh) falls back to this same default (3)
+# in code, so removing this line changes nothing.
+# Default: 3
+stale_lock_reap_after_wake_periods = 3
+
+
+# ---------------------------------------------------------------------------
+# [overwatch] — OVERWATCH block-triage settings
+# ---------------------------------------------------------------------------
+[overwatch]
+
+# block_triage: the fleet-wide default for whether OVERWATCH's block-triage
+# sweep may act on a blocked task's Block Record — requeue it, promote it,
+# or escalate it with a diagnosis — or only write the record and the
+# diagnosis and leave the task as it is. Read by pp_block_triage()
+# (team/scripts/lib/project_paths.sh) and its Python counterpart
+# resolve_block_triage() (team/pgai_agent_kanban/overwatch/
+# resolution_matrix.py), which check a project's own project.cfg
+# [overwatch] block_triage first and fall back to this kanban-wide default
+# when that project's key is absent — see project.cfg_example for the
+# per-project override.
+#
+# Every triage action runs under OVERWATCH's HALT-first protocol, backs up
+# what it touches, and is logged to the project's overwatch/actions.log as
+# a "block-triage:" entry. Set false to keep the sweep to records and
+# diagnoses only. Absent or blank resolves to true, so an install whose
+# kanban.cfg predates this key behaves as shipped. An unrecognized value
+# (a typo, 'yes', 'on') refuses loud rather than guessing.
+# Accepted: true|false. Default: true
+block_triage = true
+
+# requeue_budget: the fleet-wide default for how many times OVERWATCH's
+# block triage may return one blocked task to its owner over the whole life
+# of its Block Record, whatever reasons its blocks give. Each classifier row's
+# own max_attempts bounds the attempts on one block epoch, but a task whose
+# blocks alternate between reasons (a per-task timeout, then a dirty
+# worktree, then a timeout again) passes every verification and starts a new
+# epoch each time; this budget is what stops it being requeued forever.
+# The count is the Block Record's "requeues" line (its reasons are in
+# "requeue_reasons"); it survives re-blocks, epoch restarts and a return to
+# BACKLOG, and goes only when the task reaches DONE or WONT-DO. Once the
+# count reaches the budget, the next block that would be requeued is
+# escalated instead: Needs Human yes and an OVERWATCH Diagnosis naming
+# every reason code seen. A recomputed completion gate (a branch already
+# merged, closed as DONE) is not a requeue and is never refused or counted.
+#
+# Read by resolve_requeue_budget() (team/pgai_agent_kanban/overwatch/
+# block_requeue.py), which checks a project's own project.cfg [overwatch]
+# requeue_budget first and falls back to this kanban-wide default when that
+# project's key is absent or blank — see project.cfg_example for the
+# per-project override. Absent or blank in both resolves to 3, which is no
+# lower than any classifier row's max_attempts, so a task that blocks again
+# and again for one reason reaches its row's own ceiling exactly as before.
+# 0 requeues nothing: every block that would be requeued escalates. A value
+# that is not a whole number (a sign, a unit, a decimal point, a word)
+# refuses loud: the block-triage sweep plans nothing for that project and
+# logs the refusal, naming the value and the file.
+# Accepted: a non-negative whole number. Default: 3
+requeue_budget = 3
+
+# leaked_listener_min_age_seconds: how old a listening process under the
+# framework temp root must be before OVERWATCH's leaked-listener check treats
+# it as leaked and stops it (SIGTERM). A listener younger than this -- a test
+# server a suite started moments ago -- is left alone, as is any listener
+# inside a WORKING task's worktree or scratch, whatever its age. Read by
+# _cll_min_age_seconds() in team/scripts/lib/overwatch-checks/
+# check-leaked-listeners.sh; fleet-wide only (the scan is host-wide), so a
+# project.cfg value is not read. Absent or blank resolves to 3600 (one hour);
+# a value that is not a whole number is reported on stderr and 3600 is used.
+# Accepted: a non-negative whole number of seconds. Default: 3600
+leaked_listener_min_age_seconds = 3600
+
+
+# ---------------------------------------------------------------------------
+# [archive] — moving finished work out of the live project
+# ---------------------------------------------------------------------------
+[archive]
+
+# archive_count: how many of the newest items per category stay live. Bugs,
+# priorities, requirements and tasks are counted separately, and tasks are
+# counted per role: PM, CODER, WRITER, TESTER, CM, PO and OVERWATCH each keep
+# their own newest archive_count tasks, so every agent's recent history stays
+# on the dashboard. Within a role a task is newer when its ## Release Version
+# is newer (semver), then by its date and sequence; a task with no release
+# version sits where it was created. Within each category (or role) the
+# newest archive_count items always stay in the live project, and only
+# FINISHED items older than those move to $KANBAN_ROOT/archive/<project>/
+# under the same sub-directory names (bugs/, priority/, requirements/,
+# tasks/, tasks/queues/, logs/training/<role>/). Unfinished work, and
+# anything whose status cannot be read, is never archived. Nothing is ever
+# deleted: every move is recorded in archive/<project>/ARCHIVE-LEDGER.tsv
+# and can be restored. Each run also moves any files a project still keeps
+# in the older in-project requirements archive,
+# projects/<project>/tasks/archive/requirements/, into
+# archive/<project>/requirements/ (PRIORITY-NNNN items into priority/).
+# Set 0 to disable archiving entirely, that move included.
+#
+# Read by resolve_archive_count() (team/pgai_agent_kanban/archive/
+# config.py), which checks a project's own project.cfg [archive]
+# archive_count first and falls back to this kanban-wide default — see
+# project.cfg_example for the per-project override. Absent or blank in
+# both resolves to 55. A value that is not a whole number (a sign, a unit,
+# a decimal point) is refused dual-channel naming the file, and that run
+# archives nothing; a wake or a release never stops over it.
+# Accepted: a non-negative whole number. Default: 55
+archive_count = 55
+
+
+# ---------------------------------------------------------------------------
+# [api] — operator REST API settings (localhost-only)
 # ---------------------------------------------------------------------------
 # The API service exposes the operator command surface as a localhost-only
 # REST API.  It binds to a loopback address only — access from remote hosts
 # is by SSH tunnel or SOCKS proxy.  The service is NOT a cron citizen; the
 # operator starts it explicitly with scripts/api-server.sh start.
 #
-# Security note: no authentication or TLS in v1.2.0.  The loopback binding
+# Security note: no authentication or TLS.  The loopback binding
 # is the sole access-control mechanism.  Auth/TLS are planned as future work.
 [api]
 
@@ -408,5 +1179,65 @@ max_rc_retries = 3
 host = 127.0.0.1
 
 # TCP port the API server listens on.
+# Precedence: the PGAI_API_PORT environment variable wins when set to an
+# integer; otherwise this value is used; when both are absent the port is
+# 8300.  scripts/api-server.sh start, status and stop resolve the port the
+# same way the server does, so they always probe the port it bound.
 # Default: 8300
 port = 8300
+
+# Seconds a route may wait for an operator script it runs (a dashboard pane
+# render, for example) before the script's process group is stopped and the
+# route answers the shell_out.timeout refusal (HTTP 504) instead of holding
+# a server worker. The refusal's remedy is the same command run from a
+# shell, where no limit applies. A foreground POST /operations/wake-now is
+# not bounded by it: a wake batch bounds itself ([wake] max_runtime_seconds).
+# A non-positive or non-integer value reads as the default. Read at server
+# start; apply a change with scripts/api-server.sh stop, then start.
+# Default: 300
+shell_out_timeout_seconds = 300
+
+
+# ---------------------------------------------------------------------------
+# [testing] — gated test-suite settings
+# ---------------------------------------------------------------------------
+# Read by the test runners through config_testing_workers,
+# config_testing_coverage and config_testing_pre_merge_affected_cap in
+# team/scripts/lib/config_loader.sh. Every key here is kanban-wide:
+# project.cfg has no [testing] section and no per-project override. An
+# unrecognized value refuses loud, naming the accepted set and the sed edit
+# that fixes it; load_config does not read this section, so a typo here
+# stops a test run, never a wake.
+[testing]
+
+# workers: the bounded parallel worker budget — the most pytest-xdist
+# workers a gated run may start on this host. 0 or 1 means serial: the
+# suites run single-process. Values above 1 need pytest-xdist (declared in
+# requirements-test.txt). Set 1 to run serially on a small or busy host.
+# Accepted: a non-negative whole number in decimal digits (no sign, unit
+# or decimal point). Default when absent or blank: 3, the value shipped
+# here, so a kanban.cfg written before this key existed gets the same
+# bounded budget.
+workers = 3
+
+# coverage: whether the gated runners may collect coverage. false means a
+# --coverage request runs the suites without it and prints "coverage
+# disabled by config ([testing] coverage)". Kanban-wide only. An operator
+# can still collect coverage for one run while this is false by setting
+# PGAI_TESTING_COVERAGE=1 in their own shell, e.g.
+#   PGAI_TESTING_COVERAGE=1 scripts/run-unit-tests.sh --coverage
+# The wake bootstrap unsets PGAI_TESTING_COVERAGE, and the runners ignore it
+# while PGAI_AGENT_WAKE_ACTIVE=1, so an agent can never turn coverage on.
+# Accepted: true|false ('on'/'off' are refused). Default: false
+coverage = false
+
+# pre_merge_affected_cap: the most affected test files a pre-merge run
+# selects. An affected test file is one that mentions a script, module,
+# function or CLI name the branch changed; when more match than the cap,
+# the run narrates the cap and keeps the most-referencing files. This caps
+# how many files are chosen, not how many run at once: the run still uses
+# the workers budget above. 0 means no cap: every affected test file is
+# selected. Accepted: a non-negative whole number in decimal digits (no
+# sign, unit or decimal point; leading zeros are dropped). Default when
+# absent or blank: 60
+pre_merge_affected_cap = 60

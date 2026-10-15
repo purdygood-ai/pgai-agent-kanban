@@ -30,7 +30,7 @@ Design notes
   non-zero (exit 2 = idempotent no-op via plan-hash marker) — this proves the
   fixture is re-runnable without accumulating duplicate tickets.
 - All temp paths use pytest's tmp_path (never bare /tmp).
-- Test names describe behavior, never bug IDs or ticket IDs (SOP.md anti-pattern 6).
+- Test names describe behavior, never bug IDs or ticket IDs (roles/TESTER.md anti-pattern 6).
 """
 
 from __future__ import annotations
@@ -1125,6 +1125,12 @@ def _run_wake_harness(
     env.pop("PGAI_TASKS_DIR", None)
     env.pop("PGAI_REQUIREMENTS_DIR", None)
     env.pop("PGAI_DEV_TREE_PATH", None)
+    # Drop reasoning-effort settings an agent wake exports into the calling
+    # process: this run exercises wake dispatch against its own temp
+    # kanban.cfg, so its outcome must not depend on the operator's effort.
+    for _role in ("PM", "CODER", "WRITER", "TESTER", "CM", "PO"):
+        env.pop(f"PGAI_{_role}_EFFORT", None)
+    env.pop("CLAUDE_EFFORT", None)
     # Ensure pgai_agent_kanban is importable in the subprocess environment:
     # close_intake_on_finalize_report in wake_common.sh calls
     # `python3 -m pgai_agent_kanban.ops close_item`, and the package lives
@@ -1184,12 +1190,12 @@ class TestTwoTicketWakeDispatchClosure:
     """Wake-dispatch certification fixture: two-ticket testing-only closure via real substrate.
 
     Each test exercises the real wake substrate (close_intake_on_finalize_report +
-    completion census from CODER-20260715-007, BUG-0068 fix) through a subprocess
+    the sibling-scan completion census) through a subprocess
     invocation of wake/harness.sh against a two-ticket plan.
 
-    BUG-0068 production diagnosis anchor (must be caught by these tests):
+    Production diagnosis anchor these tests must catch a regression of:
       [2026-07-14T14:04:10+00:00] wake(tester): task
-      TESTER-20260714-008-verify-pvg-closure-check:
+      <task-id>-verify-my-app-closure-check:
       close_intake_on_finalize_report: finalize_mode:report not found
       in README constraints — skipping intake closure (not a
       finalize=report terminal ticket)
@@ -1217,9 +1223,10 @@ class TestTwoTicketWakeDispatchClosure:
         the harness processes both.  When both reach DONE, the completion census
         returns ok:2 and close_intake_on_finalize_report closes the intake item.
 
-        This is the primary regression test for BUG-0068 in the two-ticket
-        topology: the census-based approach must succeed regardless of whether
-        a 'finalize_mode:report' marker is present in any task README.
+        This is the primary regression test for the closure fix in the
+        two-ticket topology: the census-based approach must succeed
+        regardless of whether a 'finalize_mode:report' marker is present
+        in any task README.
 
         Asserts:
         - Intake ## Status == 'done' after harness run.

@@ -1,0 +1,164 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": null,
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0343 tab-safe collapse identity — fix delivered and behaviorally correct",
+      "heading": "Finding 1: BUG-0343 tab-safe collapse identity — fix delivered and behaviorally correct",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe reported defect reproduces exactly from `ai_main` and is gone on the RC. Run\nagainst the bug report's own reproduction fixture (3 tab-bearing ALPHA occurrences,\n4 tab-bearing BETA occurrences, both `sweep-census` skips, diverging only after the\nembedded tab), in a throwaway root per the live-install-safety convention:\n\n`ai_main` (pre-fix) — one row, garbled, BETA silently dropped:\n\n```\n[pm 09:01:00] — /p/req/ALPHA.md: finalize=tag — not report\twake(pm): sweep-census: skipped\t— /p/req/ALPHA.md: finalize=tag — not report (x7, first seen 09:01:00)\n```\n\n`ai_rc/v2.24.6` — two rows, correct counts, tab preserved in the displayed text:\n\n```\n[pm 09:01:00] wake(pm): sweep-census: skipped\t— /p/req/ALPHA.md: finalize=tag — not report (x3, first seen 09:01:00)\n[pm 10:01:00] wake(pm): sweep-census: skipped\t— /p/req/BETA.md: finalize=report — other reason (x4, first seen 10:01:00)\n```\n\nFour further checks, per Step 6.5 and anti-pattern 6 (verify the original failure\nmode *and* the new normal case):\n\n- **The shipped regression test is genuine.** Copying the RC's\n  `team/tests/unit/test_event_band_renderer.py` into a clone checked out at `ai_main`\n  and running\n  `test_tab_bearing_signal_lines_keep_distinct_identity_and_print_full_text_once`\n  fails with `assert 1 == 2` and the pre-fix garbled row in the message. The same\n  test passes inside the green gated unit suite on the RC.\n- **The escaping is bijective at the boundary that matters.** A line carrying a real\n  tab and a line carrying the two-character sequence `\\t` at the same position stay\n  two distinct identities (`x2` and `x3` respectively), each printed with its own\n  original text. Escaping backslash before tab is what makes that hold.\n- **The tab-free path is untouched.** A two-identity tab-free `sweep-census` fixture\n  renders byte-identically on the RC and on `ai_main`.\n- **No operator-visible change on real input.** Against a frozen snapshot of the\n  operator's live `logs/cron-*.log`, RC and `ai_main` produce the same row set\n  (2236 rows, set-identical), at the same cost (10461 ms vs 10437 ms).\n\nThe change is 17 lines in `team/scripts/dashboard/event-band.sh`, all inside the\ncollapse-key assignment, plus a 76-line test addition. `lib/event_signal_patterns.sh`\nis unmodified, as the bug's constraint required.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Requirements acceptance criteria 2 and 3",
+      "heading": "Finding 2: Requirements acceptance criteria 2 and 3",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"All Python files compile cleanly\" — every `.py` in the tree compiled under\n  `python3 -m py_compile`, exit 0.\n- \"All bash files pass syntax check\" — 286 `.sh` files, `bash -n` clean on all.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Gated suites",
+      "heading": "Finding 3: Gated suites",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `team/scripts/run-unit-tests.sh --coverage` -> `UNIT_EXIT=0`\n  (4900 passed, 31 skipped, 961.36 s). `bare_tmp_cleanliness: OK`,\n  `listener_cleanliness: OK`.\n- `team/scripts/run-integration-tests.sh --coverage` -> `INTEGRATION_EXIT=0`\n  (519 passed, 1 skipped, 554.81 s). Same two cleanliness gates OK.\n\nCoverage (informational only, never part of the verdict), from each runner's\n`totals` object in `${PGAI_AGENT_KANBAN_TEMP_DIR}/coverage/<suite>.json`:\n\n| Suite | line % | branch % |\n|---|---|---|\n| unit | 76.36 | 63.15 |\n| integration | 11.48 | 9.21 |",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Bundled item BUG-0342 had no defect to fix, and the filer that produced it files from uncommitted worktree state",
+      "heading": "Finding 4: Bundled item BUG-0342 had no defect to fix, and the filer that produced it files from uncommitted worktree state",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the same filing path has produced two unreproducible bugs\nin two consecutive release cycles, and each one ended its cycle on `Needs Human: yes`)\n**Filed As:** BUG-0346 (Path C-A — filed as BUG)\n\nThe bundle's acceptance criterion \"Each bundled item is addressed in the\nimplementation\" is met in outcome but not in substance for `BUG-0342`. That bug names\nthree `provenance` hygiene findings citing `PRIORITY-0004` at\n`team/tests/unit/test_event_band_renderer.py:412,419,456`. Verified independently of\nCODER's account:\n\n- `python3 team/scripts/lint_hygiene.py --classes provenance` on the RC:\n  `OK — 0 findings across 8 scan director(y/ies)`. The full three-class run is also\n  clean.\n- `git log --all -S\"PRIORITY-0004\" -- team/tests/unit/test_event_band_renderer.py`\n  returns **no commits**. The cited string has never been in that file on any branch.\n- The only `PRIORITY-0004` occurrences in the tree are a documentation pointer in\n  `team/config/default_palette.txt:8` and a fixture *value* in\n  `team/tests/unit/test_lint_hygiene.py:244` — neither is a provenance citation and\n  neither is at the cited lines.\n\nThe cause is upstream of this RC. Both gated runners call `lint_bug_filer_file`\n(`team/scripts/lib/lint_bug_filer.sh` -> `team/pgai_agent_kanban/lint/bug_filer.py`)\non their own findings file at the end of every run, and the runners are executed by\nCODER and WRITER inside feature worktrees carrying uncommitted edits. Nothing in that\npath consults a commit, a branch, or `git status`, so a finding in a line that is\nlater reworked or discarded still becomes a permanent project bug.\n\nThe cost is a full wasted cycle per occurrence, and it has now happened twice in a\nrow:\n\n| Phantom bug | Cited site | Ticket produced | Outcome |\n|---|---|---|---|\n| BUG-0335 | `test_event_band_renderer.py:10` citing `BUG-0333` | CODER-20260919-018 | `WONT-DO`, `Needs Human: yes` |\n| BUG-0342 | `test_event_band_renderer.py:412,419,456` citing `PRIORITY-0004` | CODER-20260919-040 | `WONT-DO`, `Needs Human: yes` |\n\n`git log --all -S\"BUG-0333\" -- team/tests/unit/test_event_band_renderer.py` is empty\ntoo, so BUG-0335's site is equally unreproducible.\n\nCODER-20260919-040's own handling was correct — it swept, found nothing, changed\nnothing, and closed `WONT-DO` with the reason stated, exactly as `SOP-core.md`\n\"WONT-DO authority\" requires. The finding is against the filer, not against CODER.",
+      "filed_as": "BUG-0346",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the same filing path has produced two unreproducible bugs",
+        "filed_as": "BUG-0346 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "The event band displays un-timestamped log lines with the render's own clock",
+      "heading": "Finding 5: The event band displays un-timestamped log lines with the render's own clock",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (fourth defect in this one script across four consecutive\nRCs — BUG-0337, BUG-0340, BUG-0343, BUG-0344 — and this branch has never had a test)\n**Filed As:** BUG-0347 (Path C-A — filed as BUG)\n\nFound under Step 6.11, category \"untested new mechanisms\": a code path in the file\nthis RC modifies that carries no coverage. Pre-existing — reproduces identically from\n`ai_main`, and this RC's diff does not touch the branch.\n\n`team/scripts/dashboard/event-band.sh` assigns `date +%H:%M:%S` to any candidate line\nwithout a leading `[ISO8601]` prefix — the bare `error:` / `message:` / `remedy:`\ncontinuation lines of a dual-channel refusal, which the wake log emits unstamped\nunder their own timestamped parent. The branch's comment justifies this with \"it\nstill sorts with its neighbors since it is read in file order\", which line 378\ncontradicts:\n\n```bash\nsort -t \"$(printf '\\t')\" -k1,1 \"$MERGE_FILE\" > \"$SORTED_FILE\"\n```\n\nBecause the synthesized key is the render's wall clock, every affected row sorts to\nthe end of the stream as one block, detached from the parent line that gives it\nmeaning, carrying a false time, and moving on every refresh.\n\nMeasured against a frozen snapshot of the operator's live logs: 2236 rows rendered,\nof which **2235** carried a synthesized timestamp clustered in the ten seconds the\nrender itself occupied (`00:27:50`-`00:27:59`); none of those times appears anywhere\nin the input (`grep -c \"00:27:50\" \"$S\"/logs/*.log` -> 0 on every file). Exactly one\nrow — the collapsed `sweep-census` row at `00:00:12` — carried a real source\ntimestamp. Two consecutive renders of that identical static input differed from line\n2 onward.\n\nNo fixture in `team/tests/unit/test_event_band_renderer.py` feeds the renderer an\nun-timestamped line; the eleven tests in that module all supply\n`[ISO8601]`-prefixed input.\n\nRated `medium` rather than `high` because the raw per-agent log panes\n(`cron-tail.sh`, the logs window) remain available and unaffected, which the band's\nown `--help` names as the forensic path — a genuine workaround under `SOP-core.md`\n\"Rating a Finding\".",
+      "filed_as": "BUG-0347",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (fourth defect in this one script across four consecutive",
+        "filed_as": "BUG-0347 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Pre-flight, worktree, and release-state integrity",
+      "heading": "Finding 6: Pre-flight, worktree, and release-state integrity",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Step 2: every task folder reading `## State: DONE` with a `## Feature Branch` other\n  than `none` was scanned; no such branch survives locally, which passes both checks\n  trivially (CODER and WRITER delete branches after merging). The one surviving\n  `ai_feature/*` branch belongs to `CODER-20260919-040`, whose state is `WONT-DO`, not\n  `DONE`, so Step 2 does not apply to it; it sits at the RC tip with zero unique\n  commits, consistent with that task's \"nothing to ship\" disposition.\n- Step 3: `git rev-parse HEAD` = `git rev-parse ai_rc/v2.24.6` = `d764c1f`;\n  `git status --porcelain` empty; `git stash list` empty.\n- Step 6.1: `release-state.md` holds all four fields. `## Active RC` `v2.24.6`,\n  `## RC Opened At` `2026-09-19T23:18:17+00:00`, `## RC Opened By Task`\n  `CM-20260919-041-open-rc-2-24-6`, `## Last Released` `v2.24.5` — well-formed.\n  `pp_last_released_version \"pgai-agent-kanban\"` returns `v2.24.5` and\n  `semver_gt v2.24.6 v2.24.5` is true (shared helper, never an inline compare).\n- Step 6.10: prerequisite graph is acyclic and correctly bookended — CM-041 (open RC,\n  DONE) -> CODER-039 (DONE) and CODER-040 (WONT-DO) -> TESTER-042 -> CM-044 (release,\n  WAITING). Every referenced task ID exists. Sequence number 043 is unused; a gap, not\n  a collision.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Constraint and standards checks",
+      "heading": "Finding 7: Constraint and standards checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Step 6.9: `set -euo pipefail` present at line 60 of `event-band.sh` on both the RC\n  and `ai_main`, unchanged. No credential-shaped strings introduced by the diff.\n- Step 6.13: `team/scripts/lint_skip_bug_gate.sh` exits 0 —\n  \"all skip annotations are compliant\", 0 missing `BUG-NNNN` files. No placeholder\n  shapes in live test source (the `BUG-NNNN` literals that grep turns up are inside\n  archived coverage-baseline run logs and inside the test *for* the scanner).\n- Step 6.14: the diff adds no new script, no new tunable, no hardcoded operational\n  value, and no duplicate of an existing `lib/` helper. `lint_hygiene.py` reports 0\n  findings across all three classes, so neither the new comment block nor the new test\n  cites a bug, task, or version identifier. No documentation artifact is owed — the\n  change makes the code match prose `docs/DASHBOARD-PANES.md` already ships.\n- Step 6.8 skipped with a note: the diff touches no release-lifecycle file\n  (`cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`, `project_paths.sh`, or the\n  open/close cycle), so the synthetic release simulation does not apply.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

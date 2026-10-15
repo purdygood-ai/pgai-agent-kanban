@@ -37,7 +37,7 @@ Tests cover:
      fails in normal mode (no env var).  Also asserts that a genuine
      CHANGELOG content edit still fails in RC mode (non-KI staleness).
 
-  8. **Writer-migration drift tolerance (BUG-0077 / BUG-0080 enumeration)**:
+  8. **Writer-migration drift tolerance**:
      Three test cases using the _diff_is_rc_tolerable() helper directly to
      verify the three new drift categories are correctly handled:
 
@@ -51,6 +51,13 @@ Tests cover:
      (c) Fixture with a drift line that is NOT one of the three tolerable
          categories (a genuine non-drift removal) → _diff_is_rc_tolerable()
          returns False (no over-broad admission).
+
+  9. **Empty Known Issues placeholder replacement**: _diff_is_rc_tolerable()
+     admits a ``None`` placeholder under ``### Known Issues`` replaced only by
+     new KI entries, and rejects every wider shape (other headings, other
+     removals, non-KI or already-published additions); check_freshness()
+     passes that fixture in RC mode and reports it stale, unchanged, in
+     strict mode.
 
 All temp paths use pytest's tmp_path (redirected to the framework temp root
 by conftest.py when PGAI_AGENT_KANBAN_TEMP_DIR is set).  No bare /tmp paths.
@@ -69,6 +76,20 @@ import unittest.mock
 
 import pytest
 
+from pgai_agent_kanban.cm import changelog_writer as _changelog_writer
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="lint-changelog-freshness")
+
 # ---------------------------------------------------------------------------
 # Locate lint_changelog_freshness.py and the real CHANGELOG artifact.
 # This file lives at team/tests/unit/test_lint_changelog_freshness.py.
@@ -84,11 +105,31 @@ _RELEASE_NOTES_DIR = _DEV_TREE_ROOT / "release-notes"
 
 # The live kanban root is resolved from PGAI_AGENT_KANBAN_ROOT_PATH at
 # import time, before conftest's autouse fixture redirects the env var.
+# _REAL_BUGS_DIR intentionally still resolves the operator's live bug
+# ledger — it backs the gate-mechanics tests below (byte-compare behavior,
+# remedy-block formatting, RC-mode drift-removal tolerance) that exercise
+# the PRODUCTION gate's own default resolution path against whatever the
+# live environment currently holds, tolerant of it being empty.  None of
+# those tests hardcode assumptions about specific bug content -- they
+# assert gate behavior that holds regardless of ledger content, so they
+# are not reads that depend on a specific ledger snapshot.  A bug filed
+# against the live ledger mid-suite-run cannot perturb any of these tests:
+# the byte-compare/remedy-block cases force a mutated, guaranteed-stale
+# scratch artifact (staleness holds regardless of ledger content), and the
+# RC-mode cases tolerate new KI additions by design.
 _LIVE_KANBAN_ROOT = pathlib.Path(
     os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
     or str(pathlib.Path.home() / "pgai_agent_kanban")
 )
 _REAL_BUGS_DIR = _LIVE_KANBAN_ROOT / "projects" / "pgai-agent-kanban" / "bugs"
+
+# Committed bug-ledger fixture — used by the tests that assert specific
+# KI-1.0.0.x disclosure CONTENT. Holds one record per published
+# KI-1.0.0.x identifier, recovered verbatim from the c2d8056 CHANGELOG.md
+# render.  Unlike _REAL_BUGS_DIR above, this path is committed to the tree
+# and its content never varies by machine or by what the operator's live
+# ledger currently contains.
+_FIXTURE_BUGS_DIR = _TEAM_DIR / "tests" / "fixtures" / "bug_ledger"
 
 
 def _import_lint_module():
@@ -335,9 +376,8 @@ class TestChangelogFreshnessBehavioralNegative:
         file as changelog_path.  The gate regenerates CHANGELOG.md to a temp
         path and byte-compares; the modification causes the comparison to fail.
 
-        This is the behavioral-negative proof-of-fire required by the task
-        acceptance criteria: a scratch-edited CHANGELOG must make the gate
-        exit 1.
+        This is the behavioral-negative proof-of-fire: a scratch-edited
+        CHANGELOG must make the gate exit 1.
 
         Args:
             tmp_path:  pytest-provided temp directory (routed to framework temp root).
@@ -440,7 +480,7 @@ class TestChangelogFreshnessBehavioralNegative:
 
 
 # ---------------------------------------------------------------------------
-# Remedy-block tests (PRIORITY-0001-gates-prescribe-remedies, motivating case)
+# Remedy-block tests (the gates-prescribe-remedies motivating case)
 # ---------------------------------------------------------------------------
 
 # A numbered fix-command line, e.g. "  1. PYTHONPATH=... python3 -m ...".
@@ -456,7 +496,7 @@ _ANGLE_BRACKET_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][\w -]*>")
 class TestChangelogFreshnessRemedyBlock:
     """The remedy block: cause(s), numbered verbatim commands, re-lint, rule.
 
-    Exercises PRIORITY-0001-gates-prescribe-remedies' motivating case end to
+    Exercises the gates-prescribe-remedies motivating case end to
     end: force a stale-CHANGELOG failure, assert the remedy block contains
     every required part (concrete cause, a numbered fix block ending in the
     re-lint check, and the one-line enforced rule), assert the printed
@@ -564,8 +604,8 @@ class TestChangelogFreshnessRemedyBlock:
     ) -> None:
         """Executing the remedy block's printed commands verbatim clears the gate.
 
-        This is acceptance criterion 2 of PRIORITY-0001 (the motivating case,
-        end to end): a stale CHANGELOG fixture is recovered using ONLY the
+        This is the gates-prescribe-remedies motivating case, end to end:
+        a stale CHANGELOG fixture is recovered using ONLY the
         gate's printed output — no external guidance. The test parses the
         exact numbered command strings out of the captured stderr (not a
         hand-reconstructed equivalent) and runs them through a real shell, so
@@ -631,8 +671,8 @@ class TestChangelogFreshnessCliArgparse:
     def test_unknown_argument_exits_2(self, capsys: pytest.CaptureFixture[str]) -> None:
         """main() with an unknown argument exits with code 2 and prints usage.
 
-        This is the PVG an earlier defect lesson applied: the gate must reject unknown
-        arguments via argparse rather than silently ignoring them.
+        The gate must reject unknown arguments via argparse rather than
+        silently ignoring them.
 
         Args:
             capsys: pytest capture fixture.
@@ -763,25 +803,60 @@ class TestChangelogContentGates:
             f"{set(headings).symmetric_difference({p.stem for p in release_note_files})}"
         )
 
-    def test_ki_1_0_0_1_renders_under_v1_0_0(self) -> None:
-        """KI-1.0.0.1 renders under the v1.0.0 entry in the committed CHANGELOG.
+    def test_ki_1_0_0_1_renders_under_v1_0_0(self, tmp_path: pathlib.Path) -> None:
+        """KI-1.0.0.1 renders under the v1.0.0 entry when regenerated from the fixture.
 
         The tmux 3.4 dashboard failure (an earlier defect) has public ID KI-1.0.0.1
         and affects v1.0.0 (the only PUBLISHED version at time of writing).
         It must appear in the Known Issues section of the v1.0.0 changelog entry.
+
+        This test regenerates CHANGELOG.md from the committed bug-ledger
+        fixture (team/tests/fixtures/bug_ledger/) into a tmp_path scratch
+        file and asserts on that output — it does NOT read the checked-in
+        CHANGELOG.md.  The checked-in artifact's Known Issues content
+        reflects whatever the operator's live bug ledger currently holds
+        (those source bug files are recycled/archived after resolution,
+        which is what makes them unavailable for re-disclosure at
+        regeneration time), so asserting on the checked-in file would
+        re-couple this test to that same live-environment state.  Sourcing
+        from the fixture instead also makes the test genuinely behavioral:
+        it fails if changelog_writer stops emitting the public ID, which a
+        static read of a pre-existing file cannot detect.
         """
-        content = _CHANGELOG_ARTIFACT.read_text(encoding="utf-8")
+        _skip_if_published_missing()
+
+        notes_dir = _RELEASE_NOTES_DIR
+        found = sorted(
+            notes_dir.glob("v*.md"),
+            key=lambda p: _changelog_writer._parse_version(p.stem),
+            reverse=True,
+        )
+        versions = [p.stem for p in found]
+        published = _changelog_writer.load_published_manifest(_DEV_TREE_ROOT)
+
+        content = _changelog_writer.regenerate(
+            _DEV_TREE_ROOT, versions, published, _FIXTURE_BUGS_DIR,
+            published_changelog=None,  # the fixture ledger is rendered without
+            # the live artifact: its published IDs belong to the live ledger
+        )
+        scratch = tmp_path / "CHANGELOG.md"
+        scratch.write_text(content, encoding="utf-8")
 
         # Extract the v1.0.0 entry (from ## v1.0.0 to the next ## v or end of file)
         entry_match = re.search(r"## v1\.0\.0.*?(?=\n## v|\Z)", content, re.DOTALL)
         assert (
             entry_match is not None
-        ), "v1.0.0 entry not found in committed CHANGELOG.md"
+        ), f"v1.0.0 entry not found in fixture-regenerated CHANGELOG:\n{content}"
         entry_text = entry_match.group(0)
 
         assert "KI-1.0.0.1" in entry_text, (
-            "KI-1.0.0.1 not found in v1.0.0 entry of committed CHANGELOG.md.\n"
-            "The tmux 3.4 dashboard failure must be disclosed under v1.0.0."
+            "KI-1.0.0.1 not found in v1.0.0 entry of the fixture-regenerated "
+            "CHANGELOG.\nThe tmux 3.4 dashboard failure must be disclosed "
+            f"under v1.0.0.\nRegenerated entry:\n{entry_text}"
+        )
+        assert "size missing" in entry_text, (
+            "The tmux 'size missing' symptom is not present in the "
+            f"fixture-regenerated v1.0.0 entry:\n{entry_text}"
         )
 
 
@@ -801,11 +876,23 @@ class TestRCModeTolerance:
       - A non-KI diff (a genuine CHANGELOG content edit that causes removals or
         non-KI additions) still fails in RC mode.
 
-    The fixture copies the real bugs directory to a temp location, then adds a
-    synthetic BUG file (an earlier defect) that references a PUBLISHED version so that
-    changelog_writer will assign it a KI Public ID and include it in the
-    regenerated CHANGELOG.  Because an earlier defect is new, its KI entry does not
-    appear in the checked-in CHANGELOG artifact.
+    The fixture copies the committed bug-ledger fixture (team/tests/fixtures/
+    bug_ledger/ — never the operator's live kanban bugs directory)
+    to a temp location, then adds a synthetic BUG file (an earlier defect)
+    that references a PUBLISHED version so that changelog_writer will assign
+    it a KI Public ID and include it in the regenerated CHANGELOG.  Because
+    an earlier defect is new, its KI entry does not appear in a baseline
+    regenerated from the fixture alone.
+
+    The "checked-in" side of the comparison is a scratch CHANGELOG.md
+    regenerated from the fixture alone (no synthetic bug) — NOT the repo's
+    real committed CHANGELOG.md.  The real committed artifact reflects
+    whatever the operator's live bug ledger currently holds (which may be
+    emptier or richer than the fixture), so comparing against it would
+    reintroduce the exact live-environment coupling this fixture design
+    avoids. Regenerating both sides of the comparison from the same committed
+    fixture keeps the diff isolated to exactly what each test intends to
+    exercise: the one synthetic post-RC addition.
 
     RC-mode tolerance uses a diff-based predicate (_diff_is_rc_tolerable) rather
     than filesystem mtime.  This avoids the mtime-reliability problem: regenerate()
@@ -847,29 +934,73 @@ test-fixture
 """
 
     def _make_temp_bugs_dir(
-        self, real_bugs_dir: pathlib.Path, tmp_path: pathlib.Path
+        self, source_bugs_dir: pathlib.Path, tmp_path: pathlib.Path
     ) -> pathlib.Path:
-        """Copy real bugs dir to a temp location, preserving file contents and mtimes.
+        """Copy source_bugs_dir to a temp location, preserving file contents and mtimes.
 
-        The copy must include all real bugs so that changelog_writer produces
-        the same base KI lines as the checked-in CHANGELOG.  The synthetic
-        an earlier defect file is then added on top of this complete copy.
+        The copy must include every record in source_bugs_dir so that
+        changelog_writer produces the same base KI lines as a baseline
+        regeneration from that same source.  The synthetic an earlier
+        defect file is then added on top of this complete copy.
 
         Args:
-            real_bugs_dir:  The live kanban bugs directory.
-            tmp_path:       pytest-provided temp directory.
+            source_bugs_dir:  The bug ledger directory to copy from — the
+                               committed fixture (team/tests/fixtures/
+                               bug_ledger/), never the operator's live kanban
+                               bugs directory.
+            tmp_path:          pytest-provided temp directory.
 
         Returns:
-            Path to the temp bugs directory containing copies of all real bugs.
+            Path to the temp bugs directory containing copies of every
+            record from source_bugs_dir.
         """
         temp_bugs = tmp_path / "bugs_copy"
         temp_bugs.mkdir(parents=True, exist_ok=True)
-        if real_bugs_dir.is_dir():
-            for bug_file in real_bugs_dir.iterdir():
+        if source_bugs_dir.is_dir():
+            for bug_file in source_bugs_dir.iterdir():
                 if bug_file.is_file():
                     dest = temp_bugs / bug_file.name
                     shutil.copy2(str(bug_file), str(dest))
         return temp_bugs
+
+    def _regenerate_fixture_baseline_changelog(
+        self, tmp_path: pathlib.Path, suffix: str = "baseline"
+    ) -> pathlib.Path:
+        """Regenerate a scratch CHANGELOG.md from the fixture ledger alone.
+
+        This is the "checked-in" side of the RC-tolerance comparison for the
+        tests below — a scratch artifact derived from the same committed
+        fixture the temp bugs dir is built from, so both sides of every
+        comparison come from the tree (no live-ledger coupling, no
+        dependency on the real repo's committed CHANGELOG.md, which may
+        differ from a fresh fixture regeneration for reasons unrelated to
+        what these tests exercise).
+
+        Args:
+            tmp_path:  pytest-provided temp directory.
+            suffix:    Filename disambiguator when called more than once
+                       per test.
+
+        Returns:
+            Path to the scratch baseline CHANGELOG.md.
+        """
+        notes_dir = _RELEASE_NOTES_DIR
+        found = sorted(
+            notes_dir.glob("v*.md"),
+            key=lambda p: _changelog_writer._parse_version(p.stem),
+            reverse=True,
+        )
+        versions = [p.stem for p in found]
+        published = _changelog_writer.load_published_manifest(_DEV_TREE_ROOT)
+
+        content = _changelog_writer.regenerate(
+            _DEV_TREE_ROOT, versions, published, _FIXTURE_BUGS_DIR,
+            published_changelog=None,  # the fixture ledger is rendered without
+            # the live artifact: its published IDs belong to the live ledger
+        )
+        baseline_path = tmp_path / f"changelog_{suffix}.md"
+        baseline_path.write_text(content, encoding="utf-8")
+        return baseline_path
 
     def _add_synthetic_post_rc_bug(self, bugs_dir: pathlib.Path) -> pathlib.Path:
         """Write an earlier defect into bugs_dir.
@@ -896,27 +1027,34 @@ test-fixture
         """RC mode passes when CHANGELOG is stale only by a new KI addition.
 
         Fixture setup:
-          1. Copy real bugs dir to a temp location (preserving file contents
-             and mtimes, so regeneration produces the same base KI output as
-             the checked-in CHANGELOG).
-          2. Add an earlier defect (synthetic bug, Affects v1.0.0, no Public ID).
-          3. Call check_freshness in RC mode (PGAI_LINT_CHANGELOG_MODE=rc).
+          1. Regenerate a scratch baseline CHANGELOG.md from the committed
+             bug-ledger fixture alone (team/tests/fixtures/bug_ledger/ —
+             never the operator's live kanban bugs directory).
+          2. Copy the fixture to a temp bugs dir and add an earlier defect
+             (synthetic bug, Affects v1.0.0, no Public ID).
+          3. Call check_freshness in RC mode (PGAI_LINT_CHANGELOG_MODE=rc),
+             comparing the temp bugs dir's regeneration against the scratch
+             baseline from step 1 (not the repo's real committed
+             CHANGELOG.md).
           4. Assert it returns True.
 
-        changelog_writer assigns KI-1.0.0.N+1 to an earlier defect during regeneration.
-        The regenerated CHANGELOG differs from the checked-in artifact by exactly
-        one added KI line (KI-1.0.0.N+1) that does not appear in the checked-in
-        artifact.  _diff_is_rc_tolerable() accepts this diff, so the gate passes.
+        changelog_writer assigns the next free KI-1.0.0.N to an earlier
+        defect during regeneration.  The regenerated CHANGELOG differs from
+        the scratch baseline by exactly one added KI line that does not
+        appear in the baseline.  _diff_is_rc_tolerable() accepts this diff,
+        so the gate passes.
 
         Args:
             tmp_path:  pytest-provided temp directory.
             capsys:    pytest capture fixture for inspecting output.
         """
-        _skip_if_bugs_dir_missing()
         _skip_if_published_missing()
 
-        # Build a temp bugs dir with the real bugs + the synthetic an earlier defect.
-        temp_bugs_dir = self._make_temp_bugs_dir(_REAL_BUGS_DIR, tmp_path)
+        # Baseline: a fresh regeneration from the fixture alone.
+        baseline_changelog = self._regenerate_fixture_baseline_changelog(tmp_path)
+
+        # Build a temp bugs dir with the fixture + the synthetic an earlier defect.
+        temp_bugs_dir = self._make_temp_bugs_dir(_FIXTURE_BUGS_DIR, tmp_path)
         self._add_synthetic_post_rc_bug(temp_bugs_dir)
 
         # Run in RC mode.  Patch _current_git_branch so the branch-aware check
@@ -929,7 +1067,7 @@ test-fixture
                 _lint, "_current_git_branch", return_value="ai_rc/v1.23.10"
             ):
                 result = _lint.check_freshness(
-                    changelog_path=_CHANGELOG_ARTIFACT,
+                    changelog_path=baseline_changelog,
                     bugs_dir=temp_bugs_dir,
                 )
         finally:
@@ -941,10 +1079,10 @@ test-fixture
         captured = capsys.readouterr()
         assert result is True, (
             "check_freshness() returned False in RC mode for a bugs dir whose only "
-            "extra entry (BUG-9999) generates a new KI line not in the checked-in "
-            "CHANGELOG.\n"
+            "extra entry generates a new KI line not in the fixture "
+            "baseline CHANGELOG.\n"
             "RC-mode tolerance must pass when the diff is only new KI additions "
-            "with IDs not present in the checked-in artifact.\n"
+            "with IDs not present in the baseline artifact.\n"
             f"stdout: {captured.out!r}\n"
             f"stderr: {captured.err!r}"
         )
@@ -959,28 +1097,31 @@ test-fixture
     ) -> None:
         """Normal mode fails when CHANGELOG is stale by a new KI addition.
 
-        Same fixture setup as test_rc_mode_tolerates_post_rc_bug_entry, but
-        check_freshness is called WITHOUT setting PGAI_LINT_CHANGELOG_MODE=rc.
-        The gate must return False: the regenerated CHANGELOG differs from the
-        checked-in artifact (new KI line for an earlier defect), and normal mode
-        byte-compares strictly.
+        Same fixture setup as test_rc_mode_tolerates_post_rc_bug_entry
+        (fixture-based scratch baseline, never the operator's live kanban
+        bugs directory), but check_freshness is called WITHOUT setting
+        PGAI_LINT_CHANGELOG_MODE=rc.  The gate must return False: the
+        regenerated CHANGELOG differs from the baseline (new KI line for an
+        earlier defect), and normal mode byte-compares strictly.
 
         Args:
             tmp_path:  pytest-provided temp directory.
             capsys:    pytest capture fixture for inspecting output.
         """
-        _skip_if_bugs_dir_missing()
         _skip_if_published_missing()
 
-        # Build a temp bugs dir with the real bugs + the synthetic an earlier defect.
-        temp_bugs_dir = self._make_temp_bugs_dir(_REAL_BUGS_DIR, tmp_path)
+        # Baseline: a fresh regeneration from the fixture alone.
+        baseline_changelog = self._regenerate_fixture_baseline_changelog(tmp_path)
+
+        # Build a temp bugs dir with the fixture + the synthetic an earlier defect.
+        temp_bugs_dir = self._make_temp_bugs_dir(_FIXTURE_BUGS_DIR, tmp_path)
         self._add_synthetic_post_rc_bug(temp_bugs_dir)
 
         # Ensure PGAI_LINT_CHANGELOG_MODE is NOT set to "rc".
         prev_mode = os.environ.pop("PGAI_LINT_CHANGELOG_MODE", None)
         try:
             result = _lint.check_freshness(
-                changelog_path=_CHANGELOG_ARTIFACT,
+                changelog_path=baseline_changelog,
                 bugs_dir=temp_bugs_dir,
             )
         finally:
@@ -990,9 +1131,9 @@ test-fixture
         captured = capsys.readouterr()
         assert result is False, (
             "check_freshness() returned True in normal mode for a bugs dir with "
-            "BUG-9999 that causes the regenerated CHANGELOG to add a new KI line.\n"
+            "a new entry that causes the regenerated CHANGELOG to add a new KI line.\n"
             "Normal mode must byte-compare strictly and return False when the "
-            "regenerated CHANGELOG differs from the checked-in artifact.\n"
+            "regenerated CHANGELOG differs from the fixture baseline artifact.\n"
             f"stdout: {captured.out!r}\n"
             f"stderr: {captured.err!r}"
         )
@@ -1064,33 +1205,46 @@ test-fixture
         diff that the original RC-mode tolerance (KI-only additions) did not handle.
 
         Fixture setup:
-          1. Write a synthetic release-notes/v99.0.0.md under the dev tree's
-             release-notes directory so that changelog_writer includes a
-             ## v99.0.0 section in the fresh regeneration.  The version uses a
-             plain semver form so _RELEASE_HEADING_RE matches it and the
-             new-release-section tolerance clause can fire.
+          1. Write a synthetic vX.Y.Z.md release-notes file under an overlay
+             directory of its own inside tmp_path — never inside the checked-out
+             dev tree — and pass it to check_freshness() via
+             extra_release_notes_dir.  changelog_writer.regenerate() and
+             _diff_is_rc_tolerable() both fall back to this overlay for a
+             version they cannot find under the real release-notes/ directory,
+             so the fresh regeneration includes a ## v99.0.0 section without
+             ever touching the real tree.  The version uses a plain semver form
+             so _RELEASE_HEADING_RE matches it and the new-release-section
+             tolerance clause can fire.
           2. Call check_freshness in RC mode with the real bugs dir and the REAL
              checked-in CHANGELOG.md (which does not have this section).
           3. Assert the gate passes — the new-release-section tolerance fires.
           4. Assert the success message mentions the tolerance clause.
 
-        Cleanup: remove the synthetic release-notes file after the test.
+        Nothing is written under the checked-out repository at any point: the
+        synthetic file lives entirely under tmp_path, so there is no teardown
+        step and no window during which the real tree is dirty (including
+        under a hard kill of the test process).
 
         This test exercises an earlier defect acceptance criteria 1-3.
 
         Args:
-            tmp_path:  pytest-provided temp directory (unused; kept for signature parity).
+            tmp_path:  pytest-provided temp directory; holds the overlay
+                       release-notes directory the synthetic fixture file
+                       lives under.
             capsys:    pytest capture fixture for inspecting output.
         """
         _skip_if_bugs_dir_missing()
         _skip_if_published_missing()
 
         # Create a synthetic release-notes file whose version does not appear in
-        # the committed CHANGELOG.md.  Use a version that sorts HIGHER than the
-        # current highest entry so it ends up at the top of the regeneration,
-        # matching the real-world new-release-section pattern.
+        # the committed CHANGELOG.md, under an overlay directory of its own
+        # (never the real release-notes/ directory).  Use a version that sorts
+        # HIGHER than the current highest entry so it ends up at the top of the
+        # regeneration, matching the real-world new-release-section pattern.
         synthetic_version = "v99.0.0"
-        synthetic_notes = _RELEASE_NOTES_DIR / f"{synthetic_version}.md"
+        extra_release_notes_dir = tmp_path / "extra_release_notes"
+        extra_release_notes_dir.mkdir()
+        synthetic_notes = extra_release_notes_dir / f"{synthetic_version}.md"
         synthetic_notes.write_text(
             f"# Release Notes: pgai-agent-kanban {synthetic_version}\n\n"
             "**Release Date:** 2099-01-01\n"
@@ -1102,29 +1256,27 @@ test-fixture
             "This file must never appear in the real release-notes directory.\n",
             encoding="utf-8",
         )
+
+        # Run in RC mode with the real bugs dir.  Patch _current_git_branch so
+        # the branch-aware check in _is_rc_mode() treats this as an RC branch
+        # regardless of the actual worktree branch (which may be ai_feature/*
+        # during development).
+        prev_mode = os.environ.get("PGAI_LINT_CHANGELOG_MODE", "")
+        os.environ["PGAI_LINT_CHANGELOG_MODE"] = "rc"
         try:
-            # Run in RC mode with the real bugs dir.  Patch _current_git_branch so
-            # the branch-aware check in _is_rc_mode() treats this as an RC branch
-            # regardless of the actual worktree branch (which may be ai_feature/*
-            # during development).
-            prev_mode = os.environ.get("PGAI_LINT_CHANGELOG_MODE", "")
-            os.environ["PGAI_LINT_CHANGELOG_MODE"] = "rc"
-            try:
-                with unittest.mock.patch.object(
-                    _lint, "_current_git_branch", return_value="ai_rc/v1.23.10"
-                ):
-                    result = _lint.check_freshness(
-                        changelog_path=_CHANGELOG_ARTIFACT,
-                        bugs_dir=_REAL_BUGS_DIR,
-                    )
-            finally:
-                if prev_mode:
-                    os.environ["PGAI_LINT_CHANGELOG_MODE"] = prev_mode
-                else:
-                    os.environ.pop("PGAI_LINT_CHANGELOG_MODE", None)
+            with unittest.mock.patch.object(
+                _lint, "_current_git_branch", return_value="ai_rc/v1.23.10"
+            ):
+                result = _lint.check_freshness(
+                    changelog_path=_CHANGELOG_ARTIFACT,
+                    bugs_dir=_REAL_BUGS_DIR,
+                    extra_release_notes_dir=extra_release_notes_dir,
+                )
         finally:
-            # Always remove the synthetic file so it does not pollute the tree.
-            synthetic_notes.unlink(missing_ok=True)
+            if prev_mode:
+                os.environ["PGAI_LINT_CHANGELOG_MODE"] = prev_mode
+            else:
+                os.environ.pop("PGAI_LINT_CHANGELOG_MODE", None)
 
         captured = capsys.readouterr()
         assert result is True, (
@@ -1142,14 +1294,14 @@ test-fixture
 
 
 # ---------------------------------------------------------------------------
-# Writer-migration drift tolerance tests (BUG-0077 / BUG-0080 enumeration)
+# Writer-migration drift tolerance tests
 # ---------------------------------------------------------------------------
 
 
 class TestWriterMigrationDriftTolerance:
-    """RC-mode tolerance for the three writer-migration drift categories (BUG-0077).
+    """RC-mode tolerance for the three writer-migration drift categories.
 
-    BUG-0080 requires that _diff_is_rc_tolerable() explicitly name and tolerate
+    _diff_is_rc_tolerable() must explicitly name and tolerate
     the three drift categories that recur between releases due to older writer
     rules being preserved in the committed CHANGELOG.md:
 
@@ -1186,7 +1338,7 @@ class TestWriterMigrationDriftTolerance:
     #
     # The checked-in CHANGELOG has the drift patterns; the regenerated CHANGELOG
     # has them stripped.  The diff must be entirely explained by Categories 3/4/5.
-    # Checked-in CHANGELOG with all three BUG-0077 drift patterns.
+    # Checked-in CHANGELOG with all three writer-migration drift patterns.
     # Structured so that ONLY the drift-category lines differ from the
     # regenerated version (no incidental blank-line drift):
     #   - "## Fixed" → Category 3 (sub-section header)
@@ -1233,8 +1385,8 @@ class TestWriterMigrationDriftTolerance:
         code fences); the regenerated CHANGELOG has them stripped.  RC-mode
         tolerance (Categories 3, 4, 5) must accept this diff and return True.
 
-        This exercises BUG-0080 acceptance criterion (a): RC-mode admission
-        passes when the only diff is the three enumerated drift categories.
+        RC-mode admission passes when the only diff is the three enumerated
+        drift categories.
         """
         is_tolerable, clause = _lint._diff_is_rc_tolerable(
             self._CHECKED_IN_WITH_DRIFT,
@@ -1242,7 +1394,7 @@ class TestWriterMigrationDriftTolerance:
         )
         assert is_tolerable is True, (
             "_diff_is_rc_tolerable() returned False for a diff containing only "
-            "the three writer-migration drift categories (BUG-0077 enumeration).\n"
+            "the three enumerated writer-migration drift categories.\n"
             "Categories 3 (## Fixed header removal), 4 (KI-resolved line removal), "
             "and 5 (triple-backtick fence removal) must all be tolerable.\n"
             f"Tolerance clause returned: {clause!r}"
@@ -1261,8 +1413,7 @@ class TestWriterMigrationDriftTolerance:
         that the tolerance set is not over-broad: only Categories 3, 4, and 5
         are admitted; all other removals are genuine staleness.
 
-        This exercises BUG-0080 acceptance criterion (c): RC-mode does not
-        over-broadly admit non-enumerated drift.
+        RC-mode must not over-broadly admit non-enumerated drift.
         """
         # The checked-in content has a non-drift removed line: a genuine content
         # line ("- Fixed item B") that is NOT one of the three drift categories.
@@ -1291,7 +1442,7 @@ class TestWriterMigrationDriftTolerance:
         assert is_tolerable is False, (
             "_diff_is_rc_tolerable() returned True for a diff containing a "
             "non-enumerated removed line ('- Feature B (genuine content...').\n"
-            "Only the three BUG-0077 drift categories are tolerable; any other "
+            "Only the three enumerated drift categories are tolerable; any other "
             "removal must be treated as genuine staleness and rejected.\n"
             f"Clause returned: {clause!r}"
         )
@@ -1309,8 +1460,8 @@ class TestWriterMigrationDriftTolerance:
         The test monkeypatches _current_git_branch to return 'ai_main' and sets
         PGAI_LINT_CHANGELOG_MODE=rc, then asserts _is_rc_mode() returns False.
 
-        This exercises BUG-0080 acceptance criterion (b): lint exits non-zero
-        (fail-fast) on ai_main for the same drift that RC-mode would tolerate.
+        The lint must exit non-zero (fail-fast) on ai_main for the same
+        drift that RC-mode would otherwise tolerate.
         """
         monkeypatch.setenv("PGAI_LINT_CHANGELOG_MODE", "rc")
         # Patch _current_git_branch at the module level to return 'ai_main'.
@@ -1321,8 +1472,7 @@ class TestWriterMigrationDriftTolerance:
         assert result is False, (
             "_is_rc_mode() returned True when the branch is 'ai_main' even "
             "with PGAI_LINT_CHANGELOG_MODE=rc set in the environment.\n"
-            "RC-mode tolerance must be suppressed on ai_main unconditionally "
-            "(fail-fast-on-ai_main requirement from BUG-0080).\n"
+            "RC-mode tolerance must be suppressed on ai_main unconditionally.\n"
             "Branch-aware suppression: 'ai_main' does not match rc/* or ai_rc/*."
         )
 
@@ -1371,7 +1521,37 @@ class TestWriterMigrationDriftTolerance:
 
 
 # ---------------------------------------------------------------------------
-# Detached-HEAD _current_git_branch() fallback tests (BUG-0081)
+# _is_rc_branch() prefix-awareness tests
+# ---------------------------------------------------------------------------
+
+
+class TestIsRcBranchPrefixAware:
+    """_is_rc_branch() must recognize a project's configured branch_prefix
+    alongside the bare 'rc/' form, not just the literal 'ai_' this repo
+    happens to ship with."""
+
+    def test_prefixed_branch_matches_its_own_configured_prefix(self) -> None:
+        assert _lint._is_rc_branch("foo_rc/v1.0.0", branch_prefix="foo_") is True
+
+    def test_bare_rc_branch_matches_regardless_of_configured_prefix(self) -> None:
+        assert _lint._is_rc_branch("rc/v1.0.0", branch_prefix="foo_") is True
+
+    def test_bare_rc_branch_matches_with_no_prefix_configured(self) -> None:
+        assert _lint._is_rc_branch("rc/v1.0.0", branch_prefix="") is True
+
+    def test_unrelated_branch_never_matches(self) -> None:
+        assert _lint._is_rc_branch("feature/x", branch_prefix="foo_") is False
+        assert _lint._is_rc_branch("feature/x", branch_prefix="") is False
+
+    def test_prefix_does_not_match_a_different_projects_prefix(self) -> None:
+        """A branch prefixed for one project's configured prefix must not
+        match when a different prefix is asserted -- the alternative added
+        is the configured prefix, not an open wildcard."""
+        assert _lint._is_rc_branch("ai_rc/v1.0.0", branch_prefix="foo_") is False
+
+
+# ---------------------------------------------------------------------------
+# Detached-HEAD _current_git_branch() fallback tests
 # ---------------------------------------------------------------------------
 
 
@@ -1494,7 +1674,7 @@ class TestCurrentGitBranchDetachedHead:
         'ai_rc/v1.23.11', _current_git_branch() must return 'ai_rc/v1.23.11'
         directly without reaching the detached-HEAD fallback loop.
 
-        This test verifies the fix does not regress the non-detached case.
+        This test verifies the detached-HEAD fallback does not regress the non-detached case.
         """
         side_effect = self._make_run_side_effect(
             symbolic_ref_output="ai_rc/v1.23.11\n",
@@ -1512,4 +1692,279 @@ class TestCurrentGitBranchDetachedHead:
             "when 'git symbolic-ref --short HEAD' succeeded with 'ai_rc/v1.23.11'.\n"
             "The primary symbolic-ref success path must return the branch name as-is "
             "without entering the detached-HEAD fallback loop."
+        )
+
+
+# ---------------------------------------------------------------------------
+# RC-mode tolerance: an empty Known Issues placeholder replaced by its first entry
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyKnownIssuesPlaceholderReplacement:
+    """RC-mode tolerance for a ``None`` placeholder that a first entry replaces.
+
+    The writer renders ``None`` under ``### Known Issues`` when a version has
+    no disclosed bug.  A bug filed post-commit against that version turns the
+    placeholder into a KI line, so the diff shows one removed ``None`` and one
+    added KI line in its place.  _diff_is_rc_tolerable() must admit exactly
+    that shape and nothing wider: the removal is tolerable only directly under
+    a Known Issues heading and only when the very next diff line is a KI entry
+    whose Public ID the checked-in artifact does not already carry.
+
+    Tests use _diff_is_rc_tolerable() directly, as the drift-category tests
+    do, because they exercise the predicate rather than the regeneration
+    pipeline.
+    """
+
+    _CHECKED_IN_EMPTY_SECTION = (
+        "## v1.0.0 — 2026-01-01\n"
+        "\n"
+        "### Implemented\n"
+        "- Feature A\n"
+        "\n"
+        "### Fixed\n"
+        "None\n"
+        "\n"
+        "### Known Issues\n"
+        "None\n"
+        "\n"
+        "*Details: [release-notes/v1.0.0.md](release-notes/v1.0.0.md)*\n"
+    )
+
+    @staticmethod
+    def _with_known_issues(*lines: str) -> str:
+        """The checked-in text with the Known Issues placeholder replaced by *lines*."""
+        body = "\n".join(lines) + "\n"
+        return TestEmptyKnownIssuesPlaceholderReplacement._CHECKED_IN_EMPTY_SECTION.replace(
+            "### Known Issues\nNone\n", "### Known Issues\n" + body
+        )
+
+    def test_placeholder_replaced_by_first_new_entry_is_tolerated(self) -> None:
+        """A ``None`` under Known Issues replaced by a new-ID KI line is admitted."""
+        regenerated = self._with_known_issues(
+            "KI-1.0.0.1 — symptom text; affects v1.0.0 · open"
+        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(
+            self._CHECKED_IN_EMPTY_SECTION, regenerated
+        )
+        assert is_tolerable is True, (
+            "_diff_is_rc_tolerable() rejected the one-line replacement of an "
+            "empty Known Issues placeholder by a KI entry whose ID the checked-in "
+            "artifact does not carry.  That is the shape every first post-commit "
+            "bug against a previously clean version produces.\n"
+            f"Clause returned: {clause!r}"
+        )
+        assert "placeholder" in clause.lower(), (
+            "_diff_is_rc_tolerable() admitted the diff but the clause description "
+            "does not name the placeholder replacement, so the log would not say "
+            f"why the gate passed.\nClause: {clause!r}"
+        )
+
+    def test_placeholder_replaced_by_several_new_entries_is_tolerated(self) -> None:
+        """Two bugs filed against the same clean version both stand in for ``None``."""
+        regenerated = self._with_known_issues(
+            "KI-1.0.0.1 — first symptom; affects v1.0.0 · open",
+            "KI-1.0.0.2 — second symptom; affects v1.0.0 · open",
+        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(
+            self._CHECKED_IN_EMPTY_SECTION, regenerated
+        )
+        assert is_tolerable is True, (
+            "_diff_is_rc_tolerable() rejected a placeholder replaced by two new "
+            "KI entries; the first entry replaces the placeholder and the second "
+            f"is an ordinary Category 1 addition.\nClause returned: {clause!r}"
+        )
+
+    def test_placeholder_replaced_by_an_already_published_id_is_rejected(self) -> None:
+        """A KI line whose ID the artifact already carries is not a first entry."""
+        checked_in = self._CHECKED_IN_EMPTY_SECTION.replace(
+            "### Fixed\nNone\n",
+            "### Fixed\n- KI-1.0.0.1 — resolved (the original meaning)\n",
+        )
+        regenerated = checked_in.replace(
+            "### Known Issues\nNone\n",
+            "### Known Issues\nKI-1.0.0.1 — a different symptom; affects v1.0.0 · open\n",
+        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(checked_in, regenerated)
+        assert is_tolerable is False, (
+            "_diff_is_rc_tolerable() admitted a placeholder replaced by a KI line "
+            "whose Public ID the checked-in artifact already publishes elsewhere.  "
+            "A reissued identifier is genuine staleness, never a first entry.\n"
+            f"Clause returned: {clause!r}"
+        )
+
+    def test_placeholder_removed_without_a_replacement_is_rejected(self) -> None:
+        """A ``None`` that simply disappears is missing content."""
+        regenerated = self._CHECKED_IN_EMPTY_SECTION.replace(
+            "### Known Issues\nNone\n", "### Known Issues\n"
+        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(
+            self._CHECKED_IN_EMPTY_SECTION, regenerated
+        )
+        assert is_tolerable is False, (
+            "_diff_is_rc_tolerable() admitted the removal of a Known Issues "
+            "placeholder that nothing replaced.  Only a KI entry standing directly "
+            f"in its place is tolerable.\nClause returned: {clause!r}"
+        )
+
+    def test_placeholder_replaced_by_prose_is_rejected(self) -> None:
+        """Only a KI entry may stand where the placeholder was."""
+        regenerated = self._with_known_issues("Nothing to see here")
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(
+            self._CHECKED_IN_EMPTY_SECTION, regenerated
+        )
+        assert is_tolerable is False, (
+            "_diff_is_rc_tolerable() admitted a Known Issues placeholder replaced "
+            "by a line that is not a KI entry.  That is a hand edit, not a "
+            f"post-commit ledger addition.\nClause returned: {clause!r}"
+        )
+
+    def test_placeholder_under_another_heading_is_rejected(self) -> None:
+        """The tolerance is scoped to Known Issues; a Fixed ``None`` is content."""
+        regenerated = self._CHECKED_IN_EMPTY_SECTION.replace(
+            "### Fixed\nNone\n",
+            "### Fixed\nKI-1.0.0.1 — symptom text; affects v1.0.0 · open\n",
+        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(
+            self._CHECKED_IN_EMPTY_SECTION, regenerated
+        )
+        assert is_tolerable is False, (
+            "_diff_is_rc_tolerable() admitted a ``None`` removed from a Fixed "
+            "section.  Fixed lines come from release notes, not the bug ledger, "
+            "so a changed Fixed section is genuine staleness whatever replaced "
+            f"the placeholder.\nClause returned: {clause!r}"
+        )
+
+    # A whole-file fixture of the shape a published version with a clean
+    # Known Issues section renders as, and the one-line change a single bug
+    # filed against it afterwards produces.
+    _FIRST_ENTRY_HEAD = (
+        "# Changelog\n\n---\n\n## v9.9.9 — 2026-01-01\n\n"
+        "### Fixed\n- something\n\n### Known Issues\n"
+    )
+    _FIRST_ENTRY_TAIL = "\n*Details: [release-notes/v9.9.9.md](release-notes/v9.9.9.md)*\n"
+    _FIRST_ENTRY_KI = "KI-9.9.9.1 — `x.md`: first bug; affects v9.9.9 · open\n"
+
+    def _first_entry_pair(self) -> tuple[str, str]:
+        """Return (checked-in, regenerated) for a placeholder replaced by one entry."""
+        checked_in = self._FIRST_ENTRY_HEAD + "None\n" + self._FIRST_ENTRY_TAIL
+        regenerated = self._FIRST_ENTRY_HEAD + self._FIRST_ENTRY_KI + self._FIRST_ENTRY_TAIL
+        return checked_in, regenerated
+
+    def test_first_entry_on_whole_file_fixture_is_tolerated(self) -> None:
+        """The full-file first-entry shape returns True with a non-empty clause."""
+        checked_in, regenerated = self._first_entry_pair()
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(checked_in, regenerated)
+        assert is_tolerable is True and clause, (
+            "_diff_is_rc_tolerable() did not admit a whole CHANGELOG in which "
+            "one version's Known Issues placeholder became its first KI entry.\n"
+            f"Result: {(is_tolerable, clause)!r}"
+        )
+
+    def test_placeholder_replaced_by_entry_then_prose_is_rejected(self) -> None:
+        """Every line filling the emptied section must be a KI entry, not just the first."""
+        checked_in, _ = self._first_entry_pair()
+        regenerated = (
+            self._FIRST_ENTRY_HEAD
+            + self._FIRST_ENTRY_KI
+            + "Hand-written note\n"
+            + self._FIRST_ENTRY_TAIL
+        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(checked_in, regenerated)
+        assert is_tolerable is False, (
+            "_diff_is_rc_tolerable() admitted a Known Issues placeholder replaced "
+            "by a KI entry followed by a non-KI line.  Only ledger entries may "
+            f"fill the section.\nClause returned: {clause!r}"
+        )
+
+    def test_placeholder_removed_with_a_second_line_is_rejected(self) -> None:
+        """A removal beside the placeholder is not covered by the replacement."""
+        checked_in = (
+            self._FIRST_ENTRY_HEAD + "None\n```\n" + self._FIRST_ENTRY_TAIL
+        )
+        _, regenerated = self._first_entry_pair()
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(checked_in, regenerated)
+        assert is_tolerable is False, (
+            "_diff_is_rc_tolerable() admitted a diff removing the placeholder "
+            "and a further line before the new entry.  The tolerance covers the "
+            f"placeholder alone.\nClause returned: {clause!r}"
+        )
+
+    def _run_check_freshness(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        rc_mode: bool,
+    ) -> tuple[bool, pathlib.Path, str, str]:
+        """Run check_freshness() on the first-entry fixture with a stubbed regeneration.
+
+        The regeneration step is replaced by one that writes the fixture's
+        regenerated text, so the gate compares exactly the placeholder
+        replacement and nothing from the real release notes or ledger.
+
+        Returns:
+            (result, changelog_path, checked_in_text, regenerated_text).
+        """
+        checked_in, regenerated = self._first_entry_pair()
+        changelog_path = tmp_path / "CHANGELOG.md"
+        changelog_path.write_text(checked_in, encoding="utf-8")
+
+        def _fake_regenerate(temp_root, bugs_dir, extra_release_notes_dir=None,
+                             published_changelog=None):
+            out = tmp_path / "regenerated.md"
+            out.write_text(regenerated, encoding="utf-8")
+            return out
+
+        monkeypatch.setattr(_lint, "_regenerate_to_temp", _fake_regenerate)
+        monkeypatch.setattr(_lint, "_is_rc_mode", lambda: rc_mode)
+        result = _lint.check_freshness(changelog_path=changelog_path, bugs_dir=tmp_path)
+        return result, changelog_path, checked_in, regenerated
+
+    def test_strict_mode_reports_placeholder_replacement_unchanged(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Strict mode fails the first-entry fixture with the plain stale report."""
+        result, changelog_path, checked_in, regenerated = self._run_check_freshness(
+            tmp_path, monkeypatch, rc_mode=False
+        )
+        captured = capsys.readouterr()
+        expected = _lint._format_remedy_block(
+            fail_summary=f"{changelog_path} is stale",
+            causes=_lint._build_causes(changelog_path, checked_in, regenerated),
+            changelog_path=changelog_path,
+            bugs_dir=tmp_path,
+        )
+        assert result is False, (
+            "check_freshness() passed the placeholder-replacement fixture in "
+            "strict mode; strict mode byte-compares and must report it stale.\n"
+            f"stdout: {captured.out!r}"
+        )
+        assert captured.err == expected + "\n", (
+            "Strict mode's report for the placeholder-replacement fixture is not "
+            "the plain stale-artifact remedy block; the RC-mode tolerance must "
+            "not leak into strict output.\n"
+            f"stderr: {captured.err!r}"
+        )
+        assert captured.out == "", f"Strict mode printed to stdout: {captured.out!r}"
+
+    def test_rc_mode_check_freshness_passes_placeholder_replacement(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """RC mode passes the first-entry fixture end to end and names why."""
+        result, _, _, _ = self._run_check_freshness(tmp_path, monkeypatch, rc_mode=True)
+        captured = capsys.readouterr()
+        assert result is True, (
+            "check_freshness() in RC mode rejected a CHANGELOG whose only change "
+            "is a Known Issues placeholder replaced by a first KI entry.\n"
+            f"stderr: {captured.err!r}"
+        )
+        assert "placeholder" in captured.out, (
+            "RC mode passed but its ok line does not name the placeholder "
+            f"replacement.\nstdout: {captured.out!r}"
         )

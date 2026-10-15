@@ -52,14 +52,26 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 # --- Resolve project ---
-_project="$(operator_args_project)"
-if [[ -z "${_project}" ]]; then
+_project_raw="$(operator_args_project)"
+if [[ -z "${_project_raw}" ]]; then
     printf 'unhalt.sh: --project is required (or set $PGAI_PROJECT_NAME)\n' >&2
     exit 1
 fi
 
+# --- Resolve project name by exact match then unambiguous prefix ---
+_project="$(pp_resolve_project_name "${_project_raw}")" || exit 1
+
 # --- Resolve project root path ---
 _project_root="$(pp_project_root "${_project}")" || exit 1
+
+# --- Idempotent: nothing to clear (checked before calling Python so the
+#     narration below can say so, matching unhalt-global.sh's fast path) ---
+_halt_path="${_project_root}/HALT"
+if [[ ! -f "${_halt_path}" ]]; then
+    printf 'unhalt: project %s was not halted (no %s found; no change made)\n' \
+        "${_project}" "${_halt_path}"
+    exit 0
+fi
 
 # --- Execute the operation via Python library ---
 if pp_run_ops pgai_agent_kanban.ops unhalt "${_project_root}"; then

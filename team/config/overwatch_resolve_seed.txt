@@ -1,0 +1,22 @@
+# overwatch_resolve: this project's override of whether OVERWATCH may act
+# autonomously on a resolvable CM block, rather than only observing and
+# raising Needs Human as today — read by pp_overwatch_resolve()
+# (team/scripts/lib/project_paths.sh) and its Python counterpart
+# resolve_overwatch_resolve() (team/pgai_agent_kanban/overwatch/
+# resolution_matrix.py). Checked here first; falls back to the kanban-wide
+# default in kanban.cfg when commented out.
+#
+# Turning this on authorises OVERWATCH to execute its documented recovery
+# playbooks (Lane A: rewrite-and-recycle a bad-fix regression; Lane B: ship
+# a HALT whose cause matches a declared operator INTENT.md entry) for THIS
+# project without waiting for a human — see team/roles/OVERWATCH.md,
+# "Autonomous Block Resolution". Everything else still escalates to Needs
+# Human exactly as today, unconditionally.
+#
+# Left commented out so a fresh project ships dark: absent, blank, or
+# unreadable resolves to false — never an error, never "true". Only an
+# unrecognized non-boolean value (a typo, 'yes') refuses loud.
+# Accepted: true|false
+# Inherits: project.cfg > kanban.cfg > false
+# Default: false
+# overwatch_resolve = false

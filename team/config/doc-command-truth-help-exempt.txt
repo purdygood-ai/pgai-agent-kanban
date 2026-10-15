@@ -1,0 +1,67 @@
+# team/config/doc-command-truth-help-exempt.txt
+#
+# Exempt list for the HELP FAILS check in
+# team/scripts/lint_doc_command_truth.py (the doc-truth lint's
+# command-existence half).
+#
+# Entry criterion: a path belongs here ONLY when every document citation
+# that resolves to it is process-internal — the file is named so a reader
+# can find it, never so a reader can run it as an operator command line
+# (a sourced prelude, a container entrypoint, or the equivalent). It does
+# NOT belong here because a --help fix is merely inconvenient to write; an
+# operator-facing script that genuinely owes a --help (coding-standards
+# directive 6) gets the --help, not an entry on this list. Compare
+# team/scripts/help_presence_exempt.txt, which draws the identical
+# distinction for the help-presence lint's own "process-internal" category.
+#
+# Format: one repo-root-relative path per line (matched against the
+# citation's *resolved* file path — not the literal text a document used
+# to cite it, so a bare-basename citation and a full-path citation of the
+# same file are treated identically). Blank lines and `#` comments are
+# ignored. Every entry must carry a reason as a comment on the line(s)
+# immediately above it — a bare list of paths with no reasons reproduces
+# the untracked-finding problem this list exists to close, one layer down.
+#
+# What this list does NOT do: it never exempts a path from the existence
+# half of the check. A listed path whose file is deleted or renamed still
+# fails to resolve and still produces a MISSING COMMAND finding — the
+# exempt-list lookup in lint_doc_command_truth.py only ever runs after
+# resolution has already succeeded.
+#
+# ---------------------------------------------------------------------------
+# process-internal: a sourced prelude, not an operator command line. It has
+# no --help branch by design — nothing ever invokes it directly, it is
+# `source`d by wake_common.sh and, per docs/OPERATIONS.md's own "wake path
+# sources shell-env and claude-env itself" note, re-sourced inline by the
+# wake path. Cited at docs/OPERATIONS.md:831 to point a reader at the
+# mechanism that re-sources shell-env/claude-env on the wake path, never to
+# suggest running it standalone.
+team/scripts/lib/wake_bootstrap.sh
+# ---------------------------------------------------------------------------
+# process-internal: a container entrypoint execed by `docker run`/the
+# container runtime, not invoked from an operator's shell. Cited at
+# docs/docker.md:281 (the "what ships in docker/" reference table) and
+# docs/docker.md:397 (the build-context note explaining the Dockerfiles
+# COPY it in) to point a reader at what starts the container, never to
+# suggest running it directly outside docker.
+docker/entrypoint.sh
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# process-internal: an importable pytest support module (the shared
+# run_dashboard_script helper), not a command line. It has no __main__ and
+# imports from the tests package, so a standalone --help cannot succeed by
+# design. Cited at docs/test-authoring-guidelines.md:496 to point a test
+# author at the helper to reuse, never to suggest running it.
+team/tests/fixtures/dashboard_render_fixture.py
+# ---------------------------------------------------------------------------
+# process-internal: the action-verb parity ledger, a data module imported by
+# the API-parity lint and the action-parity integration suite. No __main__;
+# it imports from the tests package. Cited at docs/operator-api.md:1620 to
+# name where an action verb's parity case is declared, never to run it.
+team/tests/fixtures/action_parity_cases.py
+# ---------------------------------------------------------------------------
+# process-internal: the read-verb parity ledger, the read-class twin of the
+# entry above. No __main__; it imports from the tests package. Cited at
+# docs/operator-api.md:1622 to name where a read verb's golden-pair case is
+# declared, never to run it.
+team/tests/fixtures/read_parity_cases.py

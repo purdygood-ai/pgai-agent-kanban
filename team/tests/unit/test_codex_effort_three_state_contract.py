@@ -4,23 +4,35 @@ test_codex_effort_three_state_contract.py
 Acceptance-gate suite for the reasoning-effort controls on the Codex wake
 lane (v2.1.0-reasoning-effort-controls, Acceptance items 1-4).
 
-Where team/tests/unit/test_wake_codex_effort_wiring.py (CODER-20260728-013)
-exercises provider_invoke_agent's command assembly with a hand-picked
+Where team/tests/unit/test_wake_codex_effort_wiring.py
+exercises provider_dispatch's command assembly with a hand-picked
 selected_effort/effort_source pair, this suite ties the REAL resolution
 function -- config_loader.sh's resolve_role_effort() -- to the REAL command
-assembly in one process, so the three-state contract (absent / valid /
-invalid) and the env-beats-cfg precedence are proven end to end from cfg/env
-input through to the assembled codex command, the wake-log narration, and
-the cost artifact -- not just at the command-assembly layer in isolation.
+assembly and token capture in one process, so the three-state contract
+(absent / valid / invalid) and the env-beats-cfg precedence are proven end
+to end from cfg/env input through to the assembled codex command, the
+wake-log narration, and the cost artifact -- not just at the
+command-assembly layer in isolation.
 
-Tests source the REAL production config_loader.sh and wake_codex_
-provider.sh and invoke the real resolve_role_effort() and
-provider_invoke_agent() functions directly (not a reimplementation), with a
-fake ``codex`` executable placed first on PATH that records its argv and
-emits a minimal JSONL event stream (turn.completed usage block).
+v2.9.20-engine-decomposition split the former
+wake_codex_provider.sh's single provider_invoke_agent function into the
+four-function provider interface (lib/provider_codex.sh) plus the
+provider-neutral token-capture orchestrator already centralized in
+lib/wake_driver_invoke.sh: _wd_run_provider_and_capture_tokens. This suite
+now feeds resolve_role_effort()'s output into the real
+_wd_run_provider_and_capture_tokens, which in turn calls the real
+provider_dispatch -- proving the resolution-to-dispatch-to-capture pipeline
+end to end, not a reimplementation of any of it.
+
+Tests source the REAL production config_loader.sh, provider_codex.sh, and
+wake_driver_invoke.sh and invoke the real resolve_role_effort(),
+provider_dispatch(), and _wd_run_provider_and_capture_tokens() functions
+directly, with a fake ``codex`` executable placed first on PATH that
+records its argv and emits a minimal JSONL event stream (turn.completed
+usage block).
 
 Naming: function names describe behavior under test, never bug IDs or task
-IDs (see SOP.md "Test Authoring Guidelines").
+IDs (see roles/TESTER.md "Test Authoring Guidelines").
 """
 
 from __future__ import annotations
@@ -40,7 +52,8 @@ _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _SCRIPT_DIR = _TEAM_DIR / "scripts" / "wake"
 _INI_PARSER = _TEAM_DIR / "scripts" / "lib" / "ini_parser.sh"
 _CONFIG_LOADER = _TEAM_DIR / "scripts" / "lib" / "config_loader.sh"
-_PROVIDER = _TEAM_DIR / "scripts" / "lib" / "wake_codex_provider.sh"
+_PROVIDER = _TEAM_DIR / "scripts" / "lib" / "provider_codex.sh"
+_DRIVER_INVOKE = _TEAM_DIR / "scripts" / "lib" / "wake_driver_invoke.sh"
 
 # The assembled command shape with no model and no effort resolved --
 # captured from the pre-effort behavior (identical to the baseline asserted
@@ -105,8 +118,9 @@ def _resolve_and_invoke(
 ) -> subprocess.CompletedProcess:
     """Resolve reasoning-effort via the REAL resolve_role_effort() (fed by a
     real kanban.cfg and an optional real env var), then feed the resolved
-    value/source straight into the REAL provider_invoke_agent() -- proving
-    the resolution-to-dispatch pipeline end to end in one subprocess.
+    value/source straight into the REAL _wd_run_provider_and_capture_tokens()
+    -- proving the resolution-to-dispatch-to-capture pipeline end to end in
+    one subprocess.
 
     Returns the CompletedProcess. Callers inspect stdout markers
     (RESOLVE_EXIT=, ARGV file, log file, artifact dir) to make assertions.
@@ -122,6 +136,7 @@ def _resolve_and_invoke(
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir(exist_ok=True)
     argv_capture_file = tmp_path / "argv.txt"
+    temp_root = tmp_path / "kanban_tmp"
 
     env = _base_env(bin_dir, fake_home)
     if env_effort is not None:
@@ -135,13 +150,14 @@ def _resolve_and_invoke(
     # call below -- otherwise resolve_role_effort would see the now-set var
     # and misreport the source as "env" even though it originated from cfg
     # (the documented tier-blurring behavior the model mechanism already
-    # has; see CODER-20260728-010's test suite for the same discipline).
+    # has; the model-override test suite applies the same discipline).
     _unset_cfg_derived_export = "" if env_effort is not None else "unset PGAI_CODER_EFFORT\n"
 
     harness = f"""
 set -uo pipefail
 export SCRIPT_DIR={str(_SCRIPT_DIR)!r}
 export AGENT=coder
+export PGAI_AGENT_KANBAN_TEMP_DIR={str(temp_root)!r}
 source {str(_INI_PARSER)!r}
 source {str(_CONFIG_LOADER)!r}
 load_config {str(cfg)!r}
@@ -158,16 +174,20 @@ echo "RESOLVED_EFFORT=[${{selected_effort}}]"
 echo "RESOLVED_SOURCE=[${{effort_source}}]"
 
 source {str(_PROVIDER)!r}
-provider_invoke_agent \\
-  "test prompt" \\
-  "" \\
-  "test model source" \\
-  "${{selected_effort}}" \\
-  "${{effort_source}}" \\
-  "TASK-EFFORT-CONTRACT-TEST" \\
-  {str(artifact_dir)!r} \\
-  {str(log_file)!r} \\
-  "coder"
+source {str(_DRIVER_INVOKE)!r}
+
+log() {{ echo "[$(date -Iseconds)] wake(${{AGENT}}): $*" | tee -a "$LOG_FILE"; }}
+get_release_state_field() {{ return 1; }}
+
+prompt="test prompt"
+selected_model=""
+model_source="test model source"
+task_id="TASK-EFFORT-CONTRACT-TEST"
+task_artifact_dir={str(artifact_dir)!r}
+SUBAGENT="coder"
+LOG_FILE={str(log_file)!r}
+
+_wd_run_provider_and_capture_tokens
 echo "PROVIDER_AGENT_EXIT_CODE=${{PROVIDER_AGENT_EXIT_CODE}}"
 """
 
@@ -256,6 +276,22 @@ def test_valid_cfg_effort_state_appends_override_and_records_cost_artifact(
     assert data.get("effort") == "high", f"Expected effort='high'; got: {data}"
 
 
+def test_minimal_effort_is_valid_for_codex_and_reaches_the_override(
+    tmp_path: pathlib.Path,
+) -> None:
+    """``minimal`` is in the codex provider's own effort list, so it passes
+    config load and resolution and is passed as
+    '-c model_reasoning_effort=minimal'."""
+    result = _resolve_and_invoke(tmp_path, llm_effort="minimal", env_effort=None)
+
+    assert result.returncode == 0, (
+        f"harness failed:\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+    )
+    assert "RESOLVED_EFFORT=[minimal]" in result.stdout
+    argv = _read_argv(tmp_path)
+    assert argv[argv.index("-c") + 1] == "model_reasoning_effort=minimal", argv
+
+
 # ---------------------------------------------------------------------------
 # State 3 of 3: invalid -> fail loud, naming the exact supplying key.
 # ---------------------------------------------------------------------------
@@ -297,7 +333,7 @@ def test_invalid_effort_state_fails_loud_naming_the_key(
         )
     # No provider dispatch happened -- no argv was ever captured.
     assert not (tmp_path / "argv.txt").exists(), (
-        "provider_invoke_agent must not run when effort resolution fails."
+        "provider_dispatch must not run when effort resolution fails."
     )
 
 

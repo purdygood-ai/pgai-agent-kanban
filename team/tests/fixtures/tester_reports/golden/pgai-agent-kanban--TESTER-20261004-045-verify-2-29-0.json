@@ -1,0 +1,180 @@
+{
+  "recommendation": "ship-with-serious-concerns",
+  "systemic_risk": "high",
+  "summary": null,
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "New unit test drives check-push-lag to push the dev tree's release tags to the real origin",
+      "heading": "Finding 1: New unit test drives check-push-lag to push the dev tree's release tags to the real origin",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** high (a test-isolation hole into the live install and a real remote; the conftest live-write fixture does not cover `PGAI_DEV_TREE_PATH`, and the gated runner exports it)\n**Regression:** yes\n**Integrity:** destructive\n**Severity:** high\n**Filed As:** BUG-0548 (Path C-A, filed as BUG — code defect / regression / test failure)\n**Filed By:** TESTER (autonomous Path C) — a new unit test runs the whole OVERWATCH sweep, so the push-lag check tries to push every local release tag of the real dev tree to the real GitHub remote whenever the unit suite runs.\n\nTraces to: requirement \"Host Matrix\" (\"no fixture touches the live install\"); Step 6.12 (5); SOP-core \"Git Repositories\" (only CM touches a remote).\n\n`team/tests/unit/test_overwatch_block_triage.py::test_sweep_runner_discovers_and_runs_block_triage` (added by CODER-037) runs `overwatch-sweep.sh` with no `--only`. That reaches `check-push-lag.sh`. With no `dev_tree_path` in the sandbox `project.cfg`, the check falls back to the inherited `PGAI_DEV_TREE_PATH`, which `run-unit-tests.sh:167` exports from `kanban.cfg` (`$HOME/develop/pgai-agent-kanban`). It treats the sandbox's absent `push_to_remote` as true, runs `ls-remote --tags origin`, and then `git push origin refs/tags/<tag>` for each tag the remote lacks.\n\nEvidence:\n- CODER-037..042 guard logs: 1,694 refused `git -C $HOME/develop/pgai-agent-kanban push origin refs/tags/ai_v2.x.y` (154 distinct tags per burst). The prior cycle had only fixture-repo pushes.\n- My own mandated `run-unit-tests.sh --coverage`: 154 refused records in this task's `logs/git-boundary-guard.jsonl`.\n- Reproduced in isolation with `team/tests/fixtures/git_network_stub.py` and a throwaway dev tree whose origin is a local bare repo: the stub logged `ls-remote --tags origin` then `push origin refs/tags/ai_v9.0.0` and `ai_v9.0.1`.\n\nThe integration suite made no such attempts.\n\nWhy high and destructive, argued in prose: the project is configured `push_to_remote = false` and its origin is GitHub. Outside a guarded non-CM agent wake (an operator certifying from a shell, or any `cm`-role context, where the guard lets pushes through), the certification command would publish up to 154 local-only tags. I have no evidence that this has happened; every observed attempt was refused. The fix is small (scope the test with `--only block-triage` or a sandboxed `project.cfg`, and scrub `PGAI_DEV_TREE_PATH` in the conftest fixture). CM may weigh that, but the rating is the honest one per SOP-core \"Rating a Finding\".",
+      "filed_as": "BUG-0548",
+      "filed_by": "TESTER (autonomous Path C) — a new unit test runs the whole OVERWATCH sweep, so the push-lag check tries to push every local release tag of the real dev tree to the real GitHub remote whenever the unit suite runs.",
+      "severity": "high",
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "destructive",
+      "fix_effort": "small",
+      "systemic_risk": "high",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "high (a test-isolation hole into the live install and a real remote; the conftest live-write fixture does not cover `PGAI_DEV_TREE_PATH`, and the gated runner exports it)",
+        "regression": "yes",
+        "integrity": "destructive",
+        "severity": "high",
+        "filed_as": "BUG-0548 (Path C-A, filed as BUG — code defect / regression / test failure)",
+        "filed_by": "TESTER (autonomous Path C) — a new unit test runs the whole OVERWATCH sweep, so the push-lag check tries to push every local release tag of the real dev tree to the real GitHub remote whenever the unit suite runs."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Gated unit runner red — new block_stage_deferral.py fails the package-wide by-path contract test",
+      "heading": "Finding 2: Gated unit runner red — new block_stage_deferral.py fails the package-wide by-path contract test",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one new module)\n**Severity:** medium\n**Filed As:** BUG-0551 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — a new OVERWATCH module carries the run-by-file-path guard but imports nothing from the package at load time, so the package-wide by-path test fails and the unit suite is red.\n\nTraces to: requirement Acceptance (\"TESTER certifies the full suites once\"); Step 5a.\n\n`run-unit-tests.sh --coverage`: UNIT_EXIT=1 (lint pre-flight passed; pytest `1 failed, 8460 passed, 43 skipped`). The failure is `test_package_modules_run_by_path.py::test_file_load_binds_the_package_of_its_own_tree[pgai_agent_kanban.overwatch.block_stage_deferral]`, `KeyError: 'pgai_agent_kanban'`. `block_stage_deferral.py` (new, CODER-040) has the `if not __package__:` guard, so the test discovers it, but all its package imports are function-local, so loading it by file never binds the package. Deterministic: 2/2 direct-pytest re-runs, used as a debugging aid only. The test is unchanged by this RC, so this is not a stale assertion. No runtime impact; the cost is a red certification suite.",
+      "filed_as": "BUG-0551",
+      "filed_by": "TESTER (autonomous Path C) — a new OVERWATCH module carries the run-by-file-path guard but imports nothing from the package at load time, so the package-wide by-path test fails and the unit suite is red.",
+      "severity": "medium",
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one new module)",
+        "severity": "medium",
+        "filed_as": "BUG-0551 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — a new OVERWATCH module carries the run-by-file-path guard but imports nothing from the package at load time, so the package-wide by-path test fails and the unit suite is red."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "--reason-code is taught nowhere an agent reads; SOP-core's \"four fields and no others\" is now false",
+      "heading": "Finding 3: --reason-code is taught nowhere an agent reads; SOP-core's \"four fields and no others\" is now false",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (documentation-discipline lapses of this shape recur whenever a tool gains a flag)\n**Severity:** medium\n**Filed As:** BUG-0550 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the status-writer tool now records a Block Record and accepts a reason code, but the shared operating procedure still says it touches only four fields and no agent-facing document mentions the new flag, so agents can never ask for the operator-data action triage was built to run.\n\nTraces to: Deliverable 1 (\"so agent self-blocks are classifiable\"); SOP-core Documentation Discipline Rule.\n\n`task-status.sh --state BLOCKED` now writes `## Block Record`, DONE/WONT-DO removes it, and `--reason-code` / `--action-args` exist. Both were verified behaviorally in a sandbox, with all refusals firing dual-channel. But `team/SOP-core.md` still says \"It manages four fields and no others\", and `grep -rln -- \"--reason-code\\|agent_operator_data_action\"` over `team/roles`, `team/SOP-core.md`, `subagents` and `team/read-order` finds nothing. Every agent self-block will record `agent_unclassified` (always escalates), so the AT8 `run_allowlisted_verb` path is unreachable by any agent in practice.",
+      "filed_as": "BUG-0550",
+      "filed_by": "TESTER (autonomous Path C) — the status-writer tool now records a Block Record and accepts a reason code, but the shared operating procedure still says it touches only four fields and no agent-facing document mentions the new flag, so agents can never ask for the operator-data action triage was built to run.",
+      "severity": "medium",
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (documentation-discipline lapses of this shape recur whenever a tool gains a flag)",
+        "severity": "medium",
+        "filed_as": "BUG-0550 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the status-writer tool now records a Block Record and accepts a reason code, but the shared operating procedure still says it touches only four fields and no agent-facing document mentions the new flag, so agents can never ask for the operator-data action triage was built to run."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "On-BLOCK nudge does not fire for blocks the wake makes before dispatch",
+      "heading": "Finding 4: On-BLOCK nudge does not fire for blocks the wake makes before dispatch",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (delay only; the next sweep or overwatch wake triages the block)\n**Severity:** low\n**Filed As:** BUG-0549 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — when the wake blocks a task before the agent runs (for example a failed worktree create), the chain never sets its \"blocked a task\" flag, so OVERWATCH is not nudged and the block waits for the next scheduled sweep.\n\nTraces to: Deliverable 7 (\"guarded by a 'this chain blocked a task' flag\").\n\n`_chain_blocked_a_task` is set only in `wd_finalize_task`. The pre-dispatch block sites in `wake_driver_worktree.sh`, `wake_driver_prep.sh` and `wake_driver.sh` mark `[B]` and return before finalize, so no nudge fires. One of them, `worktree_create_failed`, is an actionable triage class. The nudge itself was verified for the post-agent path: it fires after lock release, runs `--only block-triage --lock-wait 60`, the woken sweep waited through a held lock and acquired it, and no final refusal line appeared.",
+      "filed_as": "BUG-0549",
+      "filed_by": "TESTER (autonomous Path C) — when the wake blocks a task before the agent runs (for example a failed worktree create), the chain never sets its \"blocked a task\" flag, so OVERWATCH is not nudged and the block waits for the next scheduled sweep.",
+      "severity": "low",
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (delay only; the next sweep or overwatch wake triages the block)",
+        "severity": "low",
+        "filed_as": "BUG-0549 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — when the wake blocks a task before the agent runs (for example a failed worktree create), the chain never sets its \"blocked a task\" flag, so OVERWATCH is not nudged and the block waits for the next scheduled sweep."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Remaining deliverables and acceptance tests",
+      "heading": "Finding 5: Remaining deliverables and acceptance tests",
+      "level": 3,
+      "body": "**Category:** pass\n\n- D1 Block Record at every listed site, plus the census lint (fires on seeded .sh/.py violations, CONVERT, wired into the unit runner).\n- D2 resume-branch: commits kept; `branch -D` only in fresh mode; unknown mode handled as branch.\n- D3 YAML table matches the requirement row for row.\n- D4/D5 envelope and escalation, AT2, AT4a/b/c, AT5, AT6 (both), AT7, AT8 (valid and invalid), AT9, second-attempt escalations, and no re-attempt of an escalated epoch.\n- D6 / AT11 storm decisions.\n- D8 config precedence, with bash/Python parity.\n- D9 docs plus docs manifest; Registration Table entries present.\n- Lifecycle: kept across promote, removed at DONE/WONT-DO.\n- AT13 HALT_OVERWATCH (flag and env), lock held, and the grep guard.\n- 6.1, 6.8 (`test_cm_release_synthetic.py` passed in the integration run), 6.9, 6.10, 6.13. Details are in the Verification Log below.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "block_triage=false gives actionable blocks no Diagnosis",
+      "heading": "Finding 6: block_triage=false gives actionable blocks no Diagnosis",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nDeliverable 8 says \"Block Records and diagnoses are still written\". With `false`, escalation-class blocks get `Needs Human: yes` plus the Diagnosis. Actionable blocks are skipped with only a stderr line: no Diagnosis and no actions.log row. `docs/overwatch.md` documents exactly this behavior, and I read \"diagnoses\" as D5's escalation diagnoses. Under the other reading this would be a gap.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "typed action args canonicalise a bare version",
+      "heading": "Finding 7: typed action args canonicalise a bare version",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`--action-args ... version=2.28.0` is accepted and stored as `v2.28.0`. The stored and acted-on value always matches `^v\\d+\\.\\d+\\.\\d+$`, as the module docstring states.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-SERIOUS-CONCERNS",
+    "systemic_risk": "high"
+  }
+}

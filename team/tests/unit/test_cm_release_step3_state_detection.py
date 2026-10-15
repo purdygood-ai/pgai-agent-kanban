@@ -25,7 +25,7 @@ minimal synthetic git repository so the tests can run without access to a
 live remote.  The bash snippet under test mirrors the Step 3 logic; when
 Step 3 in release.sh changes, this snippet must be kept in sync.
 
-Test naming follows SOP.md Anti-pattern 6: names describe observed behavior,
+Test naming follows roles/TESTER.md Anti-pattern 6: names describe observed behavior,
 not bug IDs, version numbers, or scaffolding labels.
 """
 
@@ -38,6 +38,18 @@ import textwrap
 import pytest
 
 from tests.unit.shell_harness import run_bash
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="cm-release-step3-state-detection")
 
 # ---------------------------------------------------------------------------
 # Bash snippet: Step 3 state-detection logic extracted for unit testing

@@ -6,7 +6,7 @@
 # MANUAL-REVIEW-REQUIRED) and offending paths.
 #
 # Invokes the existing lint scripts (lint_help_presence.py,
-# lint_comment_provenance.py, lint_env_bootstrap.py, lint_lib_function_dedupe.py)
+# lint_hygiene.py, lint_env_bootstrap.py, lint_lib_function_dedupe.py)
 # for directives they already cover and runs direct checks for the rest.
 #
 # Usage:
@@ -17,7 +17,11 @@
 #                       Default: inferred from this script's location (two
 #                       directories above team/scripts/).
 #   --output-file PATH  Where to write the machine-readable results file.
-#                       Default: <repo-root>/artifacts/coding-standards-audit-data.md
+#                       Default: <temp-root>/coding-standards-audit-data.md,
+#                       where <temp-root> is $PGAI_AGENT_KANBAN_TEMP_DIR or,
+#                       unset, the framework temp root kanban.cfg [paths]
+#                       configures (tmp_root/tmp_subdir) -- never inside the
+#                       repository.
 #   --verbose, -v       Print each directive's check output while running.
 #   --help, -h          Print this message and exit 0.
 #
@@ -95,7 +99,11 @@ Options:
                       Default: inferred from this script's location (two
                       directories above team/scripts/).
   --output-file PATH  Where to write the machine-readable results file.
-                      Default: <repo-root>/docs/coding-standards-audit-data.md
+                      Default: <temp-root>/coding-standards-audit-data.md,
+                      where <temp-root> is $PGAI_AGENT_KANBAN_TEMP_DIR or,
+                      unset, the framework temp root kanban.cfg [paths]
+                      configures (tmp_root/tmp_subdir) -- never inside the
+                      repository.
   --verbose, -v       Print each directive's check output while running.
   --help, -h          Print this message and exit 0.
 
@@ -114,7 +122,7 @@ This script delegates to existing lint tools for directives they cover:
   D01  lint_lib_function_dedupe.py (duplicate function names)
   D05  lint_env_bootstrap.py (env-bootstrap ordering violations)
   D06  lint_help_presence.py (missing --help flags)
-  D08  lint_comment_provenance.py (provenance references in code)
+  D08  lint_hygiene.py --classes provenance (provenance references in code)
 Other directives receive structural checks or MANUAL-REVIEW-REQUIRED verdicts.
 
 Examples:
@@ -144,16 +152,15 @@ if [[ -z "$REPO_ROOT" ]]; then
   REPO_ROOT="$DEFAULT_REPO_ROOT"
 fi
 
-if [[ -z "$OUTPUT_FILE" ]]; then
-  OUTPUT_FILE="${REPO_ROOT}/docs/coding-standards-audit-data.md"
-fi
-
 # ---------------------------------------------------------------------------
 # Validate repo root
 # ---------------------------------------------------------------------------
 if [[ ! -d "$REPO_ROOT" ]]; then
   echo "ERROR: repo root not found: $REPO_ROOT" >&2
   echo "Pass --repo-root to specify the repository root explicitly." >&2
+  # CONVERT: audit precondition -- a missing repo root cannot be audited,
+  # but this costs a skipped quality report, not a runtime failure.
+  # CENSUS-ANCHOR: audit-coding-standards-01
   exit 2
 fi
 
@@ -163,7 +170,22 @@ DOCS_DIR="${REPO_ROOT}/docs"
 
 if [[ ! -d "$SCRIPTS_DIR" ]]; then
   echo "ERROR: team/scripts/ not found under repo root: $REPO_ROOT" >&2
+  # CONVERT: audit precondition -- same reasoning as audit-coding-standards-01.
+  # CENSUS-ANCHOR: audit-coding-standards-02
   exit 2
+fi
+
+# shellcheck source=lib/temp.sh
+source "${SCRIPTS_DIR}/lib/temp.sh"
+# pp_run_ops from this script's own tree (the JSON reads below).
+# shellcheck source=lib/pp_run_ops.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pp_run_ops.sh"
+
+# The default results file lives under the framework temp root (resolved
+# by temp.sh, sourced above), so a default run writes nothing into the
+# repository it audits.
+if [[ -z "$OUTPUT_FILE" ]]; then
+  OUTPUT_FILE="$(pgai_temp_dir)/coding-standards-audit-data.md"
 fi
 
 # ---------------------------------------------------------------------------
@@ -522,20 +544,31 @@ fi
 # ===========================================================================
 # D08 — Comments describe behavior, never process history
 # ===========================================================================
-# Automated: lint_comment_provenance.py.
-echo "  [D08] checking comment provenance (lint_comment_provenance.py)..."
+# Automated: lint_hygiene.py --classes provenance. The hygiene lint is a
+# quality-class scan that always exits 0 -- findings are reported, never a
+# reason to fail a build (see lint_hygiene.py's own "Exit codes" notes) --
+# so the verdict here is read from the --findings-file's finding count
+# rather than the process exit code, unlike the other run_lint_capture
+# call sites in this script that key off a coarse pass/fail exit.
+echo "  [D08] checking comment provenance (lint_hygiene.py --classes provenance)..."
 
-if [[ -f "${SCRIPTS_DIR}/lint_comment_provenance.py" ]]; then
+if [[ -f "${SCRIPTS_DIR}/lint_hygiene.py" ]]; then
   D08_OUT=""; D08_EXIT=0
-  run_lint_capture D08_OUT D08_EXIT "${SCRIPTS_DIR}/lint_comment_provenance.py"
-  if [[ "$D08_EXIT" -ne 0 ]]; then
+  D08_FINDINGS_FILE="$(pgai_temp_dir)/lint/audit-d08-hygiene-findings.json"
+  mkdir -p "$(dirname "$D08_FINDINGS_FILE")"
+  run_lint_capture D08_OUT D08_EXIT "${SCRIPTS_DIR}/lint_hygiene.py" \
+    --classes provenance --findings-file "$D08_FINDINGS_FILE"
+  # The findings file holds a JSON array; a missing or unreadable one counts 0.
+  D08_FINDING_COUNT="$(pp_run_ops pgai_agent_kanban.lib.json_field --file --length "$D08_FINDINGS_FILE" 2>/dev/null)" \
+    || D08_FINDING_COUNT=0
+  if [[ "$D08_FINDING_COUNT" -gt 0 ]]; then
     write_directive "D08" "Comments describe behavior" "FINDINGS" "$D08_OUT"
   else
     write_directive "D08" "Comments describe behavior" "PASS" "$D08_OUT"
   fi
 else
   write_directive "D08" "Comments describe behavior" "FINDINGS" \
-    "lint_comment_provenance.py not found at ${SCRIPTS_DIR}/lint_comment_provenance.py"
+    "lint_hygiene.py not found at ${SCRIPTS_DIR}/lint_hygiene.py"
 fi
 
 # ===========================================================================
@@ -750,6 +783,10 @@ echo ""
 
 # Exit 0 when no MANUAL-REVIEW-REQUIRED or FINDINGS; exit 1 otherwise.
 if [[ $MANUAL_REVIEW_COUNT -gt 0 || $FINDINGS_COUNT -gt 0 ]]; then
+  # CONVERT: quality-class finding, zero runtime-failure risk -- the
+  # gated runners' quality-lint wrapper always returns 0 regardless of
+  # this exit code (see docs/blocking-site-census.md's CONVERT rollup).
+  # CENSUS-ANCHOR: audit-coding-standards-03
   exit 1
 fi
 

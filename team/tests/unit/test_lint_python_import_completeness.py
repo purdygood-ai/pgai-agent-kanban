@@ -46,7 +46,7 @@ Test cases:
  12. **_PACKAGE_TO_IMPORT_NAMES mapping applied** — PyYAML declared in
      requirements produces 'yaml' in the covered-import set, not 'pyyaml'.
 
- 13. **Remedy block (PRIORITY-0001-gates-prescribe-remedies)**: forcing a
+ 13. **Remedy block (the gates-prescribe-remedies pattern)**: forcing a
      missing-import failure prints the full three-part remedy block required
      by docs/coding-standards.md ("Gates prescribe, not just diagnose") —
      cause(s) naming the offending module and file, a numbered fix block of
@@ -153,6 +153,9 @@ def _make_minimal_tree(
 
 def test_real_tree_lint_clean():
     """The lint exits 0 on the actual codebase."""
+    # Deliberately exercises the real team/ + repo root (not a fixture):
+    # this is a live regression guard, not an isolated behavior a fixture
+    # could stand in for.
     exit_code = _lint.main([
         "--team-dir", str(_TEAM_DIR),
         "--repo-root", str(_REPO_ROOT),
@@ -407,7 +410,7 @@ def test_pyyaml_maps_to_yaml(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Remedy-block tests (PRIORITY-0001-gates-prescribe-remedies)
+# Remedy-block tests (the gates-prescribe-remedies pattern)
 # ---------------------------------------------------------------------------
 
 # A numbered fix-command line, e.g. "  1. echo \"boto3\" >> \"...\"".
@@ -423,7 +426,7 @@ _ANGLE_BRACKET_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][\w -]*>")
 class TestImportCompletenessRemedyBlock:
     """The remedy block: cause(s), numbered verbatim commands, re-lint, rule.
 
-    Exercises PRIORITY-0001-gates-prescribe-remedies' first lint target end
+    Exercises the gates-prescribe-remedies pattern's first lint target end
     to end: force a missing-import failure, assert the remedy block contains
     every required part, assert the printed commands carry no angle-bracket
     placeholders, and then actually execute the printed commands verbatim to

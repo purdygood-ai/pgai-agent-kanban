@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# cm-open-doc.sh
+# team/scripts/cm/open-doc.sh
 # CM operation: open a new document/creative project version.
 #
 # Usage:
-#   cm-open-doc.sh <project-name> [target-version]
-#   cm-open-doc.sh --help
+#   cm/open-doc.sh <project-name> [target-version]
+#   cm/open-doc.sh --help
 #
 # Arguments:
 #   project-name    — project identifier (lowercase letters, digits, hyphens)
@@ -89,8 +89,8 @@ Exit codes:
   1  Missing project-name, invalid project name or version, or missing version
 
 Example:
-  cm-open-doc.sh kids-story-creek v0.0.1
-  PGAI_TARGET_VERSION=v0.0.1 cm-open-doc.sh kids-story-creek
+  scripts/cm/open-doc.sh kids-story-creek v0.0.1
+  PGAI_TARGET_VERSION=v0.0.1 scripts/cm/open-doc.sh kids-story-creek
 
 Configuration:
   PGAI_AGENT_KANBAN_ROOT_PATH  kanban root (default: ~/pgai_agent_kanban)
@@ -142,13 +142,14 @@ unset _OPEN_DOC_SCRIPT_DIR
 set -euo pipefail
 
 # --- Clean exit handling ---
-cleanup_on_exit() {
-  local exit_code=$?
-  jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
-  wait 2>/dev/null || true
-  exit $exit_code
-}
+# shellcheck source=../lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
 trap cleanup_on_exit EXIT
+
+# release_state_section and pp_run_ops: release-state.md is read through the
+# one release-state reader and written through cm/write_rc_state.py.
+# shellcheck source=../lib/cm/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/common.sh"
 
 # --- Validate project name ---
 PROJECT_NAME_RE='^[a-z0-9][a-z0-9-]*$'
@@ -192,7 +193,13 @@ DOC_WORK_DIR="${_PROJECT_TEMP}/doc/${TARGET_VERSION}"
 
 # --- Helper: write Active RC to release-state.md ---
 # Called on BOTH first-open and idempotent-re-open paths.
-# Reads the existing Last Released field to preserve it; writes Active RC = TARGET_VERSION.
+# Sets Active RC = TARGET_VERSION and RC Opened At / RC Opened By Task = none
+# through the release-state writer (cm/write_rc_state.py release-state), which
+# changes only the fields it is given and keeps every other line -- Last
+# Released and any appended event block -- as it was. Last Released is read
+# first (as a section ending at the next "##" heading, so an empty one never
+# reads as the section after it) and is set to 'none' only when it has no
+# value or is absent.
 # Non-blocking: failure logs a warning; open-doc continues.
 write_active_rc() {
   local rs_path="${KANBAN_ROOT}/projects/${PROJECT_NAME}/release-state.md"
@@ -201,36 +208,14 @@ write_active_rc() {
     echo "[cm-open-doc]   Create the file (projects/${PROJECT_NAME}/release-state.md) before running open-doc." >&2
     return
   fi
-  # Read existing Last Released to preserve it; fall back to 'none'.
   local last_released
-  last_released="$(python3 - "$rs_path" 'Last Released' <<'PY' || echo "none"
-import re, sys, pathlib
-text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-pattern = sys.argv[2]
-m = re.search(r"##\s*" + re.escape(pattern) + r"\s*\n(.*?)(?=\n##|\Z)", text, re.IGNORECASE | re.DOTALL)
-print(m.group(1).strip() if m else "none")
-PY
-)"
-  [[ -z "$last_released" ]] && last_released="none"
+  last_released="$(release_state_section "$rs_path" "Last Released")" || last_released=""
+  local -a fields=(--active-rc "$TARGET_VERSION" --rc-opened-at none --rc-opened-by-task none)
+  if [[ -z "$last_released" ]]; then
+    fields+=(--last-released none)
+  fi
 
-  # Write complete release-state.md with Active RC = TARGET_VERSION.
-  # Mirrors open-rc.sh Step (lines ~315-334): canonical here-doc, no sed/regex.
-  if cat > "$rs_path" <<EOF
-# Release State
-
-## Active RC
-${TARGET_VERSION}
-
-## RC Opened At
-none
-
-## RC Opened By Task
-none
-
-## Last Released
-${last_released}
-EOF
-  then
+  if pp_run_ops pgai_agent_kanban.cm.write_rc_state release-state "$rs_path" "${fields[@]}"; then
     echo "  release-state.md updated: Active RC -> ${TARGET_VERSION}"
     echo "  Path: ${rs_path}"
   else
@@ -301,7 +286,7 @@ echo "  Per-RC release-state JSON written: $RC_STATE_JSON"
 
 # --- Print summary ---
 echo ""
-echo "cm-open-doc.sh complete."
+echo "scripts/cm/open-doc.sh complete."
 echo "  Project:         ${PROJECT_NAME}"
 echo "  Version:         ${TARGET_VERSION}"
 echo "  Temp root:       ${TEMP_ROOT}"

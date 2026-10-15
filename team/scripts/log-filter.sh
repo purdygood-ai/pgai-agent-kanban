@@ -5,9 +5,15 @@
 # Reads from stdin (pipe) or a log file argument.
 #
 # Usage:
-#   log-filter.sh [logfile]
+#   log-filter.sh [--kanban-root <path>] [logfile]
 #   tail -f /path/to/log | log-filter.sh
 #   log-filter.sh /path/to/log
+#
+# Options:
+#   --kanban-root <path>  Kanban root whose kanban.cfg is read (default:
+#                         $PGAI_AGENT_KANBAN_ROOT_PATH)
+#   --help, -h            Print this usage and exit 0
+#   Any other --flag is refused with a usage error (exit 1).
 #
 # Noise filters (lines suppressed by default):
 #   - Empty lines
@@ -24,27 +30,31 @@
 #   - Timestamp prefix [2026-...]          -> dim timestamp, normal message
 #   - All other lines                      -> normal
 #
-# Configuration (via config.cfg):
-#   PGAI_DASHBOARD_LOG_SUPPRESS_PATTERNS — colon-separated list of grep-E patterns to suppress
-#
 # Environment:
+#   PGAI_DASHBOARD_LOG_SUPPRESS_PATTERNS — colon-separated list of grep-E patterns to suppress
 #   TERM=dumb  — disables all ANSI codes
+#   NO_COLOR=1 — disables all ANSI codes
 #   PGAI_LOG_FILTER_VERBOSE=1 — disable noise filtering (show all lines)
 
 # shellcheck source=lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+# shellcheck source=lib/header_help.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/header_help.sh"
+# shellcheck source=lib/error_contract.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
 
 # --- Argument parsing: strip --* flags before passing args to awk ---
 # Recognized flags:
 #   --kanban-root <path>   (sets KANBAN_ROOT override; value is consumed and stored)
-#   any other --* flag     (silently discarded)
+#   --help, -h             (prints the header above and exits 0)
+#   any other --* flag     (refused: usage error, exit 1)
 # Remaining non-flag arguments are passed through to awk as the log file path.
 _REMAINING_ARGS=()
 _KANBAN_ROOT_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
-      sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      header_help_print "${BASH_SOURCE[0]}"
       exit 0
       ;;
     --kanban-root)
@@ -53,8 +63,13 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --*)
-      # Discard any other double-dash flag (no value consumed)
-      shift
+      # BLOCK-WORTHY: an option this filter does not define (a mistyped
+      # --kanban-root, say) would otherwise be dropped and the log rendered
+      # as if it had never been given; refused before any input is read.
+      pgai_emit_error_contract "log_filter.unknown_option" \
+        "log-filter.sh: unknown option '$1'. Usage: log-filter.sh [--kanban-root <path>] [logfile]. Accepted options: --kanban-root, --help." \
+        "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/log-filter.sh --help"
+      exit 1
       ;;
     *)
       # Non-flag argument: keep it

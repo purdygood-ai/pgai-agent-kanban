@@ -21,7 +21,7 @@ Test coverage (four acceptance items from an earlier defect):
   2. Semver regression (TestSemverEligibilityRegression):
      On a release-project fixture, _disc_list_all_eligible_requirements with
      version_semantics=semver produces the expected ascending-version ordering,
-     identical to what a pre-fix run would produce.  This is a byte-identical
+     identical to the plain semver ordering.  This is a byte-identical
      assertion over a deterministic fixture.
 
   3. Skip-logging (TestSkipLogging):
@@ -33,7 +33,7 @@ Test coverage (four acceptance items from an earlier defect):
        for label-semantics projects"
 
 Naming convention: test names describe the behavior under test, never the bug
-ID or the ticket ID that prompted them (SOP.md Anti-pattern 6).
+ID or the ticket ID that prompted them (roles/TESTER.md Anti-pattern 6).
 """
 
 from __future__ import annotations
@@ -328,13 +328,13 @@ def _add_label_version_requirements_file(
     The filename must match BUNDLE_RE (which requires v<N>.<N>.<N>-... form)
     so the eligibility filter considers it at all.  The label version string
     lives in the ## Target Version header, not in the filename — that is the
-    exact scenario an earlier defect describes: a file whose filename satisfies the
+    exact scenario the test guards: a file whose filename satisfies the
     bundle pattern but whose Target Version is a non-semver label string.
 
-    Pre-fix: _disc_list_all_eligible_requirements applied parse_ver() to the
-    label Target Version → ValueError → file silently discarded.
+    Guarded defect: _disc_list_all_eligible_requirements applies parse_ver()
+    to the label Target Version → ValueError → file silently discarded.
 
-    Post-fix: label-semantics path skips parse_ver entirely; file is eligible.
+    Expected: label-semantics path skips parse_ver entirely; file is eligible.
 
     Args:
         kanban_root:  Kanban root path.
@@ -431,7 +431,7 @@ class TestTestingOnlyProjectFullPath:
 
         an earlier defect root cause: the eligibility filter applied semver parsing to all
         projects, so label versions raised ValueError and were silently discarded.
-        This test confirms the fix: a label-version doc is selected, PM is queued,
+        This test confirms label versions are kept: the doc is selected, PM is queued,
         and the bundle is marked 'running'.
         """
         root = _build_testing_only_project_root(tmp_path)
@@ -638,11 +638,11 @@ class TestTestingOnlyProjectFullPath:
 
 
 class TestSemverEligibilityRegression:
-    """Semver-path eligibility output is byte-identical before and after the fix.
+    """Semver-path eligibility output is unchanged by label-version support.
 
     These tests run against a release-project fixture and assert the exact
     ordering and selection of the eligible-list — the semver-path invariant
-    that the fix must preserve.
+    that label-version support must preserve.
     """
 
     def test_eligible_list_is_ascending_semver_order(
@@ -655,7 +655,7 @@ class TestSemverEligibilityRegression:
         in non-ascending order), the eligible-list output lists them in strict
         ascending semver order: v0.0.1, v0.0.2, v0.0.3.
 
-        This is the invariant the fix must preserve for the semver path.
+        This is the invariant label-version support must preserve for the semver path.
         """
         root = _build_release_project_root(tmp_path)
         project_name = "rel_proj"

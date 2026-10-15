@@ -6,6 +6,28 @@
 
 ---
 
+## v2.41.0 — 2026-10-15
+
+### Implemented
+- **"Why isn't it moving?" in one line.** `why.sh` prints one verdict per project (RUNNING, BLOCKED, HALTED, IDLE or STUCK-LOCK) with the cause and a runnable fix. `--details` adds lock holders, queues and posture.
+- **A full operator API.** Every operator verb has a REST twin: halt, halt-after, defer, wake-now, intake, cancel and unwind RC, deep-verify, add and remove project, archive. The CLI and the API call the same code. Loopback-only, with a versioned interface contract.
+- **Ship by default, with a record.** HALT means "shipping would make things worse", not "the tester found something". Findings ship as known issues and become the next RC's bugs. Each project has a ship posture (`matrix` or `always`); `cm/release.sh --decide-only` previews the decision and `--force --reason` overrides it with a recorded reason.
+- **Low-severity bugs wait their turn.** Bugs at or below `deferred_bug_level` do not set the release tempo; they ride along when a more serious bug opens an RC.
+- **OVERWATCH clears blocks itself.** Blocked tasks carry a structured block record. OVERWATCH resolves the mechanical cases (timeouts, provider refusals, stale worktrees, merge-only gates) and writes a short diagnosis for the rest.
+- **Dashboard v2.** Fifteen windows plus one per project: an operator window with a shell, a schedule window with per-agent firings, metrics with time spent blocked, and a human-review window.
+- **Containers you can leave running.** `docker/build.sh <flavor>` builds the debian, rocky9 or claude-abliterated image (a custom Claude build for local LLMs). `container-up.sh`, `container-down.sh` (soft stop) and `container-status.sh` run the kanban detached in one named container.
+- **Finished work archives itself.** After each release, finished items beyond the newest 55 per category move to `archive/<project>/`, logged and restorable with `archive.sh --restore`.
+
+### Fixed
+None
+
+### Known Issues
+None
+
+*Details: [release-notes/v2.41.0.md](release-notes/v2.41.0.md)*
+
+---
+
 ## v2.4.0 — 2026-08-09
 
 v2.4.0 is the fourth public release: the resilient-autonomy era.
@@ -216,8 +238,8 @@ selection model. Defects are tracked on the internal ledger and
 described by pattern in the CHANGELOG.
 All five public Known Issues disclosed at v1.0.0 are resolved as of
 this release:
-- KI-1.0.0.1 — `scripts/dashboard/create.sh` fails on Ubuntu 24.04 with `size missing` emitted by tmux, leaving the dashboard partially constructed (window 0 never splits past one pane); affects v1.0.0 · fixed in v1.23.0
-- KI-1.0.0.2 — During verification of RC ai_rc/v2.0.0, both gated runners exit 1 at the CHANGELOG-freshness pre-flight, before pytest runs: - `bash team/scripts/run-unit-tests.sh --coverage` → exit 1 - `bash team/scripts/run-integration-tests.sh --coverage` → exit 1 Both fail with: `lint_changelog_freshness: FAIL — CHANGELOG.md is stale`; affects v1.0.0 · fix pending next release
+- KI-1.0.0.1 — resolved
+- KI-1.0.0.2 — resolved
 - KI-1.0.0.3 — resolved
 - KI-1.0.0.4 — resolved
 - KI-1.0.0.5 — resolved
@@ -238,8 +260,7 @@ None (bugfix release)
 None
 
 ### Known Issues
-KI-1.0.0.1 — `scripts/dashboard/create.sh` fails on Ubuntu 24.04 with `size missing` emitted by tmux, leaving the dashboard partially constructed (window 0 never splits past one pane); affects v1.0.0 · fixed in v1.23.0
-KI-1.0.0.2 — During verification of RC ai_rc/v2.0.0, both gated runners exit 1 at the CHANGELOG-freshness pre-flight, before pytest runs: - `bash team/scripts/run-unit-tests.sh --coverage` → exit 1 - `bash team/scripts/run-integration-tests.sh --coverage` → exit 1 Both fail with: `lint_changelog_freshness: FAIL — CHANGELOG.md is stale`; affects v1.0.0 · fix pending next release
+None
 
 *Details: [release-notes/v1.0.0.md](release-notes/v1.0.0.md)*
 

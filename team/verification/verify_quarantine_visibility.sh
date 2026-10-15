@@ -271,19 +271,19 @@ while IFS= read -r line; do
     echo "    ${line}"
 done <<< "$ATTENTION_OUTPUT"
 
-if echo "$ATTENTION_OUTPUT" | grep -q "QUARANTINED FILES"; then
+if grep -q "QUARANTINED FILES" <<< "$ATTENTION_OUTPUT"; then
     pass "attention pane renders QUARANTINED FILES header"
 else
     fail "attention pane missing QUARANTINED FILES header"
 fi
 
-if echo "$ATTENTION_OUTPUT" | grep -q "$FIXTURE_NAME"; then
+if grep -q "$FIXTURE_NAME" <<< "$ATTENTION_OUTPUT"; then
     pass "attention pane lists fixture filename: ${FIXTURE_NAME}"
 else
     fail "attention pane missing fixture filename: ${FIXTURE_NAME}"
 fi
 
-if echo "$ATTENTION_OUTPUT" | grep -q "priority"; then
+if grep -q "priority" <<< "$ATTENTION_OUTPUT"; then
     pass "attention pane shows original_type: priority"
 else
     fail "attention pane missing original_type field"
@@ -339,7 +339,7 @@ if [[ -z "$ATTENTION_EMPTY" ]]; then
     pass "attention pane suppressed when no quarantined files"
 else
     echo "    ${ATTENTION_EMPTY}"
-    if echo "$ATTENTION_EMPTY" | grep -q "QUARANTINED FILES"; then
+    if grep -q "QUARANTINED FILES" <<< "$ATTENTION_EMPTY"; then
         fail "attention pane still shows QUARANTINED FILES header after deletion"
     else
         pass "attention pane does not show QUARANTINED FILES header after deletion"

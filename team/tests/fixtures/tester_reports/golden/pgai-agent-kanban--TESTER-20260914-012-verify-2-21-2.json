@@ -1,0 +1,199 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Fresh verification of `ai_rc/v2.21.2` against\n`requirements/v2.21.2-priority-bundle-20260914.md`, which bundles exactly one item,\n`PRIORITY-0002-env-coupled-fixture-detector.md`. The RC is small and single-themed:\na shared subprocess-environment builder promoted to `team/tests/fixtures/`, both\ngolden-comparison harnesses converted onto it, a new quality-class lint (`AP7`)\nthat reports the golden-comparison-plus-inherited-environment pairing, and the\ndocumentation and survey that give the class a remedy and a durable measurement.\nEvery acceptance criterion in the priority is met, and each one was exercised\nrather than read: the new lint was proven to fire on a production-shaped\nreintroduction and to stay silent on both negative controls and on the converted\ntree, and its finding was proven to land in a gated runner's findings file. Both\ngated runners exit 0, and they exit 0 identically under all three\n`MAX_TASK_SECONDS` values the priority names. No prior run's artifacts were read;\nevery check below was re-run from scratch.\n\nThe two findings that keep this off `PASS` are about the chain around the release,\nnot about what the release built. The RC carries a commit a human wrote by hand\nonto the release branch while the lane was halted, which is the autonomous-operation\ncriterion failing (Step 6.12, check 3); and one quality-class lint instance had no\nbug tracking it. Both are filed via Path C (autonomous follow-up filing —\nnon-blocking). Nothing found makes shipping v2.21.2 worse than not shipping it.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Shared scrubbed-environment helper exists, is documented, and is used by both golden harnesses",
+      "heading": "Finding 1: Shared scrubbed-environment helper exists, is documented, and is used by both golden harnesses",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority acceptance criterion 1. `team/tests/fixtures/scrubbed_subprocess_env.py`\n(new, 120 lines, read in full) exposes\n`build_scrubbed_env(home_dir=..., extra_path_dirs=..., lang=..., extra_env=...)`. It\nconstructs `PATH`/`HOME`/`LANG` from a fixed set and never merges `os.environ` —\nverified by reading the implementation and by its own unit tests, which assert the\nresult's key set is exactly `{PATH, HOME, LANG}` and that a variable planted in the\ntest process does not appear in the result.\n\n`team/TESTING.md` documents it in the fidelity-helper table and adds a\n\"three subprocess-facing helpers divide cleanly\" paragraph saying which to reach\nfor. All three named consumers use it:\n\n- `team/tests/integration/test_engine_behavior_baseline_harness.py` — converted.\n- `team/tests/integration/test_helloworld_flow_harness.py` — converted.\n- `team/tests/integration/wake_entrypoint_acceptance_harness.py` — `scrubbed_wake_env`\n  is now re-expressed on top of the shared builder rather than carrying its own copy\n  of the same base, which is the de-duplication the priority asked for.\n\nBoth conversions keep the case-specific values (`PGAI_AGENT_KANBAN_TEMP_DIR`, and in\nthe baseline harness the two pinned budget variables) in `extra_env`, and both\nprepend `pathlib.Path(sys.executable).parent` so the subprocess still resolves a\n3.12+ `python3` — the one real hazard of a scrubbed `PATH`, handled explicitly and\ncommented at the site.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "The AP7 quality-class lint exists and lands in both gated runners' findings files",
+      "heading": "Finding 2: The AP7 quality-class lint exists and lands in both gated runners' findings files",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority acceptance criterion 2. `team/scripts/lint_test_anti_patterns.py` gained\n`_check_ap7`, three patterns, an opt-out widening (`anti-pattern-allowlist: [1267]`),\nand a `--help` line naming the new check. Both runners invoke the linter through the\nsame quality-class wrapper:\n\n```\nteam/scripts/run-unit-tests.sh:440        gated_runner_run_quality_lint \"test_anti_patterns\" -- python3 scripts/lint_test_anti_patterns.py\nteam/scripts/run-integration-tests.sh:444 gated_runner_run_quality_lint \"test_anti_patterns\" -- python3 scripts/lint_test_anti_patterns.py\n```\n\nThe wiring was verified behaviorally, not inferred. Sourcing\n`team/scripts/lib/gated_runner_lint.sh`, running the lint against a seeded tree\nthrough `gated_runner_run_quality_lint \"test_anti_patterns\"`, and writing the\nfindings file produced:\n\n```\n[gated-runner] findings file written: .../findings-probe.json (1 finding(s))\nrunner: run-unit-tests.sh schema: 1\nlint= test_anti_patterns severity= quality exit= 1\nAP7 in detail: True\n```\n\nSo an AP7 hit arrives in the findings file as a `quality`-severity\n`test_anti_patterns` finding, and — as the real runs confirmed — does not move the\nrunner's exit code.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Zero AP7 findings on the converted tree; the check fires on a reintroduction",
+      "heading": "Finding 3: Zero AP7 findings on the converted tree; the check fires on a reintroduction",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority acceptance criterion 3, verified in both directions and four ways.\n\nZero on the shipped tree:\n\n```\n$ python3 scripts/lint_test_anti_patterns.py\nlint_test_anti_patterns: OK — 0 findings across 484 file(s) (282 test, 202 runtime).\n```\n\nFires on the seeded fixture (`fixture_golden_comparison_inherited_env.py`, copied\nout of the lint-excluded `fixtures/` directory into a scanned location):\n\n```\n.../test_seeded_reintroduction.py:42: [AP7] This file compares a captured surface against a committed golden\nAND builds its subprocess environment by inheriting the ambient one here ...\nlint_test_anti_patterns: FAIL — 1 finding(s).\n```\n\nFires on a **production-shaped** reintroduction — this is the check that matters,\nsince a fixture can be tailored to its own detector. A copy of the real, converted\n`test_engine_behavior_baseline_harness.py` with its `build_scrubbed_env(` call\nreverted to `dict(os.environ)` is flagged at the exact line:\n\n```\n.../test_reverted_engine_harness.py:104: [AP7] ...\n```\n\nSilent on both negative controls (inherited environment with no golden comparison;\ngolden comparison with an explicit environment), silent on unmodified copies of both\nconverted harnesses, and silent when the documented opt-out\n`# anti-pattern-allowlist: 7 (justification: ...)` is present above the construct.\nThe unit test `team/tests/unit/test_lint_golden_env_coupling.py` locks all four cases\nin, including a whole-tree regression case.\n\nOne caveat on the check's reach is recorded under **Caveats** below; it does not\naffect this criterion, which the check meets for every golden-comparison shape the\ntree actually contains.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "`docs/test-authoring-guidelines.md` anti-pattern 2 names the helper and the lint",
+      "heading": "Finding 4: `docs/test-authoring-guidelines.md` anti-pattern 2 names the helper and the lint",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority acceptance criterion 4. A new subsection, \"Subprocess environments are\nbuilt from an explicit set, not inherited\", sits inside anti-pattern 2 and carries\nthe rule, a BAD/BETTER code pair, the remedy by name\n(`tests.fixtures.scrubbed_subprocess_env.build_scrubbed_env`), the detector by name\nand category (`AP7`, quality-class, run by both gated runners before pytest), the\ndeliberate narrowness of the pairing, the \"when acceptable\" case, and the opt-out\nmarker. An author reading it has a remedy and not just a prohibition, which is\nexactly what the criterion asked for.\n\nThe survey doc `docs/inherited-environment-exposure-survey.md` is new, is on\n`team/config/docs-manifest.txt` and in `docs/README.md`, and its numbers reproduce\nexactly against the tree:\n\n| Claim in the doc | Re-derived here |\n|---|---|\n| 160 occurrences / 109 files at `a84deb7` | 160 / 109 at HEAD; 160 at `a84deb7` |\n| 157 occurrences / 107 files at `7f7a37d` | 157 / 107 |",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Both gated runners exit 0, under all three `MAX_TASK_SECONDS` values",
+      "heading": "Finding 5: Both gated runners exit 0, under all three `MAX_TASK_SECONDS` values",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority acceptance criteria 5 and 6. The authoritative commands were run from the\nworktree root; no direct-pytest result is cited as a PASS source anywhere in this\nreport.\n\n| `MAX_TASK_SECONDS` in the invoking shell | `run-unit-tests.sh` | `run-integration-tests.sh` |\n|---|---|---|\n| `10800` (the wake shell's own value) | exit 0 — 4402 passed, 31 skipped, 702s | exit 0 — 462 passed, 1 skipped, 467s |\n| unset | exit 0 — 4402 passed, 31 skipped, 611s | exit 0 — 462 passed, 1 skipped, 464s |\n| `5400` | exit 0 — 4402 passed, 31 skipped, 627s | exit 0 — 462 passed, 1 skipped, 470s |\n\nPass and skip counts are byte-identical across all three, which is the direct\nevidence that the harnesses' verdicts no longer depend on the invoking shell's\nbudget variables. Both lint pre-flights passed in every run (the quality-class\nfindings below never move the exit code).\n\nThe bundle's own two generic criteria also hold: all 449 Python files compile\n(`python3 -m py_compile`, exit 0) and all 275 shell files pass `bash -n`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "The RC required a manual intervention — a hand-authored commit on the release branch",
+      "heading": "Finding 6: The RC required a manual intervention — a hand-authored commit on the release branch",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a real defect an agent trips over; shipping this RC makes nothing worse, and the loop is a credible repair path — see the Systemic-Risk Rubric in `team/SOP.md`)\n**Regression:** no (the class demonstrably predates this RC — BUG-0227 and BUG-0244 are the same omission in earlier releases, and this RC's own instance is already fixed on the branch)\n**Integrity Damage:** no\n**Filed As:** PRIORITY-0003-docs-manifest-authoring-guard (Path C-B — filed as PRIORITY, enhancement / design change)\n\nStep 6.12, the autonomous operation criterion, answers:\n\n1. Tasks force-promoted from WAITING to BACKLOG manually? **NO.**\n2. `release-state.md` edited outside the CM scripts? **NO.** Its `## Active RC: v2.21.2`,\n   `## Last Released: v2.21.1` and `## HALT Event` block are all CM-written and\n   internally consistent.\n3. Scripts or tooling files patched mid-build? **YES.** See below.\n4. Queue files manually edited? **NO.** The queues are consistent with task states\n   (`[A]` on this task, `[W]` on the waiting CM release task).\n\nThe intervention: `ai_rc/v2.21.2` carries commit `2ea2004`, \"adds\ninherited-environment-exposure-survey.md to docs-manifest\" — a non-merge commit\nauthored and committed directly on the RC branch by the operator\n(`purdygood <operator@example.invalid>`, 2026-09-14T10:46:19+00:00), touching\n`team/config/docs-manifest.txt`. It is not the product of any CODER or WRITER task\nand did not arrive through a feature branch.\n\nWhy it exists is on the record in three places. An earlier verification of this same\nRC found the unit suite red because `docs/test-authoring-guidelines.md` cited the new\nsurvey document and `docs-manifest.txt` did not list it, so the installer would never\ndeposit it; that became BUG-0266. CM read that report, applied the ship-policy matrix\nand halted the lane (`release-state.md`, `## HALT Event`, \"trigger 2 ... Regression:\nyes\"). The operator then fixed the one missing line by hand, recording it in the bug\nitself: *\"fixed this manually and commited during the blocked of v2.21.2.\"*\n\nThe fix is correct, and it was re-verified here independently rather than taken on\ntrust:\n\n- `grep -qx 'inherited-environment-exposure-survey.md' team/config/docs-manifest.txt` succeeds.\n- `python3 -m pytest tests/unit/test_installed_governance_docs_citations_resolve.py`\n  (throwaway `PGAI_AGENT_KANBAN_ROOT_PATH`) → `6 passed`.\n- Both gated runners exit 0 with the line in place.\n\nBUG-0266 is `## Status: done` and is **not** re-filed; that would be a duplicate.\nWhat is filed is the class behind it. A `docs/` citation can be merged without its\nmanifest entry and nothing notices until the full unit suite runs at RC verification\n— twelve minutes, and by then the authoring agent's session is over and its branch\nis deleted. That has now produced three bug reports (BUG-0227, BUG-0244, BUG-0266)\nand, this time, a halted lane and a hand-authored commit on a release branch.\nPRIORITY-0003 asks for the same remedy shape this very release delivered for the\nenvironment-coupling class: catch it at authoring time, cheaply, as a quality-class\nsignal.\n\nA note on the honest reading of this finding: the release itself is fine. The RC's\ntree is correct, the fix is verified, and the artefact a user would install works.\nWhat failed is the premise that the chain advances without a human. That is a process\ndefect, and Step 6.12 exists precisely so it is recorded rather than absorbed.",
+      "filed_as": "PRIORITY-0003",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a real defect an agent trips over; shipping this RC makes nothing worse, and the loop is a credible repair path — see the Systemic-Risk Rubric in `team/SOP.md`)",
+        "regression": "no (the class demonstrably predates this RC — BUG-0227 and BUG-0244 are the same omission in earlier releases, and this RC's own instance is already fixed on the branch)",
+        "filed_as": "PRIORITY-0003-docs-manifest-authoring-guard (Path C-B — filed as PRIORITY, enhancement / design change)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "A quality-class lint instance with no bug tracking it",
+      "heading": "Finding 7: A quality-class lint instance with no bug tracking it",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (hygiene; text-only, both runners exit 0 with the finding merely recorded)\n**Regression:** no (the line is untouched by this RC — `git diff --name-only ai_main...ai_rc/v2.21.2 -- release-notes/` is empty and the identical line is present at `ai_main`)\n**Integrity Damage:** no\n**Filed As:** BUG-0267-hygiene-provenance-release-notes (Path C-A — filed as BUG, code defect / regression / test failure)\n\nBoth runners' findings files carry three `hygiene` provenance findings. Two are\nalready named in the `## Acceptance` of the open BUG-0260 and are cited, not\nre-filed. The third — `release-notes/v2.20.2.md:58`, citing the internal task ID\n`TESTER-20260913-013` and pointing a reader of the shipped tree at a task folder\nthat never ships — is named by no open or running bug, so one was filed. Per the\none-bug-per-lint-class rule, BUG-0267 is the single bug for the `hygiene` class on\nthis run and lists all three instances, directing the first two back to BUG-0260.\n\nThis finding is recorded here for completeness of the gap ledger; as a quality-class\nlint finding it does not, on its own, drive the recommendation or the systemic-risk\nrating. Finding 6 is what does.",
+      "filed_as": "BUG-0267",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (hygiene; text-only, both runners exit 0 with the finding merely recorded)",
+        "regression": "no (the line is untouched by this RC — `git diff --name-only ai_main...ai_rc/v2.21.2 -- release-notes/` is empty and the identical line is present at `ai_main`)",
+        "filed_as": "BUG-0267-hygiene-provenance-release-notes (Path C-A — filed as BUG, code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Structural, state and constraint checks",
+      "heading": "Finding 8: Structural, state and constraint checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Pre-flight merge verification (Step 2a):** every DONE task's feature branch has\n  already been deleted post-merge (normal lifecycle). No UNMERGED branch, no BUG-92\n  zero-unique-commit anomaly.\n- **Release-state drift (Step 6.1):** `## Active RC: v2.21.2` matches the existing\n  `ai_rc/v2.21.2` branch. `pp_last_released_version` returns `v2.21.1` (tags carry\n  the `ai_` branch prefix); `v2.21.2 > v2.21.1` under semver. `## Last Released:\n  v2.21.1` is well-formed.\n- **Prerequisite graph (Step 6.10):** the four prerequisites (CODER-007, CODER-008,\n  CODER-009, WRITER-010) are all DONE, the CM open-RC bookend is DONE, the CM release\n  bookend is WAITING. No cycles, no missing IDs, sequence numbers consistent.\n- **Skip-cites-real-bug gate (Step 6.13):** the gated runners' own\n  `lint_skip_bug_gate` reports `0 missing files`. The manual grep's four apparent\n  hits (`BUG-1234/1235/1237/1239`) are string literals inside\n  `team/tests/unit/test_skip_bug_citation_scan.py`, which is the test *of* the skip\n  gate — synthetic input, not skip annotations. Not a finding.\n- **Constraint negatives (Step 6.9):** no bare `/tmp` literal and no hardcoded temp\n  path in the added lines; no secrets; the added Python carries no new operational\n  constants beyond the documented explicit toolchain base.\n- **Coding-standards spot-check (Step 6.14):** the modified script's `--help` names\n  every argument including the new check; no added comment, docstring or output\n  string cites a bug ID, task ID or version (the `hygiene` lint independently\n  confirms zero provenance findings in this RC's new files); and the change removes\n  duplication rather than adding it, by making `scrubbed_wake_env` a caller of the\n  shared builder.\n- **Synthetic release simulation (Step 6.8):** skipped with note — the diff touches\n  no release-lifecycle file (`cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`,\n  `project_paths.sh`, or any open/close-cycle script). `team/config/docs-manifest.txt`\n  is read by `install.sh` and `upgrade.sh`, not by the release lifecycle.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "pre_flight_merge_verification_step_2a": "every DONE task's feature branch has",
+        "release_state_drift_step_6_1": "`## Active RC: v2.21.2` matches the existing",
+        "prerequisite_graph_step_6_10": "the four prerequisites (CODER-007, CODER-008,",
+        "skip_cites_real_bug_gate_step_6_13": "the gated runners' own",
+        "constraint_negatives_step_6_9": "no bare `/tmp` literal and no hardcoded temp",
+        "coding_standards_spot_check_step_6_14": "the modified script's `--help` names",
+        "synthetic_release_simulation_step_6_8": "skipped with note — the diff touches"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

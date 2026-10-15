@@ -1,0 +1,422 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "I verified RC `ai_rc/v2.27.2` (commit bf0336700600a91e727098cb8a38d33eac569619)\nagainst `requirements/v2.27.2-priority-bundle-20261003.md`. The bundle holds\none item, PRIORITY-0006: a targeted `--files` run applies the per-file\ntest-authoring lints (the anti-pattern lint and the skip-cites-a-real-bug\ngate) to exactly the files it names. Three tasks delivered it:\nCODER-20261003-027 (named-file mode on both lints), CODER-20261003-028\n(runner wiring, exit verdict, census row 72) and WRITER-20261003-029\n(guideline section).\n\nEvery PRIORITY-0006 and ticket acceptance criterion is met. I checked them\nend to end with the real runners on a scratch clone, using sandboxed roots.\nThe AP7 check used the actual v2.27.0 offender file as a production-shape\ninput. Both gated runners exited 0.\n\nI filed four small follow-ups via Path C (autonomous follow-up filing —\nnon-blocking), all as Path C-A (filed as BUG — code defect / regression /\ntest failure):\n- three low-severity accuracy and consistency defects in this RC's work;\n- one medium-severity defect that predates the RC: `--help` overwrites the\n  certification findings file.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight: RC intact (Step 2)",
+      "heading": "Finding 1: Pre-flight: RC intact (Step 2)",
+      "level": 3,
+      "body": "**Category:** pass\n\n541 DONE tasks name a feature branch. None exists locally, which is the\nnormal post-merge shape, so Check 1 and Check 2 pass trivially. The three\nRC feature commits (62aa5366, 02f9bd68, 4e165b17) each landed through a\n`--no-ff` merge (966c3963, 511c5cd0, bf033670).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Worktree identity and cleanliness (Step 3)",
+      "heading": "Finding 2: Worktree identity and cleanliness (Step 3)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` equals `git rev-parse ai_rc/v2.27.2` (bf033670).\n`git status --porcelain` and `git stash list` are both empty. The\nporcelain was re-checked after both suites: still empty.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Release-state sanity (Step 6.1)",
+      "heading": "Finding 3: Release-state sanity (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_last_released_version pgai-agent-kanban` returns v2.27.1, and\n`semver_gt v2.27.2 v2.27.1` is true. `## Active RC` reads v2.27.2 and\n`## Last Released` reads v2.27.1, both well-formed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Bundle AC — every Python file compiles",
+      "heading": "Finding 4: Bundle AC — every Python file compiles",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll 612 tracked `*.py` files go through `compile()` with 0 SyntaxError.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Bundle AC — every bash file passes the syntax check",
+      "heading": "Finding 5: Bundle AC — every bash file passes the syntax check",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll 307 tracked `*.sh` files pass `bash -n` with 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "PRIORITY-0006 AC1 — an AP7 fixture via `run-unit-tests.sh --files` prints the finding with file and line",
+      "heading": "Finding 6: PRIORITY-0006 AC1 — an AP7 fixture via `run-unit-tests.sh --files` prints the finding with file and line",
+      "level": 3,
+      "body": "**Category:** pass\n\nI recovered the real v2.27.0 offender\n(`git show 4ce0ea62:team/tests/unit/test_pm_materialize_acceptance_policy.py`)\ninto a scratch clone and ran the real runner with `--files` on it. Output:\n`.../test_probe_prod_ap7.py:92: [AP7] ...`, where line 92 is\n`env = dict(os.environ)`. Both tests passed, and the run then exited 1\nthrough the dual-channel contract\n`error: run-unit-tests.targeted-file-lint-findings` (message and remedy\npresent; the remedy re-runs only the reporting lint). `targeted-unit.exit`\nholds `1`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "PRIORITY-0006 AC2 — a clean targeted run prints no finding and run time grows by at most a few seconds",
+      "heading": "Finding 7: PRIORITY-0006 AC2 — a clean targeted run prints no finding and run time grows by at most a few seconds",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`--files tests/unit/test_semver.py` printed `[targeted-lint] test_anti_patterns: OK`\nand `[targeted-lint] skip_cites_real_bug: OK`, then 34 passed, exit 0.\n\nI timed three alternating rounds of ai_main's runner against the RC's\nrunner on the same file. ai_main took 26.0 s, 16.5 s and 12.1 s; the RC\ntook 22.0 s, 13.6 s and 26.6 s.\n\nCaveat: the host was under heavy load (load average 15, with the full\nsuite running), so wall-time is noise-dominated. Timed in isolation, the\ntwo lints add 0.085 s + 0.142 s, well within \"a few seconds\".",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "PRIORITY-0006 AC3 — the findings file and green ledger are byte-identical across targeted runs",
+      "heading": "Finding 8: PRIORITY-0006 AC3 — the findings file and green ledger are byte-identical across targeted runs",
+      "level": 3,
+      "body": "**Category:** pass\n\nIn the sandbox temp root I seeded `lint/findings-unit.json`, its `.runid`,\n`lint/findings-integration.json`, `unit.exit`, and\n`projects/pgai-agent-kanban/green-ledger/v2.27.2/ledger.jsonl`. I took\nsha256 of each, then ran five targeted runs: unit with findings, unit\nclean, three skip-gate cases, and integration with and without findings.\nThe hashes matched after each run. No targeted run created a `lint/`\ndirectory or a ledger in a fresh sandbox.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "PRIORITY-0006 AC4 and ticket ACs — `run-unit-tests.sh --files <this RC's test files>` exits 0",
+      "heading": "Finding 9: PRIORITY-0006 AC4 and ticket ACs — `run-unit-tests.sh --files <this RC's test files>` exits 0",
+      "level": 3,
+      "body": "**Category:** pass\n\n`--files tests/unit/test_lint_named_file_mode.py tests/unit/test_runner_targeted_file_lints.py tests/unit/test_runner_targeted_files.py`\ngave both lints OK and 68 passed, exit 0.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "CODER-028 AC — the integration runner has parity",
+      "heading": "Finding 10: CODER-028 AC — the integration runner has parity",
+      "level": 3,
+      "body": "**Category:** pass\n\n`run-integration-tests.sh --files` on an AP7 file under\n`tests/integration/` printed `...:10: [AP7]`, 1 passed, and exited 1 with\n`run-integration-tests.targeted-file-lint-findings`\n(`targeted-integration.exit` = 1). On a clean file it printed both OK\nlines and exited 0. Certification files stayed byte-identical.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Guard behavior, triggered (Step 6.5)",
+      "heading": "Finding 11: Guard behavior, triggered (Step 6.5)",
+      "level": 3,
+      "body": "**Category:** pass\n\nI triggered each guard on the failure path:\n- skip citing a non-existent `BUG-9999` (with a real bugs dir present) → exit 1;\n- skip citing an existing `BUG-0001` → exit 0;\n- `BUG-SKIP` placeholder → exit 1, naming `file:4`;\n- pytest failure plus an AP7 finding in the same file → pytest's own\n  failure verdict (exit 1), with the lint finding still printed;\n- `lint_test_anti_patterns.py --files` combined with `--tests-dir` → exit 2;\n- a missing path → exit 2;\n- a named clean file beside an AP7 sibling → exit 0 (the sibling is not\n  reported);\n- a duplicate spelling → counted once;\n- `lint_skip_bug_gate.sh --files` combined with `--tests-dir`, empty\n  `--files`, and a missing path → each refused with exit 2 and an\n  `error`/`message`/`remedy` triple.\n\nThe whole-tree default modes of both lints are clean on the RC: 0\nanti-pattern findings across 639 files, and the skip gate reports 0\nmissing files.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "WRITER-029 ACs — the guideline section",
+      "heading": "Finding 12: WRITER-029 ACs — the guideline section",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe `--files` section (`docs/test-authoring-guidelines.md:625-654`) says\nwhich two checks run, over named files only. It says findings print and\nmake the run exit non-zero. It says whole-tree guards and the rest of the\nfleet are skipped, and that the findings file and ledger are never\nwritten. The flags it cites (`--files` on both runners and both lints)\nmatch each script's `--help`. `grep -nE 'BUG-[0-9]{4}|PRIORITY-[0-9]{4}'`\nover the section returns nothing. The exit-files subsection (696-704)\nagrees with the behavior.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Constraints (Step 6.9) and census",
+      "heading": "Finding 13: Constraints (Step 6.9) and census",
+      "level": 3,
+      "body": "**Category:** pass\n\n`set -euo pipefail` is kept in both runners and the skip gate. No secrets\nappear in added lines. The new refusal sites carry census anchors with\nLocator Index entries: `run-unit-tests-targeted-files-05` and\n`run-integration-tests-targeted-files-05` (AGENT-RESOLVABLE, row 72), and\n`lint-skip-bug-gate-files-usage-01` (CONVERT).\n\nThe new runner verdict is AGENT-RESOLVABLE and confined to targeted runs.\nCertification runs keep warn-and-continue. That matches PRIORITY-0006's\n\"exit code reflects them as the ticket's own acceptance requires\" as PM\nread it: it is not a new hard gate on certification.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Prerequisite graph (Step 6.10)",
+      "heading": "Finding 14: Prerequisite graph (Step 6.10)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe chain runs CM-20261003-030 (open) → CODER-027 → CODER-028 →\nWRITER-029 → TESTER-031 → CM-20261003-033 (release, WAITING on all four).\nThere are no cycles and every ID exists.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Skip-cites-real-bug grep-gate (Step 6.13)",
+      "heading": "Finding 15: Skip-cites-real-bug grep-gate (Step 6.13)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe `BUG-SKIP` and synthetic `BUG-12xx`/`BUG-98xx` hits in tests are\nstring-literal fixtures, not skip calls (the sanctioned example-value\nexception). The structural whole-tree gate passes with 0 missing files.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "Skip-gate \"missing bug file\" findings do not name file and line, though the docs and runner message say every finding does",
+      "heading": "Finding 16: Skip-gate \"missing bug file\" findings do not name file and line, though the docs and runner message say every finding does",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one gate's output and two prose claims)\n**Filed As:** BUG-0523-skip-gate-missing-id-no-file-line (Path C-A)\n\nOn a `--files` run, a skip citing a non-existent `BUG-NNNN` produces\n`BUG-9999: no matching file found in <bugs-dir>`, with no path and no\nline. `docs/test-authoring-guidelines.md:645` (\"Each prints its findings\nin full, naming file and line\") and both runners' new\n`targeted-file-lint-findings` message (\"Each finding is printed above,\nnaming file and line\") overclaim. The gate's output shape predates the\nRC (ai_main is identical); the new promise is this RC's.",
+      "filed_as": "BUG-0523",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one gate's output and two prose claims)",
+        "filed_as": "BUG-0523-skip-gate-missing-id-no-file-line (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 17,
+      "label": "17",
+      "title": "`lint_skip_bug_gate.sh --files` de-duplicates by raw path text",
+      "heading": "Finding 17: `lint_skip_bug_gate.sh --files` de-duplicates by raw path text",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (only direct invocation with two spellings of one path; the runners pass normalized absolute paths)\n**Filed As:** BUG-0524-skip-gate-files-dedup-raw-path (Path C-A)\n\n`--files x.py ./x.py` reported the same placeholder finding twice\n(\"2 finding(s)\"). The script's own comment promises a path named twice is\nchecked once. The anti-pattern lint resolves paths and counts it once.",
+      "filed_as": "BUG-0524",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (only direct invocation with two spellings of one path; the runners pass normalized absolute paths)",
+        "filed_as": "BUG-0524-skip-gate-files-dedup-raw-path (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 18,
+      "label": "18",
+      "title": "The guideline's exit-code summary was not updated for the targeted-run lint exit",
+      "heading": "Finding 18: The guideline's exit-code summary was not updated for the targeted-run lint exit",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one prose line; the `--files` section and `--help` are correct)\n**Filed As:** BUG-0525-guidelines-exit-code-summary-stale (Path C-A)\n\n`docs/test-authoring-guidelines.md:588` still says exit 1 means \"one or\nmore failed (or the lint pre-flight failed)\". Both runners' `--help` now\nlist the `--files` per-file lint finding as a cause of exit 1. This is a\nDocumentation Discipline gap. WRITER-029 flagged the line as outside its\nscope.",
+      "filed_as": "BUG-0525",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one prose line; the `--files` section and `--help` are correct)",
+        "filed_as": "BUG-0525-guidelines-exit-code-summary-stale (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 19,
+      "label": "19",
+      "title": "Runner `--help` overwrites the certification findings file (predates this RC)",
+      "heading": "Finding 19: Runner `--help` overwrites the certification findings file (predates this RC)",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (any agent that checks runner options between a certification run and TESTER's read silently erases quality findings; WRITER tickets routinely run `--help`)\n**Filed As:** BUG-0526-runner-help-overwrites-findings-file (Path C-A)\n\nI seeded `findings-unit.json` and `findings-integration.json` and ran\n`--help` on each runner. Both files were replaced with\n`{\"findings\": [], ...}`, and \"findings file written\" printed twice.\nai_main 712135d2 (v2.27.1) behaves the same, so this RC did not introduce\nit. WRITER-029 reported it after its AC told it to run `--help`. Found\nunder Step 6.11 (an untested mechanism, adjacent to PRIORITY-0006 AC3's\nno-touch guarantee).",
+      "filed_as": "BUG-0526",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (any agent that checks runner options between a certification run and TESTER's read silently erases quality findings; WRITER tickets routinely run `--help`)",
+        "filed_as": "BUG-0526-runner-help-overwrites-findings-file (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

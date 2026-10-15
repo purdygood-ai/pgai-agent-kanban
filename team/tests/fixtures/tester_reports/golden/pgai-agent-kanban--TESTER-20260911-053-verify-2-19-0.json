@@ -1,0 +1,254 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified release candidate `ai_rc/v2.19.0` (commit `636149e`) against\n`projects/pgai-agent-kanban/requirements/v2.19.0-dashboard-v2.md` — the\n\"dashboard v2\" release: a census-driven window set, a single-source semantic\npalette, an agent-metrics CLI with a REST twin, visibility-aware refresh\ncadence, pane signal safety with an all-armed readiness handshake, shared\nper-tick snapshots for twin views, a posture bar that renders every active\nflag at once, and a status-writer tool as the only sanctioned mutator of task\n`status.md`. Work was done in the isolated detached worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260911-053-verify-2-19-0`\n(HEAD matches `ai_rc/v2.19.0`, clean tree, no stashes). Pre-flight merge\nverification passed: all twelve DONE prerequisite tasks merged, no live\nfeature branches, no zero-commit anomalies, and all twelve first-parent\ncommits on the RC are feature-branch merges with no direct commits.\n\nThe RC's functional deliverables all verify. Every acceptance criterion in the\nrequirements doc was exercised, most of them behaviourally rather than\nstructurally: the census lint is green end to end, the palette refuses a\nmissing key loudly in both bash and Python, the posture bar renders a global\nHALT, a project HALT-AFTER and a non-zero deferral count simultaneously with\neach scope named, the snapshot cache proves twin parity by construction\n(second render served from cache, byte-identical stdout, stale cache\nrecomputes), the status-writer tool refuses bad input dual-channel while\nwriting nothing and preserves every untouched section byte-for-byte, and the\nreal-tmux 30-window-switch storm fixture passes with zero pane deaths.\n\nOne defect stops the release from being clean: the RC added three\n`docs/dashboard.md` citations to `docs/OPERATIONS.md` without adding that\ndocument to the docs manifest, so it is not delivered to an installed or\nupgraded root. That dangles the pointer for anyone reading the installed tree\nand fails two unit tests, which makes the gated unit runner exit 1 and rules\nout a PASS recommendation. One further presentation defect was found in the\nnew agent-metrics pane. Both are filed; neither prevents an operator from\nusing the release.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "`docs/OPERATIONS.md` cites `docs/dashboard.md`, which the installer does not deliver",
+      "heading": "Finding 1: `docs/OPERATIONS.md` cites `docs/dashboard.md`, which the installer does not deliver",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a real defect that ships and is fixed next iteration — the shipped installed root carries a dangling doc pointer and the gated unit suite is red)\n**Regression:** yes (the three citations do not exist on `ai_main`; this RC's visibility-aware-cadence documentation work added them)\n**Integrity Damage:** no\n**Filed As:** BUG-0244 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nBoth failing unit tests report the same cause:\n\n```\nFAILED tests/unit/test_installed_governance_docs_citations_resolve.py::test_every_installed_governance_docs_citation_resolves_under_fresh_install\nFAILED tests/unit/test_installed_governance_docs_citations_resolve.py::test_every_installed_governance_docs_citation_resolves_under_upgraded_root\n\n  Checked 12 distinct docs/ citation(s) for resolution under the installed root.\n  1 citation(s) did NOT resolve:\n    - docs/OPERATIONS.md cites 'docs/dashboard.md', which is not installed\n```\n\n`team/config/docs-manifest.txt` is the single list both `install.sh` and\n`team/scripts/upgrade.sh` read, and it does not name `dashboard.md`.\n`docs/OPERATIONS.md` — which IS installed — now carries three references to\n`docs/dashboard.md` (the window-0 refresh paragraph, the \"Refresh loops:\n`cadence-loop.sh`, not `watch`\" section, and the \"Dashboard W6 (Metrics)\"\nsection). `git show ai_main:docs/OPERATIONS.md | grep -c 'docs/dashboard.md'`\nreturns 0, confirming the citations are new in this RC. The manifest's own\nheader states the contract this violates: \"Whoever adds a new docs/ citation\nto a role file must add its path here in the same change, or the citation\ndangles on an installed or upgraded root.\"\n\nConsequence for an operator: on a real installed kanban root, the operations\nguide sends the reader to a document that is not there. Consequence for the\nchain: the gated unit runner exits 1, so the RC has no green suite verdict.\n\nLikely one-line fix (add `dashboard.md` to the manifest), with the manifest's\ntransitive-closure rule to check alongside it. Details, reproduction, and\nacceptance assertions are in BUG-0244.",
+      "filed_as": "BUG-0244",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a real defect that ships and is fixed next iteration — the shipped installed root carries a dangling doc pointer and the gated unit suite is red)",
+        "regression": "yes (the three citations do not exist on `ai_main`; this RC's visibility-aware-cadence documentation work added them)",
+        "filed_as": "BUG-0244 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "agent-metrics \"Avg Wall\" column is the RC's wall time, not the agent's, and carries no units",
+      "heading": "Finding 2: agent-metrics \"Avg Wall\" column is the RC's wall time, not the agent's, and carries no units",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (hygiene — a label and a missing unit on one pane; the arithmetic and the CLI/REST parity are correct)\n**Regression:** yes (the pane is new in this RC; the defect did not exist before because the surface did not exist)\n**Integrity Damage:** no\n**Filed As:** BUG-0247 (Path C-A — filed as BUG)\n\nRunning the new pane against the live kanban root:\n\n```\nAgent          Avg Wall   Avg Tokens  Avg Tasks\ncm                  132    1,023,430          1\ncoder               132   79,063,440          3\npm                  132    2,457,143          1\ntester              132   11,444,382          1\nwriter              142    4,460,051          1\n```\n\nFour agents show the identical `132`. The figure is not per-agent: the per-RC\nrollups (`projects/<name>/metrics/rc/v*.json`) carry one RC-level\n`wall_time_minutes` and no per-agent wall time at all, so what is averaged is\nthe elapsed time of the RCs each agent appeared in. `writer` differs only\nbecause it appeared in a different subset. The column header is bare\n`Avg Wall` with no unit, and `docs/DASHBOARD-PANES.md` window 8 repeats the\n\"per agent\" framing with no caveat.\n\nThe computation is correct and the semantics ARE documented — in\n`agent-metrics.sh --help`, in the shared module's docstring, and in\n`docs/operator-api.md`. None of those is in front of the operator looking at\nthe pane, which is where the requirements doc places the bar (\"honest\nicons\"). Recorded as a defect of the rendered surface, not of the arithmetic;\nthe fix is a header/footnote and a docs sentence, and must leave the numbers\n(and the CLI/REST parity fixture) untouched.",
+      "filed_as": "BUG-0247",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (hygiene — a label and a missing unit on one pane; the arithmetic and the CLI/REST parity are correct)",
+        "regression": "yes (the pane is new in this RC; the defect did not exist before because the surface did not exist)",
+        "filed_as": "BUG-0247 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Census-driven window set — census lint green, derived surfaces match",
+      "heading": "Finding 3: Census-driven window set — census lint green, derived surfaces match",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/dashboard/generate_window_docs.py --check` exits 0:\n\"all surfaces match the census.\" The census\n(`team/config/dashboard_windows.census`) declares 15 window records (16 with\nthe drill window's second variant) and their pane templates;\n`team/scripts/dashboard/window-census.sh --list` reads it through the shared\nbash reader and reports the window set in creation order. Every window the\nrequirements deliverable names is present: window 0 (`main`, the overview),\n`operator` (board columns + `suggested-commands` + an interactive cmdline\npane, 10 panes), the `visibility` board twin, `attention`, `schedule`,\n`rc-metrics`, `agent-metrics`, `logs`, `terminal`, `human-review`, and the\n`drill-N` template in both its `release` and `document` variants. Three\nwindows beyond the named list (`git`, `metadata`, `debug-logs`,\n`training-logs`) are carried forward from the previous board and are not\nexcluded by the deliverable.\n\nNaming note, not a finding: the deliverable's phrase \"0 overview, main board\"\nmaps onto a census whose window 0 is named `main` and whose board twin is\nnamed `visibility`. The census is the single source the docs, tests, and\n`create.sh` all derive from, so no drift is possible; only the prose naming\ndiffers from the requirement's shorthand.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Palette single-source — missing key refuses loudly, no hardcodes",
+      "heading": "Finding 4: Palette single-source — missing key refuses loudly, no hardcodes",
+      "level": 3,
+      "body": "**Category:** pass\n\nGuard exercised in both languages (Step 6.5). Bash:\n`dashboard_semantic_color no_such_key` returns 1 and emits the full\ndual-channel contract —\n`error: dashboard-palette.key-missing` / a message naming the key and the\npalette file / a runnable remedy. Python:\n`resolve_semantic_color('no_such_key', True)` raises `PaletteKeyError`\ncarrying the same three fields. A real key resolves (\n`dashboard_semantic_tmux_fg halt_active` → `#[fg=red]`). The\n`lint_dashboard_hardcode_colors` lint reports both\n`team/scripts/dashboard` and `team/scripts/lib/dashboard` single-source\nclean, and it is registered in `run-unit-tests.sh`'s pre-flight.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Posture bar renders every active flag simultaneously, scopes named",
+      "heading": "Finding 5: Posture bar renders every active flag simultaneously, scopes named",
+      "level": 3,
+      "body": "**Category:** pass\n\nExercised against a sandbox kanban root (never the live root), with a global\n`HALT`, a project `HALT-AFTER` holding `rc:v9.9.9`, and two open low-severity\nbugs under a project configured for deferral:\n\n```\nv2.18.1 | demo:v0.0.0 | workflow:release | PM:auto | [HALT GLOBAL] | [HALT-AFTER:demo until v9.9.9] | BUGS DEFERRED 2 (<=low) | Fri 2026-09-11T20:52:44\n```\n\nAll three flags render at once, each naming its scope (`GLOBAL` literal, the\nproject by name), and the version-pinned sentinel renders its target through\nthe shared describer (`until v9.9.9`). `status-right.sh` agrees. A deliberately\nmalformed deferral config renders `DEFER CONFIG UNREADABLE: <path>` rather\nthan a silent zero — loud, as intended.\n\nObservation, not a finding: within ONE scope, a `HALT` suppresses that same\nscope's `HALT-AFTER` segment, because `halt_state.py` resolves exactly one\nstate per scope (`halted` OR `draining`). Cross-scope simultaneity — which is\nwhat the deliverable and the shipped fixtures are about — is fully honoured.\nThe single-scope behaviour predates this RC and is defensible (a hard halt at\na scope makes that scope's soft sentinel moot), but it is worth an operator\nknowing.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Signal safety — traps first, handshake before return, hook lifecycle",
+      "heading": "Finding 6: Signal safety — traps first, handshake before return, hook lifecycle",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Trap-first-line: `dashboard_pane_wrap_cmd`\n  (`team/scripts/dashboard/lib/pane_readiness.sh`) prepends\n  `trap '' <signal>` as the pane's first executed statement, before any\n  `env_bootstrap.sh` sourcing, and every pane in `create.sh` is dispatched\n  through `dashboard_send_armed_keys`.\n- All-armed handshake: `create.sh` polls `dashboard_wait_all_armed` over the\n  exact set of pane labels it armed and refuses dual-channel\n  (`dashboard_create.pane_arm_timeout`) rather than returning early.\n- Session-scoped hook removed by kill: `kill.sh` calls\n  `dashboard_remove_activation_hook` mirroring `create.sh`'s install.\n- Sender tolerates unarmed panes: `activation-hook-sender.sh` skips any pane\n  that has not reported armed and narrates the skip naming the pane.\n- **The fixture the deliverable names passes for real.**\n  `team/tests/integration/test_dashboard_activation_hook_lifecycle.py::test_thirty_immediate_window_switches_leave_every_pane_alive`\n  runs `create.sh` on a private-socket tmux server (tmux 3.2a present on this\n  host), performs 30 immediate `select-window` calls with no warm-up sleep,\n  and asserts pane identity equality before/after plus `pane_dead=0` for every\n  pane. It passed in the gated integration run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Visibility-aware cadence, stagger jitter, refresh-on-activate",
+      "heading": "Finding 7: Visibility-aware cadence, stagger jitter, refresh-on-activate",
+      "level": 3,
+      "body": "**Category:** pass\n\n`PGAI_DASHBOARD_HIDDEN_MULTIPLIER=10`,\n`PGAI_DASHBOARD_JITTER_MAX_SECONDS=3`, and\n`PGAI_DASHBOARD_HIDDEN_CPU_BUDGET_RATIO=0.5` are named constants in\n`team/scripts/lib/dashboard_constants.sh` — no per-pane magic numbers. The\n\"CPU sample: hidden-window total under stated budget\" acceptance criterion is\nimplemented as a real measurement in\n`team/tests/unit/test_dashboard_cadence.py`: a same-run, same-host baseline\narm (state forced `active`) versus hidden arm, CPU read from\n`/proc/<pid>/stat` fields 14-17 so renderer children are counted, asserted\nagainst the named ratio constant. It passed in the gated unit run. The\nderivation of the budget (measured ratio ~0.163-0.168 against an asserted\nceiling of 0.5) is recorded in the constant's own comment.\n\n`cadence-loop.sh` and `activation-hook-sender.sh` deliberately use\n`set -uo pipefail` without `-e`: `errexit` in a long-lived pane loop would\nkill the pane on a transient renderer failure, which is precisely the failure\nmode this RC exists to prevent. Recorded as correct, not as a strict-mode\nomission.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Twin-view shared per-tick snapshots",
+      "heading": "Finding 8: Twin-view shared per-tick snapshots",
+      "level": 3,
+      "body": "**Category:** pass\n\nExercised directly (Step 6.5), with a counting generator:\n\n- First render — cache miss: generator invoked once, output returned, the\n  miss narrated **to stderr only** (`[dashboard-snapshot] probe: no fresh\n  snapshot (missing, unreadable, or older than 5s) -- rendering directly`).\n- Second render within TTL — cache hit: generator NOT re-invoked (call count\n  stays 1), stdout byte-identical to the miss path, stderr empty.\n- Third render with `ttl=0` — treated as stale: generator re-invoked (call\n  count 2), fresh output returned.\n\nParity between twins is therefore by construction (same cached bytes), and\nbecause narration never touches stdout, existing render goldens are\nunaffected. Writes are atomic (temp file in the same directory plus `mv -f`).\nTTL resolution honours the env override, then `kanban.cfg`, then a 5s default.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Status-writer tool is the only sanctioned status mutator",
+      "heading": "Finding 9: Status-writer tool is the only sanctioned status mutator",
+      "level": 3,
+      "body": "**Category:** pass\n\nRefusals exercised (all write nothing, all dual-channel, all exit 1):\n\n| Attempt | Error key |\n|---|---|\n| `--state NOPE` | `task-status.invalid-state` |\n| unknown project | `task-status.missing-status-file` |\n| unknown task key | `task-status.missing-status-file` |\n| `--summary` against a status.md with no `## Summary` section | `task-status.missing-section` |\n\nHappy path exercised in a sandbox root: `--state WORKING --summary \"new\nsummary\"` produced a two-line diff — `## State` and `## Summary` only — with\nevery other section preserved byte-for-byte. `--help` names every flag and\nstates the six-value vocabulary. The bypass lint\n(`team/scripts/lint_status_writer_bypass.py`) reports 75 files clean, and the\ngovernance half of the deliverable landed: `team/SOP-core.md` gained the\n\"Writing task state\" canon and the role files cite it instead of describing a\nhand-edit.\n\nNote: the tool resolves its root through `OpsContext.from_env()`, where the\nlegacy `KANBAN_ROOT` takes precedence over `PGAI_AGENT_KANBAN_ROOT_PATH`. That\nis the documented precedence, but it means overriding only\n`PGAI_AGENT_KANBAN_ROOT_PATH` for a sandbox run silently still targets the\nlive root when `KANBAN_ROOT` is exported (as it is in the wake environment).\nNot a defect — recorded so the next verifier sets both.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Agent-metrics CLI / REST parity and ICD",
+      "heading": "Finding 10: Agent-metrics CLI / REST parity and ICD",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe CLI renders thousands-separated integers through the shared\n`number_format.format_int`; the averaging arithmetic lives once in\n`team/pgai_agent_kanban/lib/agent_metrics.py` and is imported (not\nre-implemented) by both the CLI adapter and `GET /agent-metrics`. The ICD is\nat 1.5.0 on both `docs/api/ICD_VERSION` and the package copy,\n`docs/api/baselines/icd-v1.5.0.json` is added and listed in `SUPPORTED`, and\nboth `lint_icd_freshness` and `lint_icd_compat` pass (current ICD is a\ncompatible superset of all six baselines). The parity fixture\n(`team/pgai_agent_kanban/api/tests/test_cli_rest_agent_metrics_parity.py`)\npassed in the gated unit run.\n\nCaveat is Finding 2: the numbers are right and identical across the twins; the\nwall column's label is what misleads.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Structural, constraint, and standards checks",
+      "heading": "Finding 11: Structural, constraint, and standards checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `bash -n` clean on every changed `.sh` file in the RC diff.\n- Every new script is executable and ships `--help`; `lint_help_presence`\n  reports 84 scripts, 0 offenders.\n- `lint_gate_census_compliance` OK — 35 files checked, 0 offenders, 124\n  anchored sites exempted. New refusal sites in this RC carry their census\n  class inline (e.g. `BLOCK-WORTHY` above the palette key-missing refusal,\n  `AGENT-RESOLVABLE` above the status-writer required-flag refusal) with\n  `CENSUS-ANCHOR` markers.\n- `lint_dual_channel_pair` OK — 235 files, 0 offenders.\n- Skip-cites-real-bug (Step 6.13): no placeholder skip IDs in `team/tests/`,\n  and every cited `BUG-NNNN` resolves to a real file. `lint_skip_bug_gate`\n  agrees (0 missing files).\n- Step 6.1 drift check: `pp_last_released_version` = `v2.18.1` (tag\n  `ai_v2.18.1`), `semver_gt v2.19.0 v2.18.1` is true; `release-state.md`\n  `## Active RC` is `v2.19.0`, matching the branch under test, and\n  `## Last Released` is a well-formed `v2.18.1`. `VERSION` still reads\n  `v2.18.1` — expected, CM bumps it at ship time.\n- Step 6.8 (synthetic release simulation): **skipped with note** — the RC's\n  diff touches no release-lifecycle file (`cm-release.sh`, `cm-open-rc.sh`,\n  `cm-cancel-rc.sh`, `project_paths.sh`). The existing\n  `tests/integration/test_cm_release_synthetic.py` nonetheless ran green in\n  the gated integration suite.\n- Step 6.10 (prereq graph): all 12 prerequisite task IDs resolve to real task\n  folders, all DONE, no cycles, sequence numbers 040-051 contiguous and\n  non-colliding, with the CM-open bookend at 052 and this TESTER task at 053.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

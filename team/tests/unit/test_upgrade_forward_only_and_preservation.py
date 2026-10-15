@@ -27,6 +27,10 @@ WHAT IS TESTED
    ``git worktree list`` output are byte-identical before/after both a
    successful version-targeted upgrade and a refused (older-target) one.
 
+5. **VERSION_DETAIL names the resolved tag.** A version-targeted upgrade
+   lays down from a detached worktree yet still writes VERSION_DETAIL,
+   starting with the tag it resolved and carrying that tag's commit.
+
 SANDBOX DESIGN
 --------------
 Two throwaway trees are built per test, mirroring the two-phase sandbox in
@@ -72,6 +76,18 @@ import shutil
 import subprocess
 
 import pytest
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="upgrade-forward-only-and-preservation")
 
 # ---------------------------------------------------------------------------
 # Paths to the real scripts and libraries under test
@@ -86,9 +102,11 @@ _REAL_LIBS = [
     _TEAM_DIR / "scripts" / "lib" / "env_bootstrap.sh",
     _TEAM_DIR / "scripts" / "lib" / "ini_parser.sh",
     _TEAM_DIR / "scripts" / "lib" / "project_paths.sh",
+    _TEAM_DIR / "scripts" / "lib" / "error_contract.sh",
     _TEAM_DIR / "scripts" / "lib" / "temp.sh",
     _TEAM_DIR / "scripts" / "lib" / "version_stamp.sh",
     _TEAM_DIR / "scripts" / "lib" / "subagent_deploy.sh",
+    _TEAM_DIR / "scripts" / "lib" / "script_common.sh",
 ]
 
 _TIMEOUT = 120
@@ -192,8 +210,13 @@ def _build_installed_kanban_root(
     lib_dir.mkdir(parents=True)
 
     for lib_src in _REAL_LIBS:
-        if lib_src.exists():
-            shutil.copy2(lib_src, lib_dir / lib_src.name)
+        assert lib_src.exists(), (
+            f"fixture setup: expected library source file missing: {lib_src} "
+            f"(the installed sandbox would silently omit it, producing a "
+            f"confusing 'No such file or directory' from the sourcing "
+            f"script instead of a clear fixture-setup failure)"
+        )
+        shutil.copy2(lib_src, lib_dir / lib_src.name)
 
     installed_upgrade = kanban_root / "scripts" / "upgrade.sh"
     shutil.copy2(_REAL_UPGRADE_SH, installed_upgrade)
@@ -581,3 +604,42 @@ def test_source_repo_branch_and_worktree_list_unchanged_across_success_and_refus
         f"success or the refusal path.\ngit worktree list --porcelain:\n"
         f"{after_failure[1]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# A version-targeted upgrade stamps VERSION_DETAIL with the resolved tag.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not _REAL_UPGRADE_SH.exists(),
+    reason=f"Real upgrade.sh not found at {_REAL_UPGRADE_SH}; skipping.",
+)
+def test_version_targeted_upgrade_stamps_resolved_tag_in_version_detail(
+    tmp_path: pathlib.Path,
+) -> None:
+    """``upgrade.sh vB`` writes VERSION_DETAIL naming vB and vB's commit.
+
+    The upgrade lays down from a detached worktree of the source repo, whose
+    ``.git`` is a pointer file; the checked-out branch sits at the newer vC.
+    VERSION_DETAIL must still be written and start with the resolved tag.
+    """
+    source_repo = _build_tagged_source_repo(tmp_path, "source_repo")
+    tag_sha = _run_git(source_repo, "rev-parse", f"{_TAG_B}^{{commit}}").stdout.strip()
+    kanban_root = _build_installed_kanban_root(
+        tmp_path, "kanban_root", installed_version=_TAG_A
+    )
+
+    result = _run_upgrade(kanban_root, source_repo, tmp_path, version_arg=_TAG_B)
+    output = _combined_output(result)
+
+    assert result.returncode == 0, f"upgrade.sh {_TAG_B} failed:\n{output}"
+    assert _installed_version(kanban_root) == _TAG_B, output
+
+    detail_file = kanban_root / "VERSION_DETAIL"
+    assert detail_file.exists(), (
+        f"VERSION_DETAIL was not written by a version-targeted upgrade:\n{output}"
+    )
+    assert detail_file.read_text(encoding="utf-8") == (
+        f"{_TAG_B}  deposit-sha={tag_sha}\n"
+    ), detail_file.read_text(encoding="utf-8")

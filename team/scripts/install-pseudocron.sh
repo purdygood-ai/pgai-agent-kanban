@@ -34,18 +34,27 @@
 #     and pseudocron-large.cfg.example must exist in the dev tree.
 #   - team/scripts/pseudocron.env.example must exist in the dev tree.
 #
+# NOTE on --keep-existing:
+#   An existing pseudocron.cfg is left byte-identical, whatever its content —
+#   it may be hand-tuned.  It is written only when absent.  When it differs
+#   from the selected tier's template, one line says so and names the command
+#   that replaces it.  upgrade.sh's pseudocron hook passes this flag.
+#
 # Usage:
-#   team/scripts/install-pseudocron.sh [--wake-tier small|medium|large] [--dry-run] [--yes] [--help]
+#   team/scripts/install-pseudocron.sh [--wake-tier small|medium|large] [--keep-existing] [--dry-run] [--yes] [--help]
 #
 # Options:
 #   --wake-tier small|medium|large
 #                          Select the pseudocron schedule tier.  Determines which
 #                          template is written as pseudocron.cfg.  Default: small.
 #                          Also accepted as --wake-tier=small|medium|large.
+#   --keep-existing        Never overwrite an existing pseudocron.cfg; write it
+#                          only when absent (see NOTE on --keep-existing).
 #   --dry-run              Show the actions that would be taken without writing any files.
 #   --yes                  Skip the "Install pseudocron files?" confirmation prompt.
 #                          Required for non-interactive (no-TTY) runs; without it a
 #                          no-TTY invocation exits with code 2.
+#   --non-interactive      Alias of --yes.
 #   --help                 Print this usage and exit 0.
 
 set -euo pipefail
@@ -72,6 +81,8 @@ fi
 # shellcheck source=team/scripts/lib/argparse.sh
 source "$_ARGPARSE_LIB"
 unset _ARGPARSE_LIB
+# shellcheck source=lib/script_common.sh
+source "${_SCRIPT_DIR}/lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Color helpers (only when stdout is a terminal)
@@ -99,12 +110,18 @@ DRY_RUN=false
 # WAKE_TIER_ARG: non-empty when the operator supplied --wake-tier=X on the CLI.
 # Empty means use the default ("small").
 WAKE_TIER_ARG=""
-# YES_FLAG: set to true when --yes is supplied.
+# YES_FLAG: set to true when --yes (or its alias --non-interactive) is supplied.
 YES_FLAG=false
+# KEEP_EXISTING: set to true when --keep-existing is supplied; an existing
+# pseudocron.cfg is then never overwritten.
+KEEP_EXISTING=false
 
-_print_usage() {
-  cat >&2 <<USAGE
-Usage: $(basename "$0") [--wake-tier small|medium|large] [--dry-run] [--yes] [--help]
+# Usage text as data (per lib/script_common.sh's documented convention).
+# This script's usage intentionally prints to stderr on every path (--help's
+# exit 0 included), so the destination is pinned here rather than delegated
+# to print_usage_and_exit (which routes exit 0 to stdout).
+_USAGE_TEXT="$(cat <<USAGE
+Usage: $(basename "$0") [--wake-tier small|medium|large] [--keep-existing] [--dry-run] [--yes] [--help]
 
 Install or update pseudocron.cfg and pseudocron.env in the kanban root.
 
@@ -122,11 +139,15 @@ Options:
                          Select the pseudocron schedule tier.  Determines which
                          template file is written as pseudocron.cfg in the kanban root.
                          Default: small. Also accepted as --wake-tier=small|medium|large.
+  --keep-existing        Leave an existing pseudocron.cfg byte-identical (it may be
+                         hand-tuned); write it only when absent.  A differing file is
+                         reported with the command that replaces it.
   --dry-run              Show the planned actions without writing any files.
   --yes                  Skip the "Install pseudocron files?" confirmation prompt
                          regardless of TTY presence.  Required for non-interactive
                          (no-TTY) runs; without it, a no-TTY invocation exits with
                          code 2 to prevent silent overwrites.
+  --non-interactive      Alias of --yes.
   --help                 Print this usage and exit 0.
 
 Files written to the kanban root:
@@ -135,7 +156,8 @@ Files written to the kanban root:
                    needed. pseudocron.py sets cwd to the kanban root at runtime so
                    relative paths (e.g. "scripts/wake-batch.sh") resolve correctly.
                    Skipped silently if the file already exists with identical content.
-                   Backed up and overwritten when content differs (with --wake-tier explicit).
+                   Backed up and overwritten when content differs (with --wake-tier explicit),
+                   unless --keep-existing is given.
   pseudocron.env   Pre-filled environment variable file consumed by pseudocron.py.
                    Written from team/scripts/pseudocron.env.example only if absent.
                    Existing pseudocron.env is NEVER overwritten (operator customizations).
@@ -148,7 +170,7 @@ Environment:
   PGAI_AGENT_KANBAN_ROOT_PATH    Kanban root — canonical name
                                   Default (fresh install): \$HOME/pgai_agent_kanban
 USAGE
-}
+)"
 
 # ---------------------------------------------------------------------------
 # Parse arguments via the shared argparse library.
@@ -166,10 +188,10 @@ fi
 # Short flags (-h) arrive in ARGPARSE_POSITIONAL; handle them first.
 for _pos in "${ARGPARSE_POSITIONAL[@]+"${ARGPARSE_POSITIONAL[@]}"}"; do
   case "$_pos" in
-    -h) _print_usage; exit 0 ;;
+    -h) printf '%s\n' "$_USAGE_TEXT" >&2; exit 0 ;;
     *)
       err "Unknown argument: $_pos"
-      _print_usage
+      printf '%s\n' "$_USAGE_TEXT" >&2
       exit 1
       ;;
   esac
@@ -179,10 +201,10 @@ unset _pos
 # Reject unknown flags.
 for _flag in "${!ARGPARSE_FLAGS[@]}"; do
   case "$_flag" in
-    dry-run|wake-tier|yes|non-interactive|help) ;;
+    dry-run|wake-tier|yes|non-interactive|keep-existing|help) ;;
     *)
       err "Unknown argument: --${_flag}"
-      _print_usage
+      printf '%s\n' "$_USAGE_TEXT" >&2
       exit 1
       ;;
   esac
@@ -191,12 +213,14 @@ unset _flag
 
 # Handle --help.
 if argparse_has "help"; then
-  _print_usage; exit 0
+  printf '%s\n' "$_USAGE_TEXT" >&2
+  exit 0
 fi
 
 # Extract boolean flags.
 if argparse_has "dry-run";                               then DRY_RUN=true; fi
 if argparse_has "yes" || argparse_has "non-interactive"; then YES_FLAG=true; fi
+if argparse_has "keep-existing";                         then KEEP_EXISTING=true; fi
 
 # Extract canonical value flag.
 if argparse_has "wake-tier"; then
@@ -315,6 +339,8 @@ if [[ "$DRY_RUN" == "true" ]]; then
   if [[ -f "$PSEUDOCRON_CFG" ]]; then
     if cmp -s "$TIER_TEMPLATE" "$PSEUDOCRON_CFG"; then
       info "      Status: content is already identical — would be a no-op."
+    elif [[ "$KEEP_EXISTING" == "true" ]]; then
+      info "      Status: content differs — would be kept as-is (--keep-existing)."
     else
       info "      Status: content differs — would be backed up and overwritten."
     fi
@@ -343,6 +369,8 @@ fi
 # ---------------------------------------------------------------------------
 # Write pseudocron.cfg.
 #
+# With --keep-existing, an existing file is never written (the upgrade hook's
+# mode: a hand-tuned schedule survives every upgrade).  Otherwise:
 # When --wake-tier is explicitly supplied by the operator, treat this as an
 # unconditional-overwrite intent (mirrors install-crontab.sh --tier behavior):
 # back up the existing file and write the new one without prompting.
@@ -352,7 +380,15 @@ fi
 # ---------------------------------------------------------------------------
 info "Writing pseudocron.cfg (tier: $SELECTED_TIER)..."
 
-if [[ -n "$WAKE_TIER_ARG" && -f "$PSEUDOCRON_CFG" ]]; then
+if [[ "$KEEP_EXISTING" == "true" && -f "$PSEUDOCRON_CFG" ]]; then
+  # --keep-existing: the operator's file wins, whatever it holds.
+  if cmp -s "$TIER_TEMPLATE" "$PSEUDOCRON_CFG"; then
+    info "pseudocron.cfg already matches the ${SELECTED_TIER} template — kept as-is."
+  else
+    info "pseudocron.cfg differs from the shipped ${SELECTED_TIER} template — kept as-is (--keep-existing)."
+    info "To replace it (a backup is made): ${_SCRIPT_DIR}/$(basename "$0") --wake-tier=${SELECTED_TIER} --yes"
+  fi
+elif [[ -n "$WAKE_TIER_ARG" && -f "$PSEUDOCRON_CFG" ]]; then
   # Explicit tier + file exists: force-overwrite with backup (skip prompt).
   if cmp -s "$TIER_TEMPLATE" "$PSEUDOCRON_CFG"; then
     info "pseudocron.cfg already up to date (identical content) — skipping write."
@@ -415,7 +451,9 @@ fi
 ok "Done.  Pseudocron files are in place."
 info "Next steps:"
 info "  1. Edit $PSEUDOCRON_ENV and fill in real values."
-info "  2. Start pseudocron (it finds pseudocron.cfg/.env from PGAI_AGENT_KANBAN_ROOT_PATH;"
-info "     it takes no flags — see docs/pseudocron.md):"
-info "       python3 ${KANBAN_ROOT_ABS}/scripts/pseudocron.py \\"
-info "           >> ${KANBAN_ROOT_ABS}/logs/pseudocron.log 2>&1"
+info "  2. Start pseudocron. It takes no options: it reads pseudocron.cfg and"
+info "     pseudocron.env from the root named by PGAI_AGENT_KANBAN_ROOT_PATH, which"
+info "     is required in the launching environment and has no default"
+info "     (see docs/pseudocron.md):"
+info "       export PGAI_AGENT_KANBAN_ROOT_PATH=${KANBAN_ROOT_ABS}"
+info '       python3 "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/pseudocron.py" >> "$PGAI_AGENT_KANBAN_ROOT_PATH/logs/pseudocron.log" 2>&1'

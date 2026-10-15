@@ -1,0 +1,158 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified RC v0.5.0 (\"Bonus Fruit\") for pgai-chomp-man against\n`requirements/v0.5.0-fruit-bonus.md`. The RC adds one new module (`fruit.py`)\nand makes purely additive changes to `scoring.py` and `pgai-chomp-man.py`,\nplus three new/extended test files. Pre-flight merge verification passed (all\nthree CODER feature branches merged into the RC; branches deleted post-merge\nas normal). Worktree HEAD matches `rc/v0.5.0`, tree clean, no stashes.\n`python3 -m py_compile` passes for every changed/added `.py` file. The full\nproject pytest suite runs headless with 220 passed, exit 0. Behavioral\nverification of the spawn trigger, despawn-on-timeout, cell-entry eat\ndetection (including no-double-count), and tier scoring floor/cap all pass.\nAll six acceptance criteria are met. One pass-with-caveat is recorded around a\ndocumented internal inconsistency in the requirements doc's own point-value\nguidance; it does not affect operability. Recommendation: PASS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "AC1 — all changed/added .py files compile",
+      "heading": "Finding 1: AC1 — all changed/added .py files compile",
+      "level": 3,
+      "body": "**Category:** pass\n`python3 -m py_compile fruit.py scoring.py pgai-chomp-man.py\ntests/test_fruit.py tests/test_fruit_render.py tests/test_scoring.py`\nreturned success.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "AC2 — fruit spawns on progress/timer trigger and despawns after window",
+      "heading": "Finding 2: AC2 — fruit spawns on progress/timer trigger and despawns after window",
+      "level": 3,
+      "body": "**Category:** pass\n`should_trigger_fruit_spawn()` fires on either the pellet-progress threshold\n(`FRUIT_SPAWN_PELLET_THRESHOLD = 30`) OR the elapsed-time threshold\n(`FRUIT_SPAWN_INTERVAL_MS = 20000`), whichever is reached first — matching the\nrequirements' \"progress- and/or timer-based\" wording. `spawn_fruit()` sets the\nfruit active at the fixed center-nearest cell with a full\n`FRUIT_VISIBLE_WINDOW_MS = 10000` window; `update_fruit_timer()` counts it down\neach frame and despawns the instant the window reaches 0 (floored, never\nnegative; overshoot handled). Behavioral run confirmed spawn-then-timeout\ndespawn. The main loop wires this per-frame, gated on not-board-cleared and\nnot-game-over, and resets the trigger accumulators only when a spawn fires.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "AC3 — fruit renders distinctly from pellets and power-ups",
+      "heading": "Finding 3: AC3 — fruit renders distinctly from pellets and power-ups",
+      "level": 3,
+      "body": "**Category:** pass\n`draw_fruit()` renders a diamond (rotated square via `pygame.draw.polygon`)\nwith a pale highlight diamond on top — a distinct *silhouette*, not just a\ndistinct color, from the circles `maze.draw_pellet()` /\n`maze.draw_power_pellet()` use. `FRUIT_COLOR = (48, 220, 176)` (jade/teal) is\nverified distinct from `PELLET_COLOR` and `POWER_PELLET_COLOR`.\n`tests/test_fruit_render.py` inspects real drawn pixels under the dummy video\ndriver: body color, highlight color, no-op when inactive, distinct color, and\ndiamond-not-circle (corner pixels left as background). Manual live visual check\nrequires a display and was not run headless; the pixel-level tests cover the\nstructural claim.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "AC4 — eating fruit awards high points via named constants",
+      "heading": "Finding 4: AC4 — eating fruit awards high points via named constants",
+      "level": 3,
+      "body": "**Category:** pass\n`fruit_points_for_tier()` resolves the eaten fruit's tier into a value from the\nnamed, ordered `FRUIT_TIER_VALUES = (100, 300, 500)`, built from\n`FRUIT_TIER_1_POINTS` / `FRUIT_TIER_2_POINTS` / `FRUIT_TIER_3_POINTS`. Every\ntier value exceeds `PELLET_POINTS (10)` and `POWER_PELLET_POINTS (50)` — the\nhighest standard *collectible* values in the game. The main loop awards\n`score.add(fruit_points_for_tier(fruit.tier))` and plays the registered\n`\"fruit\"` sound cue only when `eat_fruit()` returns True; `fruit.tier` remains\nreadable after the eat (neither `eat_fruit()` nor `despawn_fruit()` clears it).\nThe CODER-2 placeholder `FRUIT_POINTS` constant was fully removed — no live\ncode references remain (only historical mentions in comments/docstrings).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "AC5 — fruit values escalate across tiers as the player progresses",
+      "heading": "Finding 5: AC5 — fruit values escalate across tiers as the player progresses",
+      "level": 3,
+      "body": "**Category:** pass\n`Fruit.tier` is set from `spawn_fruit(..., tier=...)`; the main loop tracks a\ncumulative, never-reset `fruit_spawn_count` and passes it as the tier on each\nspawn, so successive spawns advance tier 1 -> 2 -> 3. `fruit_points_for_tier()`\nholds at the top value (500) past the sequence length and floors tiers <= 0 to\ntier 1 — mirroring `dragon_eat_bonus()`'s established floor/cap contract.\nVerified behaviorally: tiers 1/2/3 -> 100/300/500; tier 4 and tier 100 -> 500;\ntiers 0 and -5 -> 100.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "AC6 — no regression to prior mechanics",
+      "heading": "Finding 6: AC6 — no regression to prior mechanics",
+      "level": 3,
+      "body": "**Category:** pass\nThe diff is purely additive: `fruit.py` and two test files are new;\n`scoring.py`, `pgai-chomp-man.py`, and `test_scoring.py` gain fruit-only\nadditions. No prior gameplay module (`maze.py`, `dragons.py`, `lives.py`,\n`player.py`, `board_clear.py`, `sound.py`) was modified. All 220 tests pass,\nincluding the full pre-existing regression set (pellets, power-pellets,\ndragons, dragon-eat/vulnerable mode, lives, board-clear, player direction,\ndisplay scaling, sound wiring). The `\"fruit\"` sound cue was already registered\nin `sound.SOUND_DEFINITIONS`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Goal 2 point-value phrasing vs. suggested tier values",
+      "heading": "Finding 7: Goal 2 point-value phrasing vs. suggested tier values",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\nGoal 2 of the requirements states the fruit should award \"more than pellets or\nsingle dragon-eats.\" A single dragon-eat is `DRAGON_EAT_BONUS_VALUES[0] = 200`,\nso **tier 1 (100 points) is below a single dragon-eat (200)**. However, the\nsame requirements doc's Design/Theming section and Acceptance criteria\nexplicitly suggest the concrete progression \"100, 300, 500,\" which the\nimplementation follows exactly, and describe the fruit as \"the highest standard\n*collectible* value in the game\" (all tiers exceed pellets and power-pellets).\nThe doc is internally inconsistent on this point (Goal 2 vs. its own suggested\nnumbers). The authoritative acceptance criteria (AC4/AC5) require only \"high\npoints using named constants\" and \"values escalate across tiers\" — both met.\nThe top tier (500) does exceed a single dragon-eat. Requirements-quality\nreconciliation is out of TESTER scope; recorded as a caveat, not a defect. No\nPath C filing.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

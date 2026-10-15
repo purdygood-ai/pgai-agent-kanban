@@ -9,6 +9,13 @@
 # Thin adapter: parses --project via operator_args.sh, resolves the project
 # root via project_paths.sh, and delegates the on-disk change to the Python
 # halt function in pgai_agent_kanban.ops.write.  No mutation logic lives here.
+#
+# Provenance: a write that changes the sentinel also appends one record --
+# time, op, path, entry, pid, parent (this script's command line), user --
+# to ${KANBAN_ROOT}/logs/sentinel-writes.log, so the gated runners' sentinel
+# check can tell this arm from a test leak. The sentinel's bytes, this
+# script's output and its exit codes are unchanged; a record that cannot
+# be written is one stderr warning, never a failure.
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
@@ -52,14 +59,29 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 # --- Resolve project ---
-_project="$(operator_args_project)"
-if [[ -z "${_project}" ]]; then
+_project_raw="$(operator_args_project)"
+if [[ -z "${_project_raw}" ]]; then
     printf 'halt.sh: --project is required (or set $PGAI_PROJECT_NAME)\n' >&2
     exit 1
 fi
 
+# --- Resolve project name by exact match then unambiguous prefix ---
+_project="$(pp_resolve_project_name "${_project_raw}")" || exit 1
+
 # --- Resolve project root path ---
 _project_root="$(pp_project_root "${_project}")" || exit 1
+
+# --- Idempotent: already halted (checked before calling Python so the
+#     narration below can say so — the Python halt() function itself is
+#     already idempotent (no error, no second write), but on its own it
+#     gives the caller no way to distinguish "just armed" from "already
+#     armed") ---
+_halt_path="${_project_root}/HALT"
+if [[ -f "${_halt_path}" ]]; then
+    printf 'halt: project %s already halted (%s exists; no change made)\n' \
+        "${_project}" "${_halt_path}"
+    exit 0
+fi
 
 # --- Execute the operation via Python library ---
 if pp_run_ops pgai_agent_kanban.ops halt "${_project_root}"; then

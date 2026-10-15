@@ -7,14 +7,14 @@
 # source of truth for:
 #   1. The allowlist of kanban-owned transient top-level basenames.
 #   2. The live-state guard that checks wake locks before any purge.
-#   3. The per-entry decision logic (foreign skip, WORKING-task skip, deletion).
+#   3. The per-entry decision logic (foreign skip, live-task worktree skip, deletion).
 #
 # Consumers must set these variables BEFORE sourcing this file, or rely on the
 # cleanup.sh caller to set them:
 #   DRY_RUN           — "true" / "false"
 #   TEAM_ROOT         — absolute path to the kanban root (used for lock paths)
 #   PGAI_TASKS_DIR    — (optional) path to the project tasks directory for
-#                       WORKING-task worktree skip; defaults to "" (skip disabled)
+#                       live-task worktree skip; defaults to "" (skip disabled)
 #
 # Public functions:
 #   temp_purge_check_wake_locks [lock_dir]
@@ -26,7 +26,8 @@
 #       Sweep the contents of <dir>, applying the allowlist + live-state guard
 #       to each top-level entry.  Foreign entries are skipped with a logged
 #       notice.  Within the worktrees/ allowlist entry, subdirectories whose
-#       task status is WORKING are also skipped.  <label> is used in log lines.
+#       task (looked up in [tasks_dir]) is WORKING, BLOCKED or TESTING are
+#       also skipped.  <label> is used in log lines.
 #       Increments TEMP_ITEMS_PURGED for every item actually removed (or that
 #       would be removed in dry-run mode).
 #
@@ -38,7 +39,7 @@ _PGAI_TEMP_PURGE_SH_LOADED=1
 # Allowlist of kanban-owned transient top-level basenames.
 #
 # Every basename listed here is considered "kanban-owned" and eligible for
-# purge (subject to the WORKING-task guard for worktrees/).  Any basename NOT
+# purge (subject to the live-task guard for worktrees/).  Any basename NOT
 # in this list is "foreign" and is never deleted.
 #
 # Maintenance: add a new basename here whenever a new subsystem begins writing
@@ -205,10 +206,15 @@ temp_purge_check_wake_locks() {
 # ---------------------------------------------------------------------------
 # temp_purge_sweep_worktrees <worktrees_dir> <label> [tasks_dir]
 #
-# Sweep the contents of a worktrees/ directory, applying the WORKING-task
-# live-state guard.  Each immediate child of <worktrees_dir> is treated as a
-# task worktree named by its task ID.  Entries whose task status is WORKING
-# are skipped with a logged notice; all others are purged (or dry-run logged).
+# Sweep the contents of a worktrees/ directory, applying the live-task
+# guard.  Each immediate child of <worktrees_dir> is treated as a task
+# worktree named by its task ID.  Entries whose task status is WORKING,
+# BLOCKED (a retained worktree an operator or a retry may still need) or
+# TESTING are skipped with a logged notice; all others -- a terminal task's
+# worktree, or one no task in <tasks_dir> names -- are purged (or dry-run
+# logged).  <tasks_dir> must be the tasks dir of the project that owns
+# <worktrees_dir>: a worktree judged against another project's tasks finds
+# no status and is purged.
 #
 # This helper is extracted so both temp_purge_sweep_dir and the install-wide
 # loop in cleanup.sh can call it without code duplication.
@@ -216,7 +222,7 @@ temp_purge_check_wake_locks() {
 # Arguments:
 #   $1 — worktrees_dir : the worktrees base directory to sweep
 #   $2 — label         : human-readable label for log messages
-#   $3 — tasks_dir     : (optional) path to tasks directory for WORKING check
+#   $3 — tasks_dir     : (optional) path to tasks directory for the live-task check
 #
 # Uses caller's DRY_RUN, log_action, log, TEMP_ITEMS_PURGED.
 # ---------------------------------------------------------------------------
@@ -245,10 +251,12 @@ temp_purge_sweep_worktrees() {
             _task_state="$(_temp_purge_read_task_state "$_task_status_file")"
         fi
 
-        if [[ "$_task_state" == "WORKING" ]]; then
-            log "temp purge: skipping WORKING-task worktree: $_wt_entry"
-            continue
-        fi
+        case "$_task_state" in
+            WORKING|BLOCKED|TESTING)
+                log "temp purge: skipping ${_task_state}-task worktree: $_wt_entry"
+                continue
+                ;;
+        esac
 
         log_action "temp purge (${_label}): $_wt_entry"
         if [[ "$DRY_RUN" == "false" ]]; then
@@ -272,14 +280,14 @@ temp_purge_sweep_worktrees() {
 #        which are explicitly absent from the allowlist since they are owned
 #        by the provider CLI process, not the kanban.
 #   2. If the basename IS "worktrees" and the entry is a directory:
-#        Delegate to temp_purge_sweep_worktrees for per-task WORKING guard.
+#        Delegate to temp_purge_sweep_worktrees for the per-task live-state guard.
 #   3. Otherwise (allowlisted, not worktrees):
 #        Apply the normal purge decision (dry-run or real rm).
 #
 # Arguments:
 #   $1 — dir        : directory whose contents to sweep
 #   $2 — label      : human-readable label for log messages
-#   $3 — tasks_dir  : (optional) path to tasks directory for WORKING-task check
+#   $3 — tasks_dir  : (optional) path to tasks directory for the live-task check
 #
 # The function uses the caller's DRY_RUN variable (must be "true" or "false").
 # It uses the caller's log and log_action functions (defined in cleanup.sh).

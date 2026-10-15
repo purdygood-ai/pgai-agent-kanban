@@ -28,7 +28,7 @@ Two extraction levels are tested, mirroring the project's established
 pattern for exercising bash logic without sourcing an entire wake script:
   - The README-parsing helpers (get_role_from_readme,
     get_assigned_agent_from_readme, role_is_valid_agent) are extracted
-    from scripts/lib/wake_common.sh by function name and exercised
+    from scripts/lib/wake_readme_meta.sh by function name and exercised
     directly.
   - The pre-dispatch assertion block itself is extracted from
     scripts/wake/claude.sh by its anchor comment and exercised in a
@@ -36,7 +36,7 @@ pattern for exercising bash logic without sourcing an entire wake script:
     mark_backlog) without touching a real status.md.
 
 Naming: function names describe behavior under test, never bug IDs or
-task IDs (see SOP.md "Test Authoring Guidelines").
+task IDs (see roles/TESTER.md "Test Authoring Guidelines").
 """
 
 from __future__ import annotations
@@ -50,13 +50,20 @@ import pytest
 # ---------------------------------------------------------------------------
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
-_WAKE_COMMON_LIB = pathlib.Path("scripts/lib/wake_common.sh")
-_CLAUDE_SH = pathlib.Path("scripts/wake/claude.sh")
-_CODEX_SH = pathlib.Path("scripts/wake/codex.sh")
+_WAKE_README_META_LIB = pathlib.Path("scripts/lib/wake_readme_meta.sh")
+_WAKE_TASK_STATE_LIB = pathlib.Path("scripts/lib/wake_task_state.sh")
+# This pre-dispatch block now lives once in the shared wake driver's prep
+# stage, sourced by both wake/claude.sh and wake/codex.sh (v2.9.20-engine-
+# decomposition: process_one_task's inline body was lifted
+# out of wake/claude.sh; wake/codex.sh now sources the
+# same shared driver instead of carrying its own inline copy). Both
+# constants below point at the one shared file the block now lives in.
+_CLAUDE_SH = pathlib.Path("scripts/lib/wake_driver_prep.sh")
+_CODEX_SH = pathlib.Path("scripts/lib/wake_driver_prep.sh")
 
 # Anchor comment that begins the pre-dispatch assertion block in a wake
 # provider script. Both claude.sh and codex.sh carry the identical block
-# under this anchor (BUG-0110 brought codex.sh to parity with claude.sh).
+# under this anchor.
 _ASSERTION_ANCHOR = "# --- Pre-dispatch assertion ---"
 
 
@@ -139,9 +146,9 @@ def _run_readme_helpers(tmp_path: pathlib.Path, readme: pathlib.Path) -> subproc
     script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
-        {_awk_extract_function("get_role_from_readme", _WAKE_COMMON_LIB)}
-        {_awk_extract_function("get_assigned_agent_from_readme", _WAKE_COMMON_LIB)}
-        {_awk_extract_function("role_is_valid_agent", _WAKE_COMMON_LIB)}
+        {_awk_extract_function("get_role_from_readme", _WAKE_README_META_LIB)}
+        {_awk_extract_function("get_assigned_agent_from_readme", _WAKE_README_META_LIB)}
+        {_awk_extract_function("role_is_valid_agent", _WAKE_README_META_LIB)}
 
         role="$(get_role_from_readme "{readme}")"
         assigned="$(get_assigned_agent_from_readme "{readme}")"
@@ -215,8 +222,11 @@ def _run_dispatch_assertion(
     codex provider's copy of the same block).
 
     Stubs log/set_state/set_block/normalize_status_file/mark_backlog so the
-    block's BLOCKED path can be observed without a real status.md. Returns
-    the completed process and the recorded call-log contents.
+    block's BLOCKED path can be observed without a real status.md. The
+    block's BLOCKED write is the real block_task_with_record
+    (wake_task_state.sh); its State and section writers are stubbed to the
+    same SET_STATE / SET_BLOCK call-log lines. Returns the completed process
+    and the recorded call-log contents.
     """
     calls_file = tmp_path / "calls.log"
     calls_file.write_text("", encoding="utf-8")
@@ -227,14 +237,20 @@ def _run_dispatch_assertion(
     script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
-        {_awk_extract_function("get_role_from_readme", _WAKE_COMMON_LIB)}
-        {_awk_extract_function("get_assigned_agent_from_readme", _WAKE_COMMON_LIB)}
-        {_awk_extract_function("role_is_valid_agent", _WAKE_COMMON_LIB)}
+        {_awk_extract_function("get_role_from_readme", _WAKE_README_META_LIB)}
+        {_awk_extract_function("get_assigned_agent_from_readme", _WAKE_README_META_LIB)}
+        {_awk_extract_function("role_is_valid_agent", _WAKE_README_META_LIB)}
+        {_awk_extract_function("block_task_with_record", _WAKE_TASK_STATE_LIB)}
 
         CALLS_FILE="{calls_file}"
         log() {{ echo "LOG:$*" >> "$CALLS_FILE"; }}
         set_state() {{ echo "SET_STATE:$2" >> "$CALLS_FILE"; }}
         set_block() {{ echo "SET_BLOCK:$2:$3" >> "$CALLS_FILE"; }}
+        set_state_or_insert() {{ echo "SET_STATE:$2" >> "$CALLS_FILE"; }}
+        set_block_or_append() {{ echo "SET_BLOCK:$2:$3" >> "$CALLS_FILE"; }}
+        block_record_owner_role() {{ echo CODER; }}
+        block_record_evidence() {{ echo none; }}
+        block_record_write() {{ echo "BLOCK_RECORD:$2" >> "$CALLS_FILE"; }}
         normalize_status_file() {{ echo "NORMALIZE" >> "$CALLS_FILE"; }}
         mark_backlog() {{ echo "MARK_BACKLOG:$1:$2" >> "$CALLS_FILE"; }}
 
@@ -263,8 +279,8 @@ def _run_dispatch_assertion(
 
 
 # ---------------------------------------------------------------------------
-# Level 2 + 2b: both wake providers share one pre-dispatch assertion block
-# (BUG-0110 brought codex.sh to parity with claude.sh), so every scenario is
+# Level 2 + 2b: both wake providers share one pre-dispatch assertion block,
+# so every scenario is
 # exercised against both siblings via a `source` parametrization rather than
 # duplicating each fixture per provider.
 # ---------------------------------------------------------------------------
@@ -306,7 +322,7 @@ def test_missing_role_blocks_with_named_reason_and_no_dispatch(
     wake providers; no subagent is selected and dispatch never proceeds.
 
     "defaulting to coder" must never appear in the call log — this is the
-    exact BUG-0110 regression case, where codex.sh previously logged that
+    exact regression case where codex.sh previously logged that
     fallthrough and dispatched as coder instead of blocking.
     """
     readme = _write_readme(tmp_path, role=None, assigned_agent="none")

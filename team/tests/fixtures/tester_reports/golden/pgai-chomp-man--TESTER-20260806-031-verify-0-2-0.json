@@ -1,0 +1,137 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `rc/v0.2.0` of the pgai-chomp-man game against its\nrequirements document (`requirements/v0.2.0-dots-and-scoring.md`). The RC adds\ncollectible pellets to the maze corridors, eat-on-enter logic that removes a\npellet and adds to a running score, a live score HUD, and a board-clear (win)\ncondition with an on-screen \"BOARD CLEAR\" message. Verification ran the project\ntest suite (51 tests, all pass), compiled every changed/added .py file, executed\nthe headless module sanity checks, and ran an end-to-end behavioral simulation\neating every pellet on the shipped default maze. All six acceptance criteria are\nmet. No bugs, gaps, or stale assertions were found. The build shows no evidence\nof manual intervention.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "AC1 -- py_compile passes for all changed/added .py files",
+      "heading": "Finding 1: AC1 -- py_compile passes for all changed/added .py files",
+      "level": 3,
+      "body": "Category: pass\n`python3 -m py_compile *.py tests/*.py` exited 0. Every source and test file\ncompiles.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "AC2 -- pellets placed on open corridor cells only, never in walls",
+      "heading": "Finding 2: AC2 -- pellets placed on open corridor cells only, never in walls",
+      "level": 3,
+      "body": "Category: pass\nMaze.place_pellets() converts only CellType.OPEN cells to CellType.DOT; walls\nare untouched by construction. Behavioral check on the shipped DEFAULT_LAYOUT:\n138 pellets placed, 0 pellets on any wall cell, and Chomp Man's start cell (1,1)\ncorrectly excluded (no free pellet at spawn).\ntests/test_maze_pellets.py::test_place_pellets_only_converts_open_cells confirms\nthe same invariant.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "AC3 -- moving onto a pellet removes it and increases score",
+      "heading": "Finding 3: AC3 -- moving onto a pellet removes it and increases score",
+      "level": 3,
+      "body": "Category: pass\nscoring.eat_at() is a cell-occupancy test that reads the cell's CellType, looks\nup its point value, clears the pellet, and adds the points. Wired into the main\nmovement loop in pgai-chomp-man.py (eat_at(maze, player.row, player.col, score)\nafter each step). End-to-end sim eating all 138 pellets produced a final score of\n1380 (138 x 10). Re-eating an already-eaten cell is a no-op (returns False, score\nunchanged) -- verified the Step 6.5 double-count failure mode.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "AC4 -- score displayed on HUD and updates live",
+      "heading": "Finding 4: AC4 -- score displayed on HUD and updates live",
+      "level": 3,
+      "body": "Category: pass\nscoring.render_score_hud() renders \"SCORE: <total>\" and is called every frame in\nthe main loop, positioned inside the top-left margin strip so it never overlaps a\ncorridor cell. Confirmed the renderer runs headlessly without error.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "AC5 -- board-clear fires when the last pellet is eaten",
+      "heading": "Finding 5: AC5 -- board-clear fires when the last pellet is eaten",
+      "level": 3,
+      "body": "Category: pass\nboard_clear.is_board_clear() reads Maze.remaining_pellet_count() live off the\ngrid (single source of truth -- no parallel counter to drift). The main loop sets\nboard_cleared only when an eat drops the count to zero, then halts movement and\ndraws the \"BOARD CLEAR\" overlay. Behavioral sim: the win condition read False for\nevery pellet eaten except the last, and flipped True exactly on the final eat.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "AC6 -- scoring values are named constants, not magic numbers",
+      "heading": "Finding 6: AC6 -- scoring values are named constants, not magic numbers",
+      "level": 3,
+      "body": "Category: pass\nPELLET_POINTS = 10 and the POINT_VALUES registry (keyed by CellType) are the\nsingle source of point values. eat_at() resolves points via a generic dict lookup\n(points_for_cell_type()) with no bare literals in the eat path, structured so\nv0.4.0 power-ups / v0.5.0 fruit register a new CellType + entry without touching\nthe eat logic. Grep confirmed no stray magic numbers in the scoring logic (only\nmatch was a \"60 FPS\" mention inside a docstring).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

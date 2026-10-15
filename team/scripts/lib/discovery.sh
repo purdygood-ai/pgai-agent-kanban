@@ -1,80 +1,83 @@
 #!/usr/bin/env bash
 # team/scripts/lib/discovery.sh
 #
-# Unified discovery pipeline for autonomous work intake.
+# Discovery pipeline driver for autonomous work intake.
 #
-# This library is the single source of truth for "what does the system work on
-# next." It is used by both cron-driven mode (wake/claude.sh) and one-shot
-# mode (pm-agent.sh --auto). One iteration per call: each step that produces
-# work stops the iteration so the next iteration sees the new file via Step 3.
+# This library composes the four-step pipeline that decides "what does the
+# system work on next" from the stage libraries sourced below. One iteration
+# per call; the first step that produces work stops the iteration
+# (category-first: bugs > priorities > requirements). Used by both
+# cron-driven mode (wake_driver.sh, the PM wake's discovery branch) and
+# one-shot mode (pm-agent.sh --auto).
 #
-# The pipeline:
-#
-#   GUARD   (1) validate project.cfg (or PROJECT.cfg) exists and is readable; skip project on error
-#           (2) if per-project HALT file (projects/<name>/HALT) is present, block
-#           (3) if global HALT file ($TEAM_ROOT/HALT) is present, block
-#           (4) if pm_backlog has a pending decompose-v* entry ([ ] or [A] marker),
-#               exit cleanly — RC is opening soon; avoid phantom patch bundles
-#   STEP 1  scan bugs/, bundle ALL unhandled into a patch-bumped requirements file
-#           (skipped when GUARD 4 fires — PM ticket already in flight)
-#   STEP 2  scan priority/, bundle ALL unhandled
-#           (skipped when GUARD 4 fires — PM ticket already in flight)
-#   STEP 3  scan requirements/, queue the lowest-version unprocessed file for PM
-#           (gated: only runs when the ENTIRE chain is idle — Active RC = none
-#           AND every named agent backlog's latest entry is [x])
+#   GUARD   project.cfg readable; per-project HALT; global HALT;
+#           pm_backlog has a pending decompose-v* entry (RC opening soon)
+#   GUARD   chain busy -- Active RC set, or any task named in any role
+#           queue (pm, cm, coder, tester, writer) not DONE/WONT-DO by its
+#           own status.md: idle exit before any scan, logged as
+#             discovery_run_pipeline [<project>]: chain busy, idle exit before any scan
+#           so Steps 1-3 run only on an idle chain
+#   STEP 1  discovery_step_bugs         — bundle bugs/ into a patch-bumped
+#                                          requirements file
+#   STEP 2  discovery_step_priority     — bundle priority/ (only if Step 1
+#                                          found nothing)
+#   STEP 3  discovery_step_requirements — queue the lowest-version unprocessed
+#                                          file for PM (only if Steps 1+2
+#                                          found nothing)
 #   STEP 4  idle exit (no error)
 #
-# GUARD 4 (pm_ticket_in_flight) prevents the bug/priority bundler from writing
-# phantom patch versions while a requirements file has been picked up by discovery
-# but CM-open-rc has not yet fired.  The window is small but hit regularly when
-# an operator drops a requirements file and bugs in the same session.  Only
-# the pre-open-rc window (pm ticket pending, Active RC = none) is blocked here.
+# Repo-lock scope
+# ---------------
+# The guards and the Step 1-3 scans are read-only and run WITHOUT the
+# project's repo lock, so a long scan never keeps another role's wake out.
+# A step takes the lock once it has found something to write, through
+# _disc_enter_write_phase, before its first write (minting a bundle into
+# requirements/, flipping an intake item's ## Status and cache marker,
+# queuing a PM ticket through pm-agent.sh). Under the lock the chain-busy
+# test runs again: a chain that turned busy during the unlocked scan is not
+# written into. Once taken, the lock is held for the rest of the iteration.
+# Who takes it:
+#   - DISCOVERY_WRITE_LOCK_HOOK names a caller function (called with the
+#     project name; 0 = the caller now holds the repo lock). The caller
+#     owns that lock afterwards and releases it -- the PM wake does this
+#     so its post-discovery dispatch runs under the same hold.
+#   - With no hook set, discovery takes the repo lock itself
+#     (pgai_lock_acquire, op discovery-write:<project>) and releases it
+#     before discovery_run_pipeline returns.
+# The acquisition never waits: a lock held by another role defers the write
+# to the next wake (logged, DISCOVERY_LAST_STATUS=idle), and no later step
+# runs in that iteration, so category-first order holds across the deferral.
+# The intake scan's own bookkeeping (the malformed-name rejection counter,
+# quarantine of a malformed file name, settle markers) runs inside the
+# scan, unlocked.
 #
-# Active-RC guard (inside discovery_step_bugs / discovery_step_priority): Steps 1
-# and 2 are additionally blocked when Active RC is set.  Although CM-open-rc has
-# fired by that point, the patch bundle's target_version would be derived from
-# the last *shipped* version — which is below the in-flight RC version, producing
-# an incoherent bundle that requires manual cleanup.  Bundling is deferred until
-# after the in-flight RC ships, at which point the patch version is safe again.
-#
-# Step 3 uses a strict in-flight gate (_disc_chain_idle) to prevent queuing a
-# new PM-decompose task while any agent is still working on the current RC.
-# This prevents the "future PM visible during in-flight RC" noise on the
-# dashboard. The gate checks both Active RC and the tail of each agent backlog.
-#
-# Idempotency invariant (Step 3)
-# ------------------------------
-# Each requirements bundle file written by the discovery pipeline carries a
-# '## Status' field and a '## PM Task' field in its header.  Step 3 uses these
-# fields — not a grep over pm_backlog filenames — to determine whether a bundle
-# has already been queued for PM:
-#
-#   ## Status: open     — bundle exists but has NOT been queued yet; eligible
-#   ## Status: running  — bundle was queued for PM AND pm-agent success was
-#                         verified (task ID in ## PM Task, pm_backlog entry
-#                         confirmed present); Step 3 checks pm_backlog for that
-#                         exact task ID to distinguish in-flight from done.
-#                         Set only after verified success — never on pm-agent
-#                         failure, to prevent permanent no-retry deadlock.
-#   ## Status: done     — RC shipped; bundle is fully processed; skip forever
-#
-# The invariant is robust against filename collisions because it is anchored to
-# the bundle file itself, not to a substring match over a derived slug.  Two
-# bundles whose version+kind portion overlaps (e.g., v0.1.6 vs v0.1.16) cannot
-# trigger false idempotency gates because each bundle's own Status field is the
-# authoritative check.
-#
-# cm-release.sh Step 16b is responsible for setting the bundle's ## Status from
-# 'running' to 'done' when the RC ships.  Until that step runs, Step 3 uses the
-# pm_backlog exact-match check to detect PM completion.
+# Each step's own guard logic, idempotency invariants, and per-item state
+# machine are documented in team/scripts/lib/discovery_steps.sh, not here.
+# See also:
+#   discovery_guards.sh — RC-in-flight / ceiling / chain-idle / PM-ticket /
+#                          git-tag guard primitives the steps call
+#   discovery_items.sh  — intake-item eligibility scanning + quarantine
+#   discovery_defer.sh  — bug-step deferral gate: severity-vs-posture
+#                          decision and the hygiene-sweep queue-emptiness
+#                          check discovery_step_bugs applies
+#   discovery_state.sh  — status-field mutation and bundle writer
+#   discovery_eligibility.sh — requirements-directory eligibility enumeration
+#   discovery_step_requirements.sh — Step 3 (queue the lowest-version
+#                          unprocessed file for PM), split from
+#                          discovery_steps.sh
+#   discovery_bundle.sh — stale-requirements scan consumed by
+#                          dashboard/attention.sh and list-stale-requirements.sh
 #
 # Public API
 # ----------
-#   discovery_run_pipeline <project_name>          — runs steps 1→2→3, returns 0 always
-#   discovery_step_bugs <project_name>             — bundle bugs, return 0 if work produced
-#   discovery_step_priority <project_name>         — bundle priority items, return 0 if work produced
-#   discovery_step_requirements <project_name>     — find lowest-version doc, queue PM
-#   discovery_compute_next_patch <project_name>    — compute next patch slot with bump-around
+#   discovery_run_pipeline <project_name>   — runs steps 1→2→3 once, always
+#                                              returns 0; sets
+#                                              DISCOVERY_LAST_STATUS
+#   _disc_enter_write_phase <project_name> <step_name>
+#                                            — called by each step before its
+#                                              first write; 0 = the repo lock
+#                                              is held and the chain is still
+#                                              idle, 1 = do not write
 #
 # Source order
 # ------------
@@ -85,17 +88,47 @@
 # Source temp helpers so pgai_temp_dir / pgai_mktemp are available.
 # ---------------------------------------------------------------------------
 _DISC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Kept after the sourcing block below unsets _DISC_LIB_DIR: the default
+# write lock sources lock_provenance.sh from here on first need.
+_DISC_SELF_DIR="$_DISC_LIB_DIR"
 if ! declare -F pgai_temp_dir >/dev/null 2>&1; then
     # shellcheck source=temp.sh
     source "${_DISC_LIB_DIR}/temp.sh"
 fi
 
-# Source the workflow-type dispatcher so _disc_write_bundle can call
-# wf_bundle_source_branch rather than comparing the workflow_type string.
+# Source the workflow-type dispatcher so the stage libraries below can call
+# wf_bundle_source_branch / wf_version_semantics rather than comparing the
+# workflow_type string.
 if ! declare -F wf_load_plugin >/dev/null 2>&1; then
     # shellcheck source=workflow.sh
     source "${_DISC_LIB_DIR}/workflow.sh"
 fi
+
+# ---------------------------------------------------------------------------
+# Source the guard, item-scanning, state-mutation, step, and stale-scan lib
+# stages. These files were extracted from this file's former inline body so
+# each stage stays a focused, independently testable unit and this driver
+# stays thin — see each file's own header for its concern, its documented
+# public entry point(s), and cross-file dependencies. Source order does not matter for bash function resolution
+# (functions resolve at call time, not source time), but these are listed in
+# the order the pipeline below consumes them.
+# ---------------------------------------------------------------------------
+# shellcheck source=discovery_guards.sh
+source "${_DISC_LIB_DIR}/discovery_guards.sh"
+# shellcheck source=discovery_state.sh
+source "${_DISC_LIB_DIR}/discovery_state.sh"
+# shellcheck source=discovery_eligibility.sh
+source "${_DISC_LIB_DIR}/discovery_eligibility.sh"
+# shellcheck source=discovery_items.sh
+source "${_DISC_LIB_DIR}/discovery_items.sh"
+# shellcheck source=discovery_defer.sh
+source "${_DISC_LIB_DIR}/discovery_defer.sh"
+# shellcheck source=discovery_steps.sh
+source "${_DISC_LIB_DIR}/discovery_steps.sh"
+# shellcheck source=discovery_step_requirements.sh
+source "${_DISC_LIB_DIR}/discovery_step_requirements.sh"
+# shellcheck source=discovery_bundle.sh
+source "${_DISC_LIB_DIR}/discovery_bundle.sh"
 unset _DISC_LIB_DIR
 
 # ---------------------------------------------------------------------------
@@ -110,569 +143,6 @@ if ! declare -F log >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# discovery_compute_next_patch <project_name>
-#
-# Compute the next available patch version slot for bug/priority bundle output.
-# Bumps the Z component of current_live (X.Y.Z) and bumps-around within patch
-# space if the slot is taken in any of three sources:
-#   1. requirements/vX.Y.Z-*.md or vX.Y.Z.md exists (drafted; exact-version match)
-#   2. tasks/queues/plans/.materialized.* marker whose content references vX.Y.Z
-#   3. git tag vX.Y.Z exists in origin (already exact-match via git tag -l)
-#
-# Fresh-system semantics: if Last Released = v0.0.0 (or unset), starts at v0.0.1.
-#
-# Echoes the chosen version (e.g. "v0.18.5") on stdout. Exit 0 on success.
-# ---------------------------------------------------------------------------
-discovery_compute_next_patch() {
-    local project_name="$1"
-    project_name="$(pp_require_project_context "${project_name:-}")" || return 1
-
-    local last_released requirements_dir plans_dir
-    last_released="$(pp_last_released_version "$project_name" 2>/dev/null || echo "v0.0.0")"
-    [[ -z "$last_released" || "$last_released" == "none" ]] && last_released="v0.0.0"
-
-    requirements_dir="$(pp_requirements_dir "$project_name")"
-    plans_dir="$(pp_tasks_dir "$project_name")/queues/plans"
-
-    # Resolve the dev tree path from project.cfg (INI) or PROJECT.cfg (fallback)
-    # once and reuse for all bump-around tag-existence checks.  This ensures
-    # the same git worktree is used here as in pp_last_released_version, so
-    # bump-around works even when invoked from the live install (which has no
-    # .git/ directory).
-    local _dev_tree=""
-    local _cfg_file
-    # Source: project.cfg [project] dev_tree_path (falls back to PROJECT.cfg)
-    _cfg_file="$(_pp_project_cfg_file "$(pp_project_root "$project_name" 2>/dev/null)")"
-    if [[ -n "$_cfg_file" ]]; then
-        _dev_tree="$(_pp_read_cfg_key "$_cfg_file" project dev_tree_path "")"
-    fi
-    # Fall back to PGAI_DEV_TREE_PATH if project cfg did not yield a path
-    [[ -z "$_dev_tree" ]] && _dev_tree="${PGAI_DEV_TREE_PATH:-}"
-
-    # Parse X.Y.Z from last_released
-    local clean="${last_released#v}"
-    local x y z
-    IFS=. read -r x y z <<< "$clean"
-    x="${x:-0}"
-    y="${y:-0}"
-    z="${z:-0}"
-
-    # Loop: increment z, check all three sources
-    local candidate
-    while true; do
-        z=$((z + 1))
-        candidate="v${x}.${y}.${z}"
-
-        # Source 1: drafted file in requirements/
-        # Use exact-version match to prevent vX.Y.Z*.md from matching vX.Y.Z+N-foo.md.
-        # Requirements filenames follow the convention vX.Y.Z-<slug>.md, so anchor
-        # on the hyphen after the version.  Also check the bare exact form vX.Y.Z.md.
-        if compgen -G "${requirements_dir}/${candidate}-*.md" >/dev/null 2>&1; then
-            continue
-        fi
-        if [[ -f "${requirements_dir}/${candidate}.md" ]]; then
-            continue
-        fi
-
-        # Source 2: materialized marker in tasks/queues/plans/
-        # The marker filename convention is .materialized.<sha256-hash>
-        # (pure lowercase hex), so the version string cannot appear in the filename.
-        # Search marker file CONTENTS for the candidate version as a delimited token
-        # (i.e., not followed by another digit) to avoid vX.Y.Z matching vX.Y.Z+N.
-        if [[ -d "${plans_dir}" ]] && \
-           grep -rlE "(^|[^.0-9])${candidate//./\\.}([^0-9]|$)" \
-               "${plans_dir}"/.materialized.* 2>/dev/null | grep -q .; then
-            continue
-        fi
-
-        # Source 3: git tag — use the dev tree resolved above so this check
-        # works when the caller is the live install (no .git directory).
-        if _disc_git_tag_exists "$candidate" "$_dev_tree"; then
-            continue
-        fi
-
-        # Slot is free
-        echo "$candidate"
-        return 0
-    done
-}
-
-# ---------------------------------------------------------------------------
-# discovery_step_bugs <project_name>
-#
-# Step 1 of the pipeline. Scans bugs/ for unhandled BUG-*.md files
-# (cross-referenced against bug_backlog.md cache and each file's ## Status
-# header). Bundles ALL into one requirements file.
-#
-# Ceiling gate: after computing the target version, checks pp_version_within_ceiling.
-# If the target version exceeds the project ceiling, logs the reason and returns 1
-# (no bundle produced, pipeline returns idle for this iteration).
-#
-# Returns 0 if a bundle was produced (caller stops iteration).
-# Returns 1 if nothing to bundle (caller proceeds to Step 2).
-# ---------------------------------------------------------------------------
-discovery_step_bugs() {
-    local project_name="$1"
-    project_name="$(pp_require_project_context "${project_name:-}")" || return 1
-
-    local bugs_dir bug_backlog
-    bugs_dir="$(pp_bugs_dir "$project_name")"
-    bug_backlog="$(pp_queue_path "$project_name" "bug")"
-
-    # Check for duplicate BUG-NNNN numeric prefixes and emit WARNINGs if any
-    # are found.  Collisions should not occur when claim_next_bug_id() is used
-    # consistently, but this guard detects out-of-band creations.
-    _disc_check_bug_id_collisions "$bugs_dir"
-
-    # Quarantine state dir: tracks per-file rejection counts across cron firings.
-    local state_dir
-    state_dir="$(pp_project_root "$project_name")/.discovery-state"
-
-    # Find unhandled bugs: cache says open AND header says open
-    local unhandled_files
-    unhandled_files="$(_disc_find_unhandled_items "$bugs_dir" "$bug_backlog" "BUG-" "$state_dir" "$project_name")"
-
-    if [[ -z "$unhandled_files" ]]; then
-        return 1
-    fi
-
-    # Guard: refuse to write a bundle when no valid file paths remain.
-    # stdout from _disc_find_unhandled_items contains only absolute paths.
-    # This check is a belt-and-suspenders defence: if unhandled_files is
-    # non-empty but contains no lines starting with '/', something unexpected ended
-    # up in the variable (e.g., a log line) — do not corrupt a bundle with it.
-    if ! echo "$unhandled_files" | grep -q '^/'; then
-        log "discovery_step_bugs: no valid item paths after filtering (possible malformed-filename rejections only); skipping bundle"
-        return 1
-    fi
-
-    # Active-RC guard: refuse to bundle when an RC is in flight.
-    # Bundling while an RC is open can produce a requirements file whose target
-    # version is below the in-flight RC version, which is incoherent.  Defer all
-    # bundling until after the current RC ships.
-    # Shared helper used by both discovery_step_bugs and discovery_step_priority
-    # so the two steps cannot diverge in their Active-RC guard semantics.
-    if ! _disc_active_rc_blocks "discovery_step_bugs" "$project_name"; then
-        return 1
-    fi
-
-    # Compute target version
-    local target_version
-    target_version="$(discovery_compute_next_patch "$project_name")"
-
-    # Ceiling gate: skip bundling if the target version exceeds the project ceiling.
-    # Emits a structured rejection log line per the documented format for each
-    # failing ceiling component so the operator knows exactly what was blocked.
-    if ! _disc_check_ceiling_and_log "$project_name" "$target_version" "discovery_step_bugs"; then
-        return 1
-    fi
-
-    # Bundle into requirements file
-    local today requirements_dir bundle_path
-    today="$(date +%Y%m%d)"
-    requirements_dir="$(pp_requirements_dir "$project_name")"
-    bundle_path="${requirements_dir}/${target_version}-bugfix-bundle-${today}.md"
-
-    log "discovery_step_bugs: bundling $(echo "$unhandled_files" | wc -l) bug(s) into ${bundle_path}"
-
-    _disc_write_bundle "$bundle_path" "$target_version" "release" "true" "Bug bundle" "$unhandled_files" "BUG"
-
-    # Mark each bundled item: cache [x] AND header status=running
-    while IFS= read -r f; do
-        [[ -z "$f" ]] && continue
-        local item_id
-        item_id="$(basename "${f%.md}")"
-        _disc_mark_cache_bundled "$bug_backlog" "$item_id"
-        _disc_set_status_field "$f" "running"
-    done <<< "$unhandled_files"
-
-    log "discovery_step_bugs: bundle written, ${target_version} ready for Step 3 next iteration"
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# discovery_step_priority <project_name>
-#
-# Step 2 of the pipeline. Same shape as Step 1 but for priority items.
-# Returns 0 if a bundle was produced. Returns 1 if nothing to bundle.
-# ---------------------------------------------------------------------------
-discovery_step_priority() {
-    local project_name="$1"
-    project_name="$(pp_require_project_context "${project_name:-}")" || return 1
-
-    local priority_dir priority_backlog
-    priority_dir="$(pp_priority_dir "$project_name")"
-    priority_backlog="$(pp_queue_path "$project_name" "priority")"
-
-    # Skip if priority/ doesn't exist (older installs may not have it)
-    if [[ ! -d "$priority_dir" ]]; then
-        return 1
-    fi
-
-    # Quarantine state dir: tracks per-file rejection counts across cron firings.
-    local state_dir
-    state_dir="$(pp_project_root "$project_name")/.discovery-state"
-
-    local unhandled_files
-    unhandled_files="$(_disc_find_unhandled_items "$priority_dir" "$priority_backlog" "PRIORITY-" "$state_dir" "$project_name")"
-
-    if [[ -z "$unhandled_files" ]]; then
-        return 1
-    fi
-
-    # Guard: refuse to write a bundle when no valid file paths remain.
-    # stdout from _disc_find_unhandled_items contains only absolute paths.
-    # This check is a belt-and-suspenders defence: if unhandled_files is
-    # non-empty but contains no lines starting with '/', something unexpected ended
-    # up in the variable (e.g., a log line) — do not corrupt a bundle with it.
-    if ! echo "$unhandled_files" | grep -q '^/'; then
-        log "discovery_step_priority: no valid item paths after filtering (possible malformed-filename rejections only); skipping bundle"
-        return 1
-    fi
-
-    # Sort unhandled priority files by PRIORITY-NNNN integer ascending so that
-    # lower-numbered priorities ship first.  Extract the numeric suffix from the
-    # basename (e.g. PRIORITY-0007-... → 7) and use it as a sort key.
-    local sorted_files
-    sorted_files="$(while IFS= read -r _f; do
-        [[ -z "$_f" ]] && continue
-        local _base _num
-        _base="$(basename "$_f")"
-        _num="$(echo "$_base" | grep -oE 'PRIORITY-([0-9]+)' | head -n1 | grep -oE '[0-9]+')"
-        printf '%s\t%s\n' "${_num:-0}" "$_f"
-    done <<< "$unhandled_files" \
-        | sort -t$'\t' -k1,1n \
-        | cut -f2-)"
-    unhandled_files="$sorted_files"
-
-    # Apply max_priorities_per_run cap.  Read the configured value; default to 1
-    # when the helper returns empty (key absent or project.cfg missing).
-    local _cap_raw _cap
-    _cap_raw="$(pp_max_priorities_per_run "$project_name")"
-    _cap="${_cap_raw:-1}"
-
-    # Slice: keep only the first $_cap files for this bundle.  The remainder
-    # stay [ ] / Status open in priority_backlog.md and are picked up on the
-    # next discovery iteration once the current RC closes.
-    local bundle_files
-    bundle_files="$(echo "$unhandled_files" | head -n "$_cap")"
-
-    # Active-RC guard: refuse to bundle when an RC is in flight.
-    # A priority bundle produced while an RC is open would target a version below
-    # the in-flight RC, which is incoherent.  Defer until after the current RC ships.
-    # Shared helper used by both discovery_step_bugs and discovery_step_priority
-    # so the two steps cannot diverge in their Active-RC guard semantics.
-    if ! _disc_active_rc_blocks "discovery_step_priority" "$project_name"; then
-        return 1
-    fi
-
-    local target_version
-    target_version="$(discovery_compute_next_patch "$project_name")"
-
-    # Ceiling gate: skip bundling if the target version exceeds the project ceiling.
-    # Emits a structured rejection log line per the documented format.
-    if ! _disc_check_ceiling_and_log "$project_name" "$target_version" "discovery_step_priority"; then
-        return 1
-    fi
-
-    local today requirements_dir bundle_path
-    today="$(date +%Y%m%d)"
-    requirements_dir="$(pp_requirements_dir "$project_name")"
-    bundle_path="${requirements_dir}/${target_version}-priority-bundle-${today}.md"
-
-    log "discovery_step_priority: bundling $(echo "$bundle_files" | wc -l) of $(echo "$unhandled_files" | wc -l) priority item(s) (cap=${_cap}) into ${bundle_path}"
-
-    _disc_write_bundle "$bundle_path" "$target_version" "release" "true" "Priority bundle" "$bundle_files" "PRIORITY"
-
-    while IFS= read -r f; do
-        [[ -z "$f" ]] && continue
-        local item_id
-        item_id="$(basename "${f%.md}")"
-        _disc_mark_cache_bundled "$priority_backlog" "$item_id"
-        _disc_set_status_field "$f" "running"
-    done <<< "$bundle_files"
-
-    log "discovery_step_priority: bundle written, ${target_version} ready for Step 3 next iteration"
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# discovery_step_requirements <project_name>
-#
-# Step 3 of the pipeline. Scans requirements/ for *.md files that are eligible
-# for PM pickup, iterating them in order (semver ascending for semver projects,
-# filename-lexical ascending for label projects), applying per-file rules:
-#
-#   - File matched in pm_backlog as [x] (done): skip it and continue to the
-#     next bundle — this is a historical record, not an obstacle.
-#   - File matched in pm_backlog as [ ], [W], or [A] (in flight): exit with
-#     a 'PM in flight' log line. Only one PM task is allowed at a time.
-#   - File not in pm_backlog at all: queue a PM ticket and return 0.
-#
-# Semver projects (version_semantics = semver):
-#   Files with Target Version set to 'auto', 'next-patch', empty string, or the
-#   field entirely absent are treated as auto-sentinel files. Their effective
-#   version is computed via discovery_compute_next_patch at pickup time, and a
-#   log line is emitted recording the computed version and the source file path.
-#   Auto-sentinel files are sorted AFTER all explicit-version files.
-#
-#   Ceiling gate: files whose target_version exceeds the project ceiling are
-#   logged as 'ceiling-blocked, skipping' and skipped during iteration.
-#   If no eligible file survives the ceiling+backlog checks, Step 3 produces no
-#   work (pipeline returns idle).
-#
-# Label projects (version_semantics = label or none):
-#   All unhandled items in requirements/ are eligible.  No semver parse, no
-#   ceiling filter.  Auto-sentinel values (auto, next-patch, absent Target
-#   Version) are invalid on label projects and fail loud with a named reason.
-#
-# Returns 0 if a PM ticket was queued. Returns 1 if nothing eligible.
-# ---------------------------------------------------------------------------
-discovery_step_requirements() {
-    local project_name="$1"
-    project_name="$(pp_require_project_context "${project_name:-}")" || return 1
-
-    # Belt-and-suspenders guard: refuse to queue PM when Active RC is in flight.
-    # The pipeline orchestration in discovery_run_pipeline gates this step more
-    # strictly via _disc_chain_idle (which also checks agent backlog tails), but
-    # any direct caller bypassing the pipeline is caught here by the Active RC
-    # check alone, which is the critical single-RC-in-flight invariant.
-    local _guard_active_rc
-    _guard_active_rc="$(_disc_get_release_field "$project_name" "Active RC" 2>/dev/null || echo "none")"
-    if [[ -n "$_guard_active_rc" && "$_guard_active_rc" != "none" ]]; then
-        log "discovery_step_requirements: ERROR Active RC=${_guard_active_rc}; refusing to queue PM (single-RC-in-flight invariant)"
-        return 1
-    fi
-
-    local requirements_dir last_released
-    requirements_dir="$(pp_requirements_dir "$project_name")"
-    last_released="$(pp_last_released_version "$project_name" 2>/dev/null || echo "v0.0.0")"
-    [[ -z "$last_released" || "$last_released" == "none" ]] && last_released="v0.0.0"
-
-    if [[ ! -d "$requirements_dir" ]]; then
-        return 1
-    fi
-
-    # Resolve ceiling values for this project (empty string = no constraint).
-    local max_minor max_major max_patch
-    max_minor="$(pp_max_minor "$project_name" 2>/dev/null)" || max_minor=""
-    max_major="$(pp_max_major "$project_name" 2>/dev/null)" || max_major=""
-    max_patch="$(pp_max_patch "$project_name" 2>/dev/null)" || max_patch=""
-
-    # Resolve the project's version_semantics by loading its workflow plugin.
-    # The plugin's manifest [capabilities] version_semantics field controls
-    # how eligibility is computed — engine queries the capability flag;
-    # zero workflow-type string comparisons occur here.
-    local _wf_type _version_semantics
-    _wf_type="$(pp_workflow_type "$project_name" 2>/dev/null)" || _wf_type="release"
-    local _wf_load_exit=0
-    set +e
-    wf_load_plugin "$_wf_type"
-    _wf_load_exit=$?
-    set -e
-    if [[ $_wf_load_exit -ne 0 ]]; then
-        log "discovery_step_requirements: WARNING cannot load workflow plugin '${_wf_type}': ${WF_LOAD_ERROR}; defaulting to semver eligibility"
-        _version_semantics="semver"
-    else
-        _version_semantics="$(wf_version_semantics)"
-    fi
-
-    # Get ALL eligible requirements files in order appropriate for the semantics.
-    # Each line is either an absolute path or a path with a special suffix:
-    #   ":auto"          — auto-sentinel (semver path only)
-    #   ":auto-invalid"  — auto-sentinel on a label project (fails loud on pickup)
-    #   ":ceiling-blocked:<version>:..." — exceeds project ceiling (semver only)
-    # Ceiling-blocked and auto-invalid files are NOT filtered here — we want
-    # the shell caller to log them with named reasons and continue iterating.
-    local all_eligible
-    all_eligible="$(_disc_list_all_eligible_requirements "$requirements_dir" "$last_released" "$max_minor" "$max_major" "$max_patch" "$_version_semantics")"
-
-    if [[ -z "$all_eligible" ]]; then
-        return 1
-    fi
-
-    # pm_backlog for in-flight checks (used only when bundle ## Status is "running").
-    local pm_backlog_file
-    pm_backlog_file="$(pp_queue_path "$project_name" "pm")"
-
-    # Iterate all eligible files in order (semver ascending or filename-lexical
-    # ascending, depending on version_semantics; ordered by the Python caller).
-    while IFS= read -r file_raw; do
-        [[ -z "$file_raw" ]] && continue
-
-        local chosen_file _auto_sentinel
-        if [[ "$file_raw" == *:auto ]]; then
-            chosen_file="${file_raw%:auto}"
-            _auto_sentinel=1
-        else
-            chosen_file="$file_raw"
-            _auto_sentinel=0
-        fi
-
-        # Ceiling-blocked files are passed through by _disc_list_all_eligible_requirements
-        # with a ":ceiling-blocked:<version>:<component>:<value>:<cname>:<cvalue>" suffix
-        # (or bare ":ceiling-blocked") so we can emit the structured rejection log
-        # line here and continue iterating.
-        if [[ "$file_raw" == *:ceiling-blocked:* ]]; then
-            # Structured format: path:ceiling-blocked:<version>:<component>:<value>:<cname>:<cvalue>
-            local _cb_rest="${file_raw#*:ceiling-blocked:}"
-            chosen_file="${file_raw%%:ceiling-blocked:*}"
-            local _cb_ver _cb_comp _cb_val _cb_cname _cb_cval
-            IFS=: read -r _cb_ver _cb_comp _cb_val _cb_cname _cb_cval <<< "$_cb_rest"
-            log "PM not queued for ${_cb_ver}: ${_cb_comp} version ${_cb_val} exceeds ${_cb_cname}=${_cb_cval} (file: ${chosen_file})"
-            continue
-        fi
-        if [[ "$file_raw" == *:ceiling-blocked ]]; then
-            chosen_file="${file_raw%:ceiling-blocked}"
-            log "discovery_step_requirements: ceiling-blocked, skipping ${chosen_file}"
-            continue
-        fi
-
-        # Auto-sentinel on a label-semantics project: fail loud and skip.
-        # Auto-sentinel values (auto / next-patch / absent Target Version) compute
-        # a next semver patch slot, which has no meaning for label projects.
-        if [[ "$file_raw" == *:auto-invalid ]]; then
-            chosen_file="${file_raw%:auto-invalid}"
-            log "discovery_step_requirements: skipping $(basename "${chosen_file}"): auto-sentinel Target Version is not valid for label-semantics projects (version_semantics=${_version_semantics})"
-            continue
-        fi
-
-        # Auto-sentinel: compute the next patch slot at pickup time and log it.
-        if [[ "$_auto_sentinel" -eq 1 ]]; then
-            local _resolved_version
-            _resolved_version="$(discovery_compute_next_patch "$project_name")"
-            log "discovery_step_requirements: auto-sentinel Target Version in ${chosen_file} resolved to ${_resolved_version} via discovery_compute_next_patch"
-        fi
-
-        # -------------------------------------------------------------------
-        # Idempotency gate: read ## Status from the bundle file itself.
-        #
-        # This replaces the former slug-grep against pm_backlog filenames,
-        # which was fragile when bundle version numbers shared a numeric prefix
-        # (e.g. v0.1.6 matching inside v0.1.16).  The ## Status field written
-        # into each bundle by _disc_write_bundle is the authoritative gate:
-        #
-        #   open    — bundle not yet queued for PM → eligible
-        #   running — bundle already queued; use ## PM Task for exact pm_backlog
-        #             lookup to distinguish in-flight from done
-        #   done    — RC shipped; skip forever
-        #
-        # Bundles that lack a ## Status field are treated as 'open'.
-        # -------------------------------------------------------------------
-        local _bundle_status
-        _bundle_status="$(_disc_read_bundle_field "$chosen_file" "Status" 2>/dev/null || echo "open")"
-        _bundle_status="${_bundle_status,,}"  # lowercase
-
-        if [[ "$_bundle_status" == "done" ]]; then
-            log "discovery_step_requirements: PM already done for ${chosen_file} (bundle ## Status: done), skipping"
-            continue
-        fi
-
-        if [[ "$_bundle_status" == "running" ]]; then
-            # Bundle was queued for PM.  Read the exact task ID written at queue
-            # time and do a precise pm_backlog lookup — no slug guessing required.
-            local _pm_task_id
-            _pm_task_id="$(_disc_read_bundle_field "$chosen_file" "PM Task" 2>/dev/null || echo "")"
-
-            if [[ -n "$_pm_task_id" && "$_pm_task_id" != "none" && -f "$pm_backlog_file" ]]; then
-                # Exact task-ID match: look for a line containing the task ID token.
-                local _pm_marker_line
-                _pm_marker_line="$(grep -F "${_pm_task_id}" "$pm_backlog_file" | head -n1 || true)"
-                if [[ -n "$_pm_marker_line" ]] && echo "$_pm_marker_line" | grep -qE '^\s*-\s+\[x\]'; then
-                    # PM task is marked [x] — PM is done.
-                    # The bundle status will be promoted to 'done' when the RC ships
-                    # (cm-release.sh Step 16b).  Until then, skip this bundle.
-                    log "discovery_step_requirements: PM already done for ${chosen_file} (pm_backlog [x] for ${_pm_task_id}), skipping"
-                    continue
-                else
-                    # PM task present but not [x] — in flight.
-                    log "discovery_step_requirements: PM in flight for ${chosen_file} (${_pm_task_id} not [x] in pm_backlog), aborting scan"
-                    return 1
-                fi
-            else
-                # ## PM Task field is absent or 'none'.  Distinguish two sub-cases:
-                #
-                # Stuck state: Status=running + PM Task absent/none + no pm_backlog
-                # entry — this is a half-write left by a pm-agent failure.  The
-                # item will never self-recover under the old generic deferral.
-                # Emit a stuck-state diagnosis naming the reset recovery so an
-                # operator (or OVERWATCH) knows exactly what action unblocks it.
-                #
-                # Conservative deferral (fallback): Status=running + PM Task absent/none
-                # + pm_backlog file does not exist yet — treat as in-flight to avoid
-                # re-queueing a PM task whose backlog file may not have been written yet.
-                if [[ -f "$pm_backlog_file" ]]; then
-                    # Backlog file exists but contains no entry matching this bundle —
-                    # definitively a stuck state from a failed or incomplete pm-agent run.
-                    log "discovery_step_requirements: stuck-state detected for ${chosen_file} (## Status: running, ## PM Task not set, no pm_backlog match) — reset ## Status to ready to recover"
-                    return 1
-                else
-                    # No backlog file at all — defer conservatively; pm-agent may not
-                    # have written it yet.
-                    log "discovery_step_requirements: PM in flight for ${chosen_file} (## Status: running, ## PM Task not set), aborting scan"
-                    return 1
-                fi
-            fi
-        fi
-
-        # ## Status is 'open' (or absent/unrecognised) — bundle not yet queued.
-        # Queue a PM ticket for this bundle.
-        log "discovery_step_requirements: queueing PM for ${chosen_file}"
-
-        local pm_agent_script
-        pm_agent_script="${TEAM_ROOT}/scripts/pm-agent.sh"
-        if [[ ! -x "$pm_agent_script" ]]; then
-            log "discovery_step_requirements: ERROR pm-agent.sh not executable at ${pm_agent_script}"
-            return 1
-        fi
-
-        # Capture pm_agent.sh stdout to extract the task ID for the bundle's
-        # ## PM Task field.  Diagnostic output from pm_agent.sh goes to stderr
-        # (2>&2 is its default for log lines) — we only parse stdout here.
-        #
-        # Pass the active project name via PGAI_PROJECT_NAME so that pm-agent.sh
-        # creates the PM task folder and pm_backlog entry under the correct
-        # project's tasks/ directory.
-        local _pm_output _pm_exit _queued_task_id
-        _pm_output="$(PGAI_PROJECT_NAME="$project_name" "$pm_agent_script" "$chosen_file" 2>&1)" || _pm_exit=$?
-        _pm_exit="${_pm_exit:-0}"
-        echo "$_pm_output" >&2  # re-emit so it appears in caller's log
-
-        # Extract task ID from "  Folder  : <path>" line produced by pm-agent.sh.
-        # The task ID is the basename of the folder path.
-        _queued_task_id="$(echo "$_pm_output" \
-            | grep -E '^\s*Folder\s*:' \
-            | head -n1 \
-            | sed -E 's|.*Folder\s*:\s*||; s|/[[:space:]]*$||; s|.*/||')" || true
-
-        # Mark running ONLY when pm-agent succeeded: exit 0, non-empty task ID
-        # parsed from the Folder line, AND the pm_backlog entry is present.
-        # On any failure, emit a fail-loud ERROR and leave ## Status unchanged
-        # so the next discovery tick re-selects this bundle and retries.
-        local _pm_backlog_entry_present=0
-        if [[ -n "$_queued_task_id" && -f "$pm_backlog_file" ]] \
-            && grep -qF "$_queued_task_id" "$pm_backlog_file" 2>/dev/null; then
-            _pm_backlog_entry_present=1
-        fi
-
-        if [[ "$_pm_exit" -eq 0 && -n "$_queued_task_id" && "$_pm_backlog_entry_present" -eq 1 ]]; then
-            # Verified success: task ID obtained and pm_backlog entry confirmed present.
-            _disc_update_bundle_pm_queued "$chosen_file" "$_queued_task_id"
-            log "discovery_step_requirements: bundle marked running (PM task: ${_queued_task_id})"
-        else
-            # pm-agent failed or produced no verifiable output — leave ## Status
-            # unchanged so the next tick retries this bundle.
-            log "discovery_step_requirements: ERROR pm-agent failed for ${chosen_file} (exit ${_pm_exit}) — leaving status 'ready' for retry"
-        fi
-
-        return 0
-    done <<< "$all_eligible"
-
-    # Exhausted all eligible files without finding unprocessed work.
-    return 1
-}
-
-# ---------------------------------------------------------------------------
 # DISCOVERY_LAST_STATUS
 #
 # Set by discovery_run_pipeline on every invocation. Callers that need to
@@ -680,8 +150,11 @@ discovery_step_requirements() {
 # this variable after each call. Three values:
 #
 #   produced_work  — pipeline did something useful (step 1, 2, or 3 fired)
-#   idle           — pipeline found nothing to do (step 4 exit)
-#   blocked        — pipeline was blocked by Active RC or HALT flag
+#   idle           — pipeline found nothing to do: the chain was busy, no
+#                    step had work, or a step's write was deferred because
+#                    the repo lock was not available
+#   blocked        — pipeline was blocked by HALT, an unreadable project
+#                    config, or a pending PM decompose ticket
 #
 # The return code of discovery_run_pipeline is ALWAYS 0 so that existing
 # cron callers (wake/claude.sh) are unaffected by this new signal.
@@ -689,14 +162,128 @@ discovery_step_requirements() {
 DISCOVERY_LAST_STATUS="idle"
 
 # ---------------------------------------------------------------------------
+# Write-phase state, reset by discovery_run_pipeline on every call:
+#   _DISC_WRITE_PHASE   ""        no write attempted yet (the lock is not
+#                                 held by this iteration)
+#                       entered   the repo lock is held and the chain was
+#                                 idle under it; later steps write freely
+#                       deferred  the lock could not be taken, or the chain
+#                                 was busy under it; nothing is written and
+#                                 the iteration stops
+#   _DISC_OWN_LOCK_FILE / _DISC_OWN_LOCK_FD
+#                       the repo lock discovery took itself (no hook set);
+#                       released by discovery_run_pipeline on return
+# ---------------------------------------------------------------------------
+_DISC_WRITE_PHASE=""
+_DISC_OWN_LOCK_FILE=""
+_DISC_OWN_LOCK_FD=""
+
+# _disc_take_own_write_lock <project_name>
+# Default write lock when the caller set no DISCOVERY_WRITE_LOCK_HOOK: one
+# non-blocking pgai_lock_acquire on the project's repo lock. Returns 0 with
+# _DISC_OWN_LOCK_FILE/_DISC_OWN_LOCK_FD set, 1 when the lock is held
+# elsewhere or the path cannot be resolved (pgai_lock_acquire narrates the
+# holder on contention).
+_disc_take_own_write_lock() {
+    local project_name="$1"
+    local _disc_lock_file _disc_own_fd_out=""
+    _disc_lock_file="$(pp_repo_lock_path "$project_name" 2>/dev/null)" || return 1
+    [[ -n "$_disc_lock_file" ]] || return 1
+    if ! declare -F pgai_lock_acquire >/dev/null 2>&1; then
+        # shellcheck source=lock_provenance.sh
+        source "${_DISC_SELF_DIR}/lock_provenance.sh" || return 1
+    fi
+    pgai_lock_acquire "$_disc_lock_file" "${AGENT:-pm}" "$$" \
+        "discovery-write:${project_name}" "none" _disc_own_fd_out || return 1
+    _DISC_OWN_LOCK_FILE="$_disc_lock_file"
+    _DISC_OWN_LOCK_FD="$_disc_own_fd_out"
+    return 0
+}
+
+# _disc_release_own_write_lock
+# Release the lock _disc_take_own_write_lock took, if any. A hook-taken
+# lock is the caller's and is never touched here.
+_disc_release_own_write_lock() {
+    if [[ -n "${_DISC_OWN_LOCK_FD:-}" ]]; then
+        pgai_lock_release "$_DISC_OWN_LOCK_FILE" "$_DISC_OWN_LOCK_FD"
+    fi
+    _DISC_OWN_LOCK_FILE=""
+    _DISC_OWN_LOCK_FD=""
+}
+
+# _disc_enter_write_phase <project_name> <step_name>
+#
+# Called by each step at the point it has found something to write, before
+# the write. Takes the project's repo lock (the caller's
+# DISCOVERY_WRITE_LOCK_HOOK when set, otherwise _disc_take_own_write_lock),
+# then re-runs the chain-busy test under the lock. Returns 0 when this
+# iteration holds the lock and the chain is still idle -- immediately, with
+# no second acquisition, once an earlier step already entered. Returns 1
+# when the lock is held elsewhere or the chain turned busy during the
+# unlocked scan; the iteration is then deferred and the caller must not
+# write.
+_disc_enter_write_phase() {
+    local project_name="$1"
+    local step_name="${2:-discovery}"
+    case "${_DISC_WRITE_PHASE:-}" in
+        entered) return 0 ;;
+        deferred) return 1 ;;
+    esac
+
+    local _disc_hook="${DISCOVERY_WRITE_LOCK_HOOK:-}"
+    local _disc_took=0
+    if [[ -n "$_disc_hook" ]]; then
+        "$_disc_hook" "$project_name" && _disc_took=1
+    else
+        _disc_take_own_write_lock "$project_name" && _disc_took=1
+    fi
+    if [[ "$_disc_took" -ne 1 ]]; then
+        log "${step_name}: repo lock not available for the discovery write; deferring to the next wake"
+        _DISC_WRITE_PHASE="deferred"
+        return 1
+    fi
+
+    if ! _disc_chain_idle "$project_name"; then
+        log "${step_name}: chain became busy during the unlocked scan; not writing"
+        _DISC_WRITE_PHASE="deferred"
+        return 1
+    fi
+    log "${step_name}: repo lock held for the discovery write"
+    _DISC_WRITE_PHASE="entered"
+    return 0
+}
+
+# _disc_write_deferred
+# True when a step's write phase was deferred this iteration; the pipeline
+# then stops instead of letting a later category write ahead of it.
+_disc_write_deferred() {
+    [[ "${_DISC_WRITE_PHASE:-}" == "deferred" ]]
+}
+
+# ---------------------------------------------------------------------------
 # discovery_run_pipeline <project_name>
 #
 # Top-level entry. Runs the 4-step pipeline once. Always returns 0 (idle is
-# a normal outcome, not an error). Sets DISCOVERY_LAST_STATUS to one of:
+# a normal outcome, not an error) unless the project context cannot be
+# resolved. Sets DISCOVERY_LAST_STATUS to one of:
 #   produced_work / idle / blocked
 # so that looping callers (pm-agent.sh --auto) know whether to iterate again.
+# Resets the write-phase state, runs one iteration, and releases a repo lock
+# discovery took itself (never one a DISCOVERY_WRITE_LOCK_HOOK took).
 # ---------------------------------------------------------------------------
 discovery_run_pipeline() {
+    _DISC_WRITE_PHASE=""
+    _DISC_OWN_LOCK_FILE=""
+    _DISC_OWN_LOCK_FD=""
+    local _disc_rc=0
+    _disc_run_pipeline_once "$@" || _disc_rc=$?
+    _disc_release_own_write_lock
+    return "$_disc_rc"
+}
+
+# _disc_run_pipeline_once <project_name>
+# One pipeline iteration: the guards, then Steps 1-3; see the file header.
+_disc_run_pipeline_once() {
     local project_name="$1"
     project_name="$(pp_require_project_context "${project_name:-}")" || return 1
 
@@ -727,6 +314,16 @@ discovery_run_pipeline() {
     # it does not set the global HALT flag or affect other projects.
     if pp_project_halted "$project_name"; then
         log "discovery_run_pipeline [${project_name}]: per-project HALT, pipeline blocked"
+        pgai_emit_error_contract \
+            "discovery.per-project-halt" \
+            "discovery skipped project '${project_name}' because its project-scoped HALT flag is present" \
+            "Once the underlying issue is resolved, run: team/scripts/unhalt.sh --project ${project_name}" \
+            "${project_name}"
+        # BLOCK-WORTHY: approval-by-design — the per-project HALT is the
+        # operator's (or CM's) scoped stop signal for this project's lane
+        # (docs/blocking-site-census.md rollup row 4, "Per-project HALT guard").
+        # Census-indexed by this call's own error key ("discovery.per-project-halt"),
+        # no separate anchor marker needed — see the Locator Index.
         DISCOVERY_LAST_STATUS="blocked"
         return 0
     fi
@@ -734,16 +331,74 @@ discovery_run_pipeline() {
     # GUARD: global HALT flag blocks the entire pipeline (all steps, all projects)
     if [[ -f "${TEAM_ROOT}/HALT" ]]; then
         log "discovery_run_pipeline [${project_name}]: global HALT, pipeline blocked"
+        pgai_emit_error_contract \
+            "discovery.global-halt" \
+            "discovery skipped project '${project_name}' because the fleet-wide HALT flag at ${TEAM_ROOT}/HALT is present" \
+            "Once the underlying issue is resolved, run: team/scripts/unhalt-global.sh" \
+            "${project_name}"
+        # BLOCK-WORTHY: approval-by-design — the global HALT file is the
+        # operator's/CM's explicit fleet-wide stop signal (docs/blocking-site-census.md
+        # rollup row 3, "Global HALT guard").
+        # Census-indexed by this call's own error key ("discovery.global-halt"),
+        # no separate anchor marker needed — see the Locator Index.
         DISCOVERY_LAST_STATUS="blocked"
         return 0
     fi
 
-    # Log active ceilings when at least one is configured — visible in cron logs
-    # without being noisy on every iteration when no ceilings are set.
-    local _ceil_max_minor _ceil_max_major _ceil_max_patch _ceil_parts
-    _ceil_max_minor="$(pp_max_minor "$project_name" 2>/dev/null)" || _ceil_max_minor=""
-    _ceil_max_major="$(pp_max_major "$project_name" 2>/dev/null)" || _ceil_max_major=""
-    _ceil_max_patch="$(pp_max_patch "$project_name" 2>/dev/null)" || _ceil_max_patch=""
+    # GUARD 4: pm_ticket_in_flight — exit before Steps 1/2/3 when a decompose-v*
+    # PM ticket is pending in pm_backlog (decided by its status.md, not the
+    # marker).  This covers the window between "operator drops requirements
+    # file → discovery queues PM" and "CM-open-rc fires → Active RC is set":
+    # any bug or priority bundled in that window would land in a patch
+    # version stranded once the RC ships.  The chain-busy guard below would
+    # also stop such a wake (the pending ticket is a non-terminal queue
+    # entry); this guard runs first so that case keeps its own log line and
+    # its "blocked" status.
+    if _disc_pm_ticket_in_flight "$project_name"; then
+        log "discovery_run_pipeline [${project_name}]: pending PM ticket detected; exiting (RC opening soon)"
+        DISCOVERY_LAST_STATUS="blocked"
+        return 0
+    fi
+
+    # GUARD 5: chain busy — idle-exit before any scan. Active RC set, or any
+    # task named in any role queue not yet DONE/WONT-DO by its own
+    # status.md, means the chain is still working: no step may queue PM
+    # (Step 3's rule) and Steps 1/2 would only scan to find their writes
+    # deferred (the Active-RC guard already defers them while an RC is
+    # open). Exiting here keeps a busy-chain wake to a few seconds and
+    # runs no scan at all. _disc_chain_idle logs which task or RC makes
+    # the chain busy, just above this exit line.
+    if ! _disc_chain_idle "$project_name"; then
+        log "discovery_run_pipeline [${project_name}]: chain busy, idle exit before any scan"
+        DISCOVERY_LAST_STATUS="idle"
+        return 0
+    fi
+
+    # Read the version ceilings once, before any step: an absent key is its
+    # documented default and only an explicit `none` (echoed empty) lifts a
+    # cap. A malformed value makes its accessor print one line naming the
+    # file, key and value -- left visible here -- and the whole run is
+    # ceiling-blocked: every step below queues a version, and none of them
+    # can be checked against a ceiling that cannot be read.
+    local _ceil_max_minor _ceil_max_major _ceil_max_patch _ceil_parts _ceil_unreadable=0
+    _ceil_max_minor="$(pp_max_minor "$project_name")" || _ceil_unreadable=1
+    _ceil_max_major="$(pp_max_major "$project_name")" || _ceil_unreadable=1
+    _ceil_max_patch="$(pp_max_patch "$project_name")" || _ceil_unreadable=1
+    if (( _ceil_unreadable )); then
+        log "discovery_run_pipeline [${project_name}]: ceiling-blocked: a version ceiling is unreadable (named above); nothing is queued this run"
+        # BLOCK-WORTHY: approval/invariant-by-design -- the operator's version
+        # gate cannot be evaluated, and reading it as "no ceiling" would let
+        # any version through without a word.
+        pgai_emit_error_contract \
+            "discovery.ceiling-unreadable" \
+            "discovery will not queue work for project '${project_name}' this run because a version ceiling in its project config is unreadable (one line printed above names the file, key and value)." \
+            "Inspect and correct the ceilings: team/scripts/set-version-ceiling.sh --project ${project_name} --show" \
+            "${project_name}"
+        # CENSUS-ANCHOR: discovery-ceiling-unreadable-01
+        DISCOVERY_LAST_STATUS="blocked"
+        return 0
+    fi
+    # Log the ceilings in effect (a `none` component is left out).
     if [[ -n "$_ceil_max_minor" || -n "$_ceil_max_major" || -n "$_ceil_max_patch" ]]; then
         _ceil_parts=""
         [[ -n "$_ceil_max_major" ]] && _ceil_parts="max_major=${_ceil_max_major}"
@@ -758,24 +413,10 @@ discovery_run_pipeline() {
         log "discovery_run_pipeline: active ceilings for ${project_name}: ${_ceil_parts}"
     fi
 
-    # GUARD 4: pm_ticket_in_flight — exit before Steps 1/2/3 when a decompose-v*
-    # PM ticket is pending in pm_backlog ([ ] or [A] marker).  This closes the
-    # window between "operator drops requirements file → discovery queues PM" and
-    # "CM-open-rc fires → Active RC is set".  During that window Active RC is still
-    # "none", so the existing chain-idle guard would not block Steps 1+2.  Any bug
-    # or priority filed in this window would be bundled into a patch version that
-    # ends up stranded once the RC ships.
-    if _disc_pm_ticket_in_flight "$project_name"; then
-        log "discovery_run_pipeline [${project_name}]: pending PM ticket detected; exiting (RC opening soon)"
-        DISCOVERY_LAST_STATUS="blocked"
-        return 0
-    fi
-
     # STEP 1: bundle bugs.
-    # Skipped when GUARD 4 fires (PM ticket pending, RC opening soon).
-    # Also skipped when Active RC is set — discovery_step_bugs contains an
-    # active-RC guard that defers bundling until after the in-flight RC ships,
-    # preventing bundles whose target version would be below the RC version.
+    # Reached only on an idle chain (the guards above). discovery_step_bugs
+    # keeps its own active-RC guard for direct callers, and takes the repo
+    # lock through _disc_enter_write_phase before it writes.
     #
     # Category-first ordering: if Step 1 produces work, stop immediately.
     # Steps 2 and 3 are skipped — bugs take priority over priorities and
@@ -783,6 +424,11 @@ discovery_run_pipeline() {
     # stops the iteration" is the contract stated in the pipeline header and SOP.
     if discovery_step_bugs "$project_name"; then
         DISCOVERY_LAST_STATUS="produced_work"
+        return 0
+    fi
+    if _disc_write_deferred; then
+        log "discovery_run_pipeline [${project_name}]: discovery write deferred, idle exit"
+        DISCOVERY_LAST_STATUS="idle"
         return 0
     fi
 
@@ -793,1732 +439,26 @@ discovery_run_pipeline() {
         DISCOVERY_LAST_STATUS="produced_work"
         return 0
     fi
+    if _disc_write_deferred; then
+        log "discovery_run_pipeline [${project_name}]: discovery write deferred, idle exit"
+        DISCOVERY_LAST_STATUS="idle"
+        return 0
+    fi
 
     # STEP 3: queue PM for the lowest-version unprocessed requirements bundle.
     # Only runs when Steps 1 and 2 both found nothing (category-first ordering).
-    # Gated by _disc_chain_idle: only runs when Active RC = none AND every
-    # named agent backlog's latest entry is [x]. This prevents queuing a new
-    # PM task while any agent is still finishing the current RC.
-    if _disc_chain_idle "$project_name"; then
-        if discovery_step_requirements "$project_name"; then
-            DISCOVERY_LAST_STATUS="produced_work"
-            return 0
-        fi
+    # The chain-busy guard above already established that Active RC = none
+    # AND every task entry named in every agent backlog has reached a
+    # terminal status.md state (DONE or WONT-DO) — never decided by the
+    # queue marker — and _disc_enter_write_phase re-checks it under the
+    # repo lock before the PM ticket is queued, so a new PM task is never
+    # queued while any agent is still finishing the current RC.
+    if discovery_step_requirements "$project_name"; then
+        DISCOVERY_LAST_STATUS="produced_work"
+        return 0
     fi
 
     log "discovery_run_pipeline: no work pending, idle exit"
     DISCOVERY_LAST_STATUS="idle"
     return 0
-}
-
-# ===========================================================================
-# Public helpers for stale-requirements detection (used by dashboard-attention.sh
-# and any other external caller that needs to inspect requirements/ directly).
-# ===========================================================================
-
-# ---------------------------------------------------------------------------
-# parse_target_version_from_filename <filename>
-#
-# Parse the target version (vX.Y.Z) from a requirements file's basename.
-# The expected filename pattern is: vX.Y.Z-<slug>.md
-#
-# On success: echoes the version string (e.g. "v0.2.0") and returns 0.
-# On failure (no match): echoes nothing and returns 1.
-#
-# This is a wrapper around semver_from_filename that makes the return code
-# unambiguous (semver_from_filename always returns 0; this returns 1 on miss).
-#
-# Examples:
-#   parse_target_version_from_filename "v0.2.0-pvg-freeze-pip-20260517.md"  -> "v0.2.0"
-#   parse_target_version_from_filename "no-version-here.md"                 -> "" (return 1)
-# ---------------------------------------------------------------------------
-parse_target_version_from_filename() {
-    local fname
-    fname="$(basename "${1:-}")"
-    local ver
-    ver="$(semver_from_filename "$fname")"
-    if [[ -z "$ver" ]]; then
-        return 1
-    fi
-    echo "$ver"
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# is_requirements_bundle_file <filename>
-#
-# Return 0 (true) when the filename matches an auto-generated bundle pattern:
-#   *-bugfix-bundle-*.md
-#   *-priority-bundle-*.md
-#
-# Return 1 (false) for all other filenames (operator-authored requirements).
-#
-# Examples:
-#   is_requirements_bundle_file "v0.21.10-bugfix-bundle-20260507.md"   -> 0 (true)
-#   is_requirements_bundle_file "v0.2.0-pvg-freeze-pip-20260517.md"    -> 1 (false)
-# ---------------------------------------------------------------------------
-is_requirements_bundle_file() {
-    local fname
-    fname="$(basename "${1:-}")"
-    [[ "$fname" == *-bugfix-bundle-*.md || "$fname" == *-priority-bundle-*.md ]]
-}
-
-# ---------------------------------------------------------------------------
-# discovery_scan_stale_requirements <project_name>
-#
-# Stateless scan: for each *.md file in a project's requirements/ directory,
-# identify operator-authored files whose target_version <= current_live and
-# which have no matching release-notes/<target_version>*.md entry (i.e.,
-# orphaned — never shipped).
-#
-# For each stale file found, outputs one line in TSV format:
-#   <filename>\t<target_version>\t<current_live>\t<cross_project_hint>
-#
-# Where <cross_project_hint> is the name of another registered project whose
-# full name appears verbatim in the filename slug or the file's first 10 lines,
-# or an empty string when no unique match is found.
-#
-# Files are excluded from output when ANY of the following apply:
-#   - Filename matches *-bugfix-bundle-*.md or *-priority-bundle-*.md
-#   - target_version cannot be parsed (filename lacks vX.Y.Z prefix)
-#   - target_version > current_live (normal queued work, not stale)
-#   - file's own ## Status header is 'done'
-#   - release-notes/<target_version>*.md exists (shipped artifact; not orphaned)
-#
-# Arguments:
-#   $1 — project_name (required)
-#
-# Requires: semver_lte (from lib/semver.sh), pp_requirements_dir,
-#           pp_project_root, projects_cfg_list (from lib/projects.sh, if
-#           already loaded by the caller). If projects_cfg_list is not
-#           available, cross-project hints are skipped silently.
-#
-# Returns 0 always (empty output when no stale files found).
-# ---------------------------------------------------------------------------
-discovery_scan_stale_requirements() {
-    local project_name="${1:-}"
-    project_name="$(pp_require_project_context "${project_name:-}")" || return 1
-
-    local requirements_dir release_notes_dir dev_release_notes_dir
-    requirements_dir="$(pp_requirements_dir "$project_name" 2>/dev/null)" || return 0
-    # Primary release-notes dir: under the kanban project root.
-    release_notes_dir="$(pp_project_root "$project_name" 2>/dev/null)/release-notes"
-    # Secondary and tertiary release-notes dirs: under the dev tree.
-    # The dev tree is the canonical location where cm-release.sh writes release notes;
-    # the live install's project directory typically does not have release-notes/.
-    # Two locations to check in the dev tree:
-    #   - projects/<name>/release-notes/  (per-project layout)
-    #   - release-notes/                  (root-level location)
-    dev_release_notes_dir=""
-    local dev_release_notes_root_dir=""
-    local _rn_cfg_file
-    # Source: project.cfg [project] dev_tree_path (falls back to PROJECT.cfg)
-    _rn_cfg_file="$(_pp_project_cfg_file "$(pp_project_root "$project_name" 2>/dev/null)")"
-    if [[ -n "$_rn_cfg_file" ]]; then
-        local _dev_tree
-        _dev_tree="$(_pp_read_cfg_key "$_rn_cfg_file" project dev_tree_path "")"
-        if [[ -n "$_dev_tree" ]]; then
-            # Per-project release-notes
-            dev_release_notes_dir="${_dev_tree}/projects/${project_name}/release-notes"
-            # Root-level release-notes
-            dev_release_notes_root_dir="${_dev_tree}/release-notes"
-        fi
-    fi
-
-    [[ -d "$requirements_dir" ]] || return 0
-
-    # Determine current_live for this project.
-    local current_live
-    current_live="$(pp_last_released_version "$project_name" 2>/dev/null || echo "v0.0.0")"
-    [[ -z "$current_live" || "$current_live" == "none" ]] && current_live="v0.0.0"
-
-    # Collect other registered project names (for cross-project hints).
-    # projects_cfg_list may not be available if projects.sh was not sourced;
-    # in that case we silently skip the hint check.
-    local all_project_names=()
-    if declare -F projects_cfg_list >/dev/null 2>&1; then
-        while IFS= read -r _pn; do
-            [[ -z "$_pn" || "$_pn" == "$project_name" ]] && continue
-            all_project_names+=("$_pn")
-        done < <(projects_cfg_list 2>/dev/null || true)
-    fi
-
-    # Iterate requirements/*.md files.
-    local req_file
-    for req_file in "${requirements_dir}"/*.md; do
-        [[ -f "$req_file" ]] || continue
-        local fname
-        fname="$(basename "$req_file")"
-
-        # Skip bundle files (legitimate stale artifacts from past iterations).
-        if is_requirements_bundle_file "$fname"; then
-            continue
-        fi
-
-        # Parse target_version from filename.
-        local target_version
-        target_version="$(parse_target_version_from_filename "$fname")" || continue
-
-        # Skip when target_version > current_live (normal queued work).
-        if ! semver_lte "$target_version" "$current_live"; then
-            continue
-        fi
-
-        # Honor ## Status: done as authoritative retirement signal.
-        # A requirements file that declares ## Status: done was explicitly marked
-        # shipped by the operator.  Skip it unconditionally, before the (more
-        # expensive) release-notes lookup.  This mirrors the done-suppression
-        # already used in the bundle pickup path (~line 523) and the discovery
-        # bundle path (~line 1612).
-        local _req_status
-        _req_status="$(_disc_read_bundle_field "$req_file" "Status" 2>/dev/null || echo "open")"
-        _req_status="${_req_status,,}"  # lowercase
-        if [[ "$_req_status" == "done" ]]; then
-            continue
-        fi
-
-        # Check for a matching release-notes entry (shipped artifact → skip).
-        # Three locations are checked in priority order:
-        #   1. Kanban project root's release-notes/ (live install)
-        #   2. Dev tree's per-project release-notes/
-        #   3. Dev tree's root release-notes/
-        # Use exact-version match to prevent vX.Y.Z*.md from matching
-        # vX.Y.Z(N+1)-... release notes.  Check bare exact vX.Y.Z.md plus
-        # hyphen-anchored vX.Y.Z-*.md for any future hyphenated release note names.
-        local _release_note_found=false
-        if [[ -d "$release_notes_dir" ]] && \
-           { compgen -G "${release_notes_dir}/${target_version}-*.md" >/dev/null 2>&1 || \
-             [[ -f "${release_notes_dir}/${target_version}.md" ]]; }; then
-            _release_note_found=true
-        fi
-        if [[ "$_release_note_found" == "false" && -n "$dev_release_notes_dir" && \
-              -d "$dev_release_notes_dir" ]] && \
-           { compgen -G "${dev_release_notes_dir}/${target_version}-*.md" >/dev/null 2>&1 || \
-             [[ -f "${dev_release_notes_dir}/${target_version}.md" ]]; }; then
-            _release_note_found=true
-        fi
-        if [[ "$_release_note_found" == "false" && -n "$dev_release_notes_root_dir" && \
-              -d "$dev_release_notes_root_dir" ]] && \
-           { compgen -G "${dev_release_notes_root_dir}/${target_version}-*.md" >/dev/null 2>&1 || \
-             [[ -f "${dev_release_notes_root_dir}/${target_version}.md" ]]; }; then
-            _release_note_found=true
-        fi
-        if [[ "$_release_note_found" == "true" ]]; then
-            continue
-        fi
-
-        # File is stale and orphaned. Compute cross-project hint.
-        local hint=""
-        if [[ "${#all_project_names[@]}" -gt 0 ]]; then
-            # Scan filename slug and first 10 lines of file content.
-            local file_head
-            file_head="$(head -n 10 "$req_file" 2>/dev/null || true)"
-            local scan_text="${fname} ${file_head}"
-
-            local matched_projects=()
-            local _other_proj
-            for _other_proj in "${all_project_names[@]}"; do
-                # Exact full-name match only (avoids false positives on shared substrings).
-                if [[ "$scan_text" == *"${_other_proj}"* ]]; then
-                    matched_projects+=("$_other_proj")
-                fi
-            done
-
-            # Emit hint only when exactly one other project matched.
-            if [[ "${#matched_projects[@]}" -eq 1 ]]; then
-                hint="${matched_projects[0]}"
-            fi
-        fi
-
-        # Output TSV line: filename<TAB>target_version<TAB>current_live<TAB>hint
-        printf '%s\t%s\t%s\t%s\n' "$fname" "$target_version" "$current_live" "$hint"
-    done
-
-    return 0
-}
-
-# ===========================================================================
-# Internal helpers (prefixed _disc_)
-# ===========================================================================
-
-# _disc_active_rc_blocks <step_name> <project_name>
-#
-# Shared active-RC guard: returns 1 (blocks) when an RC is in flight for the
-# given project, 0 (allows) when the Active RC field is "none".
-#
-# Callers (discovery_step_bugs and discovery_step_priority) use this helper
-# so the two bundler steps cannot diverge in their Active-RC guard semantics.
-#
-# Three cases:
-#   - release-state.md missing or unreadable → log WARNING, return 1 (safe-fail)
-#   - Active RC = "none" (case-insensitive, whitespace-stripped) → return 0 (allow)
-#   - Active RC = any non-"none" value → log skip message, return 1 (block)
-_disc_active_rc_blocks() {
-    local step_name="$1"
-    local project_name="$2"
-    local _active_rc
-    if ! _active_rc="$(_disc_get_release_field "$project_name" "Active RC" 2>/dev/null)"; then
-        log "${step_name}: WARNING release-state.md missing or unreadable for ${project_name}; skipping bundle (cannot verify RC state)"
-        return 1
-    fi
-    _active_rc="${_active_rc:-none}"
-    # Normalise: strip leading/trailing whitespace, compare case-insensitively
-    _active_rc="$(echo "$_active_rc" | tr -d '[:space:]')"
-    if [[ "${_active_rc,,}" != "none" ]]; then
-        log "skipping bundle — Active RC ${_active_rc} in flight"
-        return 1
-    fi
-    return 0
-}
-
-# _disc_check_ceiling_and_log <project_name> <version> <caller_label>
-#
-# Reads max_major, max_minor, and max_patch from project.cfg (or PROJECT.cfg) and checks all
-# three against the given version. If any ceiling is exceeded, emits the
-# documented rejection log line:
-#
-#   [<timestamp>] discovery: PM not queued for <version>: <component> version
-#                 <value> exceeds <ceiling_name>=<ceiling_value>
-#
-# Returns 0 when the version is within all configured ceilings (proceed).
-# Returns 1 when at least one ceiling is exceeded (skip/defer).
-#
-# The first failing ceiling component is reported and the function returns
-# immediately (one log line per call per rejected version — as required).
-_disc_check_ceiling_and_log() {
-    local project_name="$1"
-    local version="$2"
-    # caller_label is unused in log output (log format is operator-facing)
-    # but kept as a positional argument for future diagnostic use.
-
-    # Strip leading 'v' or 'V'.
-    local v_clean="${version#v}"
-    v_clean="${v_clean#V}"
-
-    # Parse X.Y.Z — malformed versions are treated as exceeding ceiling
-    # (conservative: do not queue PM for an unparseable target version).
-    if ! [[ "$v_clean" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-        log "PM not queued for ${version}: target version is malformed (expected vX.Y.Z)"
-        return 1
-    fi
-    local ver_major="${BASH_REMATCH[1]}"
-    local ver_minor="${BASH_REMATCH[2]}"
-    local ver_patch="${BASH_REMATCH[3]}"
-
-    local max_major max_minor max_patch
-    max_major="$(pp_max_major "$project_name" 2>/dev/null)" || max_major=""
-    max_minor="$(pp_max_minor "$project_name" 2>/dev/null)" || max_minor=""
-    max_patch="$(pp_max_patch "$project_name" 2>/dev/null)" || max_patch=""
-
-    if [[ -n "$max_major" ]] && (( ver_major > max_major )); then
-        log "PM not queued for ${version}: major version ${ver_major} exceeds max_major=${max_major}"
-        return 1
-    fi
-
-    if [[ -n "$max_minor" ]] && (( ver_minor > max_minor )); then
-        log "PM not queued for ${version}: minor version ${ver_minor} exceeds max_minor=${max_minor}"
-        return 1
-    fi
-
-    if [[ -n "$max_patch" ]] && (( ver_patch > max_patch )); then
-        log "PM not queued for ${version}: patch version ${ver_patch} exceeds max_patch=${max_patch}"
-        return 1
-    fi
-
-    return 0
-}
-
-# _disc_get_release_field <project> <field> — read ## FIELD from release-state.md
-_disc_get_release_field() {
-    local project_name="$1"
-    local field="$2"
-    local release_state
-    release_state="$(pp_release_state "$project_name")"
-    [[ -f "$release_state" ]] || return 1
-    python3 - "$release_state" "$field" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-field = sys.argv[2]
-m = re.search(rf'^## {re.escape(field)}\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-if not m:
-    raise SystemExit(1)
-print(m.group(1).strip())
-PY
-}
-
-# _disc_chain_idle <project_name>
-#
-# Returns 0 (true) when the entire RC chain is idle, meaning it is safe to
-# queue a new PM-decompose task (Step 3). Returns 1 (false, gate closed) and
-# emits a log line naming the offending condition when the chain is not idle.
-#
-# The chain is idle when ALL of the following hold:
-#   1. Active RC in release-state.md is "none"
-#   2. The latest task entry in each of the named agent backlogs is marked [x]
-#      (or the backlog file has no task entries yet, which counts as idle)
-#
-# Agent backlogs checked (in this order):
-#   pm_backlog, cm_backlog, coder_backlog, tester_backlog, writer_backlog (if present)
-#
-# "Latest entry" means the last line in the backlog file that matches the
-# task entry pattern "- [marker] TASK-ID". Lines that are not task entries
-# (headers, comments, blank lines) are ignored.
-#
-# Usage:
-#   if _disc_chain_idle "$project_name"; then
-#       # safe to queue PM
-#   fi
-_disc_chain_idle() {
-    local project_name="$1"
-    project_name="$(pp_require_project_context "${project_name:-}")" || return 1
-
-    # Check 1: Active RC must be "none"
-    local active_rc
-    active_rc="$(_disc_get_release_field "$project_name" "Active RC" 2>/dev/null || echo "none")"
-    if [[ -n "$active_rc" && "$active_rc" != "none" ]]; then
-        log "discovery_step_requirements: skipped — Active RC=${active_rc} (chain not idle)"
-        return 1
-    fi
-
-    # Check 2: Each named agent backlog's latest task entry must be [x].
-    # Use pp_queue_path for each agent so queue paths resolve correctly.
-    local _backlog_agents=("pm" "cm" "coder" "tester")
-    local _agent _backlog_file _tail_marker _tail_line
-
-    for _agent in "${_backlog_agents[@]}"; do
-        _backlog_file="$(pp_queue_path "$project_name" "$_agent")"
-        if [[ ! -f "$_backlog_file" ]]; then
-            # Missing backlog file counts as idle (no tasks in flight)
-            continue
-        fi
-        # Find the last line that looks like a task entry: "- [x] ...", "- [ ] ...", etc.
-        _tail_line="$(grep -E '^\s*-\s+\[.\]\s+\S' "$_backlog_file" | tail -n1 || true)"
-        if [[ -z "$_tail_line" ]]; then
-            # No task entries at all — counts as idle
-            continue
-        fi
-        # Extract the marker character from the last task entry
-        _tail_marker="$(echo "$_tail_line" | sed -E 's/^\s*-\s+\[([^]]*)\]\s+.*/\1/' | tr '[:upper:]' '[:lower:]')"
-        if [[ "$_tail_marker" != "x" ]]; then
-            log "discovery_step_requirements: skipped — ${_agent}_backlog tail is [${_tail_marker}] (chain not idle)"
-            return 1
-        fi
-    done
-
-    # Also check writer_backlog if it exists (optional)
-    _backlog_file="$(pp_queue_path "$project_name" "writer")"
-    if [[ -f "$_backlog_file" ]]; then
-        _tail_line="$(grep -E '^\s*-\s+\[.\]\s+\S' "$_backlog_file" | tail -n1 || true)"
-        if [[ -n "$_tail_line" ]]; then
-            _tail_marker="$(echo "$_tail_line" | sed -E 's/^\s*-\s+\[([^]]*)\]\s+.*/\1/' | tr '[:upper:]' '[:lower:]')"
-            if [[ "$_tail_marker" != "x" ]]; then
-                log "discovery_step_requirements: skipped — writer_backlog tail is [${_tail_marker}] (chain not idle)"
-                return 1
-            fi
-        fi
-    fi
-
-    # All checks passed — chain is idle
-    return 0
-}
-
-# _disc_pm_ticket_in_flight <project_name>
-#
-# Returns 0 (true) when pm_backlog.md contains at least one pending or active
-# decompose-v* entry (marker [ ] or [A]).  Returns 1 (false) when all entries
-# are done ([x]) or the backlog does not exist.
-#
-# "Pending" means the PM agent has been queued but not yet started;
-# "active" means the PM agent is currently working (marker [A]).  Either
-# state means an RC is conceptually in flight even if Active RC in
-# release-state.md has not yet been set (i.e. CM-open-rc has not fired yet).
-#
-# Pattern rationale: only entries whose task ID contains "decompose-v" followed
-# by a version-with-hyphens (e.g. "decompose-v0-21-40-") are matched.  This
-# is conservative — it avoids false-positives on hypothetical non-decompose PM
-# tickets.  The pattern matches both dot-format (future) and hyphen-format
-# (current pm-agent.sh output) by anchoring on "decompose-v" and a digit.
-#
-# Usage:
-#   if _disc_pm_ticket_in_flight "$project_name"; then
-#       # PM ticket pending; exit before Steps 1/2/3
-#   fi
-_disc_pm_ticket_in_flight() {
-    local project_name="$1"
-    project_name="$(pp_require_project_context "${project_name:-}")" || return 1
-
-    local pm_backlog_file
-    pm_backlog_file="$(pp_queue_path "$project_name" "pm")"
-
-    # No backlog file → nothing in flight
-    [[ -f "$pm_backlog_file" ]] || return 1
-
-    # Look for any task entry with a non-[x] marker ([ ] or [A]) whose ID
-    # contains "decompose-v<digit>" — the canonical form for PM decompose tickets.
-    # Marker is the single character inside the brackets at the start of the line.
-    if grep -qE '^\s*-\s+\[([^xX])\]\s+\S.*decompose-v[0-9]' "$pm_backlog_file" 2>/dev/null; then
-        return 0  # at least one pending/active decompose-v* ticket found
-    fi
-
-    return 1  # all decompose-v* entries are [x] or there are none
-}
-
-# _disc_git_tag_exists <tag> [dev_tree] — check both local and origin tags
-# Resolution order for the git working directory:
-#   1. Explicit dev_tree argument (passed by discovery_compute_next_patch)
-#   2. $PGAI_DEV_TREE_PATH environment variable (for callers that set it directly)
-#   3. cwd-based fallback (preserves test behavior when neither is set)
-#
-# Using an explicit dev_tree keeps bump-around consistent with
-# pp_last_released_version, which reads its dev tree from project.cfg (or PROJECT.cfg).
-_disc_git_tag_exists() {
-    local tag="$1"
-    local dev_tree="${2:-${PGAI_DEV_TREE_PATH:-}}"
-
-    # Local-only render guard: PGAI_GIT_LOCAL_ONLY, checked BEFORE the
-    # ls-remote fallthrough in both branches below (dev-tree path and cwd
-    # fallback). When set to any non-empty value, local tags are
-    # authoritative and the function returns without ever invoking
-    # `git ls-remote` — render-path callers (dashboards) opt into this so a
-    # refresh never reaches the network. Left unset, behavior is unchanged:
-    # a tag not found locally still falls through to the origin check. Wake
-    # context / agent-side discovery must not set this flag.
-    local _local_only="${PGAI_GIT_LOCAL_ONLY:-}"
-
-    # Prefer dev tree if set and valid
-    if [[ -n "$dev_tree" && -d "$dev_tree/.git" ]]; then
-        git -C "$dev_tree" tag -l "$tag" 2>/dev/null | grep -qx "$tag" && return 0
-        [[ -n "$_local_only" ]] && return 1
-        # Also check origin (cheap if refs already fetched recently)
-        git -C "$dev_tree" ls-remote --tags origin "refs/tags/$tag" 2>/dev/null | grep -q "refs/tags/$tag" && return 0
-        return 1
-    fi
-
-    # Fallback: cwd-based check (preserves behavior when dev tree is not configured)
-    if git rev-parse --git-dir >/dev/null 2>&1; then
-        git tag -l "$tag" 2>/dev/null | grep -qx "$tag" && return 0
-        [[ -n "$_local_only" ]] && return 1
-        git ls-remote --tags origin "refs/tags/$tag" 2>/dev/null | grep -q "refs/tags/$tag" && return 0
-    fi
-    return 1
-}
-
-# _disc_check_bug_id_collisions <bugs_dir>
-#
-# Scan bugs_dir for files sharing the same BUG-NNNN numeric prefix and emit a
-# WARNING log line for each collision detected.  Delegates to
-# detect_duplicate_bug_ids() in pm-agent/lib/bug_scanner.py.
-# Non-fatal: always returns 0 so the pipeline continues.
-_disc_check_bug_id_collisions() {
-    local bugs_dir="$1"
-    [[ -d "$bugs_dir" ]] || return 0
-
-    # Locate the bug_scanner module.  Search order:
-    #   1. ${TEAM_ROOT}/pm-agent  — live install layout
-    #   2. ${_disc_this_dir}/../../../team/pm-agent — dev-tree layout when sourced
-    #      from team/scripts/lib/ (BASH_SOURCE[0] resolves 3 levels up to repo root,
-    #      then descend into team/pm-agent)
-    #   3. ${_disc_this_dir}/../pm-agent — alternate dev-tree layout
-    # The first directory whose lib/bug_scanner.py exists is used.
-    local _disc_this_dir _scanner_dir
-    _disc_this_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
-
-    local _candidate
-    for _candidate in \
-        "${TEAM_ROOT}/pm-agent" \
-        "${_disc_this_dir}/../../pm-agent" \
-        "${_disc_this_dir}/../../../team/pm-agent" \
-        "${_disc_this_dir}/../pm-agent"
-    do
-        if [[ -f "${_candidate}/lib/bug_scanner.py" ]]; then
-            _scanner_dir="$_candidate"
-            break
-        fi
-    done
-
-    if [[ -z "$_scanner_dir" ]]; then
-        # Cannot locate bug_scanner; skip collision check silently (non-fatal).
-        return 0
-    fi
-
-    python3 - "$bugs_dir" "$_scanner_dir" <<'PY'
-import sys, warnings
-
-bugs_dir = sys.argv[1]
-scanner_dir = sys.argv[2]
-
-# Insert pm-agent into path so we can import bug_scanner
-sys.path.insert(0, scanner_dir)
-try:
-    from lib.bug_scanner import detect_duplicate_bug_ids
-except ImportError as e:
-    print(f"WARNING: _disc_check_bug_id_collisions: could not import bug_scanner: {e}", file=sys.stderr)
-    sys.exit(0)
-
-# Capture warnings emitted by detect_duplicate_bug_ids and forward them as
-# WARNING-prefixed lines to stderr so the shell caller's log() shim sees them.
-with warnings.catch_warnings(record=True) as caught:
-    warnings.simplefilter("always")
-    detect_duplicate_bug_ids(bugs_dir)
-
-for w in caught:
-    print(f"WARNING: {w.message}", file=sys.stderr)
-
-sys.exit(0)
-PY
-    return 0
-}
-
-# _disc_maybe_quarantine <state_dir> <parent_dir> <filename> [reason] [project_name]
-#
-# Increment the per-file rejection counter for <filename> in the state file at
-# <state_dir>/rejected-counts.tsv.  If the counter reaches the configured
-# threshold (PGAI_DISCOVERY_REJECT_THRESHOLD, default 3), move the file from
-# <parent_dir>/<filename> to projects/<project_name>/rejected/<filename>
-# (project-level rejected directory via pp_rejected_dir).
-#
-# When project_name is empty or pp_rejected_dir fails, falls back to the
-# <parent_dir>/.rejected/<filename> destination.
-#
-# After a successful move, a sidecar file <filename>.reason is written into
-# the same rejected/ directory with the following key=value fields:
-#   original_type  — basename of parent_dir (bugs|priority|requirements)
-#   original_dir   — absolute path of parent_dir (used by recover-rejected.sh)
-#   reason         — rejection reason string (may be empty)
-#   rejected_at    — ISO 8601 UTC timestamp of the quarantine event
-#   retry_count    — number of times this file has been quarantined (starts at 0)
-#
-# Re-quarantine: if the sidecar already exists in the rejected/ directory,
-# retry_count is read from it, incremented by 1, and the sidecar is rewritten
-# with an updated rejected_at.  Sidecar write failures are logged but do not
-# abort the move (the file move is the authoritative effect).
-#
-# State file format (TSV, one record per file):
-#   <filename>\t<count>\t<last-seen-ISO8601>\t<reason>
-#
-# The optional 4th column <reason> carries the last rejection reason string
-# (e.g. "malformed filename (expected pattern: BUG-NNNN-<slug>.md)").
-# Rows with only 3 columns have the reason field defaulting to empty string.
-#
-# Constraints:
-#   - Files are moved, never deleted.
-#   - Rejected directory is created on demand (via pp_rejected_dir or mkdir -p).
-#   - The state file is safe to delete; it is recreated on the next rejection.
-#   - Counter resets implicitly when a file is moved (the source path no longer
-#     exists, so the next cron tick does not see it for rejection; if a same-named
-#     file is later re-introduced, it starts with count=0 in the state file or is
-#     absent from it, so it gets a fresh count).
-#
-# Logs actions to stderr (operator-visible).
-# ---------------------------------------------------------------------------
-_disc_maybe_quarantine() {
-    local state_dir="$1"
-    local parent_dir="$2"
-    local filename="$3"
-    local reason="${4:-}"        # optional rejection reason (4th column in TSV)
-    local project_name="${5:-}"  # optional project name for pp_rejected_dir routing
-    local source_file="${parent_dir}/${filename}"
-
-    # Guard: source file must still exist (could have been moved by a concurrent call)
-    [[ -f "$source_file" ]] || return 0
-
-    local threshold="${PGAI_DISCOVERY_REJECT_THRESHOLD:-3}"
-
-    # Ensure state directory exists
-    mkdir -p "$state_dir"
-
-    local state_file="${state_dir}/rejected-counts.tsv"
-    local now
-    now="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')"
-
-    # Read current count for this filename (0 if absent).
-    # State file format: <filename>\t<count>\t<timestamp>[\t<reason>]
-    # 3-column rows are accepted; reason defaults to ''.
-    local current_count=0
-    if [[ -f "$state_file" ]]; then
-        local found_line
-        found_line="$(grep -P "^${filename}\t" "$state_file" 2>/dev/null | head -1 || true)"
-        if [[ -n "$found_line" ]]; then
-            current_count="$(echo "$found_line" | cut -f2)"
-            # Validate numeric
-            [[ "$current_count" =~ ^[0-9]+$ ]] || current_count=0
-        fi
-    fi
-
-    local new_count=$(( current_count + 1 ))
-
-    # Update or insert the record in the state file using Python for safety.
-    # Writes 4-column rows: filename, count, timestamp, reason.
-    # When reading existing rows, preserves 3-column rows for other files
-    # untouched; only the row for <filename> is rewritten in 4-column form.
-    python3 - "$state_file" "$filename" "$new_count" "$now" "$reason" <<'PY'
-import pathlib, sys
-
-state_file = pathlib.Path(sys.argv[1])
-filename = sys.argv[2]
-new_count = sys.argv[3]
-now = sys.argv[4]
-reason = sys.argv[5] if len(sys.argv) > 5 else ""
-
-lines = []
-if state_file.is_file():
-    for line in state_file.read_text(encoding="utf-8").splitlines():
-        parts = line.split("\t")
-        if len(parts) >= 2 and parts[0] == filename:
-            continue  # will be replaced below
-        lines.append(line)
-
-lines.append(f"{filename}\t{new_count}\t{now}\t{reason}")
-state_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-PY
-
-    if [[ "$new_count" -lt "$threshold" ]]; then
-        log "_disc_maybe_quarantine: ${filename}: rejection count ${new_count}/${threshold}; not yet quarantined"
-        return 0
-    fi
-
-    # Threshold reached: move file to the project-level rejected/ directory.
-    # Use pp_rejected_dir when project_name is known; fall back to
-    # <parent_dir>/.rejected/ when it is empty or the helper is unavailable.
-    local rejected_dir=""
-    if [[ -n "$project_name" ]] && declare -F pp_rejected_dir >/dev/null 2>&1; then
-        rejected_dir="$(pp_rejected_dir "$project_name" 2>/dev/null)" || rejected_dir=""
-    fi
-    if [[ -z "$rejected_dir" ]]; then
-        # Legacy fallback: keep files co-located with their source directory.
-        rejected_dir="${parent_dir}/.rejected"
-        mkdir -p "$rejected_dir"
-    fi
-    local dest_file="${rejected_dir}/${filename}"
-
-    # Determine sidecar retry_count: if the sidecar already exists (re-quarantine),
-    # read the existing retry_count and increment; otherwise start at 0.
-    local sidecar_file="${rejected_dir}/${filename}.reason"
-    local retry_count=0
-    if [[ -f "$sidecar_file" ]]; then
-        local _existing_count
-        _existing_count="$(grep -E '^retry_count=' "$sidecar_file" 2>/dev/null | head -1 | cut -d= -f2 || true)"
-        if [[ "$_existing_count" =~ ^[0-9]+$ ]]; then
-            retry_count=$(( _existing_count + 1 ))
-        else
-            retry_count=1
-        fi
-    fi
-
-    # Derive original_type from the basename of parent_dir (bugs|priority|requirements).
-    local original_type
-    original_type="$(basename "$parent_dir")"
-
-    # ISO 8601 UTC timestamp for the sidecar.
-    local rejected_at
-    rejected_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -Iseconds)"
-
-    if mv "$source_file" "$dest_file"; then
-        # Emit multi-line quarantine log with reason and recovery hint.
-        # Line 1 — summary
-        log "_disc_maybe_quarantine: ${filename}: quarantined after ${new_count} failed parse(s)."
-        # Line 2 — reason (from the 4th TSV column written by the validator)
-        if [[ -n "$reason" ]]; then
-            log "  Reason: ${reason}"
-        else
-            log "  Reason: unknown"
-        fi
-        # Line 3 — recovery hint with example rename, chosen based on filename prefix.
-        # Constraints: use the reason/pattern already stored; do not re-derive it.
-        # Note: PRIORITY and BUG share the same date-optional-after-the-number
-        # pattern family (^{PREFIX}-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$);
-        # the PRIORITY branch is intentionally absent here — a dateless PRIORITY
-        # is valid and does not need renaming.
-        if [[ "$filename" == BUG-* ]]; then
-            log "  Recovery: rename file to match pattern ^BUG-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\\.md\$, e.g."
-            local _stem="${filename%.md}"
-            local _num _slug _example_name
-            _num="$(echo "$_stem" | sed 's/^BUG-\([0-9]*\)-.*/\1/')"
-            _slug="$(echo "$_stem" | sed 's/^BUG-[0-9]*-//')"
-            _example_name="BUG-${_num}-${_slug}.md"
-            log "    '${_example_name}', then move back to $(basename "${parent_dir}")/"
-        else
-            log "  Recovery: rename file to match the expected pattern, then move back to $(basename "${parent_dir}")/"
-        fi
-        # Line 4 — quarantine path
-        log "  Quarantine path: ${dest_file}"
-
-        # Write sidecar <filename>.reason co-located with the quarantined file.
-        # Atomicity: the file move above is the authoritative effect; sidecar write
-        # failures are logged and do not abort.  On re-quarantine, the sidecar is
-        # overwritten with an incremented retry_count and refreshed rejected_at.
-        if printf '%s\n' \
-            "original_type=${original_type}" \
-            "original_dir=${parent_dir}" \
-            "reason=${reason}" \
-            "rejected_at=${rejected_at}" \
-            "retry_count=${retry_count}" \
-            > "$sidecar_file" 2>/dev/null; then
-            log "  Sidecar written: ${sidecar_file} (retry_count=${retry_count})"
-        else
-            log "  WARNING: failed to write sidecar ${sidecar_file}; quarantine move succeeded but reason metadata is absent"
-        fi
-
-        # Remove the entry from the state file so a re-introduced same-named file
-        # starts with a fresh counter.
-        python3 - "$state_file" "$filename" <<'PY'
-import pathlib, sys
-state_file = pathlib.Path(sys.argv[1])
-filename = sys.argv[2]
-if state_file.is_file():
-    lines = [l for l in state_file.read_text(encoding="utf-8").splitlines()
-             if not (l.split("\t")[0] == filename)]
-    state_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-PY
-    else
-        log "_disc_maybe_quarantine: WARNING: failed to move ${source_file} to ${dest_file}; will retry next cron tick"
-    fi
-}
-
-# _disc_find_unhandled_items <dir> <backlog_cache> <id_prefix> [state_dir] [project_name]
-# Find items in <dir> that:
-#   1. Match the canonical filename pattern for the given id_prefix,
-#      sourced from pgai_agent_kanban.lib.ledger_filename_contract:
-#      BUG-      -> ^BUG-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$
-#      PRIORITY- -> ^PRIORITY-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$
-#                  OR (TESTER Path C) ^v[0-9]+\.[0-9]+\.[0-9]+-bugfix-\S+\.md$
-#      The numeric field is exactly 4 digits; an 8-digit date segment is
-#      permitted only immediately AFTER the number (historical compatibility).
-#      BUG- and PRIORITY- must stay in sync — both consumers import the same
-#      module, so tightening one tightens the other automatically.
-#   2. Are NOT marked [x] in the cache file
-#   3. Have ## Status: open in their header
-# Outputs newline-separated absolute paths on stdout.
-#
-# .md files in the directory that do NOT match the canonical pattern (and are
-# not README.md and not inside templates/) produce a rejection message on
-# stderr ONLY — never on stdout.  This ensures that rejection log output
-# cannot contaminate the validated-items list returned to the caller.  For
-# BUG-/PRIORITY- prefixes the rejection message is a prescriptive remedy
-# naming the specific defect (date-first, under-padded, or other malformation)
-# and the next free number — refuse-and-prescribe, never auto-rename.
-# Rejection format: ERROR: rejecting <filename>: <reason>
-#
-# When the optional [state_dir] argument is supplied, each rejected file is
-# passed to _disc_maybe_quarantine, which increments a per-file counter and
-# moves the file to projects/<project_name>/rejected/<filename> (or
-# <dir>/.rejected/<filename> when project_name is absent) once the counter
-# reaches PGAI_DISCOVERY_REJECT_THRESHOLD (default 3).  This stops the
-# discovery loop from re-rejecting the same misnamed file on every cron tick.
-#
-# The optional [project_name] argument (5th) is forwarded to
-# _disc_maybe_quarantine to enable project-level rejected/ routing via
-# pp_rejected_dir.  When absent, quarantine uses the local .rejected/ fallback.
-#
-# All rejection output goes directly to stderr from Python — stdout carries
-# only validated absolute paths.
-_disc_find_unhandled_items() {
-    local dir="$1"
-    local cache_file="$2"
-    local id_prefix="$3"
-    local state_dir="${4:-}"    # optional: path to .discovery-state/ for quarantine tracking
-    local project_name="${5:-}" # optional: project name for pp_rejected_dir routing
-
-    [[ -d "$dir" ]] || return 0
-
-    # When quarantine tracking is requested, Python writes rejected basename+reason
-    # pairs to a temp file so bash can call _disc_maybe_quarantine without touching
-    # stdout.  Format: one TSV line per rejected file: <basename>\t<reason>
-    local rejected_tmp=""
-    if [[ -n "$state_dir" ]]; then
-        rejected_tmp="$(pgai_mktemp disc_rejected)"
-    fi
-
-    # Self-locate team/ relative to this script ("each tree finds itself" —
-    # never require an externally-passed TEAM_ROOT).  Used to
-    # import the single-source ledger_filename_contract module below.
-    local _disc_fui_team_root
-    _disc_fui_team_root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." 2>/dev/null && pwd)" || _disc_fui_team_root=""
-
-    # stdout  → validated item paths (captured by caller via $())
-    # stderr  → rejection log messages (operator-visible; never captured as content)
-    # $rejected_tmp (when set) → one "<basename>\t<reason>" line per rejected file
-    #
-    # Settle guard: after the Python scan, each candidate is passed through
-    # _disc_settle_guard_active.  Items whose settle window has not yet expired
-    # are suppressed from stdout so the caller never sees them.  The settle
-    # guard fires only when state_dir is set and a fresh settle file exists.
-    local _py_validated_paths=""
-    _py_validated_paths="$(python3 - "$dir" "$cache_file" "$id_prefix" "${rejected_tmp:-}" "${_disc_fui_team_root}" <<'PY'
-import os, re, sys, pathlib
-
-dir_path = pathlib.Path(sys.argv[1])
-cache_file = pathlib.Path(sys.argv[2])
-id_prefix = sys.argv[3]  # e.g. "BUG-" or "PRIORITY-"
-rejected_tmp = sys.argv[4] if len(sys.argv) > 4 else ""  # path to rejected-basenames file
-_team_root = sys.argv[5] if len(sys.argv) > 5 else ""  # team/ dir, for ledger_filename_contract import
-
-# TESTER Path C filenames produced in priority/: v<X.Y.Z>-bugfix-<slug>.md
-# This regex is accepted in addition to PRIORITY- when id_prefix == "PRIORITY-".
-PATH_C_RE = re.compile(r'^v[0-9]+\.[0-9]+\.[0-9]+-bugfix-\S+\.md$', re.IGNORECASE)
-
-# Read bundled IDs from cache.
-# For PRIORITY- prefix we also capture v*-bugfix-* stems that may have been
-# stored verbatim (they do not begin with "PRIORITY-" so the prefix-anchored
-# regex would miss them).
-bundled = set()
-if cache_file.is_file():
-    cache_text = cache_file.read_text()
-    # Prefix-anchored pattern: catches BUG- and PRIORITY- stems
-    prefix_cache_re = re.compile(
-        rf'^\s*-\s+\[x\]\s+({re.escape(id_prefix)}\S+)', re.IGNORECASE
-    )
-    # Path C stem pattern: catches v*-bugfix-* stems in the cache
-    path_c_cache_re = re.compile(
-        r'^\s*-\s+\[x\]\s+(v[0-9]+\.[0-9]+\.[0-9]+-bugfix-\S+)', re.IGNORECASE
-    )
-    for line in cache_text.splitlines():
-        m = prefix_cache_re.match(line)
-        if m:
-            bundled.add(m.group(1))
-        if id_prefix.upper() == "PRIORITY-":
-            m2 = path_c_cache_re.match(line)
-            if m2:
-                bundled.add(m2.group(1))
-
-# Canonical filename patterns per id_prefix, sourced from the single-source
-# ledger_filename_contract module.  BUG- and PRIORITY- are
-# siblings: both use the exact-4-digit, date-optional-AFTER-the-number form
-#   ^{PREFIX}-[0-9]{4}(-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$
-# PRIORITY- additionally accepts (TESTER Path C) ^v[0-9]+\.[0-9]+\.[0-9]+-bugfix-\S+\.md$
-# All other prefixes fall back to the historical loose pattern (no production
-# caller passes anything other than "BUG-" / "PRIORITY-" today).
-_LEDGER_PREFIXES = {"BUG-", "PRIORITY-"}
-
-_ledger_filename_re = None
-_ledger_build_remedy = None
-if _team_root:
-    sys.path.insert(0, _team_root)
-try:
-    from pgai_agent_kanban.lib.ledger_filename_contract import (
-        ledger_filename_re as _ledger_filename_re,
-        build_remedy as _ledger_build_remedy,
-    )
-except ImportError as _e:
-    print(
-        f"WARNING: _disc_find_unhandled_items: could not import "
-        f"ledger_filename_contract ({_e}); falling back to inline pattern "
-        f"and a generic rejection message",
-        file=sys.stderr,
-    )
-
-if id_prefix.upper() in _LEDGER_PREFIXES:
-    expected_pattern = f"{id_prefix.upper()}NNNN-<slug>.md"
-    path_c_re_active = PATH_C_RE if id_prefix.upper() == "PRIORITY-" else None
-    if _ledger_filename_re is not None:
-        canonical_re = _ledger_filename_re(id_prefix)
-    else:
-        # Fallback definition when the package is not importable (e.g. test
-        # environments without a full install).  Kept byte-identical to
-        # ledger_filename_contract.py's canonical pattern.
-        canonical_re = re.compile(
-            rf'^{re.escape(id_prefix.upper())}[0-9]{{4}}(?:-[0-9]{{8}})?-[a-z0-9][a-z0-9-]*\.md$',
-            re.IGNORECASE,
-        )
-else:
-    canonical_re = re.compile(rf'^{re.escape(id_prefix)}\d{{4,}}-.+\.md$', re.IGNORECASE)
-    expected_pattern = f"{id_prefix}NNNN-<slug>.md"
-    path_c_re_active = None
-
-status_re = re.compile(r'^##\s+Status\s*\n\s*(\S+)', re.M | re.IGNORECASE)
-
-# Open the rejected-basenames file for writing if quarantine tracking is active.
-rejected_fh = open(rejected_tmp, "w", encoding="utf-8") if rejected_tmp else None
-
-results = []
-for entry in sorted(dir_path.iterdir()):
-    if not entry.is_file():
-        continue
-    # Skip non-.md files silently
-    if not entry.name.endswith(".md"):
-        continue
-    # Skip README.md silently
-    if entry.name == "README.md":
-        continue
-    # Skip anything inside a templates/ subdirectory — but since we are
-    # iterating the top-level dir_path, entries inside templates/ are
-    # directories, not files at this level.  Still, guard by name.
-    if "templates" in entry.parts:
-        continue
-    # Skip anything inside a rejected/ subdirectory — quarantined files are
-    # not eligible for re-processing by the discovery pipeline.
-    if "rejected" in entry.parts:
-        continue
-
-    # Accept if it matches the canonical pattern OR the Path C pattern
-    # (Path C is only active when id_prefix == "PRIORITY-").
-    is_path_c = path_c_re_active is not None and path_c_re_active.match(entry.name)
-    if not canonical_re.match(entry.name) and not is_path_c:
-        # Emit rejection to stderr ONLY.
-        # Never print to stdout — stdout is the validated-items stream consumed
-        # by the caller as bundle content.
-        # Prescriptive refusal: name the specific defect (date-first vs
-        # under-padded vs other) and the next free number.  Refuse-and-
-        # prescribe, never auto-rename.
-        if id_prefix.upper() in _LEDGER_PREFIXES and _ledger_build_remedy is not None:
-            rejection_reason = _ledger_build_remedy(entry.name, id_prefix, dir_path)
-        else:
-            rejection_reason = f"malformed filename (expected pattern: {expected_pattern})"
-        print(
-            f"ERROR: rejecting {entry.name}: {rejection_reason}",
-            file=sys.stderr,
-        )
-        # Write "<basename>\t<reason>" to the quarantine temp file so
-        # _disc_maybe_quarantine can store the reason in the 4th TSV column.
-        if rejected_fh is not None:
-            rejected_fh.write(entry.name + "\t" + rejection_reason + "\n")
-        continue
-
-    item_id = entry.name[:-len(".md")]  # stem without extension
-
-    # Authoritative check: ## Status header is the source of truth.
-    # A file whose Status is 'open' (or absent) is eligible for bundling
-    # regardless of whether its cache marker is [x].  Terminal states
-    # ('done', 'wont-do') and 'running' unconditionally suppress the file.
-    text = entry.read_text(encoding="utf-8", errors="replace")
-    sm = status_re.search(text)
-    if sm:
-        status = sm.group(1).strip().lower()
-        # Skip terminal items unconditionally — they are definitively resolved.
-        # 'done'    = item completed and shipped; never re-bundle.
-        # 'wont-do' = operator explicitly abandoned; never re-bundle.
-        if status in ("done", "wont-do"):
-            print(
-                f"skipping {entry.name}: terminal state '{status}'",
-                file=sys.stderr,
-            )
-            continue
-        # Skip running items unconditionally (already bundled, RC in flight)
-        if status == "running":
-            continue
-        # 'open' (or anything else) → eligible, proceed regardless of cache
-    # Missing header: treat as open (forgiving for older items)
-    # NOTE: the cache bundled set is NOT consulted here.  Status field is the
-    # sole gate.  The cache remains a convenience view; it does not suppress
-    # files whose Status disagrees with it.
-
-    results.append(str(entry.resolve()))
-
-if rejected_fh is not None:
-    rejected_fh.close()
-
-for r in results:
-    print(r)
-PY
-)"
-
-    # Quarantine tracking: process each rejected basename+reason through _disc_maybe_quarantine.
-    # Each line in rejected_tmp is: <basename>\t<reason>.
-    # Lines with no tab character are treated as basename-only (reason='').
-    if [[ -n "$state_dir" && -n "$rejected_tmp" && -s "$rejected_tmp" ]]; then
-        while IFS=$'\t' read -r rejected_name rejected_reason; do
-            [[ -z "$rejected_name" ]] && continue
-            _disc_maybe_quarantine "$state_dir" "$dir" "$rejected_name" "${rejected_reason:-}" "${project_name:-}"
-        done < "$rejected_tmp"
-    fi
-
-    # Clean up the temp file (ignore errors — failure to clean is not fatal)
-    [[ -n "$rejected_tmp" ]] && rm -f "$rejected_tmp" 2>/dev/null || true
-
-    # Settle guard: emit only items whose settle window has expired (or no settle
-    # file exists).  Items with a fresh settle file are suppressed and logged.
-    # This closes the cancel→reset→re-tick double-handling race: after an operator
-    # resets an intake item's Status back to 'open', the guard defers pickup for
-    # one settle window (PGAI_DISCOVERY_SETTLE_SECONDS, default 60) so that the
-    # cancellation bookkeeping completes before the item is re-processed.
-    if [[ -n "$_py_validated_paths" ]]; then
-        while IFS= read -r _candidate_path; do
-            [[ -z "$_candidate_path" ]] && continue
-            if [[ -n "$state_dir" ]] && _disc_settle_guard_active "$state_dir" "$_candidate_path"; then
-                log "_disc_find_unhandled_items: settle guard active for $(basename "${_candidate_path}") — deferring pickup until settle window expires"
-            else
-                echo "$_candidate_path"
-            fi
-        done <<< "$_py_validated_paths"
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# Settle guard: protect against cancel→reset→re-tick double-handling.
-#
-# When an intake item (bug, priority, or requirements bundle) transitions from
-# 'running' back to 'open' — because an operator or cancel-rc resets it — the
-# discovery pipeline must not act on it again in the same tick window.  Acting
-# on it immediately risks double-handling: a bug could be re-bundled while the
-# previous bundle's PM task is still being cleaned up, or a requirements file
-# could be re-queued while the prior RC is still being cancelled.
-#
-# The guard uses a per-item settle file stored at:
-#   <state_dir>/settle/<item-basename>.settle
-# The file records the UTC timestamp of the reset event.  When discovery finds
-# an item eligible (Status=open), it checks whether a settle file exists and is
-# less than PGAI_DISCOVERY_SETTLE_SECONDS old (default: 60).  If so, it skips
-# the item for this iteration and emits a log line.  On the next tick (after the
-# settle window expires), the item is processed normally.
-#
-# Contract:
-#   - Settle files are WRITTEN by _disc_reset_item_status_to_open (the
-#     running→open transition wrapper).  Direct callers of _disc_set_status_field
-#     for non-reset transitions (bundling step marks running; cm-release marks done)
-#     do NOT write settle files — the guard only applies to the reset path.
-#   - Settle files are READ by _disc_settle_guard_active (called from
-#     _disc_find_unhandled_items).
-#   - Settle files are not deleted after use; they expire by age comparison.
-#     This avoids write-delete races under concurrent discovery runs.
-#   - PGAI_DISCOVERY_SETTLE_SECONDS defaults to 60.  Tests set it to 0 to
-#     exercise the "guard fires immediately" path.
-# ---------------------------------------------------------------------------
-
-# _disc_settle_guard_active <state_dir> <item_path>
-#
-# Returns 0 (guard active — SKIP this item) when a settle file for the item
-# exists in <state_dir>/settle/ AND was written less than
-# PGAI_DISCOVERY_SETTLE_SECONDS ago.
-#
-# Returns 1 (guard inactive — proceed) in all other cases:
-#   - state_dir is empty or does not exist
-#   - settle file does not exist
-#   - settle file exists but is older than the window
-#   - PGAI_DISCOVERY_SETTLE_SECONDS is 0 (guard disabled)
-#
-# This is intentionally a non-fatal, non-side-effecting check: it reads
-# the settle file and compares timestamps only.  No files are written here.
-_disc_settle_guard_active() {
-    local state_dir="$1"
-    local item_path="$2"
-
-    # Disabled when state_dir is absent (settle tracking not configured).
-    [[ -z "$state_dir" ]] && return 1
-
-    local settle_window="${PGAI_DISCOVERY_SETTLE_SECONDS:-60}"
-
-    # A window of 0 means "disabled" — skip the check entirely.
-    # This prevents divide-by-zero and provides a test escape hatch.
-    if [[ "$settle_window" -eq 0 ]]; then
-        return 1
-    fi
-
-    local item_basename
-    item_basename="$(basename "$item_path")"
-    local settle_file="${state_dir}/settle/${item_basename}.settle"
-
-    [[ -f "$settle_file" ]] || return 1
-
-    # Read the epoch timestamp written into the settle file (first non-blank line).
-    local settle_epoch
-    settle_epoch="$(grep -m1 '^[0-9]' "$settle_file" 2>/dev/null || true)"
-    [[ -n "$settle_epoch" ]] || return 1
-
-    # Compare against current time.
-    local now_epoch
-    now_epoch="$(date +%s 2>/dev/null || echo 0)"
-
-    local age=$(( now_epoch - settle_epoch ))
-    if [[ "$age" -lt "$settle_window" ]]; then
-        return 0  # guard active: settle window not yet expired
-    fi
-
-    return 1  # guard inactive: settle window has passed
-}
-
-# _disc_write_settle_marker <state_dir> <item_path>
-#
-# Write a settle file for the given item.  Called by _disc_reset_item_status_to_open
-# immediately after setting Status=open so that the next discovery tick knows a
-# recent reset occurred and defers pickup.
-#
-# The settle file contains the current UTC epoch timestamp on the first line
-# and the item path on the second line (for operator diagnostics).
-# The settle/ directory is created on demand.
-_disc_write_settle_marker() {
-    local state_dir="$1"
-    local item_path="$2"
-
-    [[ -z "$state_dir" ]] && return 0
-
-    local settle_dir="${state_dir}/settle"
-    mkdir -p "$settle_dir" 2>/dev/null || true
-
-    local item_basename
-    item_basename="$(basename "$item_path")"
-    local settle_file="${settle_dir}/${item_basename}.settle"
-    local now_epoch
-    now_epoch="$(date +%s 2>/dev/null || echo 0)"
-
-    printf '%s\n%s\n' "$now_epoch" "$item_path" > "$settle_file" 2>/dev/null || true
-
-    log "_disc_write_settle_marker: settle guard armed for ${item_basename} (expires in ${PGAI_DISCOVERY_SETTLE_SECONDS:-60}s)"
-}
-
-# _disc_reset_item_status_to_open <file> <state_dir>
-#
-# Reset an intake item's ## Status to 'open' and arm the settle guard.
-# This is the canonical entry point for the running→open transition.
-# Callers that need to reset an intake item (cancel-rc integration, operator
-# tooling, recovery scripts) should use this function rather than calling
-# _disc_set_status_field directly so that the settle guard fires on the next
-# discovery tick.
-#
-# If <state_dir> is empty, the settle file is not written (settle guard
-# inactive for this reset).  This matches the behaviour of _disc_set_status_field
-# in codepaths that do not have a project-scoped state directory.
-#
-# Note: the Status field is unconditionally written to 'open' regardless of
-# the current value.  Callers are responsible for ensuring this is appropriate
-# (e.g., only calling this for items whose prior status was 'running').
-_disc_reset_item_status_to_open() {
-    local file="$1"
-    local state_dir="${2:-}"
-
-    # Update the Status field first (this is the authoritative mutation).
-    _disc_set_status_field "$file" "open"
-
-    # Arm the settle guard so the next discovery tick defers pickup.
-    if [[ -n "$state_dir" ]]; then
-        _disc_write_settle_marker "$state_dir" "$file"
-    fi
-}
-
-# _disc_set_status_field <file> <new_status>
-# Update the ## Status field in the file header. If the field doesn't exist,
-# insert one near the top (after the first heading and any frontmatter blank lines).
-_disc_set_status_field() {
-    local file="$1"
-    local new_status="$2"
-    python3 - "$file" "$new_status" <<'PY'
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-new_status = sys.argv[2]
-text = path.read_text(encoding="utf-8")
-
-pattern = re.compile(r'(^##\s+Status\s*\n)(.*?)(\n+##|\Z)', flags=re.M | re.S | re.IGNORECASE)
-if pattern.search(text):
-    new_text = pattern.sub(lambda m: m.group(1) + new_status + "\n" + (m.group(3) if m.group(3) else ''), text, count=1)
-else:
-    # Insert after the first heading (e.g. "# an earlier defect-foo")
-    lines = text.splitlines(keepends=True)
-    insert_idx = 0
-    for i, line in enumerate(lines):
-        if line.startswith("# "):
-            insert_idx = i + 1
-            break
-    block = f"\n## Status\n{new_status}\n"
-    lines.insert(insert_idx, block)
-    new_text = "".join(lines)
-
-path.write_text(new_text, encoding="utf-8")
-PY
-}
-
-# _disc_read_bundle_field <bundle_file> <field_name>
-# Read a named ## field value from a requirements bundle file.
-# Echoes the trimmed value of the first non-blank line after the heading.
-# Exits 1 and echoes nothing if the field is absent or the file does not exist.
-_disc_read_bundle_field() {
-    local bundle_file="$1"
-    local field_name="$2"
-    [[ -f "$bundle_file" ]] || return 1
-    python3 - "$bundle_file" "$field_name" <<'PY'
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-field = sys.argv[2]
-text = path.read_text(encoding="utf-8", errors="replace")
-# Match the heading, then capture the first non-blank content line.
-m = re.search(
-    rf'^##\s+{re.escape(field)}\s*\n\s*(\S[^\n]*)',
-    text,
-    flags=re.M | re.IGNORECASE,
-)
-if not m:
-    sys.exit(1)
-print(m.group(1).strip())
-PY
-}
-
-# _disc_update_bundle_pm_queued <bundle_file> <pm_task_id>
-# After discovery queues PM for a bundle, update the bundle's ## Status to
-# 'running' and ## PM Task to the given task ID.  Uses two in-place Python
-# rewrites via _disc_set_status_field plus a direct write for ## PM Task.
-# This replaces the old slug-grep idempotency check with an authoritative
-# status field anchored to the bundle file itself.
-_disc_update_bundle_pm_queued() {
-    local bundle_file="$1"
-    local pm_task_id="$2"
-    # Update ## Status field
-    _disc_set_status_field "$bundle_file" "running"
-    # Update ## PM Task field
-    python3 - "$bundle_file" "$pm_task_id" <<'PY'
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-task_id = sys.argv[2]
-text = path.read_text(encoding="utf-8")
-pattern = re.compile(
-    r'(^##\s+PM Task\s*\n\s*)(none|[^\n]*)(\n?)',
-    flags=re.M | re.IGNORECASE,
-)
-if pattern.search(text):
-    new_text = pattern.sub(lambda m: m.group(1) + task_id + "\n", text, count=1)
-else:
-    # Field absent — append it before the first non-status ## heading
-    heading_re = re.compile(r'^##\s+(?!Status\b|PM Task\b)', re.M | re.IGNORECASE)
-    m = heading_re.search(text)
-    if m:
-        insert_pos = m.start()
-        new_text = text[:insert_pos] + f"## PM Task\n\n{task_id}\n\n" + text[insert_pos:]
-    else:
-        suffix = "" if text.endswith("\n") else "\n"
-        new_text = text + suffix + f"\n## PM Task\n\n{task_id}\n"
-path.write_text(new_text, encoding="utf-8")
-PY
-}
-
-# _disc_mark_cache_bundled <cache_file> <item_id>
-# Add or update a "- [x] <item_id>" line in the cache. Idempotent.
-_disc_mark_cache_bundled() {
-    local cache_file="$1"
-    local item_id="$2"
-
-    python3 - "$cache_file" "$item_id" <<'PY'
-import pathlib, re, sys
-cache = pathlib.Path(sys.argv[1])
-item_id = sys.argv[2]
-
-if not cache.is_file():
-    # Create cache with header and the new entry
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(f"# Backlog Cache\n\n## Queue\n\n- [x] {item_id}\n")
-    raise SystemExit(0)
-
-text = cache.read_text()
-
-# Look for existing "- [ ] item_id" or "- [x] item_id" line
-entry_re = re.compile(rf'^(\s*-\s+\[)([x ])(\]\s+{re.escape(item_id)})(\b.*)?$', re.M)
-m = entry_re.search(text)
-if m:
-    new_text = entry_re.sub(lambda mm: mm.group(1) + 'x' + mm.group(3) + (mm.group(4) or ''), text, count=1)
-    cache.write_text(new_text)
-    raise SystemExit(0)
-
-# Not present: append under ## Queue, or create the section
-if re.search(r'^## Queue\s*$', text, re.M):
-    # Append after the last existing entry under Queue, or right after the Queue heading
-    new_text = re.sub(
-        r'(^## Queue\s*\n(?:.*\n)*?)(?=\n##|\Z)',
-        lambda m: m.group(1).rstrip() + f"\n- [x] {item_id}\n",
-        text,
-        count=1,
-        flags=re.M,
-    )
-    cache.write_text(new_text)
-else:
-    # No Queue section — append one
-    suffix = "" if text.endswith("\n") else "\n"
-    cache.write_text(text + suffix + f"\n## Queue\n\n- [x] {item_id}\n")
-PY
-}
-
-# _disc_list_all_eligible_requirements <dir> <last_released> [max_minor] [max_major] [max_patch] [version_semantics]
-#
-# List ALL requirements files that are eligible for PM pickup.  Behavior
-# branches on <version_semantics> declared by the project's workflow plugin:
-#
-#   semver (release, document with semver)
-#     - Ascending semver order (lowest version first), followed by auto-sentinels.
-#     - Outputs every file with target_version > last_released.
-#     - Ceiling-blocked files carry a structured suffix so the shell caller
-#       can emit the documented rejection log line and continue iterating:
-#         ":ceiling-blocked:<version>:<component>:<value>:<ceiling_name>:<ceiling_value>"
-#     - Auto-sentinel files carry ":auto" suffix.
-#     - Items with non-semver Target Version are logged and skipped.
-#
-#   label / none (testing-only and any future label-version plugin)
-#     - Every unhandled item in requirements/ is eligible; no semver parse,
-#       no ceiling filter (ceilings are version-consumption checkpoints that
-#       only apply to semver release lanes).
-#     - Ordering: filename-lexical ascending (deterministic, reproducible
-#       across systems; avoids mtime variance on copy/restore operations).
-#     - Auto-sentinel (Target Version: auto / next-patch / absent) is NOT
-#       valid for label projects — these files are emitted with ":auto-invalid"
-#       so the shell caller can fail loud with a named reason.
-#     - Items with a Terminal ## Status (done / wont-do) are still filtered.
-#     - One-line skip log is emitted to stderr for any skipped item.
-#
-# When <version_semantics> is absent or empty it defaults to "semver" for
-# backward compatibility with callers that predate the parameter.
-#
-# max_minor, max_major, max_patch are optional (pass empty string for "no
-# constraint"); they are honoured only on the semver path.
-# Output: one line per file, absolute path, possibly with ":auto",
-#         ":auto-invalid", or structured ":ceiling-blocked:..." suffix.
-#         Outputs nothing if no eligible file found.
-_disc_list_all_eligible_requirements() {
-    local dir="$1"
-    local last_released="$2"
-    local max_minor="${3:-}"
-    local max_major="${4:-}"
-    local max_patch="${5:-}"
-    local version_semantics="${6:-semver}"
-
-    python3 - "$dir" "$last_released" "$max_minor" "$max_major" "$max_patch" "$version_semantics" "${TEAM_ROOT:-}" <<'PY'
-import pathlib, re, sys
-
-req_dir = pathlib.Path(sys.argv[1])
-last_released = sys.argv[2].lstrip("v") or "0.0.0"
-max_minor_str = sys.argv[3] if len(sys.argv) > 3 else ""
-max_major_str = sys.argv[4] if len(sys.argv) > 4 else ""
-max_patch_str = sys.argv[5] if len(sys.argv) > 5 else ""
-version_semantics = sys.argv[6].strip().lower() if len(sys.argv) > 6 else "semver"
-_team_root = sys.argv[7] if len(sys.argv) > 7 else ""
-
-# Locate the pgai_agent_kanban package via TEAM_ROOT so we can import
-# filename_contract (the single-source filename pattern module).
-if _team_root:
-    sys.path.insert(0, _team_root)
-try:
-    from pgai_agent_kanban.lib.filename_contract import (
-        INTAKE_REQUIREMENTS_RE as _INTAKE_RE,
-        SEMVER_REQUIREMENTS_RE as _SEMVER_RE,
-        skip_log_line as _skip_log_line,
-        SKIP_REASON_SEMVER_SHAPE_REQUIRED as _SKIP_SEMVER_SHAPE,
-    )
-except ImportError:
-    # Fall back to inline definitions when the package is not importable
-    # (e.g., test environments without a full install).  The literals here
-    # are intentionally identical to filename_contract.py.
-    _INTAKE_RE = re.compile(r"^v[0-9].*\.md$")
-    _SEMVER_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+-.+\.md$", re.IGNORECASE)
-    _SKIP_SEMVER_SHAPE = "semver-shape-required"
-    def _skip_log_line(name, reason):
-        return f"discovery: skipping {name}: {reason}"
-
-max_minor = int(max_minor_str) if max_minor_str.strip() else None
-max_major = int(max_major_str) if max_major_str.strip() else None
-max_patch = int(max_patch_str) if max_patch_str.strip() else None
-
-# Sentinel values that indicate "compute version at runtime"
-AUTO_SENTINELS = {"auto", "next-patch", ""}
-
-def parse_ver(s):
-    s = s.lstrip("v")
-    parts = s.split(".")
-    while len(parts) < 3:
-        parts.append("0")
-    try:
-        return tuple(int(p) for p in parts[:3])
-    except ValueError:
-        return None
-
-def ceiling_violation(tv):
-    """Return (component, value, ceiling_name, ceiling_value) for first failing ceiling,
-    or None when the version is within all configured ceilings."""
-    major, minor, patch = tv
-    if max_major is not None and major > max_major:
-        return ("major", major, "max_major", max_major)
-    if max_minor is not None and minor > max_minor:
-        return ("minor", minor, "max_minor", max_minor)
-    if max_patch is not None and patch > max_patch:
-        return ("patch", patch, "max_patch", max_patch)
-    return None
-
-# Allowlist pattern for non-requirements intake items (BUG- and PRIORITY- prefixes).
-# Requirements files are matched by _INTAKE_RE (sourced from filename_contract).
-_NON_REQ_BUNDLE_RE = re.compile(
-    r'^(PRIORITY-[0-9]{4,}-.+|BUG-[0-9]{4,}-.+)\.md$',
-    re.IGNORECASE,
-)
-
-status_field_re = re.compile(r'^##\s+Status\s*\n\s*(\S+)', re.M | re.IGNORECASE)
-
-target_field_re = re.compile(
-    r'^##\s+Target Version\s*\n+\s*(\S+)',
-    re.M | re.IGNORECASE,
-)
-explicit_ver_re = re.compile(r'^v?\d+\.\d+\.\d+$')
-
-def is_terminal(text, name):
-    """Return True and emit a skip log when the item is in a terminal state."""
-    status_match = status_field_re.search(text)
-    if status_match:
-        item_status = status_match.group(1).strip().lower()
-        if item_status in ("wont-do",):
-            print(
-                f"discovery: skipping {name}: terminal state '{item_status}'",
-                file=sys.stderr,
-            )
-            return True
-        if item_status == "done":
-            return True
-    return False
-
-def iter_candidates():
-    """Yield (entry, text) for all candidates passing the common pre-filters.
-
-    The allowlist accepts files matching intake's filename contract
-    (INTAKE_REQUIREMENTS_RE for requirements files, plus the BUG- and
-    PRIORITY- prefix patterns for bug/priority intake items).  Semantics-
-    specific filtering (e.g. dotted-semver shape for semver projects) is
-    applied by the caller after this generator yields, not here.
-    """
-    for entry in sorted(req_dir.iterdir()):
-        if not entry.is_file() or not entry.name.endswith(".md"):
-            continue
-        # Skip README.md and any documentation-level files
-        if entry.name == "README.md":
-            continue
-        # Skip templates/ subdirectory contents (guard by parent path segment)
-        if "templates" in entry.parts:
-            continue
-        # Skip rejected/ subdirectory contents — quarantined files are not
-        # eligible for re-processing by the discovery pipeline.
-        if "rejected" in entry.parts:
-            continue
-        # Allowlist: accept requirements files (intake's looser v[0-9]* pattern)
-        # or BUG-/PRIORITY- intake items.  This replaces the former single-RE
-        # BUNDLE_RE that required dotted semver filenames for requirements — the
-        # old strictness caused label-semantics files (e.g. v20260712-slug.md)
-        # to be silently rejected before the semantics branch ever ran.
-        if not (_INTAKE_RE.match(entry.name) or _NON_REQ_BUNDLE_RE.match(entry.name)):
-            continue
-        text = entry.read_text(encoding="utf-8", errors="replace")
-        yield entry, text
-
-
-if version_semantics == "semver":
-    # -----------------------------------------------------------------------
-    # Semver path — existing behavior, byte-identical output for release and
-    # document projects.
-    # -----------------------------------------------------------------------
-    last_tuple = parse_ver(last_released) or (0, 0, 0)
-
-    # Three buckets:
-    #   explicit_eligible        — (tv_tuple, path) within ceiling
-    #   explicit_ceiling_blocked — (tv_tuple, path, structured_suffix) above ceiling
-    #   auto_eligible            — [path] for sentinel/missing Target Version
-    explicit_eligible = []
-    explicit_ceiling_blocked = []
-    auto_eligible = []
-
-    for entry, text in iter_candidates():
-        # Semver filename shape guard: requirements files must have a dotted
-        # vX.Y.Z-slug.md name on a semver project.  A file that passed intake's
-        # looser v[0-9]* rule but lacks dots (e.g. v20260712-slug.md) is a
-        # label-semantics file deposited into a semver project — skip it with a
-        # named log line (no silent rejection per the recorded defect).
-        if _INTAKE_RE.match(entry.name) and not _SEMVER_RE.match(entry.name):
-            print(
-                _skip_log_line(entry.name, _SKIP_SEMVER_SHAPE),
-                file=sys.stderr,
-            )
-            continue
-
-        # Skip intake items in terminal states — they are definitively resolved and
-        # must never be re-selected or re-materialized by the discovery pipeline.
-        # 'done'    = bundle shipped; skip forever.
-        # 'wont-do' = operator explicitly abandoned; skip forever.
-        # The shell caller's Step 3 loop handles 'running' (in-flight) and 'open'
-        # (eligible) via its own idempotency gate; we only filter terminal states here.
-        if is_terminal(text, entry.name):
-            continue
-
-        m = target_field_re.search(text)
-        if m:
-            raw_val = m.group(1).strip().lower()
-        else:
-            raw_val = ""
-
-        if raw_val in AUTO_SENTINELS or not explicit_ver_re.match(raw_val):
-            auto_eligible.append(entry.resolve())
-            continue
-
-        tv = parse_ver(raw_val)
-        if tv is None:
-            # Non-semver Target Version on a semver project — skip with log.
-            print(
-                f"discovery: skipping {entry.name}: non-semver Target Version '{raw_val}' on semver project",
-                file=sys.stderr,
-            )
-            continue
-        if tv <= last_tuple:
-            continue
-        # Check ceilings — both blocked and within-ceiling files are returned so the
-        # shell caller can log each blocked entry explicitly with the exact reason.
-        viol = ceiling_violation(tv)
-        if viol is not None:
-            comp, val, cname, cval = viol
-            # The version string in the rejection log uses raw_val (preserves 'v' prefix if present)
-            ver_str = raw_val if raw_val.startswith("v") else "v" + raw_val
-            # Structured suffix: ceiling-blocked:<version>:<component>:<value>:<cname>:<cval>
-            suffix = f":ceiling-blocked:{ver_str}:{comp}:{val}:{cname}:{cval}"
-            explicit_ceiling_blocked.append((tv, entry.resolve(), suffix))
-        else:
-            explicit_eligible.append((tv, entry.resolve()))
-
-    # Output in semver order: within-ceiling files first (sorted), then
-    # ceiling-blocked files (sorted), then auto-sentinel files.
-    explicit_eligible.sort()
-    explicit_ceiling_blocked.sort()
-
-    for _tv, path in explicit_eligible:
-        print(path)
-    for _tv, path, suffix in explicit_ceiling_blocked:
-        print(str(path) + suffix)
-    for path in auto_eligible:
-        print(str(path) + ":auto")
-
-else:
-    # -----------------------------------------------------------------------
-    # Label / none path — for projects whose workflow plugin declares
-    # version_semantics = label or version_semantics = none.
-    #
-    # Every unhandled item in requirements/ is eligible.  There is no semver
-    # parse and no ceiling filter: ceilings are version-consumption
-    # checkpoints that only apply to the semver release lane.
-    #
-    # Ordering: filename-lexical ascending (deterministic across systems;
-    # avoids mtime variance on file copy or restore operations).
-    #
-    # Auto-sentinel (Target Version: auto / next-patch / absent) is not
-    # valid for label projects.  These files are marked ":auto-invalid" so
-    # the shell caller can fail loud with a named reason instead of silently
-    # falling through.
-    # -----------------------------------------------------------------------
-    label_eligible = []
-    auto_invalid = []
-
-    for entry, text in iter_candidates():
-        # Skip terminal states (same as semver path).
-        if is_terminal(text, entry.name):
-            continue
-
-        m = target_field_re.search(text)
-        if m:
-            raw_val = m.group(1).strip().lower()
-        else:
-            raw_val = ""
-
-        # Auto-sentinel values are invalid on label projects.
-        if raw_val in AUTO_SENTINELS:
-            auto_invalid.append(entry.resolve())
-            continue
-
-        # All other items are eligible on label projects regardless of the
-        # version string's format.  No semver parse, no ceiling check.
-        label_eligible.append(entry.resolve())
-
-    # Output filename-lexical order (iter_candidates already sorts by name).
-    for path in label_eligible:
-        print(str(path))
-    for path in auto_invalid:
-        print(str(path) + ":auto-invalid")
-PY
-}
-
-# _disc_write_bundle <bundle_path> <target_version> <workflow_type> <test_required> <summary> <files> <kind>
-# Write a minimal but valid requirements bundle file referencing each input.
-#
-# Source Branch selection:
-#   Queries the workflow plugin's wf_bundle_source_branch hook after loading the
-#   plugin for the given workflow_type.  The release plugin returns rc/<version>;
-#   other plugin types return main (or their own branch convention).
-#   If the plugin cannot be loaded, the function logs a warning and returns
-#   non-zero so the caller can surface the failure as BLOCKED.
-_disc_write_bundle() {
-    local bundle_path="$1"
-    local target_version="$2"
-    local workflow_type="$3"
-    local test_required="$4"
-    local summary="$5"
-    local files="$6"
-    local kind="$7"  # "BUG" or "PRIORITY"
-
-    # Load the workflow plugin to query the source branch via wf_bundle_source_branch.
-    # Fail-closed: if the plugin cannot be loaded, stop bundling and surface the
-    # error so the operator can fix the plugin configuration.
-    local _wf_load_exit=0
-    set +e
-    wf_load_plugin "$workflow_type"
-    _wf_load_exit=$?
-    set -e
-    if [[ $_wf_load_exit -ne 0 ]]; then
-        log "_disc_write_bundle: cannot load workflow plugin '${workflow_type}': ${WF_LOAD_ERROR}; bundle aborted"
-        return 1
-    fi
-
-    # Compute the correct source branch via the plugin hook.
-    local source_branch
-    source_branch="$(wf_bundle_source_branch "$target_version")"
-
-    mkdir -p "$(dirname "$bundle_path")"
-
-    {
-        echo "# Requirements: ${target_version} — ${kind} bundle"
-        echo ""
-        # ## Status is the authoritative idempotency gate for Step 3.
-        # Values: open (not yet queued), running (PM queued), done (RC shipped).
-        # discovery_step_requirements reads this field to determine eligibility
-        # without relying on filename-derived slug matching.
-        echo "## Status"
-        echo ""
-        echo "open"
-        echo ""
-        # ## PM Task records the exact PM task ID written to pm_backlog.md when
-        # discovery queues this bundle for PM.  Step 3 uses this ID for a precise
-        # pm_backlog lookup to distinguish 'PM in flight' from 'PM done'.
-        # Value is 'none' until discovery queues PM for this bundle.
-        echo "## PM Task"
-        echo ""
-        echo "none"
-        echo ""
-        echo "## Target Version"
-        echo ""
-        echo "${target_version}"
-        echo ""
-        echo "## Workflow Type"
-        echo ""
-        echo "${workflow_type}"
-        echo ""
-        echo "## Test Required"
-        echo ""
-        echo "${test_required}"
-        echo ""
-        echo "## Source Branch"
-        echo ""
-        echo "${source_branch}"
-        echo ""
-        echo "## Human Approval Required"
-        echo ""
-        echo "auto"
-        echo ""
-        echo "## Summary"
-        echo ""
-        echo "${summary} produced by the discovery pipeline on $(date -Iseconds)."
-        echo "This bundle aggregates ${kind} items into a single RC."
-        echo ""
-        echo "## Bundled Items"
-        echo ""
-        while IFS= read -r f; do
-            [[ -z "$f" ]] && continue
-            local fname
-            fname="$(basename "$f")"
-            echo "- ${fname} (\`${f}\`)"
-        done <<< "$files"
-        echo ""
-        echo "## Acceptance Criteria"
-        echo ""
-        echo "- [ ] Each bundled item is addressed in the implementation"
-        echo "- [ ] All Python files compile cleanly"
-        echo "- [ ] All bash files pass syntax check"
-        echo ""
-        echo "## Notes"
-        echo ""
-        echo "Bundled by discovery pipeline. PM should read each referenced item file"
-        echo "to understand the work to do. After this RC ships, cm-release.sh Step 16b"
-        echo "will set this bundle's \`## Status\` to \`done\` and each bundled item's"
-        echo "\`## Status\` to \`done\`."
-    } > "$bundle_path"
 }

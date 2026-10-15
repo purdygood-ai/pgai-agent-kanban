@@ -1,18 +1,21 @@
 """
 test_ship_rc_hooks.py
 =====================
-Structural and sibling-parity tests for ship-rc.sh hook integration introduced
-by CODER-20260711-028-ship-rc-parity.
+Structural and sibling-parity tests for the ship-rc verb's hook integration.
+
+ship-rc's logic is pgai_agent_kanban.cm.ship.ship_rc (ship-rc.sh is a thin
+wrapper over it), which resolves each release-hook phase by running the shared
+library function cm_resolve_and_enforce_hook -- the one release.sh calls.
 
 Covers:
   (A) Structural: the resolution/printing body appears exactly once under
-      team/scripts/lib/ and zero times inline in either ship-rc.sh or release.sh.
-      (One-implementation rule enforcement.)
+      team/scripts/lib/ and zero times inline in ship-rc.sh, cm/ship.py or
+      release.sh. (One-implementation rule enforcement.)
 
-  (B) Sibling-parity: ship-rc.sh calls cm_resolve_and_enforce_hook at all three
-      phases (pre-squash, pre-tag, post-tag) and produces the same output format
-      as release.sh on identical sandbox fixtures — same printed lines, same
-      enforcement behavior.
+  (B) Sibling-parity: ship_rc resolves all three phases (pre-squash, pre-tag,
+      post-tag) through cm_resolve_and_enforce_hook and prints exactly what
+      the library prints on identical sandbox fixtures -- the same lines,
+      the same resolved path, the same enforcement -- as release.sh does.
 
 All shell tests use the shell_harness.run_bash pattern with synthetic temp directories.
 No live kanban root is touched.
@@ -34,6 +37,7 @@ from tests.unit.shell_harness import run_bash
 _SCRIPTS_ROOT = pathlib.Path("scripts")
 _LIB_DIR = _SCRIPTS_ROOT / "lib"
 _SHIP_RC = _SCRIPTS_ROOT / "ship-rc.sh"
+_SHIP_PY = pathlib.Path("pgai_agent_kanban") / "cm" / "ship.py"
 _RELEASE_SH = _SCRIPTS_ROOT / "cm" / "release.sh"
 _LIB_HOOKS = _LIB_DIR / "cm_release_hooks.sh"
 _LIB_PROJECT_PATHS = _LIB_DIR / "project_paths.sh"
@@ -129,7 +133,7 @@ def _run_resolve(
 class TestStructuralOneImplementation:
     """
     The resolution/printing body lives in exactly one place (lib/) and has
-    zero inline copies in either ship-rc.sh or release.sh.
+    zero inline copies in ship-rc.sh, cm/ship.py or release.sh.
 
     We use the internal variable name '_creh_phase' as the canary: it is
     a distinctive identifier that only appears in the body of
@@ -164,13 +168,14 @@ class TestStructuralOneImplementation:
             f"Canary found in unexpected file: {hits[0][0]}; expected cm_release_hooks.sh"
         )
 
-    def test_resolution_body_absent_from_ship_rc(self) -> None:
-        """ship-rc.sh must not inline the resolution/printing body."""
-        assert _SHIP_RC.is_file(), f"ship-rc.sh not found: {_SHIP_RC}"
-        text = _SHIP_RC.read_text(encoding="utf-8", errors="replace")
+    @pytest.mark.parametrize("path", [_SHIP_RC, _SHIP_PY], ids=["ship-rc.sh", "cm-ship.py"])
+    def test_resolution_body_absent_from_ship_rc(self, path: pathlib.Path) -> None:
+        """Neither ship-rc.sh nor cm/ship.py inlines the resolution/printing body."""
+        assert path.is_file(), f"not found: {path}"
+        text = path.read_text(encoding="utf-8", errors="replace")
         count = text.count(self._CANARY)
         assert count == 0, (
-            f"Canary '{self._CANARY}' found {count} time(s) inline in {_SHIP_RC}. "
+            f"Canary '{self._CANARY}' found {count} time(s) inline in {path}. "
             "The resolution body must stay in lib/cm_release_hooks.sh, not be copied."
         )
 
@@ -194,14 +199,22 @@ class TestStructuralOneImplementation:
         ]
         return len(call_lines)
 
-    def test_ship_rc_calls_cm_resolve_and_enforce_hook_three_times(self) -> None:
-        """ship-rc.sh has exactly three cm_resolve_and_enforce_hook call sites (non-comment)."""
-        assert _SHIP_RC.is_file(), f"ship-rc.sh not found: {_SHIP_RC}"
-        count = self._count_actual_calls(_SHIP_RC)
-        assert count == 3, (
-            f"Expected exactly 3 cm_resolve_and_enforce_hook calls (non-comment) in ship-rc.sh, "
-            f"found {count}. Each release phase (pre-squash, pre-tag, post-tag) needs one."
-        )
+    def test_ship_rc_runs_every_phase_through_the_shared_resolver(self) -> None:
+        """cm/ship.py resolves through cm_resolve_and_enforce_hook, once per phase.
+
+        Its one resolver call site (the bash it runs) names the library
+        function, and ship_rc runs a hook phase for each of pre-squash,
+        pre-tag and post-tag exactly once. ship-rc.sh itself resolves
+        nothing.
+        """
+        from pgai_agent_kanban.cm import ship
+
+        assert "cm_resolve_and_enforce_hook" in ship._HOOK_RESOLVER
+        assert ship._HOOK_RESOLVER.count("cm_resolve_and_enforce_hook") == 1
+        text = _SHIP_PY.read_text(encoding="utf-8")
+        for phase in ("pre-squash", "pre-tag", "post-tag"):
+            assert text.count(f'_hook_phase(release, "{phase}"') == 1, phase
+        assert self._count_actual_calls(_SHIP_RC) == 0
 
     def test_release_sh_calls_cm_resolve_and_enforce_hook_three_times(self) -> None:
         """release.sh has exactly three cm_resolve_and_enforce_hook call sites (non-comment)."""
@@ -447,3 +460,93 @@ class TestSiblingParityNonExecutableHook:
         assert result.returncode == 1
         combined = result.stdout + result.stderr
         assert "chmod" in combined
+
+
+class TestShipRcResolvesLikeTheLibrary:
+    """ship_rc's per-phase resolution prints exactly what the library prints.
+
+    For each tier and for the not-executable and required-but-absent stops,
+    ``cm.ship._resolve_hook`` is run on the same sandbox as a direct
+    ``cm_resolve_and_enforce_hook`` call: the resolution line, the stderr
+    remedy block and the resolved path are identical, and the library's
+    HALT reaches ship_rc as its own HALT with the library's key.
+    """
+
+    @staticmethod
+    def _release(kanban_root: pathlib.Path, project: str, dev_tree: pathlib.Path):
+        from pgai_agent_kanban.cm import ship
+        from pgai_agent_kanban.ops.context import OpsContext
+
+        ctx = OpsContext(kanban_root=kanban_root)
+        return ship._Release(ctx, project, "v1.0.0", str(dev_tree), "rc/v1.0.0", ctx.project_root(project))
+
+    @staticmethod
+    def _ship_resolve(release, phase: str):
+        from pgai_agent_kanban.cm import ship
+
+        out: list[str] = []
+        err: list[str] = []
+        path, executable = ship._resolve_hook(release, phase, out.append, err.append)
+        return "".join(out), "".join(err), path, executable
+
+    @pytest.mark.parametrize(
+        "phase, tier",
+        [
+            ("pre-squash", None),
+            ("pre-squash", "kanban-side"),
+            ("pre-tag", "in-repo"),
+            ("post-tag", "in-repo-not-executable"),
+            ("pre-tag", "cfg-absolute"),
+        ],
+    )
+    def test_resolution_matches_the_library(self, tmp_path: pathlib.Path, phase: str, tier) -> None:
+        project = "parity-ship"
+        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, project)
+        hook = None
+        if tier == "kanban-side":
+            hook = project_dir / "hooks" / f"cm-release-{phase}.sh"
+            _write_hook(hook)
+        elif tier in ("in-repo", "in-repo-not-executable"):
+            hook = dev_tree / ".pgai" / "hooks" / f"cm-release-{phase}.sh"
+            _write_hook(hook, executable=(tier == "in-repo"))
+        elif tier == "cfg-absolute":
+            hook = tmp_path / "ops" / f"{phase}.sh"
+            _write_hook(hook)
+            with (project_dir / "project.cfg").open("a", encoding="utf-8") as fh:
+                fh.write(f"[hooks]\ncm_release_{phase.replace('-', '_')}_hook = {hook}\n")
+
+        library = _run_resolve(tmp_path, kanban_root, project, project_dir / "hooks", dev_tree, phase=phase)
+        out, err, path, executable = self._ship_resolve(self._release(kanban_root, project, dev_tree), phase)
+
+        library_lines = [line for line in library.stdout.splitlines() if not line.startswith("RESOLVED_PATH:")]
+        assert out.splitlines() == library_lines
+        assert err == library.stderr
+        assert executable is (library.returncode == 0)
+        resolved = library.stdout.rsplit("RESOLVED_PATH:", 1)[1].strip()
+        assert (path or "") == resolved
+        if tier in (None, "in-repo-not-executable"):
+            assert path is None
+        else:
+            assert path == str(hook)
+
+    def test_required_absent_hook_is_a_ship_rc_halt(self, tmp_path: pathlib.Path) -> None:
+        from pgai_agent_kanban.cm import ship
+
+        project = "parity-ship-required"
+        kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, project)
+        with (project_dir / "project.cfg").open("a", encoding="utf-8") as fh:
+            fh.write("[hooks]\ncm_release_pre_tag_hook_required = true\n")
+
+        library = _run_resolve(tmp_path, kanban_root, project, project_dir / "hooks", dev_tree, phase="pre-tag")
+        assert library.returncode == 2 and "trigger=cm-release.hook-required-missing.pre-tag" in library.stdout
+
+        with pytest.raises(ship.ShipRcError) as caught:
+            self._ship_resolve(self._release(kanban_root, project, dev_tree), "pre-tag")
+        assert caught.value.error == "cm-release.hook-required-missing.pre-tag"
+        assert caught.value.exit_code == 1
+        text = caught.value.text
+        assert text.startswith("\n[ship-rc] HALT\nerror:   cm-release.hook-required-missing.pre-tag\n")
+        assert "cm_release_pre_tag_hook_required=true but no hook was found at any tier" in text
+        assert text.endswith("\n\nHALT: ship-rc.sh stopped. The release has NOT been shipped.\n")
+        ledger = (project_dir / "refusal-ledger.md").read_text(encoding="utf-8")
+        assert "- Error: cm-release.hook-required-missing.pre-tag" in ledger

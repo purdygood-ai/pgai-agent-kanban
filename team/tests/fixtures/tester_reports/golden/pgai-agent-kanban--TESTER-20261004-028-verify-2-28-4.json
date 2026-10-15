@@ -1,0 +1,288 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "I verified RC `ai_rc/v2.28.4` (HEAD ff234a52b8ac734ff74e26fb72fa61f1ae93f5cf) against\n`requirements/v2.28.4-bugfix-bundle-20261004.md`. That bundle carries BUG-0541\n(package CLI modules crash when run by file path; the regression test should\nderive its module set) and BUG-0540 (the ICD support table is missing 1.13.1;\nhygiene ride-along). Three tasks landed on the RC: CODER-20261004-024 (merge\n4d813144), CODER-20261004-025 (merge 1024f530) and WRITER-20261004-026 (merge\nff234a52).\n\nEvery acceptance criterion in both bundled bugs and in the requirements doc is\nmet, and I exercised each one. Both gated runners exited 0: unit 7908 passed /\n43 skipped, integration 646 passed / 1 skipped. Neither produced any lint\nfindings.\n\nThe Step 6.14 coding-standards spot-check found one pre-existing problem. Five\npackage CLIs exit non-zero on `--help`, and the RC's new test pins those codes\nas expected. I filed it as BUG-0543 via Path C-A (autonomous follow-up filing,\nrecorded as a BUG; it does not block). Under Step 8, any filed bug sets the\nrecommendation to at least SHIP-WITH-CONCERNS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight — RC intact, worktree clean (Steps 2-3)",
+      "heading": "Finding 1: Pre-flight — RC intact, worktree clean (Steps 2-3)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Step 2: I scanned 572 DONE task folders with a named feature branch. Only\n  four local branches exist (ai_main, ai_rc/v2.28.4, last_run_ai_main, main).\n  Every task feature branch was deleted after merge, so Check 1 and Check 2\n  pass trivially. The three v2.28.4 merges are on the RC.\n- Step 3: `git rev-parse HEAD` equals `git rev-parse ai_rc/v2.28.4` (ff234a52).\n  `git status --porcelain` is empty and `git stash list` is empty. I re-checked\n  after the suites ran: still clean, same HEAD.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Gated suites (Steps 5a, 6.6, 6.7)",
+      "heading": "Finding 2: Gated suites (Steps 5a, 6.6, 6.7)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `bash team/scripts/run-unit-tests.sh --coverage`: **UNIT_EXIT=0**. 7908\n  passed, 43 skipped (1731.75s), \"Unit tests PASSED\". The green ledger\n  recorded exit 0 at ff234a52.\n- `bash team/scripts/run-integration-tests.sh --coverage`: **INTEGRATION_EXIT=0**.\n  646 passed, 1 skipped (1033.64s), \"Integration tests PASSED\".\n- PASS evidence is these two runner exit codes, not a pytest line. Logs:\n  `/tmp/pgai_kanban_tmp/tester/TESTER-20261004-028/unit.log` and `integration.log`.\n- Both new or changed test files ran green in the certification run:\n  `test_lint_icd_compat.py` and `test_package_modules_run_by_path.py`.\n- In the pre-flight, `lint_icd_compat` reported both \"compatible superset of\n  all 16 baselines\" and \"support table ... mirrors SUPPORTED\".\n- Coverage is informational only (from the `totals` objects; I checked the\n  keys on the generated JSON):\n  - unit: line (statements) 80.27%, branch 66.33% (blended 77.16%);\n  - integration: line (statements) 14.09%, branch 9.91% (blended 13.16%).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0541 AC1 — named modules run by path",
+      "heading": "Finding 3: BUG-0541 AC1 — named modules run by path",
+      "level": 3,
+      "body": "**Category:** pass\n\nI ran these from `/` with `PYTHONPATH` unset and a sandboxed kanban root:\n\n- `deep_verify/schedule.py` prints its usage line and exits 2.\n- `deep_verify/freshness.py` prints its usage line and exits 2.\n- `reports/project_summary.py --help` exits 0.\n- None of them prints a traceback.\n\nThe original failure reproduces on base `ai_main` (a45a3e9e): schedule.py,\nfreshness.py, project_summary.py and task_status.py all exit 1 there with\n`No module named 'pgai_agent_kanban'`. The `-m` forms of the three modules\nbehave the same as the by-path forms (2/2/0).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0541 AC2 — sweep finds only allow-listed modules",
+      "heading": "Finding 4: BUG-0541 AC2 — sweep finds only allow-listed modules",
+      "level": 3,
+      "body": "**Category:** pass\n\nI ran the sweep from the bug's Reproduction step 4: every\n`team/pgai_agent_kanban/**/*.py` outside `tests/` that has a `__main__` block\nand a top-level package import, run as `--help` from `/`. That is 26 modules.\n25 run with no traceback. The only `No module named` hit is `ops/write.py`.\nIt is on `_PACKAGE_ONLY_MODULES`, and its text uses only\n`python3 -m pgai_agent_kanban.ops` forms.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0541 AC3 — test goes red without the guard (behavioural, Step 6.5)",
+      "heading": "Finding 5: BUG-0541 AC3 — test goes red without the guard (behavioural, Step 6.5)",
+      "level": 3,
+      "body": "**Category:** pass\n\nI ran this in an isolated clone at ff234a52, not in the verified worktree.\n\n- Baseline: `run-unit-tests.sh --files tests/unit/test_package_modules_run_by_path.py`\n  exits 0 (88 passed).\n- I removed the guard from `deep_verify/freshness.py`, which is a different\n  module from the CODER's own evidence. The run exits 1 with 2 failed:\n  `test_help_by_file_path_runs_without_pythonpath[...freshness]` and\n  `test_file_load_binds_the_package_of_its_own_tree[...freshness]`.\n- I added a new unguarded, non-allow-listed CLI module,\n  `reports/tester_probe_cli.py`. Discovery picked it up automatically, and the\n  run exits 1 with 2 failed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0541 AC4/AC5 — targeted run green, no dev-tree sys.path",
+      "heading": "Finding 6: BUG-0541 AC4/AC5 — targeted run green, no dev-tree sys.path",
+      "level": 3,
+      "body": "**Category:** pass\n\n- AC4: the targeted runner exits 0 (Finding 5 baseline), and the full unit\n  suite also exits 0.\n- AC5: the only added `sys.path` code is the own-tree guard\n  `pathlib.Path(__file__).resolve().parents[N]`, in 14 modules.\n  `task_status.py` correctly uses `parents[1]` because it is a top-level\n  module. No added line references a dev tree, a worktree or `PGAI_DEV_TREE*`.\n  Every guarded module imports `pathlib`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0540 AC1/AC2 — support table mirrors SUPPORTED",
+      "heading": "Finding 7: BUG-0540 AC1/AC2 — support table mirrors SUPPORTED",
+      "level": 3,
+      "body": "**Category:** pass\n\n- The AC1 `diff <(grep ... docs/operator-api.md) <(grep ... SUPPORTED)` prints\n  nothing.\n- The row reads `| 1.13.1 | supported | v2.28.2 |`. `ICD_VERSION` is 1.13.0 at\n  tag ai_v2.28.1 and 1.13.1 at ai_v2.28.2, so the Since value is right.\n- The WRITER also added `| 1.14.0 | supported | v2.28.3 |`. That is correct:\n  1.14.0 is in SUPPORTED and `ICD_VERSION` is 1.14.0 at ai_v2.28.3.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0540 AC3 — changelog rule and bump procedure agree",
+      "heading": "Finding 8: BUG-0540 AC3 — changelog rule and bump procedure agree",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `ICD_CHANGELOG.md` now says \"One entry per bump, patch bumps included\" and\n  gives a single rule for description-only patch bumps.\n- Step 4 of `operator-api.md` points to that rule instead of restating it.\n- No surviving text says description-only edits are not recorded.\n- The new 1.13.1 entry matches a structural diff of `icd-v1.13.0.json`\n  against `icd-v1.13.1.json`: only `info.version` and the `GET /show-queues`\n  description changed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "BUG-0540 AC4 — doc lints clean",
+      "heading": "Finding 9: BUG-0540 AC4 — doc lints clean",
+      "level": 3,
+      "body": "**Category:** pass\n\nEach of these exits 0:\n- `check_docs_citations.py`\n- `lint_doc_command_truth.py`\n- `generate_operator_verb_docs.py --check`\n- `lint_icd_compat.py`",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Support-table mirror check fires on drift (behavioural, Step 6.5)",
+      "heading": "Finding 10: Support-table mirror check fires on drift (behavioural, Step 6.5)",
+      "level": 3,
+      "body": "**Category:** pass\n\nI fed synthetic copies of `operator-api.md` to `lint_icd_compat.py` via\n`--support-doc`. Every drift kind fired, and the two allowed cases stayed\nquiet:\n\n| Synthetic change | Exit | What it reported |\n|---|---|---|\n| 1.13.1 row removed | 1 | `missing` |\n| 9.9.9 row added | 1 | `extra`, correct line number |\n| 1.0.0 marked `retired` | 1 | `retired`, correct line 2350 |\n| heading renamed | 1 | `no support table found` |\n| retired row whose version is absent from SUPPORTED | 0 | nothing (correct) |\n| version written as `` `v1.13.1` `` | 0 | nothing (normalized correctly) |\n\nThe runners call it through `gated_runner_run_quality_lint`, which always\nreturns 0. That makes it CONVERT, which matches the bug's \"quality-class\n(non-blocking)\" authorization and census row 33. No hard gate was added\nwithout authorization.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Requirements-doc ACs — compile and syntax",
+      "heading": "Finding 11: Requirements-doc ACs — compile and syntax",
+      "level": 3,
+      "body": "**Category:** pass\n\n- 663 tracked `.py` files compiled in memory, with 0 failures.\n- 316 tracked `.sh` files pass `bash -n`, with 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Step 6 methodology checks",
+      "heading": "Finding 12: Step 6 methodology checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- 6.1: `pp_last_released_version` returns v2.28.3, and `semver_gt v2.28.4\n  v2.28.3` is true. `## Last Released` is well-formed.\n- 6.2: all 20 files in the diff exist and the runners are executable.\n- 6.3: I read the new and changed regions in full, including the doc-layer\n  edits.\n- 6.8: the diff touches no release-lifecycle files, so I skipped the synthetic\n  release simulation.\n- 6.9: no secret-shaped literals were added. The version-shaped strings that\n  were added are docstring usage examples only, which is a sanctioned\n  exception.\n- 6.10: the prerequisite graph is CM-027 → CODER-024/025 → WRITER-026 →\n  TESTER-028 → CM-030. It has no cycles, and every ID exists. Sequence 029 is\n  unused, the same as the approval slot in earlier cycles (015, 022).\n- 6.13: there are no real placeholder skips. Six unresolved `BUG-` IDs appear\n  near \"skip\", but all are synthetic fixture strings inside lint tests or\n  assertion text, not skip annotations.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Five package CLIs answer `--help` with a usage error, and the new test pins it",
+      "heading": "Finding 13: Five package CLIs answer `--help` with a usage error, and the new test pins it",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to five internal helper CLIs and one test table)\n**Filed As:** BUG-0543 (Path C-A — filed as BUG)\n**Filed By:** TESTER (autonomous Path C) — five package command-line helpers exit with a usage error instead of printing their help and exiting 0, and the new test records that as expected.\n\nFive modules exit non-zero when asked for `--help`:\n\n| Module | `--help` exit |\n|---|---|\n| `deep_verify/bug_filer.py` | 2 |\n| `deep_verify/freshness.py` | 2 |\n| `deep_verify/schedule.py` | 2 |\n| `lint/bug_filer.py` | 2 |\n| `ops/resolve.py` | 1 |\n\n`ops/resolve.py` prints only `resolve_item: PROJECT_ROOT and KEY arguments are\nrequired`, with no usage text. This breaks `docs/coding-standards.md`\ndirective 6 (\"every script and CLI entry point ships a `--help` that describes\nevery argument\") and its \"A help path prints completely and exits 0\" section.\n\nIt is pre-existing: the same codes come back on `ai_main` via `python3 -m`.\nWhat this RC adds is that `test_package_modules_run_by_path.py` now records the\nfive codes as expected in `_HELP_USAGE_ERROR_EXIT`. The CODER disclosed this.\nNothing in the running system calls `--help` on these helpers, because shell\nwrappers call them with positional arguments. That makes severity `low` under\n\"Rating a Finding\". The no-argument exit codes (2/2/2/2/1) must stay\nunchanged; BUG-0543 spells this out.",
+      "filed_as": "BUG-0543",
+      "filed_by": "TESTER (autonomous Path C) — five package command-line helpers exit with a usage error instead of printing their help and exiting 0, and the new test records that as expected.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to five internal helper CLIs and one test table)",
+        "filed_as": "BUG-0543 (Path C-A — filed as BUG)",
+        "filed_by": "TESTER (autonomous Path C) — five package command-line helpers exit with a usage error instead of printing their help and exiting 0, and the new test records that as expected."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

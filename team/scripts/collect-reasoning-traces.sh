@@ -49,6 +49,8 @@ source "${SCRIPT_DIR}/lib/project_paths.sh"
 source "${SCRIPT_DIR}/lib/projects.sh"
 # shellcheck source=lib/temp.sh
 source "${SCRIPT_DIR}/lib/temp.sh"
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -85,13 +87,12 @@ _show_help() {
     exit 0
 }
 
-usage() {
-    echo "Usage: $(basename "$0") <agent-type> [--last N] [--project <name>]" >&2
-    echo "  agent-type       Role/agent name to filter on (e.g. coder, cm, tester, writer, pm)" >&2
-    echo "  --last N         Number of most-recent traces to include (default: 10)" >&2
-    echo "  --project <name> Restrict output to this project only (default: all projects)" >&2
-    exit 1
-}
+# Usage text as data (per lib/script_common.sh's print_usage_and_exit contract).
+# Every call site below exits 1, so the text always lands on stderr.
+_USAGE_TEXT="Usage: $(basename "$0") <agent-type> [--last N] [--project <name>]
+  agent-type       Role/agent name to filter on (e.g. coder, cm, tester, writer, pm)
+  --last N         Number of most-recent traces to include (default: 10)
+  --project <name> Restrict output to this project only (default: all projects)"
 
 _args=("$@")
 _i=0
@@ -105,12 +106,12 @@ while [[ $_i -lt ${#_args[@]} ]]; do
             _next=$(( _i + 1 ))
             if [[ $_next -ge ${#_args[@]} ]]; then
                 echo "ERROR: --last requires a numeric argument" >&2
-                usage
+                print_usage_and_exit 1 "$_USAGE_TEXT"
             fi
             LAST_N="${_args[$_next]}"
             if ! [[ "$LAST_N" =~ ^[1-9][0-9]*$ ]]; then
                 echo "ERROR: --last argument must be a positive integer, got: ${LAST_N}" >&2
-                usage
+                print_usage_and_exit 1 "$_USAGE_TEXT"
             fi
             _i=$(( _next + 1 ))
             ;;
@@ -118,7 +119,7 @@ while [[ $_i -lt ${#_args[@]} ]]; do
             _next=$(( _i + 1 ))
             if [[ $_next -ge ${#_args[@]} ]]; then
                 echo "ERROR: --project requires a project name argument" >&2
-                usage
+                print_usage_and_exit 1 "$_USAGE_TEXT"
             fi
             PROJECT_FILTER="${_args[$_next]}"
             _i=$(( _next + 1 ))
@@ -129,14 +130,14 @@ while [[ $_i -lt ${#_args[@]} ]]; do
             ;;
         --*)
             echo "ERROR: Unknown flag: ${arg}" >&2
-            usage
+            print_usage_and_exit 1 "$_USAGE_TEXT"
             ;;
         *)
             if [[ -z "$AGENT_TYPE" ]]; then
                 AGENT_TYPE="$arg"
             else
                 echo "ERROR: Unexpected argument: ${arg}" >&2
-                usage
+                print_usage_and_exit 1 "$_USAGE_TEXT"
             fi
             _i=$(( _i + 1 ))
             ;;
@@ -145,7 +146,7 @@ done
 
 if [[ -z "$AGENT_TYPE" ]]; then
     echo "ERROR: agent-type is required" >&2
-    usage
+    print_usage_and_exit 1 "$_USAGE_TEXT"
 fi
 
 # Normalize agent type to lowercase (corpus directories use lowercase names)

@@ -1,6 +1,6 @@
 # OVERVIEW
 
-This file orients you to what the pgai-agent-kanban is and why it exists. Read this before doing anything else in this kanban. It does not override `DIRECTIVES.md` or `SOP.md` — those define rules and procedure. This file defines **why** the rules exist.
+This file orients you to what the pgai-agent-kanban is and why it exists. Read this before doing anything else in this kanban. It does not override `DIRECTIVES.md` or `SOP-core.md` — those define rules and procedure. This file defines **why** the rules exist.
 
 ## What this kanban is
 
@@ -34,7 +34,7 @@ A scheduled wake script invokes you. The system that invoked you is not monitori
 When you finish a task, you have exactly two outcomes:
 
 1. **Done** — the work is delivered to where the next step expects it (committed and pushed in a git workflow; written to the expected output path in a file workflow). You verified it landed.
-2. **Blocked** — a specific named obstacle prevents delivery (a real conflict, a missing prerequisite, a contradictory brief, an authentication failure). You named the obstacle precisely so the next actor can unblock it.
+2. **Blocked** — a specific named obstacle prevents delivery (a real conflict, a missing prerequisite, a brief that no safe reading can satisfy, an authentication failure). You named the obstacle precisely so the next actor can unblock it.
 
 There is no third state for "I want a human to look at this." If you find yourself reaching for one, name a concrete obstacle and BLOCK, or ship and document the choice — never both stop and stay silent.
 
@@ -50,23 +50,18 @@ This is the trade-off you are operating under. It is not optional. It is not a g
 
 The kanban hosts many projects at once — registered in `projects.cfg`, each with its own git topology, branch prefix, version line, and task queues, all advanced by the same agent pipeline. The self-build (the kanban shipping itself) is one lane among several; games, documents, APIs, and UIs run beside it. The principles in this file apply to every project equally. Universal autonomy. Universal ship-and-iterate. Universal binary terminal states.
 
-When per-project context exists (a `projects/<name>/README.md`, a project-specific style guide), read it after this file but before the per-task README. Project context narrows scope; it never overrides this file's principles.
+Each project has its own `projects/<name>/README.md`: that project's test runners, lints, coding standard, branch prefix, push setting and any special contracts. Generic files (this one, `SOP-core.md`, the role files) never carry one project's specifics — when a role file says "the project's runners" or "the project's coding standard", the project README names them. Project context narrows scope; it never overrides this file's principles.
 
 ## How to read the kanban's instruction stack
 
-When you are invoked, read in this order:
+The stack is four layers, read top down. Each layer holds only what is true at its level, and narrows the one above it.
 
-1. The wake-script user prompt — what you were told to do at invocation
-2. Your generic agent prompt — what your role does conceptually
-3. The kanban governance stack:
-   - `DIRECTIVES.md` — rules that override everything
-   - This file (`OVERVIEW.md`) — orientation and principles
-   - `SOP.md` — how the kanban operates
-4. Your kanban-specific role file at `roles/<ROLE>.md` — your procedure
-5. Per-project context (when projects exist)
-6. The per-task `README.md` — your specific assignment
+1. **Kanban-wide** — `DIRECTIVES.md` (rules that override everything), this file (orientation and principles), `SOP-core.md` (the shared law every role follows on every project), and the kanban `README.md`.
+2. **Your role** — `roles/<ROLE>.md`, your procedure, generic across projects. Your generic agent prompt states the same role in provider-neutral terms; where the two differ on mechanics, the role file wins.
+3. **The project** — `projects/<name>/README.md`, the project-specific rules: which runners, lints, coding standard and contracts apply to *this* codebase.
+4. **The work** — the task `README.md` and `status.md`, and the requirement, bug or priority file the task names.
 
-Each layer narrows scope. Read them in order. If layers conflict on rules, `DIRECTIVES.md` wins, then `SOP.md`, then your role file. If layers seem to conflict on guidance, the more specific layer is usually right — but if a specific layer asks you to violate this file's autonomy principle (stop and wait, defer to a human, hand off without naming an obstacle), the specific layer is wrong.
+The wake prompt that invoked you comes first and is specific to this one dispatch: it names your isolated worktree, your branch and your task paths, and those mechanics override what the task README's own fields say (`SOP-core.md`, "Instruction Precedence"). Which layer wins any other conflict is stated once, in that same section. If a specific layer asks you to violate this file's autonomy principle (stop and wait, defer to a human, hand off without naming an obstacle), the specific layer is wrong.
 
 ## What success looks like
 
@@ -78,10 +73,9 @@ That's the goal. That's what you are part of.
 
 ## Verification never stops the line for quality
 
-The gated runners separate breakage (syntax, compile — fatal) from
-quality findings (every lint — recorded to a findings file the TESTER
-report ingests; TESTER cites or files the bug; the release ships and
-the next loop heals it). Blocking is reserved for the sites the
-blocking-site census classifies as BLOCK-WORTHY, and every refusal
-speaks two channels: a stable machine key and a plain-language message
-with a runnable remedy.
+A project's gated runners separate breakage (syntax, compile — fatal)
+from quality findings (lints — recorded and filed; the release ships and
+the next loop heals them). Blocking is reserved for real damage
+(`SOP-core.md`, "Gates and Refusals"), and every refusal speaks two
+channels: a stable machine key and a plain-language message with a
+runnable remedy.

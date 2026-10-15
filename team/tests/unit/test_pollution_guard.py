@@ -21,7 +21,7 @@ accepts a newline-separated list of paths on stdin and echoes each flagged
 path to stdout.  This lets the tests inject arbitrary path lists without
 needing a real git repo or a real RC branch.
 
-Test naming follows SOP.md Anti-pattern 6: names describe behavior, not bug
+Test naming follows roles/TESTER.md Anti-pattern 6: names describe behavior, not bug
 IDs or version numbers.
 """
 

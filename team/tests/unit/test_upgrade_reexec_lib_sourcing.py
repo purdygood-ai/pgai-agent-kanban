@@ -33,8 +33,8 @@ DESIGN (REAL-SCRIPT, LIVE-LAYOUT)
 Both tests run the real upgrade.sh with a live-layout sandbox, not a shim,
 consistent with the B9 standard.
 
-TEST NAMING CONVENTION (SOP.md)
---------------------------------
+TEST NAMING CONVENTION (roles/TESTER.md)
+------------------------------------------
 Test function names describe behavior, not bug IDs or task IDs.
 """
 
@@ -58,9 +58,11 @@ _REAL_ARGPARSE_SH = _TEAM_SCRIPTS_DIR / "lib" / "argparse.sh"
 _REAL_ENV_BOOTSTRAP_SH = _TEAM_SCRIPTS_DIR / "lib" / "env_bootstrap.sh"
 _REAL_INI_PARSER_SH = _TEAM_SCRIPTS_DIR / "lib" / "ini_parser.sh"
 _REAL_PROJECT_PATHS_SH = _TEAM_SCRIPTS_DIR / "lib" / "project_paths.sh"
+_REAL_ERROR_CONTRACT_SH = _TEAM_SCRIPTS_DIR / "lib" / "error_contract.sh"
 _REAL_TEMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "temp.sh"
 _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
+_REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 
 _SANDBOX_VERSION = "v1.7.0-sandbox-converted-reexec"
 
@@ -112,8 +114,8 @@ def _build_upgrade_sandbox(
 
     for lib_src in [
         _REAL_ARGPARSE_SH, _REAL_ENV_BOOTSTRAP_SH, _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH, _REAL_TEMP_SH,
-        _REAL_VERSION_STAMP_SH, _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_PROJECT_PATHS_SH, _REAL_ERROR_CONTRACT_SH, _REAL_TEMP_SH,
+        _REAL_VERSION_STAMP_SH, _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, installed_lib / lib_src.name)
@@ -169,8 +171,8 @@ def _build_upgrade_sandbox(
 
     for lib_src in [
         _REAL_ARGPARSE_SH, _REAL_ENV_BOOTSTRAP_SH, _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH, _REAL_TEMP_SH,
-        _REAL_VERSION_STAMP_SH, _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_PROJECT_PATHS_SH, _REAL_ERROR_CONTRACT_SH, _REAL_TEMP_SH,
+        _REAL_VERSION_STAMP_SH, _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_team_lib / lib_src.name)
@@ -183,7 +185,7 @@ def _build_upgrade_sandbox(
     )
 
     # --- Dev tree: team items the deposit loop iterates over ---
-    for item_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP.md"]:
+    for item_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
         (dev_tree / "team" / item_name).write_text(f"# {item_name} stub\n", encoding="utf-8")
 
     for sub in ["roles", "pm-agent", "workflows", "pgai_agent_kanban",

@@ -40,7 +40,7 @@ The assertions in every test class never change when adapters are added.
 - ``TestHaltFamilyContracts`` — halt/unhalt scope contracts.
 - ``TestIntakeContracts`` — deposit routing and validation contracts.
 
-## Design notes (SOP.md § Test Authoring Guidelines)
+## Design notes (roles/TESTER.md § Test Authoring Guidelines)
 
 - Tests are behavior-named: the function name describes the contract being
   protected, not a bug ID, version, or scaffolding label (Anti-pattern 6).
@@ -743,7 +743,7 @@ class TestReadOperationContracts:
         # type as 'bug' and routed show to emit the bug file's content directly.
         assert "BUG-7001" in result.stdout, (
             "show must emit the bug intake file's content when the key identifies a bug; "
-            f"'BUG-7001' not found in output.\nstdout: {result.stdout}"
+            f"the bug identifier was not found in output.\nstdout: {result.stdout}"
         )
         # The bug file must not have been mutated (read-only contract applies to intake too).
         assert bug_file.read_text(encoding="utf-8") == (

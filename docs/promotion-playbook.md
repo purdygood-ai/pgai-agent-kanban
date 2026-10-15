@@ -23,15 +23,101 @@ Promote only after the internal release has shipped cleanly:
   CM (its `## Status` field is a concrete ship-policy value, not the
   `PENDING-RELEASE` placeholder).
 - No hard `HALT` is in place for the project.
+- The DEEP-VERIFY (cold-build) lane holds a fresh green record for
+  `vX.Y.Z`. This one is checked by a command rather than by eye — it is
+  step 0 of the procedure below.
 
 If any of those is not true, resolve it before promoting. Promotion is
 not a recovery tool.
 
 ## Procedure
 
-Execute the steps in order. Steps 1–3 are the public-side git
-operations; step 4 is the internal bookkeeping the disclosure model
-requires.
+Execute the steps in order. Step 0 is the pre-release gate that must
+pass before anything reaches the public remote; steps 1–3 are the
+public-side git operations; step 4 is the internal bookkeeping the
+disclosure model requires.
+
+### 0. Confirm a fresh green deep-verify lane
+
+The cold-build lane no longer runs on every RC — it is the DEEP-VERIFY
+tier, which runs weekly on a schedule and on demand, and is *checked*
+here (see "The DEEP-VERIFY tier" in [team/roles/CM.md](../team/roles/CM.md) for
+the rule and the tier's shape). That trade only holds if the lane
+provably ran, green, against the tree state you are about to disclose.
+Confirm it before you push anything:
+
+```bash
+# From the internal repository root. Substitute the project name and the
+# version being promoted.
+bash team/scripts/deep-verify-freshness-check.sh --project <name> --version vX.Y.Z
+```
+
+Exit 0 means the most recent ledger record is `built`, for exactly this
+version, inside the freshness window (`PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS`,
+default 7 days) — promotion may proceed to step 1. The check is
+read-only: it reads the project's deep-verify ledger, writes nothing,
+and never starts the lane on your behalf.
+
+**The three refusals.** Each exits 1 and prints a dual-channel error
+contract — a machine key, a plain-language message, and a runnable
+remedy. Where the remedy re-runs the lane it is the operator-only
+container tier: it carries `PGAI_CONTAINER_TIER=1` and `--image all`,
+and it runs from your own shell, not from inside an agent wake (there
+it prints a `SKIPPED` line, exits 0, and records nothing). What each
+refusal means, and what to do about it:
+
+**1. No record at all — `freshness_gate.no_record`.** The DEEP-VERIFY
+tier has never run for this project, so nothing whatever is known about
+whether its images build. Silence is not a pass. Run the lane, then
+re-run the check:
+
+```bash
+PGAI_CONTAINER_TIER=1 bash team/scripts/deep-verify.sh --project <name> --image all
+```
+
+**2. The last record is not green — `freshness_gate.failed_to_build` or
+`freshness_gate.could_not_attempt`.** These are two different facts and
+they need two different responses; what each verdict means is defined in
+[team/SOP-core.md](../team/SOP-core.md) under "Gates and Refusals"
+("Unusable build blocks; an unavailable build environment does not").
+
+- `failed_to_build` is a tree defect. The deep-verify run that produced
+  it already filed a bug naming the failing engine/flavor pair — do not
+  file another. Let the loop fix the build, then re-run the lane against
+  the fixed tree and re-run this check. Do not promote over it: the tag
+  would publish something known not to build.
+- `could_not_attempt` means nothing was learned — no container engine on
+  the host, or an unreachable registry. It can never satisfy promotion no
+  matter how recent it is. Re-run the lane on a host that has a working
+  container engine and reachable registries, then re-run this check.
+
+**3. Green, but it does not speak for this version —
+`freshness_gate.stale_record`.** The most recent record is `built`, but
+it is for a different version, or older than the freshness window, or
+both; the message names which. A green result ages: a byte-identical
+tree can stop building because something upstream moved. Re-run the lane
+against the tree being promoted, then re-run this check.
+
+Two further refusals guard the check's own inputs rather than the
+promotion decision: `freshness_gate.unregistered_project` (the
+`--project` name is not in `projects.cfg`) and
+`freshness_gate.ledger_unreadable` (the ledger file exists but its most
+recent record does not parse — repair or remove the malformed record by
+hand, then re-run the lane). A malformed ledger refuses rather than
+reporting never-run, so a parse failure can never be mistaken for a
+clean slate.
+
+A refusal looks like this — the machine key is greppable, and the remedy
+line is runnable as printed from your own shell. The script path is
+printed absolute (`<kanban-root>` below stands in for it), and a remedy
+that needs a step first, such as repairing the ledger or fixing the
+build, names that step in a trailing `# after ...` shell comment:
+
+```
+error:   freshness_gate.no_record
+message: project 'pgai-agent-kanban' has no deep-verify record at all -- the DEEP-VERIFY tier has never run for it.
+remedy:  PGAI_CONTAINER_TIER=1 bash <kanban-root>/scripts/deep-verify.sh --project pgai-agent-kanban --image all
+```
 
 ### 1. Prepare the public working tree
 

@@ -2,10 +2,10 @@
 test_auto_resolutions_window.py
 ================================
 Behavioral unit tests for the human-review window's Auto-Resolutions pane
-(v2.0.0 Goal 6: "The surface"):
+(the read-only auto-resolution surface):
   team/pgai_agent_kanban/dashboard/scan_auto_resolutions.py
 
-Covers the task's acceptance criteria:
+Acceptance criteria exercised:
 
   1. Auto-Resolutions section lists RC, attempt N/M, decision, outcome,
      and evidence links.
@@ -19,7 +19,7 @@ Covers the task's acceptance criteria:
 
 All filesystem operations use tmp_path (pytest-managed). No live kanban
 root, no subprocesses. Function names describe behaviour under test, never
-bug/task IDs (SOP.md "Test Authoring Guidelines", Anti-pattern 6).
+bug/task IDs (roles/TESTER.md "Test Authoring Guidelines", Anti-pattern 6).
 """
 
 from __future__ import annotations
@@ -221,7 +221,7 @@ def test_no_evidence_paths_renders_none(tmp_path: pathlib.Path, capsys) -> None:
 
 def test_output_contains_no_action_commands(tmp_path: pathlib.Path, capsys) -> None:
     """The surface never prints an approve/reject/close/wontdo affordance —
-    it informs, it never mutates state (v2.0.0 Goal 6 constraint)."""
+    it informs, it never mutates state."""
     _write_ceiling_cfg(tmp_path)
     _append_resolution(tmp_path, "proj-alpha")
     scan_auto_resolutions(str(tmp_path), use_color=False)

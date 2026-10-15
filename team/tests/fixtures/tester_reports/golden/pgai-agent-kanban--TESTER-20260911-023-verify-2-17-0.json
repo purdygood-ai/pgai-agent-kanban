@@ -1,0 +1,328 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified the v2.17.0 container-fleet RC against its requirements document. The RC\ncarries fifteen commits across seven prerequisite tasks and touches seventeen\nfiles: the three flavor Dockerfiles, the new `docker/cli-versions.env` pin file,\n`docker/entrypoint.sh`, `team/scripts/container-shell.sh`, a rewritten\n`docs/docker.md`, and the fixture/test surface behind all of it. Both gated\nrunners exited 0 (unit 3823 passed / 3 skipped; integration 442 passed / 1\nskipped). Every deliverable in the requirements document is present and was\nchecked by reading the shipped file, not by inferring from the diff. Three guard\nmechanisms were exercised against the failure modes they exist to prevent rather\nthan inspected: the unpinned-build guard was triggered with a real\nargument-free `docker build` and refused naming the missing ARG; all five\nentrypoint mount-contract refusals were triggered with synthetic mounts and each\nprinted the exact two-line message `docs/docker.md` documents for it; the\nzero-flag launcher was run against a stub engine and emitted `--rm`, the\ncorrected default tag, and both matching-path mounts. One quality-class lint\nfinding surfaced (pre-existing, in already-shipped release notes) and was filed\nvia Path C-A. No `bug`, `gap`, or `stale-assertion` finding was recorded.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight merge verification",
+      "heading": "Finding 1: Pre-flight merge verification",
+      "level": 3,
+      "body": "**Category:** pass\n\nScanned every task folder under `projects/pgai-agent-kanban/tasks/`. Every DONE\ntask with a non-`none` `## Feature Branch` had its branch already deleted — the\nnormal post-merge cleanup CODER and WRITER perform — so zero live feature\nbranches remained to check, and both Check 1 (ancestor of RC) and Check 2\n(BUG-92 zero-commits-ahead) had no subjects. All seven prerequisite tasks'\nmerges are present in the RC log as `--no-ff` merge commits (tasks 015 through\n021). Worktree HEAD matches `ai_rc/v2.17.0` exactly, `git status --short` is\nempty, and `git stash list` is empty.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "release-state.md sanity (Step 6.1)",
+      "heading": "Finding 2: release-state.md sanity (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`## Active RC` = `v2.17.0`, `## RC Opened By Task` =\n`CM-20260911-022-open-rc-2-17-0`, `## RC Opened At` = `2026-09-11T06:40:18+00:00`\n(the file's mtime matches that timestamp to the minute, consistent with\n`cm-open-rc.sh` having written it rather than a hand-edit). `## Last Released`\n= `v2.16.2`, well-formed `vX.Y.Z`. `semver_gt v2.17.0 v2.16.2` is true. Highest\ntag on the tree is `ai_v2.16.2`, agreeing independently. No drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Deliverable — `docker/cli-versions.env` as the single source of CLI versions",
+      "heading": "Finding 3: Deliverable — `docker/cli-versions.env` as the single source of CLI versions",
+      "level": 3,
+      "body": "**Category:** pass\n\n`docker/cli-versions.env` exists and holds exactly the two required\n`KEY=value` lines (`CLAUDE_CODE_VERSION=2.1.268`, `CODEX_VERSION=0.154.0`).\nAll three Dockerfiles declare `ARG CLAUDE_CODE_VERSION` / `ARG CODEX_VERSION`\n**with no default** (`docker/rocky9/Dockerfile:45-46`,\n`docker/debian/Dockerfile:60-61`,\n`docker/claude-abliterated/Dockerfile:48-49`) and each carries a\nbyte-identical fail-loud `${VAR:?message}` guard in its own `RUN` layer ahead of\nthe `npm install`. Grepping the tree found no Dockerfile carrying a hardcoded\nCLI version of its own.\n\nThe single reader, `team/tests/fixtures/docker_cli_pins.py`, resolves the env\nfile relative to its own module location (not the caller's cwd) and refuses\nrather than defaulting on both failure modes — absent file (`FileNotFoundError`\nnaming the resolved absolute path) and missing key (`ValueError` naming the\nkey). Its four unit tests cover both refusals.\n\nBoth consumers pass the args through that one reader: the cold-build lane\n(`team/tests/cold/test_docker_cold_build.py:450`, via\n`cli_pins_build_args()`), and every docker-build fixture in the fast suite\n(`test_docker_build_fixture.py`, `test_entrypoint_shipped_image.py`,\n`test_dashboard_smoke_container.py`, `test_dashboard_operator_window.py`).\n`docs/docker.md` passes them as explicit `--build-arg` flags sourced from the\nsame file via `set -a && . docker/cli-versions.env && set +a`.\n\nThe bump ritual is documented at `docs/docker.md` section \"Bumping a pinned\nversion\": candidate through the cold-build lane first (`scripts/cold-build-now.sh\n--project <name>`), then land as an ordinary RC — in that order, with the\nblast-radius reasoning stated.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Deliverable — the three flavors",
+      "heading": "Finding 4: Deliverable — the three flavors",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **debian** — `FROM python:3.12-bookworm` with Node 20 copied from a\n  `node:20-bookworm` stage; `kanban` user at UID/GID 1000 with overridable\n  `KANBAN_UID`/`KANBAN_GID` build args.\n- **rocky9** — `FROM quay.io/rockylinux/rockylinux:9`. The RC's diff is exactly\n  the rebase off the stale Docker Hub `rockylinux:9` tag, as specified. Same\n  user model as debian.\n- **claude-abliterated** — `USER root` on line 14, immediately after the `ENV`\n  block and ahead of every install step, with `USER kanban` restored on line\n  112 as the last instruction. The adopt-and-rename block handles all three\n  arrival states the requirement names and is idempotent: gid 1000 absent ->\n  `groupadd`; gid 1000 held under another name (squatter) -> `groupmod\n  --new-name`; already `kanban` -> neither branch taken, no-op. Same three-way\n  shape for the user via `useradd` / `usermod --login ... --move-home`. A\n  following `RUN` asserts the result is exactly `1000:1000` and fails loud\n  naming the ids it actually resolved, citing the bind-mount contract as the\n  reason.\n\nAll three flavors put the CLI smoke check in its own `RUN` layer, separate\nfrom the install layer (`RUN claude --version && codex --version` at\ndebian:80, rocky9:65, claude-abliterated:68), with the reasoning — npm's\n\"added N packages\" is not proof the launcher runs — stated at the site.\n\nSupporting runtime evidence: the fast suite's `test_docker_build_fixture.py`\nran 16 tests with zero skips on this host (docker daemon reachable), which\nmeans both the debian and rocky9 flavors were actually built with the pins\nsupplied and then exercised. `_narrate_skip()` calls `pytest.skip()`, so a\nmissing daemon would have shown as a skip rather than a false pass — it did\nnot.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Deliverable — the launcher (`team/scripts/container-shell.sh`)",
+      "heading": "Finding 5: Deliverable — the launcher (`team/scripts/container-shell.sh`)",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehaviorally verified (Step 6.5), not inspected. Ran the launcher with no\nflags against a stub `docker` on `PATH`:\n\n```\ncontainer-shell.sh: engine=docker image=pgai-agent-kanban-debian:latest kanban_root=... home=...\nSTUB-ENGINE-ARGS: run --rm -it -v <home>:<home> -v <root>:<root> -e HOME=<home> -e PGAI_AGENT_KANBAN_ROOT_PATH=<root> pgai-agent-kanban-debian:latest\n```\n\n- **Zero-flag launch** — resolved both paths from the environment the\n  `shell-env` bootstrap populates; no flag and no ad-hoc export needed.\n- **Default tag matches the documented build tag** — `pgai-agent-kanban-debian:latest`\n  in `_DEFAULT_IMAGE_TAG`, in the usage text, and in the `docker build -t ...`\n  command at `docs/docker.md:161`. The stale `pgai-agent-kanban-rocky:latest`\n  string appears nowhere in the tree (grepped, zero hits), satisfying the\n  ticket's explicit no-residue criterion.\n- **`--rm` disposability** — present in the assembled invocation above, and\n  asserted by `test_assembled_invocation_carries_the_rm_flag` rather than left\n  to inspection.\n- **Engine-portable flags only** — `run --rm -it -v -e`, all accepted by both\n  docker and podman, as `docs/docker.md` section Podman claims.\n- **Narration line** — matches the example in `docs/docker.md:252` verbatim.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Deliverable — `docs/docker.md`",
+      "heading": "Finding 6: Deliverable — `docs/docker.md`",
+      "level": 3,
+      "body": "**Category:** pass\n\nRead end-to-end (438 lines, substantially rewritten — Principle 3). Every\nrequired subject is present and, where checkable, accurate:\n\n- **All three flavors** — a \"What ships in `docker/`\" table, a \"Choosing a\n  flavor\" comparison table with a stated default, and a separate build command\n  per flavor, each passing both `--build-arg` flags.\n- **The env file** — its own section, the two keys shown, the no-default/refuse\n  contract explained, and the `set -a` load line given.\n- **The pins policy** — the bump ritual in the mandated order, with the reason\n  for the order.\n- **The pseudocron-in-container ritual** — \"One heartbeat\" section: host crontab\n  confirmed off (`crontab -l`, \"no crontab for ...\" is the wanted answer), exactly\n  one scheduler started by hand in the container, and the single-heartbeat\n  confirmation via the `fired (minute=NN)` log line, with the two-heartbeats\n  failure mode named explicitly.\n- **`install --no-system-cron`** — the volume-is-an-install rule, the command,\n  and why that flag specifically.\n\nDoc/tree parity checks that passed: `install.sh` does implement\n`--no-system-cron` (install.sh:205); `scripts/cold-build-now.sh`,\n`scripts/pseudocron.py` and `scripts/dashboard/create.sh` all exist at the\ninstall-layout paths the document tells the operator to run; the default image\ntag in the launcher table matches the code; and every one of the four rows in\nthe mount-contract refusal table reproduces the entrypoint's real message (see\nFinding 7). Fenced blocks that cannot run in the harness carry explicit\n`doc-lint: skip` comments with stated reasons.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Acceptance — the entrypoint fails loud on the mount contract",
+      "heading": "Finding 7: Acceptance — the entrypoint fails loud on the mount contract",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehaviorally verified. Ran `docker/entrypoint.sh` directly against six\nsynthetic environments:\n\n| Case | Result |\n|---|---|\n| `PGAI_AGENT_KANBAN_ROOT_PATH` unset | exit 1, names the variable + host remedy |\n| kanban root points at an absent directory | exit 1, names the offending path |\n| `HOME` unset | exit 1, names the variable + `-v \"$HOME:$HOME\" -e \"HOME=$HOME\"` remedy |\n| a raw checkout mounted as the kanban root | exit 1, names checkout-vs-install layout + `install.sh --no-system-cron` remedy |\n| an empty directory mounted as the kanban root | exit 1, names `scripts/pseudocron.py` missing + same remedy |\n| contract satisfied | exit 0 |\n\nEach refusal printed exactly two lines — what is wrong, then a remedy the\nreader runs on the host — and each matched the corresponding row of the\n`docs/docker.md` refusal table. The happy path produced no error output and\n`cd`'d into the kanban root before `exec bash -l`. The script carries\n`set -euo pipefail`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Acceptance — a build without args fails naming the ARG",
+      "heading": "Finding 8: Acceptance — a build without args fails naming the ARG",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehaviorally verified (Step 6.5 — the guard was triggered, not inspected). Ran\na real argument-free build from the RC worktree:\n\n```\ndocker build -f docker/debian/Dockerfile -t pgai-tester-unpinned-probe:test .\n-> EXIT=1\n#14 0.210 /bin/sh: 1: CLAUDE_CODE_VERSION: CLAUDE_CODE_VERSION build-arg is required,\n  e.g. --build-arg CLAUDE_CODE_VERSION=2.1.268 -- refusing to install an unpinned claude-code\n```\n\nThe build stopped at the guard layer (step 8 of 14) — before the npm download,\nas designed — and the message names the missing argument and a runnable\nremedy. The probe image was removed afterward. The guard text is byte-identical\nin all three Dockerfiles (one match each, confirmed by grep), so the same\nrefusal is in place for rocky9 and claude-abliterated.\n\nThe RC also ships this as a standing test:\n`test_build_without_pinned_versions_fails_naming_the_missing_arg`, parametrized\nover debian and rocky9, which ran (not skipped) in the unit suite on this host.\n`team/tests/cold/test_docker_cold_build.py` carries the equivalent against a\nreal shipped flavor for the cold lane.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Acceptance — the relaunch-same-board fixture",
+      "heading": "Finding 9: Acceptance — the relaunch-same-board fixture",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/unit/test_container_shell_launcher.py:499` —\n`test_relaunch_against_same_kanban_root_presents_the_same_board` runs the\nlauncher twice against the same kanban root through the fake-engine harness and\nasserts both invocations carry identical mount and env flags. It passed in the\nunit suite. The file's other new coverage (zero-flag default tag, `--rm`\npresence) passed alongside it.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Acceptance — a bad pinned version fails in the smoke layer naming the CLI",
+      "heading": "Finding 10: Acceptance — a bad pinned version fails in the smoke layer naming the CLI",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe mechanism is in place and correctly shaped: because the smoke check lives\nin its own `RUN` layer after the install layer, a version that publishes to npm\nbut does not launch fails at `claude --version` / `codex --version` rather than\nbeing masked by the install layer's success. `test_docker_cold_build.py`\ncarries the assertion directly — it builds a real shipped flavor with a\ndeliberately bad `CODEX_VERSION` (lines 645-654 and 803-814) and asserts the\nfailure names the CLI.\n\n**Caveat:** that assertion lives in the cold lane, which by design is not an RC\nstep (SOP section \"The DEEP-VERIFY tier\"), so it was not executed during this\nverification. The structural half — smoke check isolated in its own layer,\nafter install, in all three flavors — was verified directly. This is recorded\nas a caveat rather than a gap: the check exists, is wired to the right lane, and\nthe lane has a pre-release gate in front of the public tag.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "caveat": "that assertion lives in the cold lane, which by design is not an RC"
+      },
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Acceptance — cold build all flavors under docker AND podman from the docs verbatim",
+      "heading": "Finding 11: Acceptance — cold build all flavors under docker AND podman from the docs verbatim",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nNot exercised at RC time, and correctly so: `team/roles/TESTER.md` Step 5d\nforbids TESTER from running the cold-build lane or starting a container engine\nduring RC verification, and SOP section \"The DEEP-VERIFY tier\" moves this\ncriterion to the DEEP-VERIFY tier with a pre-release freshness check gating the\npublic tag. `team/scripts/deep-verify.sh` is present, so the tree is not in the\none case that would make this a `gap` (images shipping with no cold-build gate\nanywhere in front of them).\n\nWhat was established instead: `test_docker_cold_build.py` discovers all three\nflavors (asserting a minimum set of `{debian, rocky9, claude-abliterated}` at\nline 469) and parametrizes over both engines, passing the pins through\n`cli_pins_build_args()`; and the fast suite's own build fixture really did build\ndebian and rocky9 under docker with the pins on this host. Both podman and\ndocker are installed here, but the two-engine x three-flavor sweep belongs to\nthe lane.\n\nSee `## Deep-Verify Freshness` below for what the lane currently knows about\nthis tree — the answer is \"nothing,\" and CM should read it before tagging.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Autonomous operation criterion (Step 6.12)",
+      "heading": "Finding 12: Autonomous operation criterion (Step 6.12)",
+      "level": 3,
+      "body": "**Category:** pass\n\nSee the `## Autonomous Criterion` section — all four checks are NO.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Skip-cites-real-bug grep-gate (Step 6.13)",
+      "heading": "Finding 13: Skip-cites-real-bug grep-gate (Step 6.13)",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo placeholder skip IDs (`BUG-SKIP`, `skip.*BUG-[A-Za-z]`) in any test source.\nThe only grep hits were the literal string `BUG-NNNN` inside four archived\n`team/tests/artifacts/coverage-*-v2.3.0/*-run.log` files, which are captured\nrunner logs, not skip annotations. Every `BUG-NNNN` cited from a skip\nannotation resolves to an existing file in `bugs/` (zero `MISSING:` lines). The\ngated runners' own `lint_skip_bug_gate.sh` pre-flight also passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Constraint negative checks and coding-standards spot-check (Steps 6.9, 6.14)",
+      "heading": "Finding 14: Constraint negative checks and coding-standards spot-check (Steps 6.9, 6.14)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `set -euo pipefail` present in both changed shell files (`docker/entrypoint.sh:20`,\n  `team/scripts/container-shell.sh:42`).\n- No credential-shaped assignments introduced anywhere in the diff.\n- No new script was added under `team/scripts/`; the one modified script still\n  exits 0 on `--help` and documents every flag including the corrected default,\n  asserted by `test_help_flag_exits_zero_and_documents_every_option`.\n- Directive 5 (operational values belong in config): the RC moves the CLI\n  versions out of the Dockerfiles into `docker/cli-versions.env` — this change\n  is the directive being applied, not violated.\n- Directive 8 (no internal IDs in production strings): the hygiene lint found\n  zero provenance hits in any file this RC touched. Its single hit is in\n  already-shipped release notes (see Lint Findings).\n- Directives 1/3 (no duplicated implementation): `docker_cli_pins.py` is a\n  single new reader that all five build call sites go through; no second parser\n  of the env file exists in the tree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Step 6.8 — synthetic release simulation",
+      "heading": "Finding 15: Step 6.8 — synthetic release simulation",
+      "level": 3,
+      "body": "**Category:** pass (skipped by trigger condition, with note)\n\nThe RC's diff touches no release-lifecycle file: no `cm-release.sh`,\n`cm-open-rc.sh`, `cm-cancel-rc.sh`, or `lib/project_paths.sh`. The only\n`team/scripts/` file in the diff is `container-shell.sh`, which does not\nparticipate in the open/close cycle. Step 6.8 is skipped per its own trigger\ncondition. `team/tests/integration/test_cm_release_synthetic.py` is present and\npassed as part of the green integration suite.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass (skipped by trigger condition, with note)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

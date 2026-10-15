@@ -26,6 +26,12 @@ Acceptance criteria exercised:
 All tests use synthetic environments and never touch the live kanban root.
 The routing logic is exercised via a self-contained bash snippet that mirrors
 the exact logic from the production wake scripts.
+
+Every filesystem write in this module resolves under pytest's ``tmp_path``;
+the two dev-tree paths this module reads (``scripts/lib/wake_driver_prep.sh``,
+referenced by ``_CLAUDE_SH``/``_CODEX_SH`` below) are read-only. Confirmed
+clear of the checked-out-tree side-effect leak class this suite guards
+against elsewhere.
 """
 
 from __future__ import annotations
@@ -40,8 +46,14 @@ from tests.unit.shell_harness import run_bash
 # ---------------------------------------------------------------------------
 # Paths relative to team/ (pytest cwd when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
-_CLAUDE_SH = pathlib.Path("scripts/wake/claude.sh")
-_CODEX_SH = pathlib.Path("scripts/wake/codex.sh")
+# This routing block now lives once in the shared wake driver's prep stage,
+# sourced by both wake/claude.sh and wake/codex.sh (v2.9.20-engine-
+# decomposition: process_one_task's inline body was lifted
+# out of wake/claude.sh; wake/codex.sh now sources the
+# same shared driver instead of carrying its own inline copy). Both
+# constants below point at the one shared file the block now lives in.
+_CLAUDE_SH = pathlib.Path("scripts/lib/wake_driver_prep.sh")
+_CODEX_SH = pathlib.Path("scripts/lib/wake_driver_prep.sh")
 
 # Anchor comment that begins the debug-log routing block in both siblings.
 _ROUTING_ANCHOR = "# --- Per-agent debug log path"
@@ -273,8 +285,16 @@ def test_project_less_debug_log_routes_to_root_dir(
         f"Expected path under: {expected_prefix}\n"
         f"Got: {resolved_path}"
     )
-    # Must NOT be under any projects/ subdirectory.
-    assert "/projects/" not in resolved_path, (
+    # Must NOT be under any projects/ subdirectory beneath the kanban root.
+    # Asserted relative to kanban_root (a path this test controls) rather
+    # than by searching the absolute resolved_path for a "/projects/"
+    # substring -- the ambient PGAI_AGENT_KANBAN_TEMP_DIR the suite happens
+    # to run under can itself contain a "projects" segment (the multi-project
+    # layout puts scratch space at .../projects/<name>/...), which would make
+    # an absolute-path substring search fail on a caller's own scratch root
+    # with no defect in the routing code under test.
+    resolved_relative_parts = pathlib.Path(resolved_path).relative_to(kanban_root).parts
+    assert "projects" not in resolved_relative_parts, (
         f"Project-less debug log was incorrectly routed to a project directory: "
         f"{resolved_path}"
     )

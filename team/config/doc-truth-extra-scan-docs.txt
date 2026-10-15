@@ -1,0 +1,34 @@
+# team/config/doc-truth-extra-scan-docs.txt
+#
+# Second scan-set source for team/scripts/lint_doc_command_truth.py,
+# unioned onto the install-manifest-derived set in
+# team/config/docs-manifest.txt. Deliberately a SEPARATE file, not an
+# addition to docs-manifest.txt — that file's own header states
+# its one job as "the docs an install actually receives" (what install.sh
+# and upgrade.sh copy into an installed root), and none of the documents
+# below clear that bar:
+#
+#   - README.md, HOW_TO.md, ARCHITECTURE.md live at the repository root,
+#     never under docs/, so they were never candidates for
+#     docs-manifest.txt's own closure rule to begin with.
+#   - docs/docker.md IS inside docs/, but is docs-manifest.txt's own
+#     recorded, deliberate exclusion (see that file's "Recorded exclusions"
+#     note) — every step it documents happens before an install exists.
+#
+# Folding this list into docs-manifest.txt would either break its
+# documented closure rule (root documents are not under docs/) or
+# contradict its own recorded exclusion (docker.md); this lint keeps its
+# own scan-set source instead of bending that file's stated purpose.
+#
+# These four are the documents a stranger reads first — the project's
+# public claim surface outside the install-manifest boundary.
+#
+# Format: one path per line, relative to the repository root (not docs/).
+# Blank lines and `#`-prefixed comments are ignored, same as
+# docs-manifest.txt. Read by lint_doc_command_truth.py's
+# --extra-scan-manifest (default: this file); bypassed entirely by --doc.
+
+README.md
+HOW_TO.md
+ARCHITECTURE.md
+docs/docker.md

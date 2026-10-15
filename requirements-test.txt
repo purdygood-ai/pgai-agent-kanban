@@ -18,3 +18,7 @@ pytest>=7
 # If absent, coverage is reported as "unavailable" and the suite still runs —
 # coverage is informational and never blocks a release.
 pytest-cov>=5
+
+# Parallel test workers (run-*-tests.sh, bounded by kanban.cfg
+# [testing] workers). If absent, the runners run serially.
+pytest-xdist>=3.8

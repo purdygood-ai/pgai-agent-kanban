@@ -2,10 +2,10 @@
 """
 status_priority_cap.py — Status-priority-aware row selection for dashboard column rendering.
 
-Extracts the ``_status_priority_cap`` helper from
-``team/scripts/dashboard/column-render.sh`` so it can be imported and tested
-independently.  The bash script's Python heredoc imports this module and
-delegates to it; runtime behavior is unchanged.
+The multi-project board column pane
+(``pgai_agent_kanban.dashboard.column_render.multi``, driven by
+``team/scripts/dashboard/column-render.sh``) narrows each project's items
+to its ``max_rows`` through this helper.
 
 Public API
 ----------
@@ -34,8 +34,7 @@ Algorithm
 5. Re-sort the selected set by ``id_sort_key`` DESC to restore visual order.
 
 Under-cap path (``len(items) <= cap``):
-    Returns ``items[:]`` — a copy byte-identical to the pre-fix naive slice.
-    This preserves the regression guarantee from the original fix.
+    Returns ``items[:]`` — an unchanged copy of the input, in input order.
 
 Over-cap, more pinned rows than cap (``slots_after_pin < 0``):
     Returns all running rows plus as many blocked rows as fit (never evicts
@@ -58,8 +57,8 @@ def status_priority_cap(
     Args:
         items: List of entry dicts, each containing at minimum ``'status'``
                (str) and ``'id_sort_key'`` (numeric).  The list is assumed to
-               be sorted DESC by ``id_sort_key`` before this call, matching the
-               preparation step in column-render.sh.
+               be sorted DESC by ``id_sort_key`` before this call, as the
+               column renderer sorts it.
         cap:   Maximum number of items to return.  The under-cap fast path
                returns exactly ``len(items)`` items (a copy); the over-cap
                path may return up to ``len(pinned_running) + cap`` items when
@@ -82,7 +81,7 @@ def status_priority_cap(
         True
     """
     if len(items) <= cap:
-        return items[:]  # under-cap: identical to pre-fix naive slice
+        return items[:]  # under-cap: an unchanged copy, nothing to evict
 
     pinned_running = [e for e in items if e["status"] == "running"]
     pinned_blocked = [e for e in items if e["status"] == "blocked"]

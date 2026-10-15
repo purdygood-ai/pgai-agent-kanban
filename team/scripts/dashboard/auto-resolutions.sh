@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dashboard-auto-resolutions.sh
+# auto-resolutions.sh
 # Human-review window — Auto-Resolutions pane (beside Approvals).
 #
 # Lists every OVERWATCH autonomous resolution ledger entry
@@ -15,10 +15,10 @@
 # or mutates state.
 #
 # Designed to run under:
-#   watch -t -c -n N -- dashboard-auto-resolutions.sh [--kanban-root <path>]
+#   watch -t -c -n N -- auto-resolutions.sh [--kanban-root <path>]
 #
 # Usage:
-#   dashboard-auto-resolutions.sh [--kanban-root <path>]
+#   auto-resolutions.sh [--kanban-root <path>] [-h|--help]
 #
 # Environment:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: ~/pgai_agent_kanban)
@@ -26,8 +26,29 @@
 #   TERM=dumb                    — also suppresses ANSI colors
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:25}"
+      exit 0
+      ;;
+  esac
+done
+
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh).
+# shellcheck source=../lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -57,15 +78,9 @@ if [[ -n "${NO_COLOR:-}" ]] || [[ "${TERM:-}" == "dumb" ]]; then
   USE_COLOR=false
 fi
 
-if [[ "$USE_COLOR" == "true" ]]; then
-  C_CYAN=$'\033[0;36m'
-  C_BOLD=$'\033[1m'
-  C_RESET=$'\033[0m'
-else
-  C_CYAN=""
-  C_BOLD=""
-  C_RESET=""
-fi
+C_CYAN="$(ansi_code cyan)"
+C_BOLD="$(ansi_code bold)"
+C_RESET="$(ansi_code reset)"
 
 # ---------------------------------------------------------------------------
 # Resolve script directories

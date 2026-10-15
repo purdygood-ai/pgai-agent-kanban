@@ -1,0 +1,263 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "v2.16.2 is a two-item bug bundle (BUG-0240, BUG-0241) touching four files: the\nhygiene lint (`team/scripts/lint_hygiene.py`), the aggregate hygiene bug filer\n(`team/pgai_agent_kanban/lint/bug_filer.py`), and their two unit-test modules.\nVerification covered pre-flight merge checks, both gated test suites, every\nacceptance criterion of both CODER tickets and of the requirements doc, and\nbehavioral exercise of both fixes — including reverting each fix in a throwaway\ncopy of the tree to confirm the new tests are real regression guards rather than\nassertions that pass either way. Both gated runners exit 0. Every acceptance\ncriterion is met. No `bug`, `gap`, or `stale-assertion` finding was recorded.\nOne pre-existing quality-class lint finding (a task ID cited in\n`release-notes/v2.16.0.md`) is carried in the non-blocking section and cites the\nopen bug that already tracks it.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight — merge verification, worktree identity, stash check",
+      "heading": "Finding 1: Pre-flight — merge verification, worktree identity, stash check",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Every DONE task with a live `## Feature Branch` was checked: no UNMERGED and\n  no BUG-92 (zero-unique-commits) anomaly. Both of this RC's feature branches\n  (`ai_feature/CODER-20260911-009-...`, `ai_feature/CODER-20260911-010-...`) were\n  deleted after merge, which the procedure treats as merged.\n- `git rev-parse HEAD` = `a929226a66f5277ad73ae27a0992f82b043006af` =\n  `git rev-parse ai_rc/v2.16.2`.\n- `git status --short` empty; `git stash list` empty.\n- RC history (`ai_main..ai_rc/v2.16.2`): `f15ad11` + merge `678a915`\n  (CODER-009), `0451aa5` + merge `a929226` (CODER-010). Nothing else landed on\n  the RC, and `ai_main` has not moved since the v2.16.1 release commits.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Gated unit suite",
+      "heading": "Finding 2: Gated unit suite",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/run-unit-tests.sh --coverage` -> **exit 0**\n(`3806 passed, 3 skipped in 519.10s`). Lint pre-flight green: breakage-class\nchecks, skip-cites-real-bug gate, help-presence, import-completeness,\nbare-/tmp cleanliness, listener cleanliness all OK.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Gated integration suite",
+      "heading": "Finding 3: Gated integration suite",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/run-integration-tests.sh --coverage` -> **exit 0**\n(`442 passed, 1 skipped in 416.13s`). Includes\n`tests/integration/test_cm_release_synthetic.py` (15 tests, all passing).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Requirements AC — \"each bundled item is addressed\"",
+      "heading": "Finding 4: Requirements AC — \"each bundled item is addressed\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n**BUG-0240 part 1 (absolute scan-root path persisted into a filed bug's cause).**\nExercised from a throwaway scan root under\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/tester_scratch_v2162`, against\n**all six** refusal shapes the sidecar loader can raise. Every one exits 0 and\nrecords a repo-relative cause with zero occurrences of the scan root:\n\n| refusal shape | recorded cause (excerpt) | scan-root leaks |\n|---|---|---|\n| blank justification | `sidecar team/scripts/hygiene-lint-allowlist.json entry #0 (file='code/dirty.py', ...) has a blank justification ...` | 0 |\n| invalid JSON | `sidecar team/scripts/hygiene-lint-allowlist.json is not valid JSON: ...` | 0 |\n| non-list top level | `sidecar team/scripts/hygiene-lint-allowlist.json must be a JSON array of entries; found a top-level dict` | 0 |\n| non-object entry | `sidecar team/scripts/hygiene-lint-allowlist.json entry #0 is not a JSON object` | 0 |\n| missing required field | `sidecar team/scripts/hygiene-lint-allowlist.json entry #0 is missing required field(s): content_hash` | 0 |\n| unreadable file | `sidecar team/scripts/hygiene-lint-allowlist.json could not be read: [Errno 13] Permission denied: 'team/scripts/hygiene-lint-allowlist.json'` | 0 |\n\nThe unreadable case is the interesting one: the underlying `OSError` embeds the\npath a second time, and the fix's replace-all covers both copies. The finding's\nidentity is unchanged (`class=hygiene-sidecar`, `label=SIDECAR-MALFORMED`,\n`lineno=0`), as the ticket required.\n\nAlso exercised in the production-shaped variant the synthetic test does not\ncover: invoking the lint from a *different* working directory with an absolute\n`--repo-root` and an absolute `--sidecar` still records the repo-relative cause\n(0 leaks).\n\n**BUG-0240 part 2 (unrunnable `## Reproduction` command).** A bug filed by\n`pgai_agent_kanban.lint.bug_filer` from the scratch scan root for the\n`hygiene-sidecar` finding contains **0** occurrences of the scan root across\nevery section, and renders:\n\n```\n1. Run `python3 team/scripts/lint_hygiene.py` and observe the finding(s) named above -- the 'hygiene-sidecar' check runs on every invocation, whatever --classes selects.\n```\n\nRun from a repo root carrying the finding, that command **exits 0** and its\noutput names the finding (the sidecar file and the blank-justification reason\nappear twice in stdout). The pre-fix command\n(`--classes hygiene-sidecar`) exits 2. The three registered classes keep their\nnarrowed commands (`--classes provenance`, `--classes version-named-test`,\n`--classes comment-drift`), and each **exits 0** run from the dev-tree root.\n\n**BUG-0241 (stale exit-contract comment).**\n`grep -n \"sidecar-malformed path above\" team/scripts/lint_hygiene.py` -> no hits\n(exit 1). The replacement comment above `main()`'s final `return 0` now names\nonly CLI-argument validation as the non-zero exit and explicitly points at the\nmodule docstring's \"Exit codes\" section (lines 207-218), which it agrees with.\nConfirmed behaviorally: with findings present, the lint exits 0; the only\nnon-zero exit observed was 2 for an unknown `--classes` value.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Requirements AC — Python compiles / bash syntax",
+      "heading": "Finding 5: Requirements AC — Python compiles / bash syntax",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `py_compile` over the whole tree: **399 Python files, 0 failures**.\n- `bash -n` over the whole tree: **257 shell files, 0 failures**.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Behavioral guard check — do the new tests actually fail pre-fix?",
+      "heading": "Finding 6: Behavioral guard check — do the new tests actually fail pre-fix?",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth fixes were reverted in a throwaway copy of `team/`\n(`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/tester_revert_a`, the live\ntree untouched, `PGAI_AGENT_KANBAN_ROOT_PATH` repointed at a fresh temp root)\nand the new/extended tests re-run against the pre-fix code:\n\n| test | pre-fix result |\n|---|---|\n| `test_lint_hygiene.py::test_blank_justification_is_reported_as_a_finding_not_an_abort` | FAILED |\n| `test_lint_hygiene.py::test_invalid_json_sidecar_is_reported_as_a_finding` | FAILED |\n| `test_lint_hygiene.py::test_missing_content_hash_sidecar_is_reported_as_a_finding` | FAILED |\n| `test_lint_hygiene.py::test_unreadable_sidecar_is_reported_as_a_finding` | FAILED |\n| `test_lint_bug_filer.py::test_filed_bug_for_an_unregistered_class_omits_the_scan_root_and_runs` | FAILED |\n\nObserved pre-fix messages match the CODER completion notes: the hygiene\nassertions fail with the scan-root path contained in the cause, and the filer\ntest fails on the rendered `--classes hygiene-sidecar` line. All five are real\nguards, not assertions that pass either way.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "New mechanism — live registry introspection in the filer",
+      "heading": "Finding 7: New mechanism — live registry introspection in the filer",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`_registered_lint_classes()` loads `team/scripts/lint_hygiene.py` by\nself-locating from `bug_filer.py`'s own path\n(`Path(__file__).resolve().parents[2] / \"scripts\" / \"lint_hygiene.py\"`) and\ncalls `registered_class_names()` — no second copy of the registry, which is\nwhat the ticket's constraint asked for. Verified directly: returns\n`['provenance', 'version-named-test', 'comment-drift']`; renders narrowed\ncommands for those three and the class-free command for `hygiene-sidecar` and\nfor any other unregistered token.\n\nCaveat (not a defect, no filing): the failure fallback — script missing or\nunloadable -> `None` -> always render the class-free command — is correct and I\nexercised it by hand (repointing `_LINT_HYGIENE_SCRIPT` at a nonexistent path\nyields `None` and a runnable class-free command, no exception), but it has no\nunit test of its own. Also, the class-free sentence asserts that \"the '<cls>'\ncheck runs on every invocation\"; that is true of `hygiene-sidecar` (the only\nunregistered class that reaches the filer today) but would be inaccurate prose\nif a future non-scan class were added. Both are hygiene-grade, and the\nself-location matches the installed layout (`install.sh` copies `team/scripts`\n-> `$ROOT/scripts` and `team/pgai_agent_kanban` -> `$ROOT/pgai_agent_kanban`, so\n`parents[2]/scripts` resolves in an install too).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0239 closure (CODER-010 acceptance item 5)",
+      "heading": "Finding 8: BUG-0239 closure (CODER-010 acceptance item 5)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`projects/pgai-agent-kanban/bugs/BUG-0239-hygiene-lint-hygiene-sidecar.md` now\nreads `## Status: done` with exactly one added line — \"This report captured a\nreproduction performed in a scratch tree, not a defect in the shipped tree.\" —\nand every other section byte-identical to the auto-filed original (its\n`## Actual` still carries the deleted scratch path, which is the evidence the\nconstraint said to preserve). It can no longer be bundled into a future RC.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Step 6.1 — release-state drift",
+      "heading": "Finding 9: Step 6.1 — release-state drift",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_last_released_version pgai-agent-kanban` -> `v2.16.1`; `semver_gt v2.16.2\nv2.16.1` true. `release-state.md` holds `Active RC: v2.16.2`, opened\n2026-09-11T05:05:15+00:00 by `CM-20260911-011-open-rc-2-16-2`, `Last Released:\nv2.16.1` (well-formed `vX.Y.Z`). The `ai_rc/v2.16.2` branch exists and matches.\n`VERSION` still reads `v2.16.1` — expected, CM writes it at release time.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Step 6.10 — prerequisite graph",
+      "heading": "Finding 10: Step 6.10 — prerequisite graph",
+      "level": 3,
+      "body": "**Category:** pass\n\nFive tasks, no cycles, all referenced IDs exist, bookends correct:\nCM-011 (open RC) -> CODER-009 -> CODER-010 -> TESTER-012 -> CM-014 (release,\nprereqs CODER-009, CODER-010, TESTER-012). Sequence numbers non-colliding.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Step 6.13 — skip-cites-real-bug gate",
+      "heading": "Finding 11: Step 6.13 — skip-cites-real-bug gate",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo placeholder skip IDs (`BUG-SKIP`, `skip ... BUG-<alpha>`) in `team/tests/`;\nthe only textual hits are inside archived coverage run logs under\n`team/tests/artifacts/`, not skip annotations. No skip annotation cites a\n`BUG-NNNN`, so there is nothing to resolve against `bugs/`. The gated runners'\nown `lint_skip_bug_gate` reported OK.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Step 6.8 — synthetic release simulation",
+      "heading": "Finding 12: Step 6.8 — synthetic release simulation",
+      "level": 3,
+      "body": "**Category:** pass (not triggered, run anyway)\n\nThe RC diff touches no release-lifecycle file (`cm-release.sh`,\n`cm-open-rc.sh`, `cm-cancel-rc.sh`, `lib/project_paths.sh`), so the trigger\ncondition does not fire. `team/tests/integration/test_cm_release_synthetic.py`\nnonetheless ran inside the gated integration suite and passed (15 tests).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass (not triggered, run anyway)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

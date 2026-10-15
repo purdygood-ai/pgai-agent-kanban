@@ -1,0 +1,326 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `ai_rc/v2.23.9` of pgai-agent-kanban against its\nrequirements document `requirements/v2.23.9-bugfix-bundle-20260916.md` (a\nsingle-item BUG bundle carrying `BUG-0305-hygiene-lint-provenance`).\nVerification ran in the isolated detached worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260916-047-verify-2-23-9`\nat commit `eb1605cc76f447dcbabe5aa629663654154347cd`, which matches\n`git rev-parse ai_rc/v2.23.9` exactly. The RC's entire content versus `ai_main`\nis one file, three insertions and two deletions: two docstrings in\n`team/tests/unit/test_overwatch_empty_files_report_scope_bash.py` reworded from\nliteral internal bug identifiers to the generic `BUG-NNNN` placeholder shape.\nBoth gated runners were executed with `--coverage` and both exited 0. The\nbundle's three acceptance criteria were each executed and each passed. The guard\nthis RC heals -- the hygiene lint's `provenance` class -- was verified\nbehaviorally by replaying the pre-RC file content through the lint and\nconfirming it still fires, then confirming the RC content is silent. No bug,\ngap, or stale assertion was found. Recommendation: `PASS`.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight -- RC intact, no unmerged DONE-task branches",
+      "heading": "Finding 1: Pre-flight -- RC intact, no unmerged DONE-task branches",
+      "level": 3,
+      "body": "**Category:** pass\n\nScanned every task folder under\n`$HOME/pgai_agent_kanban/projects/pgai-agent-kanban/tasks/`. Every folder\nwhose `status.md` reads `## State: DONE` and whose `README.md` names a\n`## Feature Branch` other than `none` was checked for local branch existence:\nzero such branches exist locally, which passes both Step 2 checks trivially --\nCODER and WRITER delete feature branches after merging, so absence is the normal\npost-merge shape. The one contributing task,\n`CODER-20260916-045-provenance-lint-sweep`, names\n`ai_feature/CODER-20260916-045-provenance-lint-sweep`; that branch is gone and\nits commit `74d451f` is present on the RC under merge commit `eb1605c`, so its\nwork demonstrably landed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Working tree identity and cleanliness",
+      "heading": "Finding 2: Working tree identity and cleanliness",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `git rev-parse HEAD` -> `eb1605cc76f447dcbabe5aa629663654154347cd`\n- `git rev-parse ai_rc/v2.23.9` -> `eb1605cc76f447dcbabe5aa629663654154347cd` (equal)\n- `git status --porcelain` -> empty\n- `git stash list` -> empty",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "`release-state.md` schema and version ordering (Step 6.1)",
+      "heading": "Finding 3: `release-state.md` schema and version ordering (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`release-state.md` holds all four fields: `## Active RC` = `v2.23.9`,\n`## RC Opened At` = `2026-09-16T19:39:28+00:00`, `## RC Opened By Task` =\n`CM-20260916-046-open-rc-2-23-9`, `## Last Released` = `v2.23.8` (well-formed\n`vX.Y.Z`). `pp_last_released_version \"pgai-agent-kanban\"` returns `v2.23.8`, and\n`semver_gt \"v2.23.9\" \"v2.23.8\"` from `team/scripts/lib/semver.sh` returns true --\nthe RC under test is strictly greater than the last released version. `Active RC`\nis consistent with the actual branch state: `ai_rc/v2.23.9` exists locally and no\nother `ai_rc/*` branch does.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Bundle acceptance criterion 1 -- \"Each bundled item is addressed\"",
+      "heading": "Finding 4: Bundle acceptance criterion 1 -- \"Each bundled item is addressed\"",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe bundle carries exactly one item, `BUG-0305-hygiene-lint-provenance`, which\nreported 2 `provenance`-class instances at\n`team/tests/unit/test_overwatch_empty_files_report_scope_bash.py:155` and `:249`.\nRan from the worktree root:\n\n```\npython3 team/scripts/lint_hygiene.py --classes provenance\n  -> lint_hygiene: scanning 5 code dir(s), 1 test-tree dir(s), 1 prose dir(s),\n     1 config dir(s); classes=['provenance']\n  -> lint_hygiene: OK -- 0 findings across 8 scan director(y/ies).\n  -> exit 0\n```\n\nThe full lint across all three registered classes is also clean:\n\n```\npython3 team/scripts/lint_hygiene.py\n  -> classes=['provenance', 'version-named-test', 'comment-drift']\n  -> lint_hygiene: OK -- 0 findings across 8 scan director(y/ies).\n```\n\nThe CODER ticket's stated scope was the *class*, not the named file list, and the\nclass is at zero tree-wide, so the sweep was performed as specified rather than\nas a transcription of the bug's snapshot list.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Bundle acceptance criterion 2 -- \"All Python files compile cleanly\"",
+      "heading": "Finding 5: Bundle acceptance criterion 2 -- \"All Python files compile cleanly\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n`find . -name \"*.py\" -not -path \"./.git/*\" | xargs -n50 python3 -m py_compile`\nproduced no output and exited 0 across the whole tree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Bundle acceptance criterion 3 -- \"All bash files pass syntax check\"",
+      "heading": "Finding 6: Bundle acceptance criterion 3 -- \"All bash files pass syntax check\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash -n` over every `*.sh` in the tree (excluding `.git`) produced zero\nfailures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Behavioral verification of the healed guard (Step 6.5)",
+      "heading": "Finding 7: Behavioral verification of the healed guard (Step 6.5)",
+      "level": 3,
+      "body": "**Category:** pass\n\nPrinciple 4 and anti-pattern 6 require synthesizing the ORIGINAL failure mode as\nwell as the new normal case. Both were exercised. Two scratch trees were built\nunder `PGAI_AGENT_KANBAN_TEMP_DIR` (the worktree itself was never modified;\n`git status --porcelain` remained empty throughout): one holding\n`git show ai_main:team/tests/unit/test_overwatch_empty_files_report_scope_bash.py`\n(the pre-RC content), one holding the same path from `ai_rc/v2.23.9`. Each was\nscanned with the scan surface narrowed to that directory alone, so the shared\nallowlist sidecar could not mask the result:\n\n```\n# PRE-RC content (the original failure mode)\nlint_hygiene: 2 finding(s) (non-blocking; ...)\n  1. reword pre/t.py:155 ... citing the BUG-ID ...\n  2. reword pre/t.py:249 ... citing the BUG-ID ...\n\n# RC content (the new normal case)\nlint_hygiene: OK -- 0 findings across 1 scan director(y/ies).\n```\n\nThe guard fires on exactly the two lines `BUG-0305` named and is silent on the\nshipped content. Structural inspection alone would not have distinguished \"the\ndocstring was edited\" from \"the lint no longer fires\".",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "The reword did not change test behavior",
+      "heading": "Finding 8: The reword did not change test behavior",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe diff is docstring-only -- read in full, it changes two triple-quoted\ndocstring bodies and nothing else. The fixture filename literals the docstrings\nnarrate (`BUG-0001-something.md` at the file's line 164,\n`BUG-0005-something.md.empty.orphan` at line 262) are unchanged in the executable\ncode, which is the correct outcome: a fixture filename is a usage value, not a\nprovenance citation, and the lint correctly never flagged those lines. The file's\nfour tests ran and passed inside the gated unit run\n(`tests/unit/test_overwatch_empty_files_report_scope_bash.py ....  [ 95%]`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Gated suites (Steps 5a, 6.6, 6.7)",
+      "heading": "Finding 9: Gated suites (Steps 5a, 6.6, 6.7)",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth runners were executed from the dev-tree root with `--coverage`, output teed\nto `PGAI_AGENT_KANBAN_TEMP_DIR/tester/`:\n\n| Runner | Exit | Result |\n|---|---|---|\n| `team/scripts/run-unit-tests.sh --coverage` | `UNIT_EXIT=0` | 4648 passed, 31 skipped in 890.15s |\n| `team/scripts/run-integration-tests.sh --coverage` | `INTEGRATION_EXIT=0` | 515 passed, 1 skipped in 579.37s |\n\nEvery lint pre-flight in both runners reported OK, including\n`test_anti_patterns`, `skip_cites_real_bug`, `orphan_tests`, `api_parity`,\n`operator_verb_manifest`, `icd_freshness`, `icd_compat`, `changelog_freshness`,\n`doc_command_truth`, `help_presence`, `hygiene`, `python_import_completeness`,\n`dockerfile_static` (3 Dockerfiles, 0 violations), and the post-run\n`bare_tmp_cleanliness` and `listener_cleanliness` checks. The PASS evidence cited\nhere is the two runner exit codes, not a pytest \"N passed\" line.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Constraint negative checks (Step 6.9)",
+      "heading": "Finding 10: Constraint negative checks (Step 6.9)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- The CODER ticket's \"reword in preference to suppressing\" constraint holds:\n  `team/scripts/hygiene-lint-allowlist.json` is NOT in the RC diff, so no new\n  suppression was added to reach zero findings.\n- The diff introduces no secrets, tokens, or credentials -- it touches docstring\n  prose only.\n- No `set -euo pipefail`, cleanup trap, or parameterized-query site is touched by\n  the RC.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Skip-cites-real-bug gate (Step 6.13)",
+      "heading": "Finding 11: Skip-cites-real-bug gate (Step 6.13)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/lint_skip_bug_gate.sh` exited 0: \"checking for placeholder\nskip IDs ... BUG-NNNN file-existence check: 0 missing files ... OK -- all skip\nannotations are compliant.\" Independent greps for placeholder shapes (`BUG-SKIP`,\n`skip` near `BUG-<letters>`) found only two non-violating classes of hit:\narchived runner logs under `team/tests/artifacts/`, and the gate's own test\nfixtures in `team/tests/unit/test_skip_bug_citation_scan.py` (synthetic IDs\n`BUG-1234` through `BUG-1239`, which are the subject under test rather than\ncitations).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Prerequisite dependency graph (Step 6.10)",
+      "heading": "Finding 12: Prerequisite dependency graph (Step 6.10)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe v2.23.9 lifecycle is correctly bookended and acyclic:\n\n```\nPM-20260916-007-decompose-...  (prereq: none, DONE)\nCM-20260916-046-open-rc-2-23-9 (prereq: none, DONE)\n  +- CODER-20260916-045-provenance-lint-sweep (prereq: CM-046, DONE)\n       +- TESTER-20260916-047-verify-2-23-9    (prereq: CODER-045, WORKING)\n            +- CM-20260916-049-release-2-23-9  (prereq: CODER-045 + TESTER-047, WAITING)\n```\n\nNo cycles; every referenced task ID resolves to an existing folder; no sequence\ncollisions. The CODER ticket carrying a lower sequence number (045) than the\nopen-RC bookend it depends on (046) matches the established materialization order\nin this project -- the immediately prior cycle used the same shape (CODER-039 /\nWRITER-040 under CM-041-open-rc-2-23-8) -- so it is not drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Synthetic release simulation (Step 6.8)",
+      "heading": "Finding 13: Synthetic release simulation (Step 6.8)",
+      "level": 3,
+      "body": "**Category:** pass (skipped by rule, with note)\n\nSkipped as the step directs. The RC diff touches exactly one path,\n`team/tests/unit/test_overwatch_empty_files_report_scope_bash.py`. No\nrelease-lifecycle file -- `cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`,\n`team/scripts/lib/project_paths.sh`, or anything in `team/scripts/` in the\nopen/close cycle -- is in the diff, so the trigger condition for this step is not\nmet. `team/tests/integration/test_cm_release_synthetic.py` nonetheless ran as\npart of the green integration suite.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass (skipped by rule, with note)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Coding-standards and documentation-discipline spot-check (Step 6.14)",
+      "heading": "Finding 14: Coding-standards and documentation-discipline spot-check (Step 6.14)",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo new script, no new `--help` surface, no new operational value, and no newly\nduplicated `lib/` implementation is introduced -- the RC changes prose in an\nexisting test module only. The Documentation Discipline Rule creates no\nobligation here: the change adds or alters no tunable, environment variable,\nconfiguration value, script behavior, or team convention, so no `*_example`,\nREADME, or SOP update is owed. `lint_doc_command_truth`,\n`lint_changelog_freshness`, and `lint_icd_freshness` all reported OK inside the\ngated run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Test fidelity of the change",
+      "heading": "Finding 15: Test fidelity of the change",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe RC's change is prose in a test module; the behavior it narrates (quarantine\nof empty bug-report files, scope-bounded pruning of claim-lock residue) is\nexercised by the module's four tests through a real `bash` subprocess sourcing\nthe real `overwatch_check_empty_files` implementation against a real temp kanban\ntree -- not a mocked proxy. The breaking condition the module guards is therefore\ngenuinely exercised. No fidelity concern is raised.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

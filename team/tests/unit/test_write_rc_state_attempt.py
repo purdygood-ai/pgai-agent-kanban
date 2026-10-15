@@ -2,7 +2,7 @@
 test_write_rc_state_attempt.py
 ===============================
 Unit tests for write_open_with_attempt in pgai_agent_kanban.cm.write_rc_state
-— the v2.0.0 Goal 3 ("the retry counter") writer.
+— the retry-counter writer.
 
 Coverage:
   - write_open_with_attempt emits the same base shape as write_open() plus

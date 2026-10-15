@@ -18,9 +18,15 @@
 #
 # Usage:
 #   bash verify-window0-geometry.sh <SESSION_NAME> [--kanban-root <path>]
+#   bash verify-window0-geometry.sh -h|--help
+#
+#   SESSION_NAME           tmux session whose 'main' window is checked
+#   --kanban-root <path>   Override the kanban root path
+#   -h, --help             Print this usage and exit 0 without querying tmux
 #
 # Exit codes:
-#   0  — geometry is correct (queues pane is rightmost at ~PGAI_WINDOW0_RIGHT_COL_PCT%)
+#   0  — geometry is correct (queues pane is rightmost at ~PGAI_WINDOW0_RIGHT_COL_PCT%),
+#        or -h/--help printed this usage
 #   1  — geometry is wrong (queues pane not rightmost, width off, or not found)
 #   2  — usage error or tmux session/window not found
 #
@@ -31,6 +37,23 @@
 # The right-column width is a shared constant defined in lib/dashboard_constants.sh.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:36}"
+      exit 0
+      ;;
+  esac
+done
+
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
@@ -115,7 +138,7 @@ QUEUES_INDEX=""
 
 while IFS=' ' read -r idx left width ppid; do
     # Get all descendant processes of this pane's shell PID and search for --mode queues
-    if ps --ppid "$ppid" -o args= 2>/dev/null | grep -q -- '--mode queues'; then
+    if grep -q -- '--mode queues' <<< "$(ps --ppid "$ppid" -o args= 2>/dev/null)"; then
         QUEUES_LEFT="$left"
         QUEUES_WIDTH="$width"
         QUEUES_INDEX="$idx"
@@ -123,7 +146,7 @@ while IFS=' ' read -r idx left width ppid; do
     fi
     # Also check grandchildren (watch spawns a child process)
     while IFS= read -r child_pid; do
-        if ps --ppid "$child_pid" -o args= 2>/dev/null | grep -q -- '--mode queues'; then
+        if grep -q -- '--mode queues' <<< "$(ps --ppid "$child_pid" -o args= 2>/dev/null)"; then
             QUEUES_LEFT="$left"
             QUEUES_WIDTH="$width"
             QUEUES_INDEX="$idx"

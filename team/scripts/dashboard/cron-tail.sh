@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# dashboard-cron-tail.sh
+# cron-tail.sh
 # Tails the cron log for a single cron-driven agent.
 #
 # Designed to run in a tmux pane inside the cron-logs window created by
-# dashboard-create.sh.  Handles the missing-log-file case gracefully:
+# dashboard/create.sh.  Handles the missing-log-file case gracefully:
 # prints a "no log yet" notice and polls until the file appears, then
 # exec-replaces itself with tail -F.
 #
 # Usage:
-#   dashboard-cron-tail.sh <agent> [--kanban-root <path>]
+#   cron-tail.sh <agent> [--kanban-root <path>]
 #
 # Arguments:
 #   agent        One of: pm, cm, coder, writer, tester
@@ -34,6 +34,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source project_paths lib for pp_* helpers
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/../lib/project_paths.sh"
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh). This pane
+# has always colored unconditionally (no NO_COLOR/TERM=dumb gate) -- that
+# behavior is preserved by setting USE_COLOR=true unconditionally below,
+# matching ansi_code()'s own USE_COLOR-gated contract.
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
+USE_COLOR=true
 
 # ---------------------------------------------------------------------------
 # Valid agent names
@@ -52,7 +60,12 @@ while [[ $_i -lt ${#_args[@]} ]]; do
   arg="${_args[$_i]}"
   case "$arg" in
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -35
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:25}"
       exit 0
       ;;
     --kanban-root)
@@ -101,24 +114,24 @@ esac
 # Resolve log file path
 # ---------------------------------------------------------------------------
 # cron-<agent>.log files live at $KANBAN_ROOT/logs/ — that's where the
-# cron-suggested.txt template redirects each wake-claude.sh firing's stdout.
+# cron-suggested.txt template redirects each wake/claude.sh firing's stdout.
 LOG_FILE="${KANBAN_ROOT}/logs/cron-${AGENT_NAME}.log"
 
 # ---------------------------------------------------------------------------
 # Print agent header banner so pane identity is visible even before the log
 # ---------------------------------------------------------------------------
-printf '\033[1;36m=== cron log: %s ===\033[0m\n' "$AGENT_NAME"
-printf '\033[2m%s\033[0m\n' "$LOG_FILE"
+printf '%s=== cron log: %s ===%s\n' "$(ansi_code bold_cyan)" "$AGENT_NAME" "$(ansi_code reset)"
+printf '%s%s%s\n' "$(ansi_code dim)" "$LOG_FILE" "$(ansi_code reset)"
 
 # ---------------------------------------------------------------------------
 # Wait for the log file to appear, then exec tail -F
 # ---------------------------------------------------------------------------
 if [[ ! -f "$LOG_FILE" ]]; then
-  printf '\033[33mno log yet — waiting for %s to appear...\033[0m\n' "$LOG_FILE"
+  printf '%sno log yet — waiting for %s to appear...%s\n' "$(ansi_code yellow_bright)" "$LOG_FILE" "$(ansi_code reset)"
   while [[ ! -f "$LOG_FILE" ]]; do
     sleep 5
   done
-  printf '\033[32mlog file found — starting tail\033[0m\n'
+  printf '%slog file found — starting tail%s\n' "$(ansi_code green_bright)" "$(ansi_code reset)"
 fi
 
 exec tail -F "$LOG_FILE"

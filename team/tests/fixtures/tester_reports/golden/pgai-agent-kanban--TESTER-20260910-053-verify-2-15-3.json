@@ -1,0 +1,179 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "RC `ai_rc/v2.15.3` at commit `3f654cd` was verified against\n`requirements/v2.15.3-bugfix-bundle-20260910.md` — a single-item bundle\ncarrying `BUG-0232-bugs-skipped-render-misses-autogen.md` — and against the\nacceptance criteria of the four tickets it decomposed into (CODER-048 scrub\nprose repair, CODER-049 render on the auto-generate notes path, CODER-050\nend-to-end coverage of that path, WRITER-051 document truth). The RC\ndelivers what it was chartered to deliver, and I confirmed it behaviorally\nrather than structurally: the internal-identifier scrub now substitutes a\nneutral noun phrase instead of deleting the token, leaving publishable\nprose; the auto-generated release notes carry a `## Bugs Skipped` section\nfed from the pre-built, pre-scrubbed block, with an explicit `None` empty\nstate and no stray table artefacts; driving the real chain (bug files →\n`build_bugs_skipped_notes_block` → the extracted generator) with task\nidentifiers of all six agent prefixes produced notes that contain none of\nthem; and the WRITER-draft path cannot double-render, because the\ngenerator's `git ls-tree HEAD` guard skips the whole block once the squash\nhas carried the notes file onto main. Both gated runners exited 0 (unit\n3770 passed / 3 skipped; integration 442 passed / 1 skipped). Three findings are filed as follow-ups, none of which\naffects this release's usability: the new end-to-end test stays green when\nthe rendered table stops arriving at the generator (BUG-0233); the rendered\ntable's severity cell is filled with the whole body of a bug file's severity\nsection, newlines included, which breaks the row for the 33 of 72 bug files\nwritten that way (BUG-0235 — this release's own notes are clean because its\nthree new bug files were authored in the template's bare-value shape); and\none release-notes generation step is narrated under two different step\nnumbers (BUG-0234, pre-existing). Systemic risk is `medium`, carried by\nBUG-0235: a real defect that ships and gets fixed next iteration, damaging a\npublished document's formatting and nothing else.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "the auto-generate notes path renders the scrubbed Bugs-Skipped table",
+      "heading": "Finding 1: the auto-generate notes path renders the scrubbed Bugs-Skipped table",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0232 `## Acceptance` item 1, and CODER-049's criteria 1-3. Verified\nbehaviorally, not by grep alone:\n\n- `grep -c \"Bugs Skipped\" team/scripts/lib/cm/release_notes.sh` → 3 hits\n  (comment, `SECTION_ORDER`, render branch).\n- Extracted the real `RELNOTES_PY` heredoc (lines 209-545) and drove it with\n  the production argv contract in a throwaway git repo under the framework\n  temp root. With a non-empty block the section renders the block verbatim —\n  header, separator, rows — between `## Other Changes` and `## Known Issues`,\n  exactly where the documents say it sits. With an empty block the section\n  renders `## Bugs Skipped` / `None`: no table header, no separator, no\n  dangling blank, byte-stable for a no-findings release (CODER-049 criterion 3).\n- End-to-end over the real chain: wrote six synthetic bug files whose\n  `## Symptom` text carried a task identifier of each agent prefix, built the\n  block through `build_bugs_skipped_notes_block` (sourced from\n  `release_known_issue.sh`), fed the result to the generator, then ran\n  `grep -rEn '(CODER|WRITER|TESTER|CM|PM|PO)-[0-9]{8}-[0-9]+'` over the\n  written notes file: no output. Each row read\n  `| The widget failed to open while another item was in flight. | internal-only | MEDIUM | Deferred because another item already covers the area. |`\n  — scrubbed and grammatical (CODER-049 criterion 2).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "the scrub leaves readable prose and the identifier never survives",
+      "heading": "Finding 2: the scrub leaves readable prose and the identifier never survives",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-048's criteria 1-3 and the closing paragraph of BUG-0232's `## Fix`.\n`_strip_internal_ids` now substitutes `_ID_REPLACEMENT_TEXT` (`\"another\nitem\"`) rather than deleting, and the choice is documented at the definition\nwith its reasoning, as the ticket required. Exercised directly:\n\n| Input | Output |\n|---|---|\n| `Deferred because CODER-20260101-001-some-slug already covers the area.` | `Deferred because another item already covers the area.` |\n| `CODER-20260101-001-some-slug` | `another item` |\n| `See (PM-20260910-006-decompose-...-20260910) for context.` | `See (another item) for context.` |\n| `Source Task: WRITER-20260910-051-cm-augmentation-doc-truth` | `Source Task: another item` |\n| `No identifier here at all.` | unchanged |\n\nThe worked example from the bug report produces exactly the expected\nsentence. `_INTERNAL_ID_RE` is unchanged (byte-identical in the diff), no\nsecond copy of the scrub was created, and the three importing heredocs are\nuntouched. The new `team/tests/unit/test_internal_id_scrub.py` covers all\nfive required sentence positions with exact-string assertions plus both\ntoken families and all six prefixes.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "the WRITER-draft path is unaffected and cannot double-render",
+      "heading": "Finding 3: the WRITER-draft path is unaffected and cannot double-render",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-049 criterion 4. Step 4e is untouched in the diff. The ordering in\n`team/scripts/cm/release.sh` is ship policy (321) → squash to main (325) →\ngenerate notes (330), and the generator opens with an idempotency guard that\nskips its entire generation block when `git ls-tree --name-only HEAD\nrelease-notes/<version>.md` returns non-empty. I verified that predicate\nempirically in a throwaway repo: non-empty output once the notes file is\ncommitted to HEAD, empty output when absent. So on the draft path the\ngenerator does not run at all and exactly one `## Bugs Skipped` section can\nexist; on the no-draft path it runs. The draft-path end-to-end test\n(case (d), which asserts the scrubbed substance is present) passed inside\nthe green integration suite.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "the two documents agree with each other and with the code",
+      "heading": "Finding 4: the two documents agree with each other and with the code",
+      "level": 3,
+      "body": "**Category:** pass\n\nWRITER-051's six criteria and BUG-0232 `## Acceptance` item 4. Read both\nrevised passages in full. `team/roles/CM.md` now states that `## Bugs\nSkipped` is rendered on **both** notes paths, tells the agent never to type\nor append that table, and names what the agent does author (Summary, What\nShipped, Bugs Resolved, Known Issues outside a KNOWN-ISSUE decision).\n`docs/cm-release-reference.md` makes the same claim and adds the per-path\nempty-state split. No surviving sentence in either document asserts the\nblock is hand-authored or that the render is draft-path-only. Both match\nthe code I exercised in Findings 1 and 3 (section between Other Changes and\nKnown Issues; literal `None` when empty; render-once per path). The lint\nreminder is still described as advice, not a gate — which is true: nothing\nin the release path refuses on its output. `RELEASE-NOTES-TEMPLATE.md`\n(out of the ticket's scope) already says the section is rendered, so the\nthree surfaces are consistent. `grep -rEn\n'(CODER|WRITER|TESTER|CM|PM|PO)-[0-9]{8}-[0-9]+' release-notes/\nteam/roles/CM.md docs/cm-release-reference.md` returns nothing.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "the new end-to-end test passes when the rendered table stops arriving",
+      "heading": "Finding 5: the new end-to-end test passes when the rendered table stops arriving",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks — one assertion in one test)\n**Systemic Risk:** low (test-coverage hygiene; no runtime effect, no state at risk, nothing shipped is wrong today)\n**Regression:** no (the coverage shortfall predates this RC — before it, the auto-generate notes path had no end-to-end test at all; `git show ai_main:team/tests/integration/test_cm_release_known_issue_carry_forward.py` contains no auto-generate case. This RC narrowed the shortfall and did not close it; no behavior that worked in v2.15.2 stopped working)\n**Integrity Damage:** no\n**Integrity:** none\n**Filed As:** BUG-0233 (Path C-A — filed as BUG — code defect / regression / test failure)\n\nThe acceptance item this test answers is met as literally written, and its\ncontrol holds: removing the render wiring (the `SECTION_ORDER` entry and the\n`elif section == \"Bugs Skipped\":` branch in `release_notes.sh`) makes all six\nparametrized cases fail on `assert '## Bugs Skipped' in ...`. That matches\nwhat the authoring ticket recorded, so its completion note is true.\n\nThe shortfall is one level deeper. The test's three assertions are the\n`KNOWN-BUGS` status, the presence of the `## Bugs Skipped` heading, and the\nabsence of its own prefix. None observes the rendered rows. I kept the\nsection and removed only the value's arrival — changed the tenth positional\nargument of the `cm_release_generate_notes` invocation from\n`\"${_BUGS_SKIPPED_NOTES_BLOCK:-}\"` to `\"\"`, simulating the global being\nrenamed, cleared, or computed in another shell — and all six cases passed\n(`6 passed, 5 deselected in 14.75s`), with the notes file carrying\n`## Bugs Skipped` / `None` and the report's six findings unrepresented.\nThat second shape is the one that recurs: the defect this release closed was\nnever a missing section, it was a value computed and then discarded before\nit reached the file.\n\nNothing else covers the arrival. The new unit module does assert\npass-through of rows/header/separator, but it hands the block to the\ngenerator itself as an argv value, so it proves the generator renders what\nit is given, not that the pipeline still gives it anything. The\nWRITER-draft sibling test does not have this hole — it asserts the scrubbed\nsubstance sentence is present (line 717); the auto-generate case omitted the\nequivalent assertion. The worktree was restored after both controls and is\nbyte-identical to its pre-experiment state.",
+      "filed_as": "BUG-0233",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks — one assertion in one test)",
+        "systemic_risk": "low (test-coverage hygiene; no runtime effect, no state at risk, nothing shipped is wrong today)",
+        "regression": "no (the coverage shortfall predates this RC — before it, the auto-generate notes path had no end-to-end test at all; `git show ai_main:team/tests/integration/test_cm_release_known_issue_carry_forward.py` contains no auto-generate case. This RC narrowed the shortfall and did not close it; no behavior that worked in v2.15.2 stopped working)",
+        "integrity": "none",
+        "filed_as": "BUG-0233 (Path C-A — filed as BUG — code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "one release-notes generation step is narrated under two step numbers",
+      "heading": "Finding 6: one release-notes generation step is narrated under two step numbers",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks — three strings)\n**Systemic Risk:** low (operator-facing narration only)\n**Regression:** no (pre-existing; the `[Step 8]` strings at `release_notes.sh:124` and `:141` are untouched by this RC's diff and ship identically in v2.15.2)\n**Integrity Damage:** no\n**Integrity:** none\n**Filed As:** BUG-0234 (Path C-A)\n\n`team/scripts/lib/cm/release_notes.sh` prints `[Step 8]` at lines 124 and\n141 and `[Step 11a]` at line 553 for the same step, while\n`release_ship_policy.sh` calls it Step 11a at lines 505, 590 and 602 —\nincluding the operator-facing `skipping stamp (Step 11a will auto-generate)`\nmessage. A release log therefore reads `[Step 4e] ... (Step 11a will\nauto-generate)` followed immediately by `[Step 8] Generating release\nnotes ...`. This is the code-side wart WRITER-051 recorded in its completion\nnote: it deliberately named the function rather than a step number in\n`team/roles/CM.md`, because either number would have put a wrong fact in a\ngovernance file. That judgement was correct, and filing the wart is the\nfollow-up it asked for.",
+      "filed_as": "BUG-0234",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks — three strings)",
+        "systemic_risk": "low (operator-facing narration only)",
+        "regression": "no (pre-existing; the `[Step 8]` strings at `release_notes.sh:124` and `:141` are untouched by this RC's diff and ship identically in v2.15.2)",
+        "integrity": "none",
+        "filed_as": "BUG-0234 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "rendered Bugs-Skipped cells are not normalized for a markdown table",
+      "heading": "Finding 7: rendered Bugs-Skipped cells are not normalized for a markdown table",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks — normalize the cell in one heredoc, plus a unit test)\n**Systemic Risk:** medium (a real defect that ships and is fixed next iteration: it damages a published document's formatting only, and this release's own notes are clean because its bug files were authored in the template's bare-value shape)\n**Regression:** no (the row-assembly code is untouched by this RC — the same extraction shipped in v2.15.2 and was already reachable through the Step 4e stamp. What this RC changes is reach, not behavior: the table now renders on the path every release takes. Stated plainly so CM can weigh it: no code path behaves differently than it did in v2.15.2, but a latent fragility moved from a path this project never uses to one it always uses)\n**Integrity Damage:** no\n**Integrity:** none\n**Filed As:** BUG-0235 (Path C-A)\n\nFound by driving the real render with real inputs — this report and the two\nbugs it files — rather than with a synthetic fixture:\n\n```\ncm_build_bugs_skipped_ship_block <this report> <project bugs dir>\n```\n\nThe severity cell came back as `MEDIUM THE SHIPPED BEHAVIOR IS CORRECT TODAY —\nI VERIFIED THE RENDERED, SCRUBBED TABLE REACHES AUTO-GENERATED NOTES END TO\nEND, ...` and ran on for six more lines, ending in the file's `---` rule. The\ncause is in `build_bugs_skipped_notes_block`\n(`team/scripts/lib/cm/release_known_issue.sh`, heredoc around lines 435-455):\n`desc` is flattened through `first_sentence`, but `severity` is\n`parse_section(text, \"Severity\").strip()`, and `parse_section` returns the\nwhole section body up to the next `##` heading. A bug file that records why it\nchose its rating therefore emits that paragraph into the cell, uppercased,\nnewlines and all — and the table row ends at the first newline.\n\nThis is not a rare input shape: **33 of the 72 bug files with a `## Severity`\nsection carry more than one line in it**, including every TESTER-filed bug\nfrom BUG-0219 onward. A milder case of the same gap: no cell is sanitized for\n`|`, and three current bug files (BUG-0182, BUG-0195, BUG-0202) carry one\ninside the first sentence of their `## Symptom`, which is the substance cell.\n\n**What I did about this release's own notes.** v2.15.3 takes the\nauto-generate path and this report carries findings, so the table will render\ninto its notes. I authored BUG-0233, BUG-0234 and BUG-0235 with a bare value\nunder `## Severity` — the shape `bugs/templates/BUG-TEMPLATE.md` specifies —\nand moved each rating's justification into its own `## Severity Rationale`\nsection. Re-running the render then produced exactly header + separator + one\nline per row, every cell single-line. So this release publishes a clean table;\nthe fragility is filed for the loop rather than left to surface in whichever\nfuture release happens to cite a conventionally-authored bug.",
+      "filed_as": "BUG-0235",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks — normalize the cell in one heredoc, plus a unit test)",
+        "systemic_risk": "medium (a real defect that ships and is fixed next iteration: it damages a published document's formatting only, and this release's own notes are clean because its bug files were authored in the template's bare-value shape)",
+        "regression": "no (the row-assembly code is untouched by this RC — the same extraction shipped in v2.15.2 and was already reachable through the Step 4e stamp. What this RC changes is reach, not behavior: the table now renders on the path every release takes. Stated plainly so CM can weigh it: no code path behaves differently than it did in v2.15.2, but a latent fragility moved from a path this project never uses to one it always uses)",
+        "integrity": "none",
+        "filed_as": "BUG-0235 (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

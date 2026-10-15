@@ -81,8 +81,8 @@ contains:
 The sandbox kanban root is under the pytest temp tree, so upgrade.sh's
 temp-root guard skips crontab and pseudocron hooks.
 
-NAMING CONVENTION (SOP.md)
----------------------------
+NAMING CONVENTION (roles/TESTER.md)
+--------------------------------------
 Test function names describe BEHAVIOR, not bug IDs or task IDs.
 """
 
@@ -106,19 +106,22 @@ _REAL_ARGPARSE_SH = _TEAM_SCRIPTS_DIR / "lib" / "argparse.sh"
 _REAL_ENV_BOOTSTRAP_SH = _TEAM_SCRIPTS_DIR / "lib" / "env_bootstrap.sh"
 _REAL_INI_PARSER_SH = _TEAM_SCRIPTS_DIR / "lib" / "ini_parser.sh"
 _REAL_PROJECT_PATHS_SH = _TEAM_SCRIPTS_DIR / "lib" / "project_paths.sh"
+_REAL_ERROR_CONTRACT_SH = _TEAM_SCRIPTS_DIR / "lib" / "error_contract.sh"
 _REAL_TEMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "temp.sh"
 
 _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
+_REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 
 _REAL_LIBS = [
     _REAL_ARGPARSE_SH,
     _REAL_ENV_BOOTSTRAP_SH,
     _REAL_INI_PARSER_SH,
     _REAL_PROJECT_PATHS_SH,
+    _REAL_ERROR_CONTRACT_SH,
     _REAL_TEMP_SH,
     _REAL_VERSION_STAMP_SH,
-    _REAL_SUBAGENT_DEPLOY_SH,
+    _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH,
 ]
 
 # Version written into the dev-tree VERSION file for fixtures that need
@@ -232,7 +235,7 @@ def _build_two_phase_sandbox(
             shutil.copy2(lib_src, dev_lib / lib_src.name)
 
     # --- Dev tree: minimal stubs for the deposit loop ---
-    for doc_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP.md"]:
+    for doc_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
         (dev_tree / "team" / doc_name).write_text(
             f"# {doc_name} stub\n", encoding="utf-8"
         )
@@ -249,12 +252,15 @@ def _build_two_phase_sandbox(
     subagents.mkdir()
     (subagents / "MANIFEST.txt").write_text("# Empty manifest\n", encoding="utf-8")
 
-    # --- Dev tree: minimal .git directory so upgrade.sh writes the VERSION stamp.
-    # upgrade.sh only runs the VERSION stamp block when `[[ -d "$DEV_TREE/.git" ]]`.
-    # We create a bare sentinel .git to satisfy that check; no real git history
-    # is needed since --stamp-version bypasses git describe entirely.
+    # --- Dev tree: minimal .git sentinel so the dev tree is shaped like a checkout.
+    # upgrade.sh writes the VERSION stamp on every path, .git or not; only the
+    # git-dependent work depends on `[[ -e "$DEV_TREE/.git" ]]` -- the
+    # branch-prefix resolution and divergence advisory in upgrade.sh, and the
+    # VERSION_DETAIL write in the shared stamp helper. The sentinel puts this
+    # run on the checkout path; no real git history is needed since
+    # --stamp-version bypasses git describe entirely.
     # anti-pattern-allowlist: sandbox-fixture (justification: this is an
-    # intentional minimal .git sentinel to satisfy upgrade.sh's -d check; it is
+    # intentional minimal .git sentinel to satisfy upgrade.sh's -e check; it is
     # not a real git repository and does not produce any git operations)
     (dev_tree / ".git").mkdir()
     (dev_tree / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")

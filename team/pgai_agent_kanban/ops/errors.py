@@ -10,7 +10,12 @@ to distinguish individual subtypes.
     ├── Ambiguous   — lookup matched more than one result; caller must narrow
     ├── Refused     — operation was rejected by a policy or guard (e.g. HALT)
     ├── IoError     — underlying I/O failure reading kanban files
-    └── MountPinned — stale worktree path is an active mount target; cannot rm -rf
+    ├── MountPinned — stale worktree path is an active mount target; cannot rm -rf
+    └── CliRefusal  — a verb stopped with the exact stderr text and exit code
+                      its CLI wrapper prints and exits with
+
+cli_exit_code(exc) maps any of them to the exit code the ops CLI uses, so
+every surface that reports an ops failure as an exit code agrees with it.
 """
 
 from __future__ import annotations
@@ -89,3 +94,65 @@ class MountPinned(OpsError):
 
     Maps to exit code 4 in the reset_item CLI path.
     """
+
+
+class CliRefusal(OpsError):
+    """A verb stopped, carrying what its CLI prints and the code it exits with.
+
+    The base of a verb whose refusals keep their CLI script's plain-text
+    form (the CM verbs: ``cm.cancel.CancelRcError``,
+    ``cm.unwind.UnwindRcError``), so the CLI and the REST twin report one
+    refusal the same way.
+
+    Attributes:
+        error:     A stable machine key (``<verb>.<reason>``).
+        text:      What remains to be printed to stderr (plain ``ERROR:``
+                   lines, a dual-channel block, or ``""`` when nothing is
+                   left to print).
+        exit_code: The code the CLI exits with.
+    """
+
+    def __init__(self, error: str, text: str, exit_code: int = 1) -> None:
+        super().__init__(text.rstrip("\n") or error)
+        self.error = error
+        self.text = text
+        self.exit_code = exit_code
+
+
+# Text an OpsError carries when deposit_intake refuses to overwrite an
+# existing target; the one OpsError message that selects its own exit code.
+NO_CLOBBER_MARKER = "already exists (no clobber)"
+
+
+def cli_exit_code(exc: OpsError) -> int:
+    """Return the exit code the ``python3 -m pgai_agent_kanban.ops`` CLI uses for *exc*.
+
+    The one mapping from an ops exception to a process exit code, shared by
+    the CLI entry point (``ops.write._cli_main``) and the operator API's ops
+    adapter, so an operation refused over HTTP reports the same ``exit_code``
+    the CLI wrapper exits with.
+
+    Mapping:
+        Ambiguous   -> 2  (key prefix matched more than one item)
+        NotFound    -> 3  (no item matched)
+        Refused     -> 2  (a guard rejected the operation)
+        MountPinned -> 4  (reset --force blocked by a mount)
+        IoError     -> 4  (filesystem failure)
+        OpsError    -> 3  when the message carries the no-clobber marker
+                           (deposit_intake target exists), else 1
+
+    Args:
+        exc: The exception an ops function raised.
+
+    Returns:
+        The exit code, 1 through 4.
+    """
+    if isinstance(exc, (Ambiguous, Refused)):
+        return 2
+    if isinstance(exc, NotFound):
+        return 3
+    if isinstance(exc, (MountPinned, IoError)):
+        return 4
+    if NO_CLOBBER_MARKER in str(exc):
+        return 3
+    return 1

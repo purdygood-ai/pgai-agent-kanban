@@ -1,0 +1,41 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified RC `ai_rc/v2.27.1` (HEAD `a898029c`) against `requirements/v2.27.1-bugfix-bundle-20261003.md`, a 27-bug bundle:\n\n- three CM release-script defects: BUG-0491 (cancel-rc state reader), BUG-0492 (GitHub release ignoring `push_to_remote`), BUG-0493 (release-state rewrites dropping appended event blocks);\n- two hygiene ride-alongs: BUG-0494 (release summary text in local mode), BUG-0495 (operator window layout);\n- twenty quarantined timing- or order-dependent tests (BUG-0496 to BUG-0515);\n- two certification-tooling environment bugs (BUG-0516, BUG-0517).\n\nThe bundle was implemented by 12 tasks, all merged with `--no-ff`. Both gated runners exited 0: unit 6410 passed and 43 skipped, integration 638 passed and 1 skipped, nothing deselected.\n\nThe original failure modes of BUG-0491, BUG-0493 and BUG-0516 were reproduced (on `ai_main`, or in the old environment shape) and shown fixed on the RC. BUG-0495's geometry was measured on a private tmux socket. All 20 un-quarantined tests passed 20 of 20 iterations idle and 10 of 10 with CPU spinners on every core. The full order-independence sweep found no order coupling.\n\nOne acceptance gap was found and filed: hand-written docs still describe the removed suggested-commands pane (BUG-0518). One quality-class lint finding was filed (BUG-0519); it does not affect the recommendation.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Hand-written operator-window docs still describe the removed suggested-commands pane",
+      "heading": "Finding 1: Hand-written operator-window docs still describe the removed suggested-commands pane",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated documentation drift; no runtime effect)\n**Filed As:** BUG-0518 (Path C-A: filed as a BUG — code defect / regression / test failure)\n**Filed By:** TESTER (autonomous Path C) — the operator dashboard window no longer has a suggested-commands pane, but three documents and one script header still tell operators it is there.\n\n**Criterion:** BUG-0495 acceptance requires that \"the census, cadence lint and window docs agree with the new layout\".\n\n**Expected:** every operator-facing description of window 1 names, top to bottom, the eight-column board, the full-width shell and the legend.\n\n**Actual:** five places still describe the removed pane:\n- `docs/DASHBOARD-PANES.md:35` describes \"three stacked regions: board (top), suggested-commands (middle), and cmdline (bottom)\". The generated table directly below it lists the shell and the legend instead.\n- `docs/DASHBOARD-PANES.md:52` says \"The suggested-commands pane is strictly read-only...\".\n- `docs/DASHBOARD-PANES.md:147` refers to window 1's \"suggested-commands row\".\n- `HOW_TO.md:1035` says \"with a suggested-commands pane below it and an interactive shell at the bottom\".\n- The header comment of `team/scripts/dashboard/suggested-commands.sh` still calls the script a pane.\n\n**Why it was missed:** the WRITER ticket was scoped to `docs/dashboard.md` and `docs/OPERATIONS.md` only. It updated both correctly and recorded these other locations in its status as out-of-scope follow-ups. The generated table, the census and the code are all correct; only this prose is stale.",
+      "filed_as": "BUG-0518",
+      "filed_by": "TESTER (autonomous Path C) — the operator dashboard window no longer has a suggested-commands pane, but three documents and one script header still tell operators it is there.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "criterion": "BUG-0495 acceptance requires that \"the census, cadence lint and window docs agree with the new layout\".",
+        "expected": "every operator-facing description of window 1 names, top to bottom, the eight-column board, the full-width shell and the legend.",
+        "actual": "five places still describe the removed pane:",
+        "why_it_was_missed": "the WRITER ticket was scoped to `docs/dashboard.md` and `docs/OPERATIONS.md` only. It updated both correctly and recorded these other locations in its status as out-of-scope follow-ups. The generated table, the census and the code are all correct; only this prose is stale."
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated documentation drift; no runtime effect)",
+        "filed_as": "BUG-0518 (Path C-A: filed as a BUG — code defect / regression / test failure)",
+        "filed_by": "TESTER (autonomous Path C) — the operator dashboard window no longer has a suggested-commands pane, but three documents and one script header still tell operators it is there."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

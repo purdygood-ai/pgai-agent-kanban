@@ -1,1 +1,1 @@
-# team/pgai_agent_kanban/dashboard — dashboard rendering sub-package.
+"""team/pgai_agent_kanban/dashboard — dashboard rendering sub-package."""

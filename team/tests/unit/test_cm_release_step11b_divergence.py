@@ -1,8 +1,9 @@
 """
 test_cm_release_step11b_divergence.py
 ======================================
-Focused regression gate for the Step 11b idempotency guard in
-``team/scripts/cm/release.sh``.
+Focused regression gate for the Step 11b idempotency guard, now living in
+``team/scripts/lib/cm/release_notes.sh`` (extracted from
+``team/scripts/cm/release.sh`` by the v2.9.20-engine-decomposition).
 
 The prior guard skipped CHANGELOG.md regeneration whenever HEAD's CHANGELOG
 already contained a heading for the target version.  A WRITER-authored section
@@ -22,7 +23,7 @@ This file tests the FIXED behaviour:
      render byte-for-byte, ``cmp -s`` exits 0, meaning the guard correctly
      identifies the file as up-to-date.
   4. **Safety pass: BUG-[0-9] tokens** — the safety pass grep pattern (added
-     after regeneration) would catch the BUG-0068 token in the WRITER-authored
+     after regeneration) would catch a bug-ID token in the WRITER-authored
      CHANGELOG section, confirming the guard is required and that the existing
      committed CHANGELOG.md would have triggered the safety-pass failure.
   5. **Regenerated output is clean** — a fresh ``changelog_writer`` render of
@@ -59,7 +60,11 @@ _THIS_FILE = pathlib.Path(__file__).resolve()
 # Three levels up: unit/ -> tests/ -> team/
 _TEAM_DIR = _THIS_FILE.parent.parent.parent       # team/
 _DEV_TREE_ROOT = _TEAM_DIR.parent                  # project root
-_CM_RELEASE_SCRIPT = _TEAM_DIR / "scripts" / "cm" / "release.sh"
+# Step 11b was extracted from cm/release.sh into this lib stage file by the
+# v2.9.20-engine-decomposition (see team/scripts/lib/cm/release_notes.sh's own
+# header doc); this constant follows the move so the structural assertions
+# below keep reading the code they actually describe.
+_CM_RELEASE_SCRIPT = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_notes.sh"
 _PYTHONPATH_ROOT = str(_TEAM_DIR)
 
 
@@ -223,8 +228,8 @@ class TestStep11bGuardStructure:
         )
         assert not old_guard_pattern.search(step11b_block), (
             "Step 11b still contains the heading-presence-only guard "
-            "``grep -qF '## ${ACTIVE_RC}'``.  This guard was the root cause of "
-            "BUG-0069: it allows WRITER-authored content to bypass regeneration. "
+            "``grep -qF '## ${ACTIVE_RC}'``, which allows WRITER-authored "
+            "content to bypass regeneration. "
             "The guard must be the byte-compare form (``cmp -s``) instead."
         )
 
@@ -263,7 +268,7 @@ class TestStep11bGuardStructure:
 class TestStep11bDivergencePath:
     """The byte-compare detects divergence between hand-authored and writer-rendered content.
 
-    These tests demonstrate the divergence scenario from BUG-0069: a
+    These tests demonstrate the divergence scenario: a
     WRITER-authored CHANGELOG section that contains an internal BUG-NNNN
     identifier and narrative prose not produced by the writer is byte-different
     from a fresh changelog_writer render on the same inputs.  The byte-compare
@@ -322,15 +327,16 @@ class TestStep11bDivergencePath:
         assert writer_authored != canonical_text, (
             "The WRITER-authored content is byte-identical to the canonical writer output.\n"
             "This fixture is broken — the hand-authored section must diverge to simulate "
-            "the BUG-0069 scenario.  Ensure the WRITER-authored text includes content "
+            "a WRITER-authored section that retains an internal identifier the writer "
+            "would strip.  Ensure the WRITER-authored text includes content "
             "(e.g. a BUG-NNNN token or narrative prose) that the writer would not produce."
         )
 
         # Confirm the hand-authored content contains the BUG-NNNN token the guard catches.
         assert re.search(r"BUG-[0-9]", writer_authored), (
             "The WRITER-authored fixture content does not contain a BUG-[0-9] token.\n"
-            "The fixture must simulate the BUG-0069 scenario where a WRITER-authored "
-            "section retains an internal identifier that changelog_writer would strip."
+            "The fixture must simulate a WRITER-authored section that retains an "
+            "internal identifier that changelog_writer would strip."
         )
 
     def test_canonical_writer_output_has_no_bug_tokens(

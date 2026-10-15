@@ -13,7 +13,7 @@ Family identity is the sorted, de-duplicated set of bundled-item basenames
 (e.g. "BUG-0042-foo.md") read from a requirements bundle's
 `## Bundled Items` section -- the same section and backtick-paren path
 convention CM.md documents for the bundled-item promotion in
-cm-release.sh Step 16b and the release-notes generator (team/scripts/cm/
+scripts/cm/release.sh Step 16b and the release-notes generator (team/scripts/cm/
 release.sh). Two bundles carrying the identical cargo set (same bugs, any
 order, any patch number) produce the identical family_key.
 

@@ -1,0 +1,126 @@
+# team/config/operator_verb_census_exempt.txt
+#
+# Exempt list for team/scripts/lint_api_parity.py's census-walk gate
+# (check_app_routes_have_census_row / class 2, and
+# check_scripts_have_census_row / class 4). team/config/operator_verbs.manifest
+# is the single source of truth for the operator VERB estate the REST-parity
+# contract scopes -- it is deliberately narrower
+# than "every script under team/scripts/ that declares OPERATOR_VALID_FLAGS"
+# (class 4) or "every script any router shells out to" (class 2), per
+# lint_operator_verb_manifest.py's own check_operations_reverse docstring
+# ("reads.py fronts a much wider set of read-only convenience endpoints ...
+# not part of the operator VERB set this manifest catalogues"). This sidecar
+# is how that narrower scope stays a documented, checked-in fact instead of
+# an unwritten exception a filesystem scan would otherwise flag as drift.
+#
+# Format: one script BASENAME per line (e.g. "show-readme.sh" -- never the
+# "scripts/..." relative form, since class 2's fronted-script detection and
+# the manifest's own check_operations_reverse precedent both key on
+# basename, and every script this list names has a unique basename across
+# the tree). Blank lines and `#` comments are ignored. Every entry must
+# carry a reason as a comment on the line(s) immediately above it.
+#
+# What this list does NOT do: it never removes a script from the operator
+# verb estate the REST-parity contract itself names (why, show,
+# show-queues, rc-metrics, agent-metrics, release-state, deep-verify,
+# halt/unhalt family, defer/undefer, wake-now, intake, release-locks,
+# unwind-rc, cancel-rc, deep-verify) -- every one of those carries a census
+# row, and an entry here for one of them (release-locks.sh, below) exists
+# only because that verb has a SECOND route for a second mode, and the
+# manifest carries exactly one REST twin per row: the entry documents the
+# extra route, it does not stand in for the row. Backfilling a script
+# listed below into a real census row (or removing it here because it
+# never fronts an operator verb) is future work; this list makes the
+# current, deliberate gap visible rather than silently flagged as noise on
+# every run.
+#
+# ---------------------------------------------------------------------------
+# reads.py convenience read: fronts GET /status (kanban-wide summary), one
+# of the "much wider set of read-only convenience endpoints" reads.py
+# serves outside the curated operator-verb estate.
+kanban-status.sh
+# ---------------------------------------------------------------------------
+# reads.py convenience read: fronts GET /costs (cost report).
+cost-report.sh
+# ---------------------------------------------------------------------------
+# The machine-readable sibling of why.sh: both reach resolve_verdicts in
+# team/pgai_agent_kanban/ops/verdict.py, the function GET /verdicts calls --
+# it is part of the "why" verb's own REST twin (GET /verdicts, census
+# schema_ref VerdictsResponse), not a separate operator verb of its own.
+# See operator_verbs.manifest's own "why" notes.
+verdict-report.sh
+# ---------------------------------------------------------------------------
+# Second route of an already-censused verb, not a gap: release-locks' census
+# row names its mutating mode, POST /operations/release-locks (body model
+# ReleaseLocksBody, held to the script's release|force flags by the parity
+# check). The verb's read-only listing mode -- release-locks.sh with no
+# --release -- is GET /release-locks in reads.py; a GET must never mutate,
+# so the two modes cannot share one route, and the manifest carries one
+# REST twin per row. This entry keeps class 2 from reporting the listing
+# route as uncensused; the POST twin is still verified by
+# lint_operator_verb_manifest.py's forward check (declared twin resolves to
+# a real route) and its /operations/* reverse check.
+release-locks.sh
+# ---------------------------------------------------------------------------
+# reads.py convenience read: fronts GET /test-report.
+show-test-report.sh
+# ---------------------------------------------------------------------------
+# reads.py convenience read: fronts GET /rejected (quarantined intake
+# inventory listing).
+list-rejected.sh
+# ---------------------------------------------------------------------------
+# reads.py convenience read: fronts GET /projects/{project}/tasks/{key}/readme.
+show-readme.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: recovers a
+# quarantined intake item back into the active queue. Not yet backfilled
+# into the operator-verb census.
+recover-rejected.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: exports one project's
+# full state (tasks, config, queues) to a portable archive.
+export-project.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: imports a project
+# archive produced by export-project.sh.
+import-project.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: exports the four
+# operator-owned root config files (kanban.cfg, projects.cfg, shell-env,
+# claude-env) to a portable bundle.
+export-kanban-config.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: imports a config
+# bundle produced by export-kanban-config.sh.
+import-kanban-config.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: initializes a bare git
+# repository for a new project's dev tree.
+init-project-git-repo.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: regenerates CHANGELOG.md
+# from release-notes/ history.
+regenerate-changelog.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: retires empty
+# consolidation bundle files left behind by the defer-piggyback mechanism.
+retire-empty-bundles.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: checks the DEEP-VERIFY
+# ledger's own freshness/cadence.
+deep-verify-freshness-check.sh
+# ---------------------------------------------------------------------------
+# CLI-only operator tool, no REST twin at all today: back-fills a release
+# version into ## Fixed In on a named set of bug files, never overwriting a
+# value already set.
+restamp-fixed-in.sh
+# ---------------------------------------------------------------------------
+# operator-only container lifecycle; deliberately CLI-only, never exposed over the API
+container-up.sh
+# ---------------------------------------------------------------------------
+# operator-only container lifecycle; deliberately CLI-only, never exposed over the API
+container-down.sh
+# ---------------------------------------------------------------------------
+# operator-only container lifecycle; deliberately CLI-only, never exposed over the API
+container-status.sh
+# ---------------------------------------------------------------------------

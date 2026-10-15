@@ -24,7 +24,7 @@ Design notes
 - "No task folders on disk" is verified by checking tasks_root after
   the subprocess exits non-zero.
 - All temp paths use pytest's tmp_path (never bare /tmp).
-- Test names describe behavior, never bug IDs or ticket IDs (SOP.md anti-pattern 6).
+- Test names describe behavior, never bug IDs or ticket IDs (roles/TESTER.md anti-pattern 6).
 """
 
 from __future__ import annotations

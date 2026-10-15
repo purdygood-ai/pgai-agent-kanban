@@ -11,7 +11,7 @@ Public API
     get_open_bug_ids(bug_backlog_path)      -> set[str]
     update_bug_backlog_cache(bugs_dir, bug_backlog_path) -> None
     get_unbundled_bugs(bugs_dir, bug_backlog_path)       -> list[dict]
-    claim_next_bug_id(bugs_dir, slug)       -> tuple[str, Path]
+    claim_next_bug_id(bugs_dir, slug, claimed_by=None) -> tuple[str, Path, Path]
     release_bug_id_claim(lock_path)         -> None
     detect_duplicate_bug_ids(bugs_dir)      -> list[int]
 """
@@ -20,6 +20,7 @@ import os
 import re
 import sys
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -84,11 +85,49 @@ else:
         r'^BUG-[0-9]{4}(?:-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$', re.IGNORECASE
     )
 
+# Which 'running' items a shipped bundle carried (see
+# pgai_agent_kanban.lib.bundle_items). _resolve_ledger_filename_re above has
+# already put this tree's package root on sys.path when it was needed.
+try:
+    from pgai_agent_kanban.lib.bundle_items import carried_item_names as _carried_item_names
+except ImportError:
+    _carried_item_names = None
+
+# The closed states every reader shares (done, wont-do; the retired
+# "superseded" reads as wont-do). The package root is on sys.path by now
+# (see _resolve_ledger_filename_re above).
+from pgai_agent_kanban.lib.terminal_states import TERMINAL_STATES, canonical_state  # noqa: E402
+
+
+def _carried_bug_files(bugs_dir: str) -> frozenset:
+    """File names of the bugs a shipped bundle left at 'running' (carried).
+
+    Read from the ``requirements`` directory beside *bugs_dir*. Empty when
+    the shared module is not importable.
+    """
+    if _carried_item_names is None:
+        return frozenset()
+    return _carried_item_names(Path(bugs_dir).parent / "requirements")
+
+
 # Excluded filenames (compared case-insensitively)
 _EXCLUDED_NAMES = {"BUG-TEMPLATE.md", "README.md"}
 
 # Maximum retry attempts for claim_next_bug_id before giving up.
 _CLAIM_MAX_RETRIES = 256
+
+# Durable per-bugs-dir provenance ledger claim_next_bug_id appends to on every
+# successful claim -- see _record_bug_claim below. A dotfile sitting beside
+# the bug reports themselves, never a bug report's own content, so it needs
+# no ledger-filename-gate handling and is invisible to the BUG-NNNN scans
+# above.
+_CLAIM_LOG_FILENAME = ".bug-claims.log"
+
+# Env var an agent's own wake dispatch exports naming the task currently
+# running in that session (team/scripts/lib/wake_driver_invoke.sh). Read as
+# the default claimant identity when a caller does not name itself
+# explicitly via claim_next_bug_id's own claimed_by argument.
+_TASK_ID_ENV_VAR = "PGAI_TASK_ID"
 
 # Extracts severity from **Severity:** field — liberal whitespace handling.
 _SEVERITY_RE = re.compile(
@@ -317,8 +356,17 @@ def update_bug_backlog_cache(bugs_dir: str, bug_backlog_path: str) -> None:
     ## Status field:
 
     - ## Status: running  →  [x]  (bundled into an RC, in flight)
+    - ## Status: running  →  [ ]  when carried: every bundle in the
+                                   requirements/ directory beside bugs_dir
+                                   that lists it is done or wont-do, so a
+                                   release shipped it unfixed and it is a
+                                   candidate for the next bundle
     - ## Status: done     →  [x]  (already shipped; only when ## Resolved By
                                    is populated — see below)
+    - ## Status: wont-do  →  [x]  (closed without a fix; any closed state
+                                   other than done, from
+                                   lib.terminal_states, with the retired
+                                   "superseded" read as wont-do)
     - ## Status: open     →  [ ]  (needs bundling)
     - ## Status absent    →  [ ]  (treat missing as open)
 
@@ -353,6 +401,7 @@ def update_bug_backlog_cache(bugs_dir: str, bug_backlog_path: str) -> None:
     # The file path is needed so we can read Status from the file content.
     dir_bugs = scan_bugs_directory(bugs_dir)
     bugs_path = Path(bugs_dir)
+    carried = _carried_bug_files(bugs_dir)
 
     # Build new entry list in sorted order, only for bugs in directory.
     # Derive checkbox from file Status — cache prior state is NOT consulted.
@@ -385,6 +434,10 @@ def update_bug_backlog_cache(bugs_dir: str, bug_backlog_path: str) -> None:
             else:
                 checkbox = "x"
         elif status == "running":
+            checkbox = " " if file_path.name in carried else "x"
+        elif canonical_state(status) in TERMINAL_STATES:
+            # Closed without a fix (wont-do, or the retired "superseded"):
+            # never offered for bundling again.
             checkbox = "x"
         else:
             # 'open' or any unrecognised value → treat as open
@@ -399,7 +452,9 @@ def update_bug_backlog_cache(bugs_dir: str, bug_backlog_path: str) -> None:
 
 
 def get_unbundled_bugs(bugs_dir: str, bug_backlog_path: str) -> list:
-    """Return bugs from the directory whose ## Status is 'open' (or absent).
+    """Return bugs from the directory whose ## Status is 'open' (or absent),
+    plus every 'running' bug a shipped bundle carried (see
+    update_bug_backlog_cache).
 
     Calls update_bug_backlog_cache as a side effect so the cache is
     regenerated from file Status fields before being read.  A bug whose cache
@@ -416,7 +471,8 @@ def get_unbundled_bugs(bugs_dir: str, bug_backlog_path: str) -> list:
     Returns
     -------
     list[dict]
-        Bugs from bugs_dir whose ## Status is 'open' (or absent). Each dict
+        Bugs from bugs_dir whose ## Status is 'open' (or absent), or
+        'running' and carried. Each dict
         has keys: id, file, summary, severity.
     """
     update_bug_backlog_cache(bugs_dir, bug_backlog_path)
@@ -467,7 +523,36 @@ def _scan_highest_bug_num(bugs_dir: Path) -> int:
     return highest
 
 
-def claim_next_bug_id(bugs_dir: str, slug: str) -> tuple:
+def _record_bug_claim(bugs_path: Path, bug_id: str, claimed_by: str) -> None:
+    """Append one durable provenance line to ``<bugs_dir>/.bug-claims.log`` for
+    a successful ``claim_next_bug_id`` call: a UTC timestamp, the claimed
+    ``bug_id``, and the claiming session's identity.
+
+    This is the record a bug file's own ``Source Task`` header cannot be
+    trusted to be on its own -- a header is whatever the filer chose to
+    write into the content, while this line is written by the claiming
+    function itself at the moment of creation, from the caller's own
+    identity rather than from anything the filer's content composed later.
+    A mismatch between the two is now detectable by comparing this ledger
+    against a bug file's own header, rather than inferred from file mtimes
+    and wake-log timing the way an earlier investigation had to.
+
+    Best-effort: a write failure here (read-only filesystem, permissions)
+    must never turn a successful bug-ID claim into a failed one, so any
+    ``OSError`` is swallowed silently. The claim itself already succeeded
+    by the time this is called; the provenance line is additive evidence,
+    not a precondition for filing.
+    """
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    line = f"{timestamp}\t{bug_id}\t{claimed_by}\n"
+    try:
+        with open(bugs_path / _CLAIM_LOG_FILENAME, "a", encoding="utf-8") as handle:
+            handle.write(line)
+    except OSError:
+        pass
+
+
+def claim_next_bug_id(bugs_dir: str, slug: str, claimed_by: str = None) -> tuple:
     """Atomically claim the next available BUG-NNNN slot and return the claimed
     bug file path along with a lock path that the caller must release.
 
@@ -500,6 +585,16 @@ def claim_next_bug_id(bugs_dir: str, slug: str) -> tuple:
     slug:
         Kebab-case slug for the bug file name, e.g. ``"my-new-bug"``.
         Do not include the ``BUG-NNNN-`` prefix or the ``.md`` extension.
+    claimed_by:
+        Identity of the claiming session, recorded verbatim into the
+        durable provenance ledger (see ``_record_bug_claim``). When omitted
+        (the default, preserving every existing two-argument call site),
+        falls back to the ``PGAI_TASK_ID`` environment variable an agent's
+        own wake dispatch exports for the duration of its session, and
+        finally to the literal string ``"unknown"`` when neither is
+        available -- an automated filer invoked outside any task session
+        (a gated-runner hook, a cron-triggered sweep) should pass its own
+        fixed identity here explicitly rather than relying on the fallback.
 
     Returns
     -------
@@ -545,8 +640,14 @@ def claim_next_bug_id(bugs_dir: str, slug: str) -> tuple:
             # Another caller beat us to this slot.  Re-scan and try again.
             continue
 
-        # Claim is ours.  Return immediately — do not write the bug file here.
-        # The caller writes the content and then calls release_bug_id_claim().
+        # Claim is ours. Record who claimed it before returning, so the
+        # claim is durably attributable even if the caller never gets as
+        # far as writing bug_path's content (see _record_bug_claim).
+        _claimant = claimed_by or os.environ.get(_TASK_ID_ENV_VAR) or "unknown"
+        _record_bug_claim(bugs_path, bug_id, _claimant)
+
+        # Return immediately — do not write the bug file here.  The caller
+        # writes the content and then calls release_bug_id_claim().
         return (bug_id, bug_path, lock_path)
 
     raise RuntimeError(

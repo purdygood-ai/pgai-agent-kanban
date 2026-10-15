@@ -13,6 +13,10 @@ Fixtures exercised:
       check-orphan-rc-branches detects the orphan with the prefixed pattern.
   (D) prefix_branch=ai_ + stale rc with ai_rc/v1.0.0 absent, ai_v1.0.0 tag present:
       check-stale-active-rc detects stale state correctly.
+  (F) branch_prefix=ai_ in a repository shared with an unprefixed lane: local
+      tags v9.0.0 and ai_v9.0.0, main and ai_main both ahead of the fixture
+      origin. With push_to_remote = true the check pushes only ai_v9.0.0 and
+      ai_main; with push_to_remote unset or false it pushes nothing.
 
 All tests run against synthetic environments and never touch the live kanban root.
 """
@@ -26,6 +30,18 @@ import textwrap
 import pytest
 
 from tests.unit.shell_harness import run_bash
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="overwatch-push-lag-bash")
 
 # ---------------------------------------------------------------------------
 # Paths to the check modules.
@@ -94,14 +110,21 @@ def _build_kanban(
     kanban_root: pathlib.Path,
     project_name: str,
     dev_tree: pathlib.Path,
-    push_to_remote: str = "true",
+    push_to_remote: "str | None" = "true",
     branch_prefix: str = "",
 ) -> pathlib.Path:
     """
     Build a minimal synthetic kanban root with one registered project.
 
+    The project is registered in projects.cfg: check-push-lag acts only on a
+    registered project whose own project.cfg names its dev tree.
+
     Returns the project directory path.
     """
+    kanban_root.mkdir(parents=True, exist_ok=True)
+    (kanban_root / "projects.cfg").write_text(
+        f"[project:{project_name}]\npriority = 1\n", encoding="utf-8"
+    )
     proj_dir = kanban_root / "projects" / project_name
     (proj_dir / "overwatch" / "backups").mkdir(parents=True)
     (proj_dir / "overwatch" / "actions.log").write_text("", encoding="utf-8")
@@ -112,8 +135,9 @@ def _build_kanban(
         "[project]\n",
         f"project_name={project_name}\n",
         f"dev_tree_path={dev_tree}\n",
-        f"push_to_remote={push_to_remote}\n",
     ]
+    if push_to_remote is not None:
+        cfg_lines.append(f"push_to_remote={push_to_remote}\n")
     if branch_prefix:
         cfg_lines.append(f"branch_prefix={branch_prefix}\n")
     (proj_dir / "project.cfg").write_text("".join(cfg_lines), encoding="utf-8")
@@ -469,3 +493,89 @@ def test_push_lag_local_mode_no_lag_exits_clean(tmp_path: pathlib.Path) -> None:
     assert "staged-by-design" not in log, (
         f"No 'staged-by-design' expected when local matches origin; log:\n{log}"
     )
+
+
+# ---------------------------------------------------------------------------
+# (F) A shared repository: the ai_ lane pushes only its own main and tags
+# ---------------------------------------------------------------------------
+
+
+def _shared_lane_repo(tmp_path: pathlib.Path) -> tuple:
+    """A dev tree shared by two lanes, both mains ahead of a fixture origin.
+
+    Returns (dev_tree, origin, {ref: sha before the check}).
+    """
+    origin = tmp_path / "origin.git"
+    origin.mkdir()
+    _git(origin, "init", "--bare")
+    dev_tree = tmp_path / "dev"
+    _make_git_repo(dev_tree)
+    _git(dev_tree, "branch", "-M", "main")
+    _git(dev_tree, "remote", "add", "origin", str(origin))
+    _make_branch(dev_tree, "ai_main")
+    _git(dev_tree, "push", "origin", "main", "ai_main")
+    _make_commit(dev_tree, "bare-lane-work")
+    _make_tag(dev_tree, "v9.0.0")
+    _git(dev_tree, "checkout", "-q", "ai_main")
+    _make_commit(dev_tree, "ai-lane-work")
+    _make_tag(dev_tree, "ai_v9.0.0")
+    before = {ref: _git(origin, "rev-parse", ref) for ref in ("refs/heads/main", "refs/heads/ai_main")}
+    return dev_tree, origin, before
+
+
+def _run_live_push_lag(tmp_path, kanban_root, project_name, proj_dir):
+    script = textwrap.dedent(f"""\
+        set -euo pipefail
+        overwatch_log_action() {{
+            local name="$1" target="$2" action="$3" backup="$4" reason="$5"
+            printf '%s\\t%s\\t%s\\t%s\\n' "${{name}}" "${{action}}" "${{target}}" "${{reason}}" \
+                >> "{proj_dir}/overwatch/actions.log"
+        }}
+        overwatch_halt_first_fix() {{ "$1"; }}
+        export KANBAN_ROOT="{kanban_root}"
+        export OVERWATCH_PROJECT="{project_name}"
+        source {_CHECK_PUSH_LAG}
+        overwatch_check_push_lag
+    """)
+    return run_bash(tmp_path, script)
+
+
+def _origin_tags(origin: pathlib.Path) -> set:
+    out = _git(origin, "tag", "--list")
+    return set(out.split()) if out else set()
+
+
+def test_push_lag_pushes_only_the_prefixed_lanes_main_and_release_tag(tmp_path: pathlib.Path) -> None:
+    dev_tree, origin, before = _shared_lane_repo(tmp_path)
+    kanban_root = tmp_path / "kanban"
+    project_name = "ai-lane"
+    proj_dir = _build_kanban(kanban_root, project_name, dev_tree, push_to_remote="true", branch_prefix="ai_")
+
+    result = _run_live_push_lag(tmp_path, kanban_root, project_name, proj_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert _origin_tags(origin) == {"ai_v9.0.0"}, "only the lane's own release tag is published"
+    assert _git(origin, "rev-parse", "refs/heads/ai_main") == _git(dev_tree, "rev-parse", "ai_main")
+    assert _git(origin, "rev-parse", "refs/heads/main") == before["refs/heads/main"], (
+        "the other lane's main is never pushed"
+    )
+    log = _action_log(proj_dir)
+    assert "pushed-main-to-origin\tai_main" in log and "pushed-tag-to-origin\tai_v9.0.0" in log, log
+    assert "v9.0.0\t" not in log.replace("ai_v9.0.0\t", "")
+
+
+@pytest.mark.parametrize("push_to_remote", [None, "false"], ids=["unset", "false"])
+def test_push_lag_pushes_nothing_unless_push_to_remote_is_true(tmp_path: pathlib.Path, push_to_remote) -> None:
+    dev_tree, origin, before = _shared_lane_repo(tmp_path)
+    kanban_root = tmp_path / "kanban"
+    project_name = "ai-lane"
+    proj_dir = _build_kanban(kanban_root, project_name, dev_tree, push_to_remote=push_to_remote, branch_prefix="ai_")
+
+    result = _run_live_push_lag(tmp_path, kanban_root, project_name, proj_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert _origin_tags(origin) == set()
+    for ref, sha in before.items():
+        assert _git(origin, "rev-parse", ref) == sha
+    assert "staged-by-design" in _action_log(proj_dir)
+

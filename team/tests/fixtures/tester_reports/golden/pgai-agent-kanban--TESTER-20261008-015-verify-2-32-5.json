@@ -1,0 +1,89 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified `ai_rc/v2.32.5` (commit `35f385ada6bfc3f7693f943bfcece320889f6862`, four CODER merges on top of `ai_main` v2.32.4) against `requirements/v2.32.5-bugfix-bundle-20261008.md`. That document bundles BUG-0616, BUG-0617, BUG-0615 and BUG-0618; each bug's own `## Acceptance` section served as the testable criteria. All four fixes work.\n\nFor each bug, the original reproduction fails on `ai_main` and passes on the RC, using production-shaped inputs: the real shipped release notes, the real `metrics/history.csv`, and the real v2.32.4 TESTER report. Both gated runners exited 1:\n- Two failures come from a real defect this RC introduced. The Status reader now crashes when run by file path (BUG-0619, medium).\n- Two failures are tests that asserted the exact Lane A behavior BUG-0617 removed (stale assertions BUG-0620 and BUG-0621).\n\nNo defect affects the release pipeline, Step 4e stamping, or data integrity. Recommendation: ship and track the follow-ups.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Release-notes Status reader crashes when run by file path",
+      "heading": "Finding 1: Release-notes Status reader crashes when run by file path",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the \"package CLI crashes by path\" class recurs whenever a module gains a package import; filed before as BUG-0533, BUG-0537, BUG-0541, BUG-0561, BUG-0575, BUG-0595)\n**Filed As:** BUG-0619 (Path C-A)\n**Regression:** yes\n**Integrity:** breakage\n\n- Traces to: requirements AC \"Each bundled item is addressed\" (the BUG-0616 fix introduced it) and TESTER.md Step 5a (gated runners must exit 0).\n- Location: `team/pgai_agent_kanban/cm/notes_status_section.py:81`. The new top-level `from pgai_agent_kanban.lib.html_comments import comment_spans` has no `if not __package__:` self-location guard, although the module has its own CLI.\n- Actual: `python3 team/pgai_agent_kanban/cm/notes_status_section.py --help` exits 1 with `ModuleNotFoundError: No module named 'pgai_agent_kanban'`. `test_package_modules_run_by_path.py` fails 2 cases (`test_help_by_file_path_runs_without_pythonpath[...notes_status_section]` and `test_file_load_binds_the_package_of_its_own_tree[...notes_status_section]`). Both pass on ai_main.\n- Why medium, not high: the defect is real and this RC introduced it, so `Regression: yes`. The one production caller (`cm_release_notes_status_has_placeholder` via `pp_run_ops ... -m`) and the stamp heredoc (package import) both still work: I drove Step 4e's check and stamp on the RC and both behaved correctly. Nothing in the tree invokes the module by path. That fits the rubric's medium: \"incorrect, but a workaround exists or nothing depends on the broken path yet\". A reader who weighs the calibration line \"a command that worked in the last release and exits non-zero in this one is high\" more heavily could argue for high. I did not rate it so, because the documented invocation is `python3 -m` and still works. The rating is not softened to reach a ship outcome; CM and the operator can weigh the argument here.",
+      "filed_as": "BUG-0619",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "breakage",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the \"package CLI crashes by path\" class recurs whenever a module gains a package import; filed before as BUG-0533, BUG-0537, BUG-0541, BUG-0561, BUG-0575, BUG-0595)",
+        "filed_as": "BUG-0619 (Path C-A)",
+        "regression": "yes",
+        "integrity": "breakage"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Lane A wiring unit test asserts the drill clears the HALT after a failed unwind",
+      "heading": "Finding 2: Lane A wiring unit test asserts the drill clears the HALT after a failed unwind",
+      "level": 3,
+      "body": "**Category:** stale-assertion\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one test)\n**Filed As:** BUG-0620 (Path C-A)\n**Regression:** no\n**Integrity:** none\n\n- Test file and line: `team/tests/unit/test_overwatch_lane_classification.py:384` (`assert not fx[\"halt_path\"].is_file()`); line 385 (bundle document deleted) would fail next.\n- Expected vs actual: expected the HALT absent; actual, the HALT is present (`assert not True`).\n- Production change: `team/pgai_agent_kanban/overwatch/resolution_stage.py:825-837`. A failed unwind-rc now returns before cancel-rc, the bundle deletion and the HALT clear. RC commit 49d47e70, task CODER-20261008-011-lane-a-stop-on-failed-cancel.\n- Consistent with requirements: BUG-0617 Expected says \"If unwind-rc or cancel-rc fails, the bundle document stays in place and the ship-policy HALT stays.\" The test's docstring states the old premise (no scripts/ tree, so the RC steps error \"while the two steps that need no external script ... still complete\").\n- Recommendation: update the test, not the production code. The test passes on ai_main.",
+      "filed_as": "BUG-0620",
+      "filed_by": null,
+      "severity": null,
+      "category": "stale-assertion",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "stale-assertion",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one test)",
+        "filed_as": "BUG-0620 (Path C-A)",
+        "regression": "no",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Fresh-project resolution integration test passed only through the Lane A defect",
+      "heading": "Finding 3: Fresh-project resolution integration test passed only through the Lane A defect",
+      "level": 3,
+      "body": "**Category:** stale-assertion\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one test)\n**Filed As:** BUG-0621 (Path C-A)\n**Regression:** no\n**Integrity:** none\n\n- Test file and line: `team/tests/integration/test_overwatch_scaffolding_gates_resolution.py:427` (`assert not halt_path.exists()`).\n- Expected vs actual: expected the HALT absent; actual, the HALT is present.\n- Production change: `team/pgai_agent_kanban/overwatch/resolution_stage.py:842-854` (a failed cancel-rc now stops the drill). RC commit 49d47e70, task CODER-20261008-011-lane-a-stop-on-failed-cancel.\n- Evidence the old pass went through the defect: in this fixture `cancel-rc.sh` fails on both trees (`create-project.sh`'s default `push_to_remote=true` with no `origin`: \"fatal: 'origin' does not appear to be a git repository\"). On ai_main the drill cleared the HALT anyway (actions.log: \"1 action(s) reported errors\"). On the RC it correctly leaves the HALT in place.\n- Consistent with requirements: BUG-0617 Expected, as in Finding 2.\n- Recommendation: update the test. Preferably give the fixture `push_to_remote = false`, as `test_overwatch_lane_a_drill.py` does, so the test still proves what its name says.",
+      "filed_as": "BUG-0621",
+      "filed_by": null,
+      "severity": null,
+      "category": "stale-assertion",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "stale-assertion",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one test)",
+        "filed_as": "BUG-0621 (Path C-A)",
+        "regression": "no",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

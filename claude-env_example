@@ -1,0 +1,101 @@
+# claude-env_example — runtime tuning for the installed Claude CLI binary.
+#
+# Copy to "claude-env" in the kanban root and edit:
+#
+#   cp claude-env_example "$PGAI_AGENT_KANBAN_ROOT_PATH/claude-env"
+#
+# This file is shell-sourced, AFTER shell-env:
+#   - by every wake firing (the wake bootstrap,
+#     team/scripts/lib/wake_bootstrap.sh), always — including a cron or
+#     pseudocron firing, which has no interactive shell to inherit tuning
+#     from. That is the reason this file exists: a value that tunes the CLI
+#     binary itself has nowhere else to live that a headless wake firing can
+#     reach;
+#   - by other entry points through team/scripts/lib/env_bootstrap.sh ONLY
+#     when PGAI_AGENT_KANBAN_ROOT_PATH is not already set in their
+#     environment. The crontab templates export that variable, so a
+#     cron-launched po-agent, pm-agent, overwatch-sweep or cleanup does not
+#     source this file.
+#
+# FOUR-FILE CONCERN SEPARATION
+# -----------------------------
+# The kanban root carries four sourced/parsed config files, each with one
+# concern. Putting a value in the wrong one is how a tuning knob turns into
+# a credential-file edit, or a credential ends up readable by anything that
+# greps shell-only files.
+#
+#   claude-env    (this file)  Tuning values the INSTALLED Claude CLI binary
+#                               itself reads — provider-runtime knobs that
+#                               belong to the CLI, not to the kanban.
+#   shell-env                  Kanban paths, PATH adjustments, Python
+#                               virtualenv activation. See shell-env_example.
+#   secrets                    Credentials only: OAuth tokens, API keys.
+#                               See secrets_example. Never put a tuning value
+#                               here just because it is also shell-sourced.
+#   kanban.cfg                 Kanban BEHAVIOUR (dashboard, chain, providers,
+#                               wake bounds, per-agent model overrides). INI
+#                               format, parsed — never executed.
+#
+# This file is OPTIONAL and shell-sourced:
+#   - A fresh install.sh run seeds a claude-env from this file, every line
+#     commented out, so it changes nothing until a line is uncommented. An
+#     absent claude-env is a clean no-op — no error, no warning, no stdout,
+#     no stderr, no change to any script's exit status.
+#   - The file is shell-sourced — any syntax error fails the wake firing
+#     loud, through the shared dual-channel error contract, rather than
+#     silently continuing with a half-sourced file.
+#     Test edits with: bash -n $PGAI_AGENT_KANBAN_ROOT_PATH/claude-env
+#   - Sourcing order is fixed: shell-env first (it establishes
+#     PGAI_AGENT_KANBAN_ROOT_PATH and the virtualenv), claude-env second. A
+#     value set in both files resolves to whatever claude-env sets, because
+#     it sources later.
+#   - Never put credentials here — this file is not gitignored any more
+#     strictly than shell-env is, and its sourcing path is not a disclosure
+#     path by design (see below). Use secrets for anything sensitive.
+#
+# NO-DISCLOSURE RULE
+# -------------------
+# Nothing in the kanban's sourcing path for this file ever prints, echoes,
+# or logs the VALUE of a variable this file sets, and never logs the file's
+# contents. Naming the file's PATH in a diagnostic is fine; naming a VALUE
+# from inside it is not. An operator may still put something sensitive here
+# despite the guidance above — the sourcing path must not become the way
+# that value leaks into a log.
+#
+# CALIBRATION RECORD
+# -------------------
+# Claude CLI version this file's tuning was calibrated against: 2.1.251
+# Re-audit the entries below after every Claude CLI upgrade — a tuning
+# value calibrated against one CLI version is not guaranteed to still be
+# correct, or even still exist as a knob, on a later one.
+#
+# All lines below are commented out by default. Uncomment to use.
+
+
+# --- Background-wait ceiling ---
+# BASH_MAX_TIMEOUT_MS caps how long the installed Claude CLI will wait on a
+# Bash tool invocation — including a backgrounded one — before it gives up
+# on its own, regardless of what the kanban's watchdog would still tolerate.
+# The CLI defaults this to 600000ms (10 minutes; verified against the 2.1.251
+# CLI recorded in the header above via `claude --help`). The wake path
+# (team/scripts/lib/wake_bootstrap.sh) derives and exports this value on
+# every firing as (MAX_TASK_SECONDS + KILL_GRACE_SECONDS) * 1000 — the
+# kanban's own per-task budget plus its kill grace, in milliseconds — so a
+# 600s CLI default never silently truncates work the kanban's own watchdog
+# (default 5400s + 30s) was still happily waiting on. It skips deriving a
+# value entirely when MAX_TASK_SECONDS=0 (the per-task watchdog disabled).
+#
+# The wake-path derivation only fires when this variable is unset or empty
+# at that point in the wake process — it never overwrites an operator value
+# already sourced from this file. Uncomment and set a value here ONLY when
+# the CLI-derived default is wrong for your environment (for example, a
+# provider or network known to need more headroom than the kanban's own
+# task budget implies); the value you set here always wins over the
+# derivation. Any non-empty value switches the derivation off, so never
+# uncomment a line without a real number in it.
+# Read by: the installed Claude CLI (its Bash tool timeout) and the wake
+# bootstrap (which leaves a value set here alone).
+# Default: unset here; the wake path then derives
+# (max_task_seconds + kill_grace_seconds) * 1000 — 5430000 at the shipped
+# kanban.cfg values (5400 + 30) — and the CLI's own default is 600000.
+# export BASH_MAX_TIMEOUT_MS="5430000"

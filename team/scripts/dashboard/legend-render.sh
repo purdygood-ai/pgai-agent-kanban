@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dashboard-legend-render.sh
+# legend-render.sh
 # Renders the persistent one-line color legend for the unified 8-column
 # visibility window (unified 8-column layout).
 #
@@ -12,7 +12,7 @@
 # read the convention directly from the legend without needing external reference.
 #
 # Usage:
-#   dashboard-legend-render.sh [--kanban-root <path>]
+#   legend-render.sh [--kanban-root <path>]
 #
 # Environment:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root override
@@ -55,7 +55,12 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -30
+            # Read the whole header via mapfile so grep/sed always finish writing
+            # before anything reads their output, then slice to the line limit
+            # locally -- head -N as a pipe stage can close its input early and
+            # SIGPIPE the writers under pipefail.
+            mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+            printf '%s\n' "${__help_lines[@]:0:21}"
             exit 0
             ;;
         *)
@@ -126,14 +131,19 @@ use_color = sys.argv[1].lower() == "true"
 # ---------------------------------------------------------------------------
 # Resolve the pgai_agent_kanban package from the live-install anchor only.
 # The live kanban root (PGAI_AGENT_KANBAN_ROOT_PATH) is the single sys.path
-# candidate -- the dev tree is DATA to the live runtime, never CODE. Mirrors
-# the identical resolution in dashboard-column-render.sh's Python heredoc.
+# candidate -- the dev tree is DATA to the live runtime, never CODE. A
+# missing live package fails the import loudly, naming the import path.
 # ---------------------------------------------------------------------------
 _kanban_root = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "")
 if _kanban_root and _kanban_root not in sys.path:
     sys.path.insert(0, _kanban_root)
 
-from pgai_agent_kanban.lib.palette import load_default_palette, PaletteFileError  # noqa: E402
+from pgai_agent_kanban.lib.palette import (  # noqa: E402
+    ansi_code,
+    load_default_palette,
+    PaletteFileError,
+    resolve_semantic_color,
+)
 
 # Canonical gray sentinel: sourced from team/config/default_palette.txt via
 # the shared palette loader (its last entry is the documented "last resort"
@@ -162,27 +172,28 @@ def truecolor(hex_color):
         return ""
     return f"\033[38;2;{r};{g};{b}m"
 
-RESET = "\033[0m" if use_color else ""
+RESET = ansi_code("reset", use_color)
 
-# Status-to-ANSI color mapping (mirrors dashboard-column-render.sh).
-# Status colors are a fixed ANSI-standard convention for lifecycle status,
-# independent of the project-tag palette in team/config/default_palette.txt
-# -- status colors and project-tag colors are two separate color systems
-# that must not be conflated (palette single-sourcing design).
+# Status-to-color mapping (same arms as column_render.cells.status_color), resolved
+# from the single-source semantic palette (team/config/default_palette.txt
+# "status_*" keys) rather than a hand-decided ANSI literal per branch.
+# Status colors are independent of the project-tag palette (the ordered
+# hex list in the same file) -- status colors and project-tag colors are
+# two separate color systems that must not be conflated (palette
+# single-sourcing design).
 #
 # "done" and "wont-do" are both terminal-resolved states — green means
-# "settled, no action required". They share the green color arm.
+# "settled, no action required". They share the status_done semantic key.
 def status_color(s):
     if not use_color:
         return ""
     if s == "running":
-        return "\033[0;33m"   # yellow / amber
+        return resolve_semantic_color("status_running", use_color)
     if s in ("done", "wont-do"):
-        # Both are terminal-resolved states — green means "settled, no action needed"
-        return "\033[0;32m"   # green
+        return resolve_semantic_color("status_done", use_color)
     if s == "blocked":
-        return "\033[0;31m"   # red
-    return "\033[0;37m"       # white / default (open)
+        return resolve_semantic_color("status_blocked", use_color)
+    return resolve_semantic_color("status_open", use_color)
 
 # ---------------------------------------------------------------------------
 # Read project data and template constants from environment

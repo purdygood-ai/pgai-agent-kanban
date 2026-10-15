@@ -1,0 +1,4 @@
+=== CODER ===
+[dashboard-snapshot] column-render CODER: no fresh snapshot (missing or unreadable) -- rendering directly
+[harn] 20260101-001
+[harn] 20260101-002

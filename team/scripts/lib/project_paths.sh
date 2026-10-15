@@ -41,6 +41,9 @@
 # Functions
 # ---------
 #   pp_require_project_context [name]  — resolve project name; fail loudly when absent
+#   pp_resolve_project_name [name] — resolve --project by exact match then
+#                               unambiguous prefix against projects.cfg;
+#                               dual-channel refusal on not-found/ambiguous
 #   pp_project_root   [name]  — root dir of the named project
 #   pp_tasks_dir      [name]  — tasks/ subpath under the project root
 #   pp_requirements_dir [name] — requirements/ subpath
@@ -62,8 +65,24 @@
 #                               default 'release' when absent or empty
 #   pp_branch_prefix  [name]  — optional branch name prefix from [project] branch_prefix;
 #                               returns empty string when key is absent or empty
-#   pp_push_to_remote [name]  — echoes 'true' or 'false' from [project] push_to_remote;
-#                               default 'true' when absent, blank, or malformed
+#   pp_rc_branch_prefix [name] — branch prefix for RC-branch DETECTION (not
+#                               construction): same configured value as
+#                               pp_branch_prefix, but falls back to
+#                               PP_RC_BRANCH_PREFIX_DEFAULT instead of "" when
+#                               project.cfg cannot be read at all, so RC-branch
+#                               detection agrees with
+#                               lint_changelog_freshness.py's
+#                               _resolve_branch_prefix() on an unconfigured
+#                               install
+#   pp_push_to_remote [name]  — echoes 'true' only when the shared push-decision
+#                               resolver (push_decision.sh) answers push: a
+#                               registered project whose own project.cfg names
+#                               dev_tree_path and does not set push_to_remote =
+#                               false; 'false' otherwise, unresolved included
+#   pp_push_policy <name> <site-tag> — the same decision for a CM release
+#                               entry point: sets PP_PUSH_DECISION and
+#                               PP_PUSH_TO_REMOTE, and logs one
+#                               skipped-unresolved-project line when unresolved
 #   pp_hook_required  [name] <phase> — echoes 'true' or 'false' from [hooks]
 #                               cm_release_<phase>_hook_required; default 'false' when absent.
 #                               <phase>: pre-squash | pre-tag | post-tag
@@ -72,6 +91,12 @@
 #   pp_prefix_branch  [name] <branch> — returns PREFIX+branch; identity when prefix is empty
 #   pp_prefix_tag     [name] <tag>    — returns PREFIX+tag; identity when prefix is empty
 #   pp_strip_prefix_from_tag [name] <tag> — strips prefix from tag; returns bare semver
+#   validate_git_remote_name <value> — returns 0 for a remote name the release
+#                               machinery may pass to git, 1 otherwise (silent)
+#   pp_git_remote_name [--quiet] [name] — the project's git remote: [project]
+#                               git_remote_name, origin when absent or blank;
+#                               an invalid value returns 1 (refusing
+#                               dual-channel unless --quiet)
 #   pp_repo_lock_path [name]  — path to the per-project repo flock file; single
 #                               source of truth shared by wake dispatch and OVERWATCH
 #   pp_max_rc_retries [name]  — effective RC-retry ceiling: project.cfg
@@ -80,6 +105,161 @@
 #                               FAILS LOUD (non-zero, stderr message) when the
 #                               key is absent from both sources — no silent
 #                               fallback, unlike the other pp_max_* ceilings.
+#   pp_deep_verify_mode [name]  — the project's DEEP-VERIFY scheduled-dispatch
+#                               mode: project.cfg [release] deep_verify,
+#                               else kanban.cfg [release] deep_verify,
+#                               resolved to "weekly" or "off" on stdout.
+#                               Accepts "weekly"/"true" and "off"/"false"
+#                               (the legacy boolean spellings are recognized
+#                               aliases, never echoed back). Absent/blank in
+#                               both defaults to "weekly". FAILS LOUD
+#                               (non-zero, stderr message naming the file,
+#                               no stdout) for any other non-blank value —
+#                               an unrecognized value must never be silently
+#                               guessed into a schedule mode.
+#   pp_deep_verify_offhours_window [name]  — the project's DEEP-VERIFY
+#                               off-hours window ("the schedule knob"):
+#                               project.cfg [release]
+#                               deep_verify_offhours_window, else the same
+#                               kanban.cfg key, "HH:MM-HH:MM". A malformed
+#                               value counts as absent at its tier (one
+#                               warning); with no well-formed value the
+#                               shipped default (03:00-03:59) applies —
+#                               this knob is a scheduling nicety, not an
+#                               invariant, so it never fails loud.
+#   pp_overwatch_resolve [name]  — whether OVERWATCH may autonomously act on
+#                               a CM block for this project: project.cfg
+#                               [release] overwatch_resolve override when
+#                               present, else kanban.cfg [release]
+#                               overwatch_resolve default. Accepts only the
+#                               exact strings "true"/"false" on stdout.
+#                               Absent, blank, or unreadable resolves to
+#                               "false" — the opposite failure direction
+#                               from pp_max_rc_retries: this key must never
+#                               fail loud and must never default to "true".
+#                               An unrecognized non-boolean value (a typo,
+#                               'yes', a quoted empty string) is refused
+#                               dual-channel through team/scripts/lib/
+#                               error_contract.sh rather than guessed into
+#                               either state.
+#   pp_block_triage [name]  — whether OVERWATCH's block-triage sweep may
+#                               act on a blocked task's Block Record for
+#                               this project (requeue, promote, escalate),
+#                               or only write the record and its
+#                               diagnosis: project.cfg [overwatch]
+#                               block_triage override when present, else
+#                               kanban.cfg [overwatch] block_triage
+#                               default. Same resolver semantics as
+#                               pp_overwatch_resolve — exact "true"/"false"
+#                               on stdout, an unrecognized value refused
+#                               dual-channel — but absent, blank, or
+#                               unreadable in both files resolves to
+#                               "true", the shipped default.
+#   pp_stale_lock_reap_after_wake_periods [name]  — the stale-lock reap
+#                               threshold, in wake periods: project.cfg
+#                               [locks] stale_lock_reap_after_wake_periods
+#                               override when present, else kanban.cfg
+#                               [locks] stale_lock_reap_after_wake_periods
+#                               default (shipped default 3 when absent from
+#                               both). Consumed by lock_provenance.sh's
+#                               contention-path reaper.
+#   pp_ship_posture [name]  — the project's ship posture, exactly "matrix"
+#                               or "always": project.cfg [release]
+#                               ship_posture override when present, else
+#                               kanban.cfg [release] ship_posture, else
+#                               "matrix". An unrecognized value resolves to
+#                               "matrix" with one stderr warning line. On a
+#                               push_to_remote = true lane, "always" also
+#                               needs [release] ship_posture_confirm_remote
+#                               = true (same chain), else "matrix" with one
+#                               warning line. Never a refusal: status 0.
+#
+# Key Registry
+# ------------
+# Every project.cfg key any pp_* accessor above reads is listed here. This
+# is a DISTINCT key set from team/scripts/lib/config_loader.sh's own Key
+# Registry, which speaks only for kanban.cfg — see that block's own header
+# note for why the two are not merged into one file. [release], [locks],
+# [overwatch] and [archive] are the sections genuinely shared by both cfg
+# files (a project.cfg override of a kanban.cfg-wide default); each is
+# declared once, in config_loader.sh's registry, not duplicated here — see
+# pp_max_rc_retries, pp_deep_verify_offhours_window,
+# pp_overwatch_resolve, and pp_ship_posture (ship_posture and
+# ship_posture_confirm_remote) above for the five [release] keys,
+# pp_stale_lock_reap_after_wake_periods above for the one [locks] key,
+# pp_block_triage above for [overwatch] block_triage,
+# resolve_requeue_budget() in team/pgai_agent_kanban/overwatch/
+# block_requeue.py for [overwatch] requeue_budget, and
+# resolve_archive_count() in team/pgai_agent_kanban/archive/config.py for
+# the one [archive] key (the last two read in Python; no pp_* accessor).
+# The whole read set, shared sections included, is PROJECT_CFG_KEYS in
+# team/pgai_agent_kanban/ops/projects.py; the project.cfg template
+# (team/config/project.cfg_example) documents every key in it, and every
+# new project.cfg is rendered from that template.
+#
+# Status: REQUIRED = the pp_* accessor has no default; absence is a caller
+#         error. OPTIONAL = the pp_* accessor applies its own documented
+#         default when absent.
+# Default shown is the value the matching pp_* accessor returns when the
+# key is absent, EXCEPT where marked N/A: a per-installation identity or
+# example field (every real project.cfg legitimately carries a different
+# value here) has no single canonical default to check a document against,
+# so the default-value comparison is skipped for it — see
+# lint_doc_command_truth.py's "Config-key parity" section for why.
+#
+# [project]
+#   project_name            OPTIONAL  N/A  (per-installation identity;
+#                                            create-project.sh and
+#                                            add-project.sh write it)
+#   dev_tree_path           OPTIONAL  N/A  (per-installation path; see above)
+#   git_repo_url            OPTIONAL  N/A  (per-installation URL; see above)
+#   git_remote_name         OPTIONAL  origin
+#   workflow_type           OPTIONAL  release
+#   branch_prefix           OPTIONAL  N/A  (pp_branch_prefix's own absent-key
+#                                           fallback is "" — no prefix — but
+#                                           create-project.sh scaffolds every
+#                                           new project.cfg with "ai_"; the
+#                                           two are different claims about
+#                                           "the default," so this key is
+#                                           not defaulted-checked rather than
+#                                           picking one and calling the
+#                                           other line wrong)
+#   push_to_remote          OPTIONAL  true
+#   temp_dir                OPTIONAL  N/A  (per-installation name; absent
+#                                           resolves to projects/<project_name>
+#                                           under the framework temp root,
+#                                           itself installation-specific)
+#
+# [versioning]
+#   max_patch               OPTIONAL  21
+#   max_minor               OPTIONAL  13
+#   max_major               OPTIONAL  0
+#                           (the three version ceilings: an absent or empty
+#                            key, or no project.cfg at all, reads as the
+#                            default shown, held once in
+#                            pgai_agent_kanban.lib.version_ceiling
+#                            CEILING_DEFAULTS; `none` means no ceiling and
+#                            is the only spelling that removes one; deleting
+#                            the line restores the default rather than
+#                            removing the cap; any other value blocks the
+#                            project with one narrated line)
+#   max_priorities_per_run  OPTIONAL  1
+#
+# [hooks]
+#   cm_release_pre_squash_hook           OPTIONAL  ""
+#   cm_release_pre_squash_hook_required  OPTIONAL  false
+#   cm_release_pre_tag_hook              OPTIONAL  ""
+#   cm_release_pre_tag_hook_required     OPTIONAL  false
+#   cm_release_post_tag_hook             OPTIONAL  ""
+#   cm_release_post_tag_hook_required    OPTIONAL  false
+#
+# [debug]
+#   verbose_mode            OPTIONAL  false
+#   verbose_agents          OPTIONAL  pm,coder,writer,tester,cm
+#
+# [training]
+#   reasoning_trace         OPTIONAL  false
+#   training_agents         OPTIONAL  ""
 
 # ---------------------------------------------------------------------------
 # Source the INI parser (read_ini) once when this library is loaded.
@@ -91,6 +271,10 @@ source "${_PP_LIB_DIR}/ini_parser.sh"
 # shellcheck source=temp.sh
 if ! declare -F pgai_temp_dir >/dev/null 2>&1; then
     source "${_PP_LIB_DIR}/temp.sh"
+fi
+# shellcheck source=error_contract.sh
+if ! declare -F pgai_emit_error_contract >/dev/null 2>&1; then
+    source "${_PP_LIB_DIR}/error_contract.sh"
 fi
 
 # ---------------------------------------------------------------------------
@@ -210,6 +394,201 @@ pp_project_root() {
 }
 
 # ---------------------------------------------------------------------------
+# Project Name Resolution (prefix matching against the projects.cfg registry)
+# ---------------------------------------------------------------------------
+#
+# pp_project_root (above) and every other pp_* path helper builds a path by
+# string concatenation only — a typo or an intentionally-shortened --project
+# value silently yields a path to a project that does not exist. The
+# resolver below is the opt-in fix: callers that are looking up an EXISTING,
+# already-registered project (every operator verb except create-project.sh /
+# add-project.sh, whose whole job is naming a NOT-YET-registered project)
+# should resolve the operator's raw --project value through
+# pp_resolve_project_name before handing it to pp_project_root. This
+# mirrors, at the project-name layer, the same exact-then-prefix algorithm
+# pgai_agent_kanban.ops.resolve.resolve_item already uses for --key: try an
+# exact match first, then an unambiguous prefix match, refusing dual-channel
+# (never guessing) on not-found or on ambiguous.
+
+# ---------------------------------------------------------------------------
+# _pp_registered_project_names <projects_cfg_path>
+# Internal helper. Echoes every registered project name, one per line, from
+# either projects.cfg format (INI `[project:NAME]` sections, or the legacy
+# `name:priority[:color]` colon form) — the same two formats
+# lib/projects.sh's projects_cfg_list already parses. This helper is
+# self-contained (no dependency on lib/projects.sh) specifically because
+# lib/projects.sh's own header requires it be sourced AFTER this file
+# (projects_cfg_active needs pp_project_halted); sourcing it from here would
+# invert that ordering constraint. Order does not matter for the caller —
+# pp_resolve_project_name only needs the set of names, not registration
+# order or priority.
+# ---------------------------------------------------------------------------
+_pp_registered_project_names() {
+    local cfg="$1"
+    [[ -f "$cfg" ]] || return 0
+    awk '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        /^\[project:[a-zA-Z0-9_-]+\]$/ {
+            print substr($0, 10, length($0) - 10)
+            next
+        }
+        /^[[:space:]]*\[/ { next }
+        {
+            # Colon-legacy: name:priority[:color]. Lines with no ':' (e.g.
+            # INI key=value fields like "priority=1") split to a single
+            # field and are silently skipped — this awk block runs
+            # unconditionally over both formats rather than branching on a
+            # detected format string.
+            n = split($0, f, ":")
+            if (n >= 2) {
+                name = f[1]
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+                if (name != "") print name
+            }
+        }
+    ' "$cfg"
+}
+
+# ---------------------------------------------------------------------------
+# _pp_join_names <name> [name...]
+# Internal helper. Echoes the given names joined with ", " for use in a
+# refusal message's candidate list. ("$*" with IFS set only uses the FIRST
+# character of IFS to join — a two-character separator like ", " requires
+# an explicit loop, not the IFS-and-"$*" idiom.)
+# ---------------------------------------------------------------------------
+_pp_join_names() {
+    local _pjn_out="" _pjn_n
+    for _pjn_n in "$@"; do
+        if [[ -z "$_pjn_out" ]]; then
+            _pjn_out="$_pjn_n"
+        else
+            _pjn_out="${_pjn_out}, ${_pjn_n}"
+        fi
+    done
+    echo "$_pjn_out"
+}
+
+# ---------------------------------------------------------------------------
+# pp_resolve_project_name [name]
+#
+# Resolves a project name by exact match, then by unambiguous prefix,
+# against the projects registered in projects.cfg. Echoes the resolved,
+# canonical project name on success.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME (via
+# pp_require_project_context), then error (that error is unchanged from
+# pp_require_project_context's own — this function adds registry
+# resolution, it does not change what happens when no name is supplied at
+# all).
+#
+# Prefix matching keeps resolve_item's hyphen-boundary rule (see
+# pgai_agent_kanban.ops.resolve._collect_prefix_matches): a candidate name
+# matches the typed prefix only when it equals the prefix exactly, or
+# continues immediately with a literal hyphen ("<prefix>-..."). This is the
+# same boundary that stops a shorter key from matching an unrelated longer
+# name that merely happens to start with the same characters.
+#
+# Returns 0 and echoes the resolved name on success:
+#   - projects.cfg does not exist at all — nothing to resolve against, so
+#     the candidate is echoed back unchanged (best-effort pass-through, not
+#     a refusal — this keeps every caller that operates on a project
+#     directory without a maintained registry working exactly as it did
+#     before this resolver existed; the caller's own existing
+#     directory-existence check is still what catches a genuine typo in
+#     that case);
+#   - the candidate matches exactly one registered project, by exact name
+#     or by unambiguous prefix.
+# Returns 1 (dual-channel refusal to stderr, nothing on stdout) when:
+#   - projects.cfg exists but no registered project matches the given name
+#     or prefix (not-found);
+#   - two or more registered projects share the given prefix (ambiguous).
+# ---------------------------------------------------------------------------
+pp_resolve_project_name() {
+    local candidate
+    candidate="$(pp_require_project_context "${1:-}")" || return 1
+
+    local root
+    root="$(_pp_kanban_root)" || return 1
+    local cfg="${root}/projects.cfg"
+
+    if [[ ! -f "$cfg" ]]; then
+        # Pass-through, not a refusal: with no registry file at all there is
+        # nothing to resolve a prefix against, and every existing caller of
+        # pp_project_root already worked this way (raw name straight into a
+        # path). Requiring a registry here would turn a project directory
+        # that has never been run through create-project.sh/add-project.sh
+        # into an unaddressable one — the caller's own directory-existence
+        # check (present in every wired verb) is still the backstop that
+        # catches a genuine typo when no registry exists to disambiguate
+        # against.
+        echo "$candidate"
+        return 0
+    fi
+
+    local -a _pp_names=()
+    local _pp_n
+    while IFS= read -r _pp_n; do
+        [[ -n "$_pp_n" ]] && _pp_names+=("$_pp_n")
+    done < <(_pp_registered_project_names "$cfg")
+
+    # Exact match first — mirrors resolve_item's own exact-then-prefix order.
+    for _pp_n in "${_pp_names[@]+"${_pp_names[@]}"}"; do
+        if [[ "$_pp_n" == "$candidate" ]]; then
+            echo "$_pp_n"
+            return 0
+        fi
+    done
+
+    # Prefix match: candidate name must continue with a literal hyphen right
+    # after the typed prefix (the hyphen-boundary rule described above).
+    local -a _pp_matches=()
+    for _pp_n in "${_pp_names[@]+"${_pp_names[@]}"}"; do
+        if [[ "$_pp_n" == "${candidate}-"* ]]; then
+            _pp_matches+=("$_pp_n")
+        fi
+    done
+
+    if [[ "${#_pp_matches[@]}" -eq 1 ]]; then
+        echo "${_pp_matches[0]}"
+        return 0
+    fi
+
+    if [[ "${#_pp_matches[@]}" -eq 0 ]]; then
+        # BLOCK-WORTHY (docs/blocking-site-census.md): a typo or an
+        # unregistered name has no directory this framework should ever
+        # write to — refused rather than silently concatenating a path to
+        # a project that does not exist.
+        local _pp_remedy
+        if [[ "${#_pp_names[@]}" -eq 0 ]]; then
+            # No project is registered at all — naming the (empty) list
+            # gives the reader nothing to act on, so point at the verb
+            # that registers one instead.
+            _pp_remedy="No project is registered in ${cfg}. Register one first: team/scripts/add-project.sh --project ${candidate}."
+        else
+            _pp_remedy="Check the project name against projects.cfg (registered: $(_pp_join_names "${_pp_names[@]}"))."
+        fi
+        pgai_emit_error_contract \
+            "project_resolve.not_found" \
+            "pp_resolve_project_name: no project matches '${candidate}' in ${cfg}." \
+            "${_pp_remedy}"
+        # CENSUS-ANCHOR: project-resolve-not-found-01
+        return 1
+    fi
+
+    # BLOCK-WORTHY (docs/blocking-site-census.md): two or more registered
+    # projects share this prefix — picking one silently would risk operating
+    # on the wrong project's data, so this refuses and names both rather
+    # than guessing.
+    pgai_emit_error_contract \
+        "project_resolve.ambiguous" \
+        "pp_resolve_project_name: '${candidate}' matches multiple registered projects: $(_pp_join_names "${_pp_matches[@]}")." \
+        "Re-run with a longer, unambiguous prefix or the full name, e.g. --project ${_pp_matches[0]}."
+    # CENSUS-ANCHOR: project-resolve-ambiguous-01
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # pp_tasks_dir [name]
 # Echoes the tasks/ subpath under the project root for the named project.
 #
@@ -315,6 +694,32 @@ pp_release_state() {
 }
 
 # ---------------------------------------------------------------------------
+# pp_agent_role_is_non_cm
+# True (exit 0) when PGAI_AGENT_ROLE is set to a non-empty value naming any
+# role other than "cm" (compared case-insensitively); false (exit 1) when
+# the role is "cm" or when the variable is unset or empty.
+#
+# The single answer to "would the remote boundary refuse this process's
+# fetch, pull or push?" for callers that want to skip a best-effort remote
+# reach rather than have team/scripts/lib/git_boundary_guard.sh refuse it
+# and spend an evidence record on a crossing nobody attempted (the CM
+# scripts' pre-flight `git fetch origin`, for instance). An unset or empty
+# role -- an operator running a script by hand, outside the wake/guard
+# machinery -- is deliberately NOT non-CM: that shell's fetch is not
+# guaranteed a refusal, so callers leave its behaviour unchanged.
+#
+# Usage:
+#   if pp_agent_role_is_non_cm; then
+#       echo "skipping git fetch origin (role ${PGAI_AGENT_ROLE} never touches the remote)"
+#   else
+#       git -C "$repo" fetch origin
+#   fi
+pp_agent_role_is_non_cm() {
+    local _role_lc
+    _role_lc="$(printf '%s' "${PGAI_AGENT_ROLE:-}" | tr '[:upper:]' '[:lower:]')"
+    [[ -n "$_role_lc" && "$_role_lc" != "cm" ]]
+}
+
 # pp_last_released_version [name]
 # Echoes the highest bare semver tag (vX.Y.Z) reachable in the project's dev
 # tree, after stripping the configured branch_prefix from candidate tags.
@@ -328,25 +733,41 @@ pp_release_state() {
 # Resolution path:
 #   1. Reads dev_tree_path from $(pp_project_root <name>)/project.cfg or PROJECT.cfg.
 #   2. Reads branch_prefix from the same config file (may be empty).
-#   3. Runs git -C "$dev_tree" fetch origin --tags --quiet (best-effort;
+#   3. Runs git -C "$dev_tree" fetch <remote> --tags --quiet, where <remote>
+#      is pp_git_remote_name's answer (origin unless [project]
+#      git_remote_name names another; an invalid value skips this step and
+#      step 4) (best-effort;
 #      failure is ignored so callers in air-gapped or read-only environments
-#      are not broken). SKIPPED when PGAI_GIT_LOCAL_ONLY is set to any
-#      non-empty value — render-path callers (dashboards) opt into this so a
-#      version lookup never reaches the network; local tags become
-#      authoritative and resolution proceeds straight to step 4 using
-#      whatever refs are already on disk. Agent-side / wake-context callers
-#      must not set this flag.
-#   4. Tries to list git tags merged into origin/<main_branch> (e.g. origin/ai_main).
+#      are not broken). SKIPPED in two cases, either one sufficient on its
+#      own: PGAI_GIT_LOCAL_ONLY is set to any non-empty value — render-path
+#      callers (dashboards) opt into this so a version lookup never reaches
+#      the network, and the wake layer (team/scripts/lib/wake_guard_wiring.sh)
+#      exports it for every dispatched role other than "cm", so a non-CM
+#      agent wake's lookup stays local whatever copy of this file the task
+#      sources — or PGAI_AGENT_ROLE names anything other than "cm"
+#      (case-insensitive). The role check is automatic, not caller-declared:
+#      team/scripts/lib/git_boundary_guard.sh refuses this exact fetch for
+#      every non-CM role, so attempting it never changes the answer, only
+#      appends a boundary-evidence record for a crossing that never
+#      happened. The two mechanisms are deliberately redundant: the flag
+#      lives in the launcher and survives an installed copy of this file
+#      that predates the role check; the role check covers a caller that
+#      sets the role without the flag. An unset role — a human running this
+#      directly, outside the wake/guard machinery — is left unchanged, since
+#      its fetch is not guaranteed to be refused. Either skip leaves local
+#      tags authoritative and resolution proceeds straight to step 4 using
+#      whatever refs are already on disk.
+#   4. Tries to list git tags merged into <remote>/<main_branch> (e.g. origin/ai_main).
 #      When prefix is non-empty: filters to tags starting with PREFIX followed
 #      by 'v'; strips the prefix from each candidate before semver comparison.
 #      Tags from a different prefix (e.g. human_v0.31.0 when prefix=ai_) are
 #      excluded.
 #      When prefix is empty: filters to bare ^v[0-9]+\.[0-9]+\.[0-9]+$ tags.
 #      Sorts stripped candidates with sort -V, returns the highest as bare vX.Y.Z.
-#   5. When origin/<main_branch> is unavailable (remote not configured, not yet
+#   5. When <remote>/<main_branch> is unavailable (remote not configured, not yet
 #      pushed, or air-gapped), retries the same tag scan against the local
-#      <main_branch> ref (e.g. ai_main) instead of origin/<main_branch>.
-#   6. When neither origin nor local <main_branch> is available, falls back to
+#      <main_branch> ref (e.g. ai_main) instead of <remote>/<main_branch>.
+#   6. When neither the remote ref nor local <main_branch> is available, falls back to
 #      scanning ALL local tags in the repo that match the prefix pattern, and
 #      returns the highest.  This covers a repo that has real release tags but
 #      whose main branch is absent locally (e.g. a shallow clone or a
@@ -393,37 +814,26 @@ pp_last_released_version() {
 
     # ---------------------------------------------------------------------------
     # Internal helper: _pp_read_last_released_from_state <project_root>
-    # Reads '## Last Released' from release-state.md in the project root.
-    # Returns a valid bare vX.Y.Z semver, or empty string when absent/invalid.
+    # Reads '## Last Released' from release-state.md in the project root
+    # through the one release-state reader (release_state_section in
+    # lib/cm/common.sh, loaded here on first use so callers on the git-tag
+    # path never pay for it). Returns a valid bare vX.Y.Z semver, or empty
+    # string when the file, heading or value is missing or not a version.
     # Used as the fallback for document-workflow (no-git-repo) projects.
     # ---------------------------------------------------------------------------
     _pp_read_last_released_from_state() {
         local _root="$1"
-        local _rs_path="${_root}/release-state.md"
-        if [[ ! -f "$_rs_path" ]]; then
-            echo ""
-            return 0
+        if ! declare -F release_state_section >/dev/null 2>&1; then
+            # shellcheck source=cm/common.sh
+            source "${_PP_LIB_DIR}/cm/common.sh" 2>/dev/null || { echo ""; return 0; }
         fi
         local _val
-        _val="$(python3 - "$_rs_path" 2>/dev/null <<'PY' || true
-import re, sys, pathlib
-text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-m = re.search(
-    r"##\s*Last\s+Released\s*\n(.*?)(?=\n##|\Z)",
-    text,
-    re.IGNORECASE | re.DOTALL,
-)
-if m:
-    val = m.group(1).strip()
-    if val and val.lower() != "none" and re.match(r"^v[0-9]+\.[0-9]+\.[0-9]+$", val):
-        print(val)
-    else:
-        print("")
-else:
-    print("")
-PY
-)"
-        echo "${_val:-}"
+        _val="$(release_state_section "${_root}/release-state.md" "Last Released")" || _val=""
+        if [[ "$_val" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$_val"
+        else
+            echo ""
+        fi
     }
 
     # ---------------------------------------------------------------------------
@@ -516,32 +926,52 @@ PY
         return 0
     fi
 
-    # Best-effort fetch — never fail the function.  Local-only render guard:
-    # PGAI_GIT_LOCAL_ONLY, checked BEFORE the fetch.  When set to any
-    # non-empty value, the fetch is skipped entirely and resolution proceeds
-    # with whatever tags/refs already exist on disk — render-path callers
-    # (dashboards) opt into this so a version lookup never performs a network
-    # operation.  Left unset, behavior is unchanged.  Wake context / agent-side
-    # discovery must not set this flag.
-    if [[ -z "${PGAI_GIT_LOCAL_ONLY:-}" ]]; then
-        git -C "$dev_tree" fetch origin --tags --quiet 2>/dev/null || true
+    # Best-effort fetch — never fail the function.  Skipped, and resolution
+    # proceeds with whatever tags/refs already exist on disk, under either:
+    #   - PGAI_GIT_LOCAL_ONLY set to any non-empty value — render-path
+    #     callers (dashboards) opt into this so a version lookup never
+    #     performs a network operation, and the wake layer
+    #     (wake_guard_wiring.sh) exports it for every non-CM dispatch so
+    #     the skip holds even where this file's own role check below is
+    #     absent from the copy being sourced; or
+    #   - PGAI_AGENT_ROLE naming anything other than "cm" (case-insensitive)
+    #     — every non-CM role's fetch is refused by this same repo's
+    #     team/scripts/lib/git_boundary_guard.sh, so running it changes no
+    #     answer and only records a boundary-evidence line for a crossing
+    #     that never happened. CM and an unset role (a human
+    #     invoking this directly, outside the wake/guard machinery) still
+    #     get the real fetch, since neither is guaranteed a refusal.
+    local _plrv_role_lc=""
+    if [[ -n "${PGAI_AGENT_ROLE:-}" ]]; then
+        _plrv_role_lc="$(printf '%s' "$PGAI_AGENT_ROLE" | tr '[:upper:]' '[:lower:]')"
+    fi
+    # The remote is the project's own (pp_git_remote_name): origin when
+    # git_remote_name is absent or blank. An invalid value is not refused
+    # here -- this is a read -- it skips the fetch and the remote tier, and
+    # resolution continues from the local refs.
+    local remote=""
+    remote="$(pp_git_remote_name --quiet "$name")" || remote=""
+    if [[ -z "${PGAI_GIT_LOCAL_ONLY:-}" && ( -z "$_plrv_role_lc" || "$_plrv_role_lc" == "cm" ) ]]; then
+        if [[ -n "$remote" ]]; then
+            git -C "$dev_tree" fetch "$remote" --tags --quiet 2>/dev/null || true
+        fi
     fi
 
     # Resolve the canonical main branch name for this project.
     # When branch_prefix is non-empty (e.g. "ai_"), release.sh operates on
     # ai_main rather than bare main.  Tags are created on ai_main commits, so
-    # we prefer origin/ai_main for the merged-tag scan.
+    # we prefer <remote>/ai_main for the merged-tag scan.
     local main_branch
     main_branch="${prefix}main"
 
     local highest=""
 
-    # --- Tier 1: tags merged into origin/<main_branch> ---
-    if git -C "$dev_tree" rev-parse --verify "origin/${main_branch}" &>/dev/null 2>&1; then
-        highest="$(_pp_scan_tags_from_ref "$dev_tree" "origin/${main_branch}" "$prefix")"
+    # --- Tier 1: tags merged into <remote>/<main_branch> ---
+    if [[ -n "$remote" ]] && git -C "$dev_tree" rev-parse --verify "${remote}/${main_branch}" &>/dev/null 2>&1; then
+        highest="$(_pp_scan_tags_from_ref "$dev_tree" "${remote}/${main_branch}" "$prefix")"
     fi
 
-    # --- Tier 2: tags merged into local <main_branch> (when origin unavailable) ---
+    # --- Tier 2: tags merged into local <main_branch> (when the remote ref is unavailable) ---
     if [[ -z "$highest" ]]; then
         if git -C "$dev_tree" rev-parse --verify "${main_branch}" &>/dev/null 2>&1; then
             highest="$(_pp_scan_tags_from_ref "$dev_tree" "${main_branch}" "$prefix")"
@@ -562,122 +992,87 @@ PY
 }
 
 # ---------------------------------------------------------------------------
-# pp_max_minor [name]
-# Echoes the configured max_minor value from PROJECT.cfg for the named
-# project, or an empty string when the field is absent.
+# pp_max_patch / pp_max_minor / pp_max_major [name]
+# Echo the version ceiling in effect for one semver component of the named
+# project, read from project.cfg [versioning] max_patch / max_minor /
+# max_major (or the bare key in a legacy PROJECT.cfg).
 #
 # Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
 #
-# Only non-negative integers are valid.  Malformed values (non-numeric,
-# negative, empty after stripping whitespace) are rejected: the function
-# prints an error to stderr and returns 1.
-#
-# Missing field is NOT an error — it means "no constraint on minor".
+# What each accessor echoes (exit 0 unless noted):
+#   - the configured non-negative whole number (0 is a real ceiling: only
+#     component value 0 is allowed);
+#   - the documented default when the key is absent or empty, or the project
+#     has no project.cfg at all: 21 for max_patch, 13 for max_minor, 0 for
+#     max_major. The defaults live in one place,
+#     pgai_agent_kanban.lib.version_ceiling (CEILING_DEFAULTS), read here
+#     through pp_run_ops only when a key is absent. Deleting the line
+#     therefore restores the default; it never removes the cap;
+#   - an empty string for the explicit "no ceiling" spelling `none` (any
+#     case) — empty is the "no constraint" signal every caller tests with
+#     [[ -n ]];
+#   - nothing, exit 1, for a malformed value (anything else): exactly one
+#     line on stderr names the file, the key and the bad value. A caller
+#     must not discard that line and must treat the project as
+#     ceiling-blocked — never as "no ceiling". Also exit 1 when the project
+#     cannot be resolved or the default cannot be read.
+# One pair of matching surrounding quotes is stripped before parsing.
 #
 # Example:
-#   pp_max_minor "pgai-agent-kanban"   # -> 21 (or empty if unset)
+#   pp_max_major "pgai-agent-kanban"   # -> 0 (configured or default), or "" for none
 # ---------------------------------------------------------------------------
-pp_max_minor() {
-    local name
-    name="$(pp_require_project_context "${1:-}")" || { echo ""; return 0; }
-    local project_root cfg_file
-    project_root="$(pp_project_root "$name" 2>/dev/null)" || { echo ""; return 0; }
+_pp_version_ceiling() {
+    local accessor="$1" key="$2" name
+    name="$(pp_require_project_context "${3:-}")" || return 1
+    local project_root cfg_file=""
+    project_root="$(pp_project_root "$name")" || return 1
     cfg_file="$(_pp_project_cfg_file "$project_root")"
 
-    [[ -n "$cfg_file" ]] || { echo ""; return 0; }
+    local raw=""
+    [[ -n "$cfg_file" ]] && raw="$(_pp_read_cfg_key "$cfg_file" versioning "$key" "")"
+    if [[ ${#raw} -ge 2 && ( "$raw" == \"*\" || "$raw" == \'*\' ) ]]; then
+        raw="${raw:1:${#raw}-2}"
+    fi
 
-    # Source: project.cfg [versioning] max_minor (or bare key in legacy PROJECT.cfg)
-    local raw
-    raw="$(_pp_read_cfg_key "$cfg_file" versioning max_minor "")"
+    if [[ -z "$raw" ]]; then
+        # Absent — the documented default from the shared source.
+        local default
+        if ! default="$(_pp_version_ceiling_default "$key")"; then
+            echo "project_paths.sh: ${accessor}: cannot read the default for ${key} from pgai_agent_kanban.lib.version_ceiling; the project '${name}' is ceiling-blocked until the kanban install is repaired" >&2
+            return 1
+        fi
+        echo "$default"
+        return 0
+    fi
 
-    # Empty / absent — no constraint.
-    [[ -z "$raw" ]] && { echo ""; return 0; }
+    if [[ "${raw,,}" == "none" ]]; then
+        echo ""
+        return 0
+    fi
 
-    # Validate: must be a non-negative integer.
     if ! [[ "$raw" =~ ^[0-9]+$ ]]; then
-        echo "project_paths.sh: pp_max_minor: invalid value '${raw}' for project '${name}' (expected non-negative integer)" >&2
+        local default_text
+        default_text="$(_pp_version_ceiling_default "$key" 2>/dev/null)" || default_text="?"
+        echo "project_paths.sh: ${accessor}: version ceiling unreadable: ${cfg_file} [versioning] ${key} = '${raw}' is not a non-negative whole number or none; the project is ceiling-blocked until it is fixed -- write a number, write none for no ceiling, or delete the line for the default ${default_text}" >&2
         return 1
     fi
 
     echo "$raw"
 }
 
-# ---------------------------------------------------------------------------
-# pp_max_major [name]
-# Echoes the configured max_major value from PROJECT.cfg for the named
-# project, or an empty string when the field is absent.
-#
-# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
-#
-# Same validation rules as pp_max_minor.
-#
-# Example:
-#   pp_max_major "pgai-agent-kanban"   # -> 0 (or empty if unset)
-# ---------------------------------------------------------------------------
-pp_max_major() {
-    local name
-    name="$(pp_require_project_context "${1:-}")" || { echo ""; return 0; }
-    local project_root cfg_file
-    project_root="$(pp_project_root "$name" 2>/dev/null)" || { echo ""; return 0; }
-    cfg_file="$(_pp_project_cfg_file "$project_root")"
-
-    [[ -n "$cfg_file" ]] || { echo ""; return 0; }
-
-    # Source: project.cfg [versioning] max_major (or bare key in legacy PROJECT.cfg)
-    local raw
-    raw="$(_pp_read_cfg_key "$cfg_file" versioning max_major "")"
-
-    # Empty / absent — no constraint.
-    [[ -z "$raw" ]] && { echo ""; return 0; }
-
-    # Validate: must be a non-negative integer.
-    if ! [[ "$raw" =~ ^[0-9]+$ ]]; then
-        echo "project_paths.sh: pp_max_major: invalid value '${raw}' for project '${name}' (expected non-negative integer)" >&2
-        return 1
+# _pp_version_ceiling_default <key> — echo the documented default for one
+# ceiling key from pgai_agent_kanban.lib.version_ceiling.
+_pp_version_ceiling_default() {
+    if ! declare -F pp_run_ops >/dev/null 2>&1; then
+        # shellcheck source=pp_run_ops.sh
+        source "${_PP_LIB_DIR}/pp_run_ops.sh"
     fi
-
-    echo "$raw"
+    pp_run_ops pgai_agent_kanban.lib.version_ceiling default "$1"
 }
 
-# ---------------------------------------------------------------------------
-# pp_max_patch [name]
-# Echoes the configured max_patch value from PROJECT.cfg for the named
-# project, or an empty string when the field is absent.
-#
-# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
-#
-# Same validation rules as pp_max_minor and pp_max_major.
-#
-# IMPORTANT: 0 is a valid ceiling value (meaning only patch 0 is allowed).
-# Empty/absent field is the unset sentinel meaning "no patch ceiling".
-#
-# Example:
-#   pp_max_patch "pgai-agent-kanban"   # -> 5 (or empty if unset)
-# ---------------------------------------------------------------------------
-pp_max_patch() {
-    local name
-    name="$(pp_require_project_context "${1:-}")" || { echo ""; return 0; }
-    local project_root cfg_file
-    project_root="$(pp_project_root "$name" 2>/dev/null)" || { echo ""; return 0; }
-    cfg_file="$(_pp_project_cfg_file "$project_root")"
-
-    [[ -n "$cfg_file" ]] || { echo ""; return 0; }
-
-    # Source: project.cfg [versioning] max_patch (or bare key in legacy PROJECT.cfg)
-    local raw
-    raw="$(_pp_read_cfg_key "$cfg_file" versioning max_patch "")"
-
-    # Empty / absent — no constraint.
-    [[ -z "$raw" ]] && { echo ""; return 0; }
-
-    # Validate: must be a non-negative integer.
-    if ! [[ "$raw" =~ ^[0-9]+$ ]]; then
-        echo "project_paths.sh: pp_max_patch: invalid value '${raw}' for project '${name}' (expected non-negative integer)" >&2
-        return 1
-    fi
-
-    echo "$raw"
-}
+pp_max_patch() { _pp_version_ceiling pp_max_patch max_patch "${1:-}"; }
+pp_max_minor() { _pp_version_ceiling pp_max_minor max_minor "${1:-}"; }
+pp_max_major() { _pp_version_ceiling pp_max_major max_major "${1:-}"; }
 
 # ---------------------------------------------------------------------------
 # pp_max_priorities_per_run [name]
@@ -686,7 +1081,8 @@ pp_max_patch() {
 #
 # Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
 #
-# Same validation rules as pp_max_patch, pp_max_minor, and pp_max_major.
+# Same non-negative-integer validation as the version ceilings above, but
+# with no default and no `none` spelling.
 #
 # IMPORTANT: 0 is a valid value (meaning no priorities processed per run).
 # Empty/absent field is the unset sentinel; callers apply their own default
@@ -734,8 +1130,9 @@ pp_max_priorities_per_run() {
 # to HALT-hard with the full retry history instead of a further
 # cancel-and-rebundle attempt.
 #
-# Unlike pp_max_minor / pp_max_major / pp_max_patch / pp_max_priorities_per_run
-# (which return an empty string meaning "no constraint" when unset), this
+# Unlike pp_max_priorities_per_run (which returns an empty string when
+# unset) and the version ceilings pp_max_minor / pp_max_major / pp_max_patch
+# (which apply their documented defaults when unset), this
 # ceiling has no safe empty meaning — the resolver needs a concrete integer
 # to compare an attempt count against. So absence in BOTH project.cfg and
 # kanban.cfg is NOT treated as "unlimited retries"; it fails loud instead:
@@ -801,6 +1198,393 @@ pp_max_rc_retries() {
     # required-at-resolve-time ceiling.
     echo "project_paths.sh: pp_max_rc_retries: max_rc_retries is required but absent for project '${name}'. Checked ${cfg_file:-<no project.cfg found for ${name}>} [release] max_rc_retries and ${kanban_cfg} [release] max_rc_retries — set one of them." >&2
     return 1
+}
+
+# ---------------------------------------------------------------------------
+# pp_overwatch_resolve [name]
+# Echoes "true" or "false": whether OVERWATCH is authorized to act
+# autonomously on a resolvable CM block for the named project, rather than
+# only observing and escalating. Same project.cfg-overrides-kanban.cfg
+# precedence as pp_max_rc_retries above:
+#
+#   1. project.cfg [release] overwatch_resolve  (or bare key in legacy PROJECT.cfg)
+#   2. kanban.cfg  [release] overwatch_resolve  (kanban root, shipped default: absent)
+#
+# Unlike pp_max_rc_retries, absence must never be an error and must never
+# resolve to "true" — this key gates an autonomy grant, so the fail-safe
+# direction is the opposite of a required ceiling. Absent, blank, or
+# unreadable in BOTH sources resolves to "false" with no diagnostic at all;
+# this is the ordinary, expected state for every project until an operator
+# deliberately opts in.
+#
+# Validation: only the exact strings "true" and "false" are accepted. Any
+# other non-blank value (a typo, 'yes', a quoted empty string) is NEVER
+# guessed into either boolean — it is refused dual-channel through
+# team/scripts/lib/error_contract.sh, naming the key, the offending value,
+# the file it came from, and a runnable remedy.
+#
+# CENSUS (docs/blocking-site-census.md): BLOCK-WORTHY. A malformed
+# overwatch_resolve value could otherwise silently leave OVERWATCH either
+# granted or denied autonomous resolution authority against the operator's
+# actual intent — resolving it wrong in either direction is a real
+# authority mistake, not a cosmetic one, so this site refuses rather than
+# guesses.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+#
+# Example:
+#   pp_overwatch_resolve "pgai-agent-kanban"  # -> 'false' (key unset in both files; shipped default)
+#   pp_overwatch_resolve "opted-in-project"   # -> 'true'  (project.cfg [release] overwatch_resolve = true)
+# ---------------------------------------------------------------------------
+pp_overwatch_resolve() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || return 1
+
+    local kroot
+    kroot="$(_pp_kanban_root)" || return 1
+    local kanban_cfg="${kroot}/kanban.cfg"
+
+    local project_root cfg_file
+    project_root="${kroot}/projects/${name}"
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    # Tier 1: project.cfg override.
+    local raw="" source_file=""
+    if [[ -n "$cfg_file" ]]; then
+        raw="$(_pp_read_cfg_key "$cfg_file" release overwatch_resolve "")"
+    fi
+    if [[ -n "$raw" ]]; then
+        source_file="$cfg_file"
+    else
+        # Tier 2: kanban.cfg default. A read_ini failure (unreadable file)
+        # prints nothing to stdout, so it folds into the same blank-raw
+        # path as "absent" — exactly the fail-safe-to-false behavior this
+        # key requires.
+        raw="$(read_ini "$kanban_cfg" release overwatch_resolve "")"
+        source_file="$kanban_cfg"
+    fi
+
+    case "$raw" in
+        ""|false)
+            echo "false"
+            return 0
+            ;;
+        true)
+            echo "true"
+            return 0
+            ;;
+        *)
+            pgai_emit_error_contract \
+                "overwatch_resolve.invalid_value" \
+                "pp_overwatch_resolve: unrecognized value '${raw}' for project '${name}' in ${source_file} [release] overwatch_resolve (expected 'true' or 'false')." \
+                "Set [release] overwatch_resolve to 'true' or 'false' in ${source_file}, or remove/comment out the key to default to 'false'." \
+                "$name"
+            # CENSUS-ANCHOR: overwatch-resolve-invalid-01
+            return 1
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# pp_block_triage [name]
+# Echoes "true" or "false": whether OVERWATCH's block-triage sweep may take
+# action on a blocked task's Block Record for the named project (requeue,
+# promote, escalate), or must only write the record and its diagnosis.
+# Same resolver semantics as pp_overwatch_resolve above, under its own
+# [overwatch] section:
+#
+#   1. project.cfg [overwatch] block_triage  (or bare key in legacy PROJECT.cfg)
+#   2. kanban.cfg  [overwatch] block_triage  (kanban root, shipped default: true)
+#
+# Absent, blank, or unreadable in BOTH sources resolves to "true" with no
+# diagnostic. That is the opposite default from pp_overwatch_resolve on
+# purpose: an upgrade leaves an existing kanban.cfg untouched, so an install
+# that predates this key must behave the way kanban.cfg_example ships it
+# (triage on) rather than silently differently. An operator who wants
+# record-and-diagnose only sets the key to false in either file.
+#
+# Validation: only the exact strings "true" and "false" are accepted. Any
+# other non-blank value (a typo, 'yes', 'on') is NEVER guessed into either
+# boolean — it is refused dual-channel through
+# team/scripts/lib/error_contract.sh, naming the key, the offending value,
+# the file it came from, and a runnable remedy.
+#
+# CENSUS (docs/blocking-site-census.md): BLOCK-WORTHY. A malformed
+# block_triage value could otherwise silently grant or withhold the
+# sweep's authority to mutate task state against the operator's intent.
+# The stop is scoped to the caller's triage action alone: the sweep treats
+# a non-zero return as a safety refusal — the task is left unchanged and
+# the refusal is logged — so nothing here can stop a wake or a release.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+#
+# Example:
+#   pp_block_triage "pgai-agent-kanban"  # -> 'true'  (key unset in both files; shipped default)
+#   pp_block_triage "watch-only-project" # -> 'false' (project.cfg [overwatch] block_triage = false)
+# ---------------------------------------------------------------------------
+pp_block_triage() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || return 1
+
+    local kroot
+    kroot="$(_pp_kanban_root)" || return 1
+    local kanban_cfg="${kroot}/kanban.cfg"
+
+    local project_root cfg_file
+    project_root="${kroot}/projects/${name}"
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    # Tier 1: project.cfg override.
+    local raw="" source_file=""
+    if [[ -n "$cfg_file" ]]; then
+        raw="$(_pp_read_cfg_key "$cfg_file" overwatch block_triage "")"
+    fi
+    if [[ -n "$raw" ]]; then
+        source_file="$cfg_file"
+    else
+        # Tier 2: kanban.cfg default. A read_ini failure (unreadable file)
+        # prints nothing to stdout, so it folds into the same blank-raw
+        # path as "absent" and takes the shipped default.
+        raw="$(read_ini "$kanban_cfg" overwatch block_triage "")"
+        source_file="$kanban_cfg"
+    fi
+
+    case "$raw" in
+        ""|true)
+            echo "true"
+            return 0
+            ;;
+        false)
+            echo "false"
+            return 0
+            ;;
+        *)
+            pgai_emit_error_contract \
+                "block_triage.invalid_value" \
+                "pp_block_triage: unrecognized value '${raw}' for project '${name}' in ${source_file} [overwatch] block_triage (accepted: true|false)." \
+                "sed -i 's/^[[:space:]]*block_triage[[:space:]]*=.*/block_triage = true/' \"${source_file}\"" \
+                "$name"
+            # CENSUS-ANCHOR: block-triage-invalid-01
+            return 1
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# pp_stale_lock_reap_after_wake_periods [name]
+# Echoes the effective stale-lock reap threshold, in wake periods, for the
+# named project: the per-project override from project.cfg [locks]
+# stale_lock_reap_after_wake_periods when present, otherwise the
+# kanban-wide default from $KANBAN_ROOT/kanban.cfg [locks]
+# stale_lock_reap_after_wake_periods. Same project.cfg-overrides-kanban.cfg
+# precedence as pp_max_rc_retries above.
+#
+# team/scripts/lib/lock_provenance.sh's pgai_lock_acquire multiplies this
+# count by its own fixed wake-period length to get a wall-clock age beyond
+# which a contended lock is reaped purely on age, independent of the
+# recorded holder's pid liveness -- the third of that reaper's three
+# independently-verifiable conditions (dead pid, no provenance, or age).
+#
+# Unlike pp_max_rc_retries, absence in both files is never an error: this
+# knob carries a documented, safe shipped default (3 wake periods), so a
+# project that never touches it still gets ordinary staleness protection
+# rather than a fail-loud acquisition failure over a config lookup.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+#
+# Source (checked in this order):
+#   1. project.cfg [locks] stale_lock_reap_after_wake_periods
+#   2. kanban.cfg  [locks] stale_lock_reap_after_wake_periods (kanban root, shipped default 3)
+#
+# Validation: must be a positive integer in whichever source supplies it.
+# An invalid (non-integer or zero) value is a fail-loud non-zero return
+# naming the offending file and value -- never silently coerced or ignored,
+# since a garbled threshold could otherwise silently disable the reaper (0)
+# or make it absurdly slow, and neither failure mode should pass quietly.
+#
+# Example:
+#   pp_stale_lock_reap_after_wake_periods "pgai-agent-kanban"  # -> 3 (shipped default)
+#   pp_stale_lock_reap_after_wake_periods "patient-project"    # -> 10 (project.cfg override)
+# ---------------------------------------------------------------------------
+pp_stale_lock_reap_after_wake_periods() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || return 1
+
+    local kroot
+    kroot="$(_pp_kanban_root)" || return 1
+    local kanban_cfg="${kroot}/kanban.cfg"
+
+    local project_root cfg_file
+    project_root="${kroot}/projects/${name}"
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    # Tier 1: project.cfg override.
+    local project_raw=""
+    if [[ -n "$cfg_file" ]]; then
+        project_raw="$(_pp_read_cfg_key "$cfg_file" locks stale_lock_reap_after_wake_periods "")"
+    fi
+    if [[ -n "$project_raw" ]]; then
+        if ! [[ "$project_raw" =~ ^[0-9]+$ ]] || [[ "$project_raw" -eq 0 ]]; then
+            echo "project_paths.sh: pp_stale_lock_reap_after_wake_periods: invalid value '${project_raw}' for project '${name}' in ${cfg_file} [locks] stale_lock_reap_after_wake_periods (expected a positive integer)" >&2
+            return 1
+        fi
+        echo "$project_raw"
+        return 0
+    fi
+
+    # Tier 2: kanban.cfg default.
+    local kanban_raw
+    kanban_raw="$(read_ini "$kanban_cfg" locks stale_lock_reap_after_wake_periods "")"
+    if [[ -n "$kanban_raw" ]]; then
+        if ! [[ "$kanban_raw" =~ ^[0-9]+$ ]] || [[ "$kanban_raw" -eq 0 ]]; then
+            echo "project_paths.sh: pp_stale_lock_reap_after_wake_periods: invalid value '${kanban_raw}' in ${kanban_cfg} [locks] stale_lock_reap_after_wake_periods (expected a positive integer)" >&2
+            return 1
+        fi
+        echo "$kanban_raw"
+        return 0
+    fi
+
+    # Tier 3: shipped default -- absence in both files is the ordinary,
+    # expected state for every project that never touches this key.
+    echo 3
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pp_release_key_chain <cfg_file> <kanban_cfg> <key>
+# Internal. Reads [release] <key> through the project.cfg-then-kanban.cfg
+# chain every [release] resolver in this file uses: the project's own
+# config (project.cfg, or a legacy PROJECT.cfg) first, then the kanban-wide
+# kanban.cfg. A blank value counts as absent and falls through.
+#
+# Prints two lines on stdout: the first non-blank raw value, then the path
+# of the file it came from. Both lines are empty when neither file carries a
+# non-blank value. <cfg_file> may be empty (no per-project config file).
+# ---------------------------------------------------------------------------
+_pp_release_key_chain() {
+    local cfg_file="$1"
+    local kanban_cfg="$2"
+    local key="$3"
+
+    local raw=""
+    if [[ -n "$cfg_file" ]]; then
+        raw="$(_pp_read_cfg_key "$cfg_file" release "$key" "")"
+        if [[ -n "$raw" ]]; then
+            printf '%s\n%s\n' "$raw" "$cfg_file"
+            return 0
+        fi
+    fi
+    raw="$(read_ini "$kanban_cfg" release "$key" "")"
+    if [[ -n "$raw" ]]; then
+        printf '%s\n%s\n' "$raw" "$kanban_cfg"
+        return 0
+    fi
+    printf '\n\n'
+}
+
+# ---------------------------------------------------------------------------
+# pp_ship_posture [name]
+# Echoes the named project's resolved ship posture, exactly "matrix" or
+# "always": how CM answers a ship-policy trigger that would otherwise HALT.
+# "matrix" applies the ship-policy matrix as written; "always" ships through
+# the triggers the posture covers and records what they would have stopped
+# on. Every caller that branches on the posture reads it through this
+# function (or its Python counterpart, resolve_ship_posture() in
+# team/pgai_agent_kanban/overwatch/resolution_matrix.py), never by reading
+# the key itself.
+#
+# Source (first non-blank wins), the same chain as pp_max_rc_retries:
+#   1. project.cfg [release] ship_posture  (or bare key in legacy PROJECT.cfg)
+#   2. kanban.cfg  [release] ship_posture  (kanban root, shipped value matrix)
+#   3. "matrix" when both are absent or blank
+#
+# Accepted values: matrix | always, matched exactly. Any other value
+# resolves to "matrix" and prints ONE warning line on stderr naming the file
+# and the raw value. This is a fallback, not a refusal: the return status is
+# 0 and the caller carries on under "matrix".
+#
+# Remote-lane guard. On a lane whose project.cfg does not set
+# push_to_remote = false (_pp_push_to_remote_configured reports "true" -- the
+# configured intent, deliberately not the resolver's answer, so the guard
+# fails safe and agrees with the Python resolver),
+# "always" takes effect only when [release] ship_posture_confirm_remote is
+# exactly "true", read through the same project.cfg-then-kanban.cfg chain.
+# Anything short of that (absent, blank, "false", a typo) resolves to
+# "matrix" and prints ONE warning line on stderr — the guard fails safe, so
+# a lane that publishes to origin never drifts into "always" by accident.
+# Like the unrecognized-value fallback, it is not a HALT and not a refusal:
+# return status 0. On a push_to_remote = false lane the confirm key is not
+# consulted.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then
+# error (the only non-zero return, alongside an unset KANBAN_ROOT).
+#
+# Example:
+#   pp_ship_posture "pgai-agent-kanban"      # -> matrix (key unset anywhere)
+#   pp_ship_posture "local-only-project"     # -> always (ship_posture = always,
+#                                            #    push_to_remote = false)
+#   pp_ship_posture "published-project"      # -> matrix + warning (always set,
+#                                            #    push_to_remote = true, no confirm)
+# ---------------------------------------------------------------------------
+pp_ship_posture() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || return 1
+
+    local kroot
+    kroot="$(_pp_kanban_root)" || return 1
+    local kanban_cfg="${kroot}/kanban.cfg"
+
+    local project_root cfg_file
+    project_root="${kroot}/projects/${name}"
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    local -a chain
+    local raw source_file
+    mapfile -t chain < <(_pp_release_key_chain "$cfg_file" "$kanban_cfg" ship_posture)
+    raw="${chain[0]:-}"
+    source_file="${chain[1]:-}"
+
+    case "$raw" in
+        ""|matrix)
+            echo "matrix"
+            return 0
+            ;;
+        always)
+            ;;
+        *)
+            echo "project_paths.sh: pp_ship_posture: WARNING: unrecognized value '${raw}' for project '${name}' in ${source_file} [release] ship_posture (accepted: matrix|always); resolving to 'matrix'." >&2
+            echo "matrix"
+            return 0
+            ;;
+    esac
+
+    if [[ "$(_pp_push_to_remote_configured "$name")" != "true" ]]; then
+        echo "always"
+        return 0
+    fi
+
+    local confirm_raw confirm_source
+    mapfile -t chain < <(_pp_release_key_chain "$cfg_file" "$kanban_cfg" ship_posture_confirm_remote)
+    confirm_raw="${chain[0]:-}"
+    confirm_source="${chain[1]:-}"
+    if [[ "$confirm_raw" == "true" ]]; then
+        echo "always"
+        return 0
+    fi
+
+    # The remedy names the file whose confirm value wins the chain: the one
+    # already carrying a non-true value, else the one that set "always".
+    local confirm_desc confirm_target
+    if [[ -n "$confirm_raw" ]]; then
+        confirm_desc="'${confirm_raw}' in ${confirm_source}"
+        confirm_target="$confirm_source"
+    else
+        confirm_desc="absent from ${cfg_file:-${project_root}/project.cfg} and ${kanban_cfg}"
+        confirm_target="$source_file"
+    fi
+    echo "project_paths.sh: pp_ship_posture: WARNING: ship_posture 'always' for project '${name}' in ${source_file} is not confirmed for a push_to_remote = true lane ([release] ship_posture_confirm_remote is ${confirm_desc}); resolving to 'matrix'. Set ship_posture_confirm_remote = true under [release] in ${confirm_target} to confirm." >&2
+    echo "matrix"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -1087,28 +1871,183 @@ pp_branch_prefix() {
 }
 
 # ---------------------------------------------------------------------------
-# pp_push_to_remote [name]
-# Echoes 'true' when CM should push to origin for the named project; echoes
-# 'false' when the project is configured for local-only / demo mode.
+# PP_RC_BRANCH_PREFIX_DEFAULT
+# Fallback branch prefix used by pp_rc_branch_prefix ONLY when a project's
+# configuration cannot be read at all. Matches
+# lint_changelog_freshness.py's _DEFAULT_BRANCH_PREFIX so the shell gated
+# runners and the Python CHANGELOG lint agree on which branches count as
+# RC branches on an unconfigured install.
+# ---------------------------------------------------------------------------
+PP_RC_BRANCH_PREFIX_DEFAULT="ai_"
+
+# ---------------------------------------------------------------------------
+# pp_rc_branch_prefix [name]
+# Echoes the branch prefix to use when DETECTING whether the current branch
+# is an RC branch — used by the gated test runners and the CHANGELOG
+# freshness lint to decide whether to relax staleness checks for the
+# duration of a release. This is a different question from pp_branch_prefix
+# (branch/tag CONSTRUCTION), whose correct empty-string default must never
+# guess a prefix when creating a new branch or tag.
 #
-# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+# Resolution:
+#   1. project.cfg is readable and its [project] section carries the
+#      branch_prefix key (even when the configured value is deliberately
+#      empty) — that configured value always wins, exactly like
+#      pp_branch_prefix.
+#   2. project.cfg cannot be read at all — missing project root, missing or
+#      unparsable project.cfg, or the key entirely absent from the
+#      [project] section — falls back to PP_RC_BRANCH_PREFIX_DEFAULT so an
+#      unconfigured install still recognises its default-prefixed RC
+#      branch, instead of silently losing RC-mode detection.
 #
-# Source in project.cfg: [project] push_to_remote
+# This mirrors lint_changelog_freshness.py's _resolve_branch_prefix() so the
+# Python lint and the shell gated runners resolve the same RC-branch pattern
+# under the same kanban root.
 #
-# Normalization rules (defensive — all of these return 'true' or 'false'):
-#   - Absent key, blank value, or any value other than the exact string 'false'
-#     → 'true'  (default; preserves existing behavior for all existing projects)
-#   - Exact string 'false' (case-sensitive, no surrounding quotes) → 'false'
-#   - Surrounding double-quotes are stripped before comparison, matching the
-#     same strip-surrounding-quotes treatment used by pp_branch_prefix.
-#
-# Default when absent or empty: 'true'.
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then
+# PP_RC_BRANCH_PREFIX_DEFAULT (an unresolvable project name is itself a form
+# of "cannot be read at all").
 #
 # Example:
-#   pp_push_to_remote "pgai-agent-kanban"   # -> 'true' (key unset)
+#   pp_rc_branch_prefix "pgai-agent-kanban"  # -> "ai_" (project.cfg unreadable)
+#   pp_rc_branch_prefix "my-project"         # -> "" (project.cfg sets branch_prefix = "")
+# ---------------------------------------------------------------------------
+pp_rc_branch_prefix() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || { echo "$PP_RC_BRANCH_PREFIX_DEFAULT"; return 0; }
+    local project_root cfg_file
+    project_root="$(pp_project_root "$name" 2>/dev/null)" || { echo "$PP_RC_BRANCH_PREFIX_DEFAULT"; return 0; }
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    [[ -n "$cfg_file" ]] || { echo "$PP_RC_BRANCH_PREFIX_DEFAULT"; return 0; }
+
+    # Sentinel default distinguishes "key absent from [project]" (fall back
+    # to PP_RC_BRANCH_PREFIX_DEFAULT) from "key present with an explicitly
+    # empty value" (respect the configured empty prefix). read_ini's FOUND:
+    # sentinel already makes this distinction internally; passing our own
+    # sentinel default surfaces it to this caller.
+    local _pp_sentinel="__pp_rc_branch_prefix_unset__"
+    local raw
+    raw="$(read_ini "$cfg_file" project branch_prefix "$_pp_sentinel")"
+
+    if [[ "$raw" == "$_pp_sentinel" ]]; then
+        echo "$PP_RC_BRANCH_PREFIX_DEFAULT"
+        return 0
+    fi
+
+    # Strip surrounding double-quotes so that `branch_prefix = ""` is treated
+    # as empty rather than as the 2-char string "".
+    raw="${raw%\"}"
+    raw="${raw#\"}"
+
+    echo "$raw"
+}
+
+# ---------------------------------------------------------------------------
+# Internal: _pp_load_push_decision
+# Makes pp_push_decision (push_decision.sh, beside this file) available,
+# sourcing it on first use. Returns 1 when that file is missing, which every
+# caller treats as "do not push" -- the gate fails closed.
+# ---------------------------------------------------------------------------
+_pp_load_push_decision() {
+    declare -F pp_push_decision >/dev/null 2>&1 && return 0
+    [[ -f "${_PP_LIB_DIR}/push_decision.sh" ]] || return 1
+    # shellcheck source=push_decision.sh
+    source "${_PP_LIB_DIR}/push_decision.sh"
+}
+
+# ---------------------------------------------------------------------------
+# pp_push_to_remote [name]
+# Echoes 'true' when CM may push the named project's refs to origin, 'false'
+# otherwise. Decided by the shared push-decision resolver (pp_push_decision,
+# push_decision.sh), so the release path applies the same rule as every
+# other push site: the project must be registered in projects.cfg, its own
+# project.cfg (or legacy PROJECT.cfg) must exist, and that file must name a
+# dev_tree_path. An inherited PGAI_DEV_TREE_PATH or REPO_ROOT never counts.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then
+# 'false' (nothing to resolve, so nothing to push).
+#
+# Answers:
+#   - Resolved project, [project] push_to_remote absent, blank, 'true' or any
+#     value other than the exact string 'false' -> 'true' (the default for a
+#     real registered project is unchanged). One surrounding double quote is
+#     stripped from each side before the comparison.
+#   - Resolved project, push_to_remote = false -> 'false'.
+#   - Unresolved project (unregistered, no project config, no dev_tree_path),
+#     no project context, unset KANBAN_ROOT, or a resolver that cannot run
+#     -> 'false'. Never 'true' by default.
+#
+# Quiet: prints only the answer. A site that must also log why an
+# unresolved project is skipped calls pp_push_policy instead.
+#
+# Example:
+#   pp_push_to_remote "pgai-agent-kanban"   # -> 'true' (registered, key unset)
 #   pp_push_to_remote "local-only-project"  # -> 'false' (push_to_remote = false)
+#   pp_push_to_remote "unregistered"        # -> 'false' (no [project:...] section)
 # ---------------------------------------------------------------------------
 pp_push_to_remote() {
+    local name kroot
+    name="$(pp_require_project_context "${1:-}" 2>/dev/null)" || { echo "false"; return 0; }
+    kroot="$(_pp_kanban_root 2>/dev/null)" || { echo "false"; return 0; }
+    _pp_load_push_decision || { echo "false"; return 0; }
+    KANBAN_ROOT="$kroot" pp_push_decision "$name"
+    if [[ "${PP_PUSH_DECISION:-}" == "push" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# pp_push_policy <name> <site-tag>
+# The release-path push decision for one CM entry point (open-rc, release,
+# finalize-release), taken once, before any git command. Asks the shared
+# resolver (pp_push_decision) and sets, in the caller's scope:
+#   PP_PUSH_DECISION    push | no-push | unresolved (see push_decision.sh)
+#   PP_PUSH_TO_REMOTE   'true' only for push; 'false' for no-push and
+#                       unresolved, so the site takes its local-only path
+# For an unresolved project it also prints, on stdout, exactly one line:
+#   <site-tag> skipped-unresolved-project: project '<name>': missing <piece>: <detail>; nothing pushed and no remote contacted
+# -- the status token and 'missing <piece>' shape check-push-lag.sh and
+# cm/push-watchdog.sh log. Push and no-push print nothing here; the site
+# narrates its own push-policy line. Must be called directly, not in $(...),
+# or the variables are lost. Always returns 0; fails closed (a missing
+# resolver reads as unresolved with piece 'resolver').
+#
+# Example:
+#   pp_push_policy "$PROJECT_NAME" "[cm-open-rc]"
+#   _CM_PUSH_TO_REMOTE="$PP_PUSH_TO_REMOTE"
+# ---------------------------------------------------------------------------
+pp_push_policy() {
+    local name="${1:-}" tag="${2:-}"
+    PP_PUSH_TO_REMOTE="false"
+    if _pp_load_push_decision; then
+        pp_push_decision "$name"
+    else
+        PP_PUSH_DECISION="unresolved"
+        PP_PUSH_STATUS_LINE="skipped-unresolved-project: project '${name}': missing resolver: ${_PP_LIB_DIR}/push_decision.sh does not exist; nothing pushed and no remote contacted"
+    fi
+    if [[ "$PP_PUSH_DECISION" == "push" ]]; then
+        PP_PUSH_TO_REMOTE="true"
+    elif [[ "$PP_PUSH_DECISION" != "no-push" ]]; then
+        echo "${tag:+${tag} }${PP_PUSH_STATUS_LINE}"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Internal: _pp_push_to_remote_configured [name]
+# The push intent a project's own config states, without the resolver's
+# registration and dev-tree checks: 'false' only for the exact value 'false'
+# in [project] push_to_remote (one surrounding double quote stripped from
+# each side); 'true' for an absent key or config file. Used by
+# pp_ship_posture's remote-lane guard, which must fail safe (treat anything
+# short of an explicit 'false' as a publishing lane) and agrees with the
+# Python resolver (resolution_matrix._project_pushes_to_remote). Never use
+# it to decide whether to push -- that is pp_push_to_remote.
+# ---------------------------------------------------------------------------
+_pp_push_to_remote_configured() {
     local name
     name="$(pp_require_project_context "${1:-}")" || { echo "true"; return 0; }
     local project_root cfg_file
@@ -1214,6 +2153,110 @@ pp_strip_prefix_from_tag() {
 }
 
 # ---------------------------------------------------------------------------
+# PP_GIT_REMOTE_NAME_DEFAULT
+# The remote pp_git_remote_name answers when [project] git_remote_name is
+# absent or blank, or the project has no config file at all.
+# ---------------------------------------------------------------------------
+PP_GIT_REMOTE_NAME_DEFAULT="origin"
+
+# ---------------------------------------------------------------------------
+# validate_git_remote_name <value>
+# Returns 0 when <value> is a remote name the release machinery may hand to
+# git, 1 otherwise; prints nothing. The rule, shared with the Python twin
+# (pgai_agent_kanban.lib.git_remote.is_valid_remote_name): letters, digits,
+# '.', '_' and '-', starting with a letter or digit, with no '..' and no
+# trailing '.' or '.lock'. Narrower than git's own rule on purpose: the
+# value becomes a git push / fetch argument and the <remote> in
+# refs/remotes/<remote>/..., so a leading '-', a '/', whitespace or a URL is
+# refused rather than passed through.
+#
+# Examples that pass:  origin  upstream  my-fork  gh.mirror_2
+# Examples that fail:  ""  -x  "up stream"  a/b  ..x  x.  x.lock
+# ---------------------------------------------------------------------------
+validate_git_remote_name() {
+    local value="${1:-}"
+    [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+    [[ "$value" != *..* && "$value" != *. && "$value" != *.lock ]]
+}
+
+# ---------------------------------------------------------------------------
+# pp_git_remote_name [--quiet] [name]
+# Echoes the git remote the named project's release machinery talks to:
+# project.cfg [project] git_remote_name (or the bare key in a legacy
+# PROJECT.cfg), one surrounding double quote stripped from each side. Every
+# CM push, fetch, ls-remote and <remote>/<branch> ref, and the push-lag and
+# released-version reads, name their remote through this function.
+#
+# Answers (exit 0, the name on stdout):
+#   - absent or blank key, no config file, no project root, or no project
+#     context -> PP_GIT_REMOTE_NAME_DEFAULT ("origin");
+#   - a value validate_git_remote_name accepts -> that value.
+#
+# A configured value validate_git_remote_name rejects prints nothing on
+# stdout and returns 1. Without --quiet it first refuses dual-channel on
+# stderr through the shared emitter (error key git_remote_name.invalid,
+# naming the key, the value and the file, and recorded in the project's
+# refusal ledger); the Python twin raises the byte-identical block. With
+# --quiet nothing is printed or recorded: a read-only caller (a dashboard,
+# a released-version lookup) skips its remote tier and narrates its own
+# line instead.
+#
+# CENSUS (docs/blocking-site-census.md): BLOCK-WORTHY. A value that cannot
+# name a remote would hand git an option, a path or a URL where a release
+# expects its remote -- a push to, a branch delete on, or a fetch from a
+# destination nobody configured -- so it is refused, never guessed.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then
+# the default.
+#
+# Example:
+#   pp_git_remote_name "pgai-agent-kanban"   # -> origin  (key absent or "origin")
+#   pp_git_remote_name "fork-project"        # -> upstream (git_remote_name = upstream)
+#   remote="$(pp_git_remote_name "$PROJECT_NAME")" || exit 1
+# ---------------------------------------------------------------------------
+pp_git_remote_name() {
+    local quiet=false
+    if [[ "${1:-}" == "--quiet" ]]; then
+        quiet=true
+        shift
+    fi
+    local name
+    name="$(pp_require_project_context "${1:-}" 2>/dev/null)" || { echo "$PP_GIT_REMOTE_NAME_DEFAULT"; return 0; }
+    local project_root cfg_file
+    project_root="$(pp_project_root "$name" 2>/dev/null)" || { echo "$PP_GIT_REMOTE_NAME_DEFAULT"; return 0; }
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+    [[ -n "$cfg_file" ]] || { echo "$PP_GIT_REMOTE_NAME_DEFAULT"; return 0; }
+
+    # Source: project.cfg [project] git_remote_name (or bare key in legacy PROJECT.cfg)
+    local raw
+    raw="$(_pp_read_cfg_key "$cfg_file" project git_remote_name "")"
+    raw="${raw%\"}"
+    raw="${raw#\"}"
+
+    if [[ -z "${raw//[[:space:]]/}" ]]; then
+        echo "$PP_GIT_REMOTE_NAME_DEFAULT"
+        return 0
+    fi
+    if validate_git_remote_name "$raw"; then
+        echo "$raw"
+        return 0
+    fi
+
+    if [[ "$quiet" != true ]]; then
+        local dev_tree listed=""
+        dev_tree="$(_pp_read_cfg_key "$cfg_file" project dev_tree_path "")"
+        [[ -n "$dev_tree" ]] && listed=" listed by 'git -C ${dev_tree} remote'"
+        pgai_emit_error_contract \
+            "git_remote_name.invalid" \
+            "[project] git_remote_name is '${raw}' for project '${name}' in ${cfg_file}, which is not a valid git remote name (letters, digits, '.', '_' and '-', starting with a letter or digit; no '..', no trailing '.' or '.lock'); no git remote operation was run." \
+            "Set git_remote_name in the [project] section of ${cfg_file} to a remote name${listed} (for example: git_remote_name = ${PP_GIT_REMOTE_NAME_DEFAULT}), or delete the line to use ${PP_GIT_REMOTE_NAME_DEFAULT}." \
+            "$name"
+    fi
+    # CENSUS-ANCHOR: git-remote-name-invalid-02
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # pp_version_within_ceiling [name] <version>
 # Returns 0 (true) when <version> is within the ceiling defined in PROJECT.cfg
 # for the named project; returns 1 when the version exceeds it.
@@ -1224,16 +2267,18 @@ pp_strip_prefix_from_tag() {
 # PGAI_PROJECT_NAME.  When called with two arguments, the first is the
 # project name and the second is the version.
 #
-# Rules:
-#   - If max_major is set and version's major component > max_major → exceeds (1)
-#   - If max_minor is set and version's minor component > max_minor → exceeds (1)
-#   - If max_patch is set and version's patch component > max_patch → exceeds (1)
-#   - Empty/absent ceiling means "no constraint" for that component.
-#   - If no ceiling is set, any version is within ceiling → returns 0.
+# Rules (ceilings as pp_max_major / pp_max_minor / pp_max_patch resolve them):
+#   - version's major component > max_major → exceeds (1)
+#   - version's minor component > max_minor → exceeds (1)
+#   - version's patch component > max_patch → exceeds (1)
+#   - An absent ceiling key (or no project.cfg) applies its documented
+#     default (max_major 0, max_minor 13, max_patch 21); only an explicit
+#     `none` means "no constraint" for that component.
+#   - A malformed ceiling value → the accessor's one stderr line passes
+#     through and this returns 1: the project is ceiling-blocked.
 #   - Malformed version string → prints error to stderr and returns 1.
 #
-# NOTE: max_patch=0 is a real ceiling (only v X.Y.0 accepted). Empty string
-# is the unset signal. This differs from many parsers that treat 0 as unset.
+# NOTE: max_patch=0 is a real ceiling (only v X.Y.0 accepted).
 #
 # The version argument accepts a leading "v" prefix (e.g. v0.21.5 or 0.21.5).
 #
@@ -1306,7 +2351,7 @@ pp_version_within_ceiling() {
 # at $KANBAN_ROOT/HALT and is evaluated separately by those callers.
 #
 # Example:
-#   if pp_project_halted "video-generator"; then
+#   if pp_project_halted "pgai-chomp-man"; then
 #       echo "project is halted — skipping" >&2
 #   fi
 # ---------------------------------------------------------------------------
@@ -1393,7 +2438,9 @@ pp_load_config() {
         export PP_project_name="$(read_ini "$new_cfg" project project_name "")"
         export PP_dev_tree_path="$(read_ini "$new_cfg" project dev_tree_path "")"
         export PP_git_repo_url="$(read_ini "$new_cfg" project git_repo_url "")"
-        export PP_git_remote_name="$(read_ini "$new_cfg" project git_remote_name "origin")"
+        # pp_git_remote_name's answer: origin when absent or blank; empty when
+        # the value is invalid (call pp_git_remote_name itself for the refusal).
+        export PP_git_remote_name="$(pp_git_remote_name --quiet "$name")"
         export PP_workflow_type="$(read_ini "$new_cfg" project workflow_type "release")"
         export PP_branch_prefix="$(read_ini "$new_cfg" project branch_prefix "")"
         # Source: project.cfg [project] temp_dir (per-project temp directory name)
@@ -1427,7 +2474,7 @@ pp_load_config() {
         after_vars="$(compgen -v)"
 
         while IFS= read -r var; do
-            if echo "$before_vars" | grep -qx "$var"; then
+            if grep -qx "$var" <<< "$before_vars"; then
                 continue
             fi
             case "$var" in
@@ -1604,4 +2651,265 @@ pp_repo_lock_path() {
     repo_id="$(printf '%s' "$name" | tr '/' '_' | tr -cd '[:alnum:]_-')"
 
     echo "${root}/locks/repo-wake-${repo_id}.lock"
+}
+
+# ---------------------------------------------------------------------------
+# Internal: _pp_find_key_section <cfg_file> <key> <expected_section>
+# Scans an INI file for the first section OTHER than <expected_section>
+# that carries <key> (comments and blank lines ignored, same section-
+# assignment rule as read_ini: a key belongs to the nearest header above
+# it). Used only to build the misplaced-key warning below — it never
+# changes which section a key resolves from; read_ini's own [release]-only
+# read stays authoritative for the value itself. A recognised deep-verify
+# key sitting outside [release] must not resolve silently — this helper
+# is what lets the callers below say where it actually landed.
+#
+# Echoes the section name if the key is found elsewhere in the file, or
+# nothing if it is absent everywhere. Never fails loud — an unreadable or
+# missing file just yields no match, since the caller only uses this to
+# decide whether to print an advisory warning before falling back to the
+# documented default.
+# ---------------------------------------------------------------------------
+_pp_find_key_section() {
+    local file="$1"
+    local key="$2"
+    local expected_section="$3"
+
+    [[ -r "$file" ]] || return 0
+
+    awk \
+        -v target_key="$key" \
+        -v expected_section="$expected_section" \
+        '
+        /^\[/ {
+            secname = $0
+            sub(/^\[[ \t]*/, "", secname)
+            sub(/[ \t]*\].*$/, "", secname)
+            cur_section = secname
+            next
+        }
+        /^[ \t]*$/ { next }
+        /^[ \t]*[#;]/ { next }
+        {
+            eq_pos = index($0, "=")
+            if (eq_pos == 0) { next }
+            raw_key = substr($0, 1, eq_pos - 1)
+            gsub(/^[ \t]+|[ \t]+$/, "", raw_key)
+            if (raw_key == target_key && cur_section != expected_section && cur_section != "") {
+                print cur_section
+                exit 0
+            }
+        }
+        ' "$file"
+}
+
+# ---------------------------------------------------------------------------
+# _pp_warn_release_key_misplaced <caller> <file> <key> <scope> <next_tier>
+# Internal. Prints ONE advisory stderr line when <key> is absent from
+# [release] in <file> but present under some other section, where the
+# [release]-scoped reader never looks. <scope> is the phrase naming whose
+# file it is ("for project 'x'" or empty for kanban.cfg); <next_tier> names
+# what applies instead. Prints nothing when the key is absent everywhere
+# or the file is unreadable. Always returns 0.
+# ---------------------------------------------------------------------------
+_pp_warn_release_key_misplaced() {
+    local caller="$1"
+    local file="$2"
+    local key="$3"
+    local scope="$4"
+    local next_tier="$5"
+
+    [[ -n "$file" ]] || return 0
+    local found_section
+    found_section="$(_pp_find_key_section "$file" "$key" release)"
+    if [[ -n "$found_section" ]]; then
+        echo "project_paths.sh: ${caller}: '${key}' found in [${found_section}], not [release],${scope:+ ${scope}} in ${file} — only [release] ${key} is honored, so it is ignored there; ${next_tier} applies. Move the key under [release] to activate it." >&2
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# pp_deep_verify_mode [name]
+# Echoes the effective DEEP-VERIFY scheduled-dispatch mode for the named
+# project, "weekly" or "off".
+#
+# Source (first non-blank wins), the same chain as pp_ship_posture:
+#   1. project.cfg [release] deep_verify  (or bare key in legacy PROJECT.cfg)
+#   2. kanban.cfg  [release] deep_verify  (the kanban-wide value; setting
+#      "off" here turns scheduled DEEP-VERIFY off for every project that
+#      does not set its own)
+#   3. "weekly" when both are absent or blank
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+#
+# Default when absent or blank everywhere: "weekly" — deliberately opt-OUT
+# rather than opt-in. A lane that only runs when someone remembers to run
+# it is a lane that stops running; an absent key silently meaning "off"
+# would recreate exactly that failure mode for every project that never
+# touches this key, including this framework's own self-build.
+# Projects that ship no images, or that want to skip the cost, opt out
+# explicitly with deep_verify = off.
+#
+# Misplaced key: when a tier's file carries deep_verify under some section
+# other than [release] (and not under [release]), ONE advisory stderr line
+# names the section and the file, and resolution continues with the next
+# tier. Exit status stays 0.
+#
+# Validation: the accepted non-blank values are "weekly", "off", and the
+# legacy boolean aliases "true" (-> "weekly") and "false" (-> "off") --
+# the same four spellings team/scripts/lib/config_loader.sh accepts for
+# this key in kanban.cfg, and the set every shipped project.cfg/kanban.cfg
+# example advertises. An alias is recognized, not guessed: stdout on
+# success carries exactly one of the two mode words ("weekly" or "off"),
+# never the alias spelling echoed back. Any other value in the tier that
+# supplies it (a typo, a stray value from another vocabulary) is a
+# fail-loud, non-zero return with a stderr diagnostic naming that file and
+# the key, and NOTHING on stdout — never a guessed mode, and never a fall
+# through to the next tier. This is what lets a caller distinguish
+# "resolved to a mode" (stdout has exactly one of the two words) from
+# "refused" (non-zero exit, nothing usable on stdout) without parsing
+# prose. team/scripts/deep-verify.sh's --scheduled path is the caller that
+# turns a non-zero return here into the scheduled path's own dual-channel
+# refusal (CENSUS-ANCHOR deep-verify-02) — this function does not emit the
+# dual-channel contract itself, matching every other pp_* reader in this
+# file (the emitter lives at the site of refusal, not in the shared
+# reader).
+#
+# Python counterpart: _read_deep_verify_mode_raw() and
+# get_deep_verify_status() in team/pgai_agent_kanban/ops/read.py read the
+# same chain through resolution_matrix._release_key_chain().
+#
+# Example:
+#   pp_deep_verify_mode "pgai-agent-kanban"    # -> "weekly" (unset in both files)
+#   pp_deep_verify_mode "quiet-project"        # -> "off" (project.cfg opt-out,
+#                                              #    or kanban.cfg deep_verify = off)
+#   pp_deep_verify_mode "legacy-project"       # -> "weekly" (deep_verify=true alias)
+# ---------------------------------------------------------------------------
+pp_deep_verify_mode() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || return 1
+
+    local kroot
+    kroot="$(_pp_kanban_root)" || return 1
+    local kanban_cfg="${kroot}/kanban.cfg"
+
+    local project_root cfg_file
+    project_root="$(pp_project_root "$name")" || return 1
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    local -a chain
+    local raw source_file
+    mapfile -t chain < <(_pp_release_key_chain "$cfg_file" "$kanban_cfg" deep_verify)
+    raw="${chain[0]:-}"
+    source_file="${chain[1]:-}"
+
+    # A tier the chain passed over may still carry the key under the wrong
+    # section; say so rather than let the operator's intent vanish silently.
+    if [[ -n "$cfg_file" && "$source_file" != "$cfg_file" ]]; then
+        _pp_warn_release_key_misplaced pp_deep_verify_mode "$cfg_file" deep_verify \
+            "for project '${name}'" "${kanban_cfg} [release] deep_verify, else 'weekly',"
+    fi
+    if [[ -z "$raw" ]]; then
+        _pp_warn_release_key_misplaced pp_deep_verify_mode "$kanban_cfg" deep_verify \
+            "" "the default 'weekly'"
+        echo "weekly"
+        return 0
+    fi
+
+    # weekly/true and off/false are recognized aliases of the same two
+    # modes, not four independent outcomes: stdout always carries the
+    # canonical word ("weekly" or "off"), never the alias spelling that
+    # was actually in the config file, so every caller downstream (the
+    # off-mode literal comparison in deep-verify.sh included) keeps
+    # comparing against exactly two strings.
+    case "$raw" in
+        weekly|true)
+            echo "weekly"
+            return 0
+            ;;
+        off|false)
+            echo "off"
+            return 0
+            ;;
+        *)
+            echo "project_paths.sh: pp_deep_verify_mode: unrecognized value '${raw}' for project '${name}' in ${source_file} [release] deep_verify (expected 'weekly' or 'off', aliases 'true'/'false' also accepted; blank/absent in project.cfg and kanban.cfg defaults to 'weekly')" >&2
+            return 1
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# pp_deep_verify_offhours_window [name]
+# Echoes the DEEP-VERIFY off-hours window for the named project — "the
+# schedule knob" — as a literal "HH:MM-HH:MM" string (UTC).
+#
+# Source (first well-formed value wins):
+#   1. project.cfg [release] deep_verify_offhours_window  (or bare key in
+#      legacy PROJECT.cfg)
+#   2. kanban.cfg  [release] deep_verify_offhours_window  (the kanban-wide
+#      value)
+#   3. "03:00-03:59" when neither tier supplies a well-formed value
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+#
+# Unlike pp_deep_verify_mode, this knob never fails loud: a scheduling
+# nicety that lets an operator stagger multiple projects' weekly runs
+# across different hours is not an invariant worth halting a cron job
+# over. A malformed value at a tier (not HH:MM-HH:MM, hours 0-23, minutes
+# 00-59) counts as absent at that tier: ONE warning line on stderr names
+# the file and the value, and resolution continues with the next tier. A
+# key under the wrong section gets the same one-line advisory as
+# pp_deep_verify_mode's. Exit status is 0 on every one of those paths.
+# The accepted shape matches _WINDOW_RE in
+# team/pgai_agent_kanban/deep_verify/schedule.py, whose
+# resolve_offhours_window() still applies its own default fallback to
+# whatever string reaches it.
+#
+# Example:
+#   pp_deep_verify_offhours_window "pgai-agent-kanban"  # -> "03:00-03:59" (default)
+#   pp_deep_verify_offhours_window "night-owl-project"  # -> "01:00-01:59" (project.cfg
+#                                                       #    or kanban.cfg value)
+# ---------------------------------------------------------------------------
+pp_deep_verify_offhours_window() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || return 1
+
+    local kroot
+    kroot="$(_pp_kanban_root)" || return 1
+    local kanban_cfg="${kroot}/kanban.cfg"
+
+    local project_root cfg_file
+    project_root="$(pp_project_root "$name")" || return 1
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    local default_window="03:00-03:59"
+    local window_re='^([01]?[0-9]|2[0-3]):[0-5][0-9]-([01]?[0-9]|2[0-3]):[0-5][0-9]$'
+
+    local tier_file raw scope next_tier
+    for tier_file in "$cfg_file" "$kanban_cfg"; do
+        [[ -n "$tier_file" ]] || continue
+        if [[ "$tier_file" == "$kanban_cfg" ]]; then
+            raw="$(read_ini "$tier_file" release deep_verify_offhours_window "")"
+            scope=""
+            next_tier="the default '${default_window}'"
+        else
+            raw="$(_pp_read_cfg_key "$tier_file" release deep_verify_offhours_window "")"
+            scope="for project '${name}'"
+            next_tier="${kanban_cfg} [release] deep_verify_offhours_window, else '${default_window}',"
+        fi
+
+        if [[ -z "$raw" ]]; then
+            _pp_warn_release_key_misplaced pp_deep_verify_offhours_window "$tier_file" \
+                deep_verify_offhours_window "$scope" "$next_tier"
+            continue
+        fi
+        if [[ "$raw" =~ $window_re ]]; then
+            echo "$raw"
+            return 0
+        fi
+        echo "project_paths.sh: pp_deep_verify_offhours_window: WARNING: malformed value '${raw}'${scope:+ ${scope}} in ${tier_file} [release] deep_verify_offhours_window (expected HH:MM-HH:MM, UTC); ignoring it — ${next_tier} applies." >&2
+    done
+
+    echo "$default_window"
+    return 0
 }

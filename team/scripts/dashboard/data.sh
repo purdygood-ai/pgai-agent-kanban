@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# dashboard-data.sh
+# data.sh
 # Collects all dashboard metrics and outputs structured key=value data.
 #
 # Usage:
-#   dashboard-data.sh --project <name> [--kanban-root <path>]
+#   data.sh --project <name> [--kanban-root <path>]
+#   data.sh -h|--help
 #
 # --project <name> is required when PGAI_PROJECT_NAME is not set.
 #
@@ -14,6 +15,8 @@
 #   KANBAN_VERSION        — VERSION file content (via get_kanban_version() in lib/version.sh)
 #   KANBAN_ROOT           — absolute path to kanban root
 #   ACTIVE_RC             — Active RC version from release-state.md, or "none"
+#   RC_OPENED_AT          — RC Opened At from release-state.md as written, or
+#                           empty when the file, heading or value is missing
 #   LAST_RELEASED         — Last Released from release-state.md
 #   HALT_FLAG             — "yes" if HALT sentinel present (project or global scope), "no" otherwise
 #   HALT_OVERWATCH_FLAG    — "yes" if HALT_OVERWATCH file exists, "no" otherwise
@@ -55,6 +58,23 @@
 # Configuration:
 #   PGAI_AGENT_KANBAN_ROOT_PATH — kanban root override
 #   PGAI_PROJECT_NAME           — project name (alternative to --project)
+
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:59}"
+      exit 0
+      ;;
+  esac
+done
 
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
@@ -114,6 +134,12 @@ source "${SCRIPT_DIR}/lib/version.sh"
 # Source dev_tree helper (resolve_global_dev_tree / require_dev_tree)
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
+# Source pp_run_ops for the task-count scan (pgai_agent_kanban.dashboard.task_counts)
+# shellcheck source=lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
+# Source the release-state.md field readers (release_state_section)
+# shellcheck source=../lib/cm/common.sh
+source "${SCRIPT_DIR}/../lib/cm/common.sh"
 
 # Source config — INI format (kanban.cfg) replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
@@ -197,16 +223,21 @@ emit PROJECT_NAME "$PROJECT_NAME_RESOLVED"
 # -------------------------------------------------------------------
 # Release state
 # -------------------------------------------------------------------
-ACTIVE_RC="none"
-if [[ -f "$RELEASE_STATE" ]]; then
-  # Liberal parse — read first header only, trim whitespace,
-  # then validate: accept only vX.Y.Z semver or 'none'; anything else → none.
-  _raw_arc="$(awk '/^## Active RC/{found=1;next} found && /^[[:space:]]*$/{next} found{print; exit}' "$RELEASE_STATE" 2>/dev/null | tr -d '[:space:]')" || _raw_arc=""
-  if [[ "$_raw_arc" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    ACTIVE_RC="$_raw_arc"
-  else
-    ACTIVE_RC="none"
-  fi
+# Active RC and RC Opened At in one read through the one release-state
+# reader. ACTIVE_RC is a vX.Y.Z version, or "none" for a missing file, an
+# empty value, or anything that is not a version. RC_OPENED_AT is the value as
+# written with whitespace removed, or empty when the file, heading or value is
+# missing.
+_rs_fields="$(release_state_section "$RELEASE_STATE" "Active RC" "RC Opened At")" || true
+_rs_arc=""
+RC_OPENED_AT=""
+{ IFS= read -r _rs_arc || true; IFS= read -r RC_OPENED_AT || true; } <<< "$_rs_fields"
+_rs_arc="${_rs_arc//[[:space:]]/}"
+RC_OPENED_AT="${RC_OPENED_AT//[[:space:]]/}"
+if [[ "$_rs_arc" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  ACTIVE_RC="$_rs_arc"
+else
+  ACTIVE_RC="none"
 fi
 # Last Released is derived from git tags via pp_last_released_version rather
 # than read from release-state.md, so it stays accurate when the live install
@@ -215,6 +246,7 @@ fi
 LAST_RELEASED="$(pp_last_released_version "$_resolved_project" 2>/dev/null || echo "none")"
 [[ -z "$LAST_RELEASED" ]] && LAST_RELEASED="none"
 emit ACTIVE_RC "$ACTIVE_RC"
+emit RC_OPENED_AT "$RC_OPENED_AT"
 emit LAST_RELEASED "$LAST_RELEASED"
 
 # -------------------------------------------------------------------
@@ -386,133 +418,13 @@ while [[ $_shipped_idx -le 5 ]]; do
 done
 
 # -------------------------------------------------------------------
-# Walk tasks/ directory and collect state counts.
-# Use a single Python process to read all task dirs — avoids spawning
-# awk/stat per task and keeps the loop well under 500ms.
+# Task state counts, per-role queue counters, the working task and the last
+# five done tasks -- one scan by pgai_agent_kanban.dashboard.task_counts,
+# the same function the queue pane (show-queues.sh / GET /show-queues)
+# reads its counters from. It prints the KEY=value lines emitted below.
 # -------------------------------------------------------------------
 
-METRICS="$(python3 - "$TASKS_ROOT" <<'PY'
-import os, re, sys, pathlib
-
-tasks_root = pathlib.Path(sys.argv[1])
-SKIP = {"archive", "queues", "plans"}
-KNOWN_ROLES = {"PM", "CODER", "WRITER", "TESTER", "CM"}
-DONE_STATES = {"DONE", "WONT-DO"}
-
-def read_field(text, heading):
-    """Return the first non-blank content line after '## heading'."""
-    pat = re.compile(r'^## ' + re.escape(heading) + r'\s*$', re.M)
-    m = pat.search(text)
-    if not m:
-        return ""
-    rest = text[m.end():]
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            return stripped.upper()
-    return ""
-
-totals = {"TOTAL": 0, "DONE": 0, "WORKING": 0, "BLOCKED": 0,
-          "WAITING": 0, "BACKLOG": 0}
-
-q = {role: {"TOTAL": 0, "DONE": 0, "WORKING": 0, "BLOCKED": 0, "WAITING": 0}
-     for role in KNOWN_ROLES}
-
-working_id = ""
-working_mtime = 0
-working_role = ""
-done_entries = []   # (mtime, task_id, role)
-
-if tasks_root.is_dir():
-    for task_dir in sorted(tasks_root.iterdir()):
-        if not task_dir.is_dir():
-            continue
-        task_id = task_dir.name
-        if task_id in SKIP or task_id.startswith("TASK-"):
-            continue
-        status_file = task_dir / "status.md"
-        if not status_file.is_file():
-            continue
-        readme_file = task_dir / "README.md"
-
-        totals["TOTAL"] += 1
-
-        try:
-            status_text = status_file.read_text(errors="replace")
-        except OSError:
-            continue
-
-        state = read_field(status_text, "State")
-        if not state:
-            state = "BACKLOG"
-
-        role = ""
-        if readme_file.is_file():
-            try:
-                readme_text = readme_file.read_text(errors="replace")
-                role = read_field(readme_text, "Role")
-                # handle "CODER|CODER" style
-                role = role.split("|")[0].strip()
-            except OSError:
-                pass
-        if role not in KNOWN_ROLES:
-            role = "CODER"
-
-        q[role]["TOTAL"] += 1
-
-        if state in DONE_STATES:
-            totals["DONE"] += 1
-            q[role]["DONE"] += 1
-            try:
-                mtime = int(status_file.stat().st_mtime)
-            except OSError:
-                mtime = 0
-            done_entries.append((mtime, task_id, role))
-        elif state == "WORKING":
-            totals["WORKING"] += 1
-            q[role]["WORKING"] += 1
-            try:
-                mtime = int(status_file.stat().st_mtime)
-            except OSError:
-                mtime = 0
-            if not working_id or mtime > working_mtime:
-                working_id = task_id
-                working_mtime = mtime
-                working_role = role
-        elif state == "BLOCKED":
-            totals["BLOCKED"] += 1
-            q[role]["BLOCKED"] += 1
-        elif state == "WAITING":
-            totals["WAITING"] += 1
-            q[role]["WAITING"] += 1
-        else:
-            totals["BACKLOG"] += 1
-
-for k in ("TOTAL", "DONE", "WORKING", "BLOCKED", "WAITING", "BACKLOG"):
-    print(f"{k}_TICKETS={totals[k]}" if k == "TOTAL" else f"{k}_COUNT={totals[k]}")
-
-# Emit per-queue counters
-for role in ("PM", "CODER", "WRITER", "TESTER", "CM"):
-    for stat in ("TOTAL", "DONE", "WORKING", "BLOCKED", "WAITING"):
-        print(f"QUEUE_{role}_{stat}={q[role][stat]}")
-
-# Emit working task
-print(f"WORKING_TASK_ID={working_id}")
-print(f"WORKING_TASK_MTIME={working_mtime}")
-print(f"WORKING_TASK_ROLE={working_role}")
-
-# Emit last 5 done tasks
-done_entries.sort(reverse=True)
-for i, (mtime, task_id, role) in enumerate(done_entries[:5], start=1):
-    print(f"LAST_DONE_{i}={task_id}")
-    print(f"LAST_DONE_ROLE_{i}={role}")
-for i in range(len(done_entries[:5]) + 1, 6):
-    print(f"LAST_DONE_{i}=")
-    print(f"LAST_DONE_ROLE_{i}=")
-PY
-)"
+METRICS="$(pp_run_ops pgai_agent_kanban.dashboard.task_counts "$TASKS_ROOT")"
 
 # Emit all metrics from Python output
 while IFS='=' read -r key val; do

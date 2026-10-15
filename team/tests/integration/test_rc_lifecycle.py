@@ -24,7 +24,7 @@ Design notes:
   - All tests use pytest's tmp_path for scratch.  No bare /tmp paths.
   - Each test is self-contained and produces no state visible to other tests.
   - Test names describe the behavior under test; no bug IDs, version numbers,
-    or gate tokens appear in function names (SOP.md Anti-pattern 6).
+    or gate tokens appear in function names (roles/TESTER.md Anti-pattern 6).
   - The "dev tree" in every test is a local temp git repo, never the live repo.
   - Push tests use a local bare git repo as the remote — no real network access.
   - Because cm-open-rc.sh unconditionally fetches and pulls from origin (even
@@ -41,6 +41,18 @@ import subprocess
 from typing import Optional
 
 import pytest
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="rc-lifecycle")
 
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.
@@ -390,7 +402,7 @@ def _add_tester_task(
                          task for the same Release Version with a controlled
                          lexicographic/creation order — this is how RCs that
                          are cancelled and re-cut end up with multiple TESTER
-                         attempts (SOP "RC Immutability").
+                         attempts (roles/PM.md "RC immutability").
 
     Returns:
         pathlib.Path — the created task directory.
@@ -552,12 +564,12 @@ class TestFullRCLifecycleLocalOnly:
     ) -> None:
         """cm-open-rc.sh carries forward a pre-existing ## Last Released value.
 
-        Reproduces BUG-0111: release-state.md starts with ## Active RC: none
+        Reproduces the precondition: release-state.md starts with ## Active RC: none
         and a populated ## Last Released field from a prior ship. Opening a
         new RC must rewrite the three RC-tracking fields (Active RC, RC
         Opened At, RC Opened By Task) while preserving the existing
         Last Released value verbatim -- it is monotonic and latching per
-        SOP.md and must never be dropped or altered by open-rc.
+        roles/CM.md ("Release state") and must never be dropped or altered by open-rc.
         """
         import re as _re
         version = "v0.2.0"
@@ -573,7 +585,7 @@ class TestFullRCLifecycleLocalOnly:
         )
 
         # Overwrite the idle release-state.md fixture with one carrying a
-        # populated Last Released field, matching BUG-0111's precondition.
+        # populated Last Released field, matching the reproduction's precondition.
         release_state_path = kanban_root / "projects" / project_name / "release-state.md"
         release_state_path.write_text(
             "# Release State\n\n"
@@ -1286,7 +1298,7 @@ class TestTesterVerificationGate:
         reflecting the RC's CURRENT state must be selected — not merely the one
         whose task ID sorts first lexicographically.
 
-        Regression test for BUG-0025: an RC that is cancelled and re-cut can
+        Regression test: an RC that is cancelled and re-cut can
         leave a stale, superseded TESTER task (ended WONT-DO, high risk) behind
         a task ID that sorts BEFORE the current, correct verification (ended
         DONE, low risk). cm-release.sh must pick the DONE task and ship
@@ -1368,7 +1380,7 @@ class TestTesterVerificationGate:
         DONE (e.g. WONT-DO) must HALT the release, per the ship-policy matrix's
         '(unrecognized values)' row — never silently default-ship FUNCTIONAL.
 
-        Regression test for BUG-0025's second, independent defect: previously
+        Regression test for a second, independent defect: previously
         cm_ship_policy() fell through to SHIP-FUNCTIONAL for any tester_state
         other than exactly "blocked" or "done", which meant a WONT-DO task
         carrying a high-risk report shipped as if no report existed at all.

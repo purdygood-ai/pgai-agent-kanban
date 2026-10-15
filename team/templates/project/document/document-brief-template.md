@@ -100,7 +100,7 @@ WRITER as input, and WRITER performs the transformation described in this
 brief.
 
 Use Source Documents for any of:
-- Iterating on a prior version (load `v0.1.3-slide-deck`, revise it).
+- Iterating on a prior version (e.g. load `v0.1.3-slide-deck`, revise it).
 - Merging across two or more prior artifacts (load both decks, splice slides
   from one into the other).
 - Starting from an operator-dropped reference file (operator places the file

@@ -1,0 +1,61 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": null,
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "the gated unit runner exits 1 — a \"best effort\" refusal-ledger write kills its `set -e` caller",
+      "heading": "Finding 1: the gated unit runner exits 1 — a \"best effort\" refusal-ledger write kills its `set -e` caller",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks — one guarded call, plus a regression test)\n**Systemic Risk:** medium (the helper sits on every refusal path in the framework, so the same abort can recur wherever a caller runs under `set -e` and the ledger write fails)\n**Filed As:** BUG-0326 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`bash team/scripts/run-unit-tests.sh --coverage` exits 1 with three failures in\n`team/tests/unit/test_lock_contention_staleness_reap.py`\n(`test_dead_pid_holder_lock_is_reaped_and_narrated`,\n`test_provenance_less_contended_lock_is_reaped_with_atomicity_narration`,\n`test_live_pid_lock_older_than_threshold_is_reaped_on_age`; a run in an\ninstrumented clone of the same commit also failed\n`test_kill9_holder_self_recovers_on_next_acquisition`, 4 failures). This is the\nthird head of BUG-0324 — the one CODER-20260918-016 and -017 explicitly left\nout of scope and CODER-20260918-019 recorded as \"unexplained\". It is now\nroot-caused.\n\n**Mechanism, proven.** `refusal_ledger_record_best_effort`\n(`team/scripts/lib/refusal_ledger.sh:144-149`) calls `refusal_ledger_record ...\n>/dev/null 2>&1` as an unguarded simple command and only then `return 0`. The\nredirection hides the output, not the exit status, so under the caller's\n`set -euo pipefail` the shell exits at that line and the documented \"Always\nreturns 0; never prints\" contract is not honoured.\n`pgai_emit_error_contract` (`team/scripts/lib/error_contract.sh:117-133`) calls\nit on every emission when a project context resolves, so the abort rides on\nevery refusal site. In these tests the victim is `pgai_lock_acquire`: it\ncorrectly classifies the holder as stale, emits the\n`lock.provenance.stale_reaped.*` contract, and is then killed before its\nreap-and-retry can return 0 — which is exactly the \"reap narration on stderr,\nthen silent exit 1, no `lock.provenance.contended` message\" shape BUG-0324\ncould not explain.\n\n**Why it only fires under the gated runner.** `refusal_ledger_record` refuses\nwhen `[[ ! -d \"${KANBAN_ROOT}\" ]]` (its own deliberate \"never fabricate the\nkanban root\" guard). `run-unit-tests.sh:547` assigns `KANBAN_ROOT=\"$TEAM_ROOT\"`\n**without `export`**, so the pytest process and every `run_bash()` child run with\nno `KANBAN_ROOT`, while an operator shell that sourced `shell-env` exports it.\n\n**Evidence.**\n\n- Minimal reproduction, ~2 s, from `<dev tree>/team`:\n  `env -u KANBAN_ROOT PGAI_PROJECT_NAME=pgai-agent-kanban python3 -m pytest -p no:randomly -q tests/unit/test_lock_contention_staleness_reap.py`\n  → `4 failed, 4 passed`; the identical command with `KANBAN_ROOT` exported →\n  `8 passed`.\n- Contract helper in isolation, no pytest: a script doing\n  `set -euo pipefail; source error_contract.sh; pgai_emit_error_contract k m r; echo \"AFTER_EMIT reached\"`\n  run under `env -u KANBAN_ROOT PGAI_PROJECT_NAME=pgai-agent-kanban` prints the\n  three contract lines, never prints `AFTER_EMIT reached`, and exits 1. With\n  `KANBAN_ROOT` set it prints `AFTER_EMIT reached` and exits 0.\n- `env -u KANBAN_ROOT bash -c 'source scripts/lib/refusal_ledger.sh; set +e; refusal_ledger_record pgai-agent-kanban k m r s >/dev/null 2>&1; echo $?'`\n  → `1`.\n- A clone of the RC at the same commit, with the fixtures' acquirer scripts run\n  under `set -euxo pipefail`, reproduced the failure under the gated runner and\n  its xtrace ends exactly at `+ refusal_ledger_record_best_effort ...`, followed\n  by the EXIT trap's `pgai_lock_release_all_held`.\n\n**The production library is not implicated.** Every reap behavior these\nfixtures cover was exercised by hand against the shipped\n`team/scripts/lib/lock_provenance.sh` with `KANBAN_ROOT` present: a dead-pid\nrecord is reaped and the acquisition returns 0, and a live well-provenanced\nholder is still refused with `lock.provenance.contended`.\n\n**Consequence for this RC.** The suite-pass precondition for `PASS` is not met:\n`UNIT_EXIT=1`. It also means the bundle's criterion \"each bundled item is\naddressed\" is met for BUG-0322, BUG-0323 and BUG-0325, and met in two of three\nheads for BUG-0324. Note that `cm-release.sh` Step 16b will set BUG-0324's\n`## Status` to `done` when this RC ships; BUG-0326 is what carries the\nunresolved head forward, and it names the one-line fix.\n\n**Regression:** no\n**Integrity:** breakage\n\n(The two fields above are recorded even though this finding's Systemic Risk is\n`medium`, because the reader would otherwise have to infer them: the failing\ntests failed identically on v2.23.13 before this RC opened, and the unguarded\ncall in `refusal_ledger_record_best_effort` is older than either.)",
+      "filed_as": "BUG-0326",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "breakage",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks — one guarded call, plus a regression test)",
+        "systemic_risk": "medium (the helper sits on every refusal path in the framework, so the same abort can recur wherever a caller runs under `set -e` and the ledger write fails)",
+        "filed_as": "BUG-0326 (Path C-A — filed as BUG: code defect / regression / test failure)",
+        "regression": "no",
+        "integrity": "breakage"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "the runners' \"Replay this exact run\" line does not reproduce the run",
+      "heading": "Finding 2: the runners' \"Replay this exact run\" line does not reproduce the run",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to the two runners' output)\n**Filed As:** BUG-0327 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nCODER-20260918-017 added, to both runners, a `Test order: stated ...` line and a\n`Replay this exact run: (cd ... && python3 -m pytest ...)` line, and both\nrunners' usage comments now promise \"A failing run is reproduced by re-running\nthis exact command; no seed capture is needed.\"\n\nRun verbatim, it does not reproduce. The gated unit run on commit `788281c`\nexited 1 with three failures; its own printed replay command, pasted into an\noperator shell on the same commit, exited 0 — `4732 passed, 31 skipped`\n(`/tmp/pgai_kanban_tmp/tester/t021-replay.log`). The line carries the pytest\nargv only, and omits every environment variable the runner applies —\n`PYTEST_ADDOPTS=--basetemp=...`, `PYTHONHASHSEED=0`, `PGAI_DEV_TREE_PATH`,\n`PGAI_PROJECT_TEMP_SUBTREE`, the crontab seam, and (decisively)\n`KANBAN_ROOT`, which line 547 sets without exporting. Adding `env -u\nKANBAN_ROOT` to the printed command reproduces the runner's failures exactly,\nwhich is what makes this a defect in the line rather than a flaky suite.\n\nThe cost is already visible in this cycle's record: two CODER tickets re-ran\nthis command, saw green, and recorded the failure as \"not reproducible\nstandalone\".\n\nThe new `team/tests/unit/test_gated_runner_stated_test_order.py` asserts the\nline is printed and carries the pytest invocation; it cannot catch this,\nbecause the assertion is about the text, not about whether the text reproduces\nthe run.",
+      "filed_as": "BUG-0327",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to the two runners' output)",
+        "filed_as": "BUG-0327 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

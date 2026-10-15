@@ -15,6 +15,11 @@ PyYAML>=6.0
 # httpx, required by fastapi.testclient.TestClient in the API test suites.
 fastapi[standard]>=0.100
 
+# ASGI toolkit FastAPI is built on; imported directly for the Headers reader
+# and the ASGI type aliases the request-trust middlewares in
+# team/pgai_agent_kanban/api/app.py are written against.
+starlette>=0.27
+
 # Data validation; used directly via BaseModel in
 # team/pgai_agent_kanban/api/routers/operations.py and
 # team/scripts/lint_api_parity.py.

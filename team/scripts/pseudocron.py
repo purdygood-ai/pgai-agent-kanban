@@ -10,7 +10,12 @@ command strings in pseudocron.cfg (e.g. "scripts/wake-batch.sh --agent=pm")
 resolve correctly regardless of where pseudocron.py itself was launched from.
 
 Usage:
-    python3 pseudocron.py
+    python3 pseudocron.py [--help]
+
+    --help, -h prints this usage text and exits 0 immediately — before the
+    config file is read or the signal handlers are installed — and starts
+    no scheduler loop. With no arguments, the script runs the scheduler
+    described below.
 
 Environment:
     PGAI_AGENT_KANBAN_ROOT_PATH          Root directory containing
@@ -22,11 +27,19 @@ Output:
         <ISO timestamp> fired (minute=<NN>): <command>
     stderr — startup info, parse errors (prefixed with ERROR), shutdown notice.
 
+Jobs:
+    Each fired job runs as ``bash -c <command>`` in a session of its own
+    (as under real cron), so it is not in the scheduler's process group or
+    attached to the scheduler's terminal. Closing the terminal or tmux pane
+    the scheduler runs in, or pressing Ctrl-C there, reaches the scheduler
+    only, never a job it started.
+
 Stop:
     SIGINT (Ctrl-C) or SIGTERM — clean exit with status 0.
     Already-running child processes are not killed.
 """
 
+import argparse
 import os
 import pathlib
 import re
@@ -144,6 +157,43 @@ def parse_env(text, source="pseudocron.env"):
 
 
 # ---------------------------------------------------------------------------
+# Argument parsing (importable by unit tests)
+# ---------------------------------------------------------------------------
+
+
+def _parse_args(argv=None):
+    """Parse command-line arguments.
+
+    The scheduler takes no positional or optional arguments beyond the
+    standard --help/-h. Building the parser this way gives --help/-h an
+    argparse-generated usage banner and, critically, lets it be checked
+    (via main() calling this function first) before the config file is
+    read or the signal handlers are installed.
+
+    Args:
+        argv (list of str, optional): Argument vector to parse. Defaults
+            to sys.argv[1:] when None (argparse's own default).
+
+    Returns:
+        argparse.Namespace: Empty namespace — parsing succeeds for a bare
+        invocation and exits the process for --help/-h or an unrecognized
+        argument (argparse's standard behavior).
+    """
+    parser = argparse.ArgumentParser(
+        prog="pseudocron.py",
+        description=(
+            "Foreground cron-like scheduler for sandboxed environments. "
+            "Reads pseudocron.cfg (schedule) and pseudocron.env "
+            "(environment) from the kanban root named by "
+            "PGAI_AGENT_KANBAN_ROOT_PATH, then loops forever firing jobs "
+            "whose minute value matches the current minute. Stop with "
+            "SIGINT (Ctrl-C) or SIGTERM."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -151,6 +201,31 @@ def _ts():
     """Return current UTC time as an ISO 8601 string (seconds precision)."""
     t = time.gmtime()
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", t)
+
+
+def spawn_job(command, env, cwd):
+    """Start one job as ``bash -c command`` in a new session; do not wait.
+
+    ``start_new_session=True`` makes the job a session (and process group)
+    leader of its own, as cron does: a SIGHUP from the scheduler's terminal
+    or tmux pane closing, or a SIGINT typed there, reaches the scheduler's
+    group only, so a wake driver started here runs to completion whatever
+    happens to the scheduler.
+
+    Args:
+        command (str): The job's shell command line.
+        env (dict): The job's environment.
+        cwd (str): The directory the job runs in (the kanban root).
+
+    Returns:
+        subprocess.Popen: The started job.
+    """
+    return subprocess.Popen(
+        ["bash", "-c", command],
+        env=env,
+        cwd=cwd,
+        start_new_session=True,
+    )
 
 
 def _shutdown(signum, frame):  # noqa: ARG001
@@ -163,6 +238,18 @@ def _shutdown(signum, frame):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 def main():
+    """Run the pseudocron scheduler in the foreground until SIGINT or SIGTERM.
+
+    Reads ``pseudocron.cfg`` (and the optional ``pseudocron.env``) from the
+    kanban root and fires each job on its schedule. ``--help``/``-h`` prints
+    usage and exits 0 before anything is read. Exit codes: 0 on a clean stop
+    by signal; 1 the kanban root is unresolved or the config file is missing.
+    """
+    # Argument parsing runs before anything else: --help/-h must exit 0
+    # without loading the config file or installing signal handlers, so an
+    # operator asking for usage never triggers a live scheduler run.
+    _parse_args()
+
     # Resolve root directory through the canonical resolver — fails loud when
     # PGAI_AGENT_KANBAN_ROOT_PATH is unset or empty (source-then-fail-loud contract).
     try:
@@ -232,11 +319,7 @@ def main():
             print(f"{ts} fired (minute={minute:02d}): {command}", file=sys.stderr)
             sys.stdout.flush()
             try:
-                subprocess.Popen(
-                    ["bash", "-c", command],
-                    env=child_env,
-                    cwd=root,
-                )
+                spawn_job(command, env=child_env, cwd=root)
             except Exception as exc:  # noqa: BLE001
                 print(
                     f"ERROR {ts} spawn failed (minute={minute:02d}):"

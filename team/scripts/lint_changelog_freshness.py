@@ -30,7 +30,8 @@ RC mode (PGAI_LINT_CHANGELOG_MODE=rc):
   directory, then computes the diff between the checked-in artifact and the
   regeneration.  A diff is tolerable in RC mode only when ALL added lines
   fall into one of two accepted categories, and ALL removed lines fall into
-  one of three accepted writer-migration drift categories:
+  one of three accepted writer-migration drift categories or are the empty
+  Known Issues placeholder a first entry now replaces:
 
   Tolerable ADDED lines:
 
@@ -64,7 +65,18 @@ RC mode (PGAI_LINT_CHANGELOG_MODE=rc):
       emitted as an opening or closing fence for embedded code samples inside
       KI descriptions or Fixed entries but the current writer strips.
 
-  These three removal categories represent one-time writer-rule migration drift:
+    Category 6 — Empty Known Issues placeholder replaced by its first entry:
+      The ``None`` line the writer renders for a Known Issues section with
+      no entries, removed only because the diff line directly after it is a
+      Category 1 addition (a KI entry whose Public ID the checked-in
+      artifact does not carry) standing in its place.  The placeholder is
+      the writer's rendering of "nothing here yet", not content: a bug
+      filed post-commit against a version whose section was empty produces
+      exactly this one-line replacement.  A ``None`` removed under any
+      other heading, or not directly followed by a new entry, is still a
+      hard failure.
+
+  Categories 3, 4 and 5 represent one-time writer-rule migration drift:
   the checked-in CHANGELOG was committed under older writer rules, and the
   current writer no longer produces those patterns.  Allowing their removal
   enables RC verification to pass without requiring a per-RC CHANGELOG
@@ -87,11 +99,9 @@ RC mode (PGAI_LINT_CHANGELOG_MODE=rc):
   The default behaviour (strict byte-compare) is enforced when the variable
   is absent, set to any value other than "rc", or the branch is ai_main.
 
-Migration note: prior to this RC (v1.19.0), CHANGELOG.md was maintained as
-a hybrid hand-edited format.  This RC regenerated CHANGELOG.md via the
-changelog_writer as a one-time migration step.  After this point, the
-committed CHANGELOG.md is always writer-produced, and this gate enforces
-that invariant on every subsequent RC.
+Invariant: the committed CHANGELOG.md is always writer-produced -- rendered
+by the changelog_writer, never hand-edited -- and this gate enforces that
+invariant on every RC.
 
 Wired into both gated runners (run-unit-tests.sh and run-integration-tests.sh)
 as a pre-flight check, following the lint_icd_freshness pattern.
@@ -171,15 +181,31 @@ _TEAM_DIR = _THIS_FILE.parent.parent  # team/
 _DEV_TREE_ROOT = _TEAM_DIR.parent  # project_root/
 _DEFAULT_CHANGELOG_PATH = _DEV_TREE_ROOT / "CHANGELOG.md"
 
+# The Public ID reader is shared with the changelog writer; this script is
+# run directly as well as imported, so the team package is put on sys.path
+# from this file's own location before the import.
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.public_id import (  # noqa: E402
+    extract_ki_ids,
+    ki_line_title,
+    leading_ki_id,
+    same_ki_title,
+)
+
 # Default project name — the kanban-self project that owns this script.
 _DEFAULT_PROJECT_NAME = "pgai-agent-kanban"
+
+# Fallback branch prefix — project.cfg_example's own shipped default for
+# _DEFAULT_PROJECT_NAME. Used by _resolve_branch_prefix() only when the live
+# project.cfg cannot be read (unconfigured install, sandboxed test
+# environment); a project.cfg that IS readable always wins, including one
+# that deliberately configures an empty prefix.
+_DEFAULT_BRANCH_PREFIX = "ai_"
 
 # Pattern that matches a KI line prefix in CHANGELOG output.
 # Example: "KI-1.0.0.1 — symptom text; affects v1.0.0 · open"
 _KI_LINE_RE = re.compile(r"^KI-(\d+\.\d+\.\d+\.\d+)\s+—")
-
-# Pattern to extract Public IDs already present in the checked-in CHANGELOG.
-_KI_ID_IN_CHANGELOG_RE = re.compile(r"\bKI-(\d+\.\d+\.\d+\.\d+)\b")
 
 # Pattern that matches a CHANGELOG section heading for a release version.
 # Example: "## v1.22.5 — 2026-07-14"
@@ -192,7 +218,7 @@ _RELEASE_HEADING_RE = re.compile(r"^## (v\d+\.\d+\.\d+)(?:\s|$)")
 _HEADING_LINE_RE = re.compile(r"^## (v\d+\.\d+\.\d+).*$", re.MULTILINE)
 
 # ---------------------------------------------------------------------------
-# Writer-migration drift categories (an earlier defect enumeration).
+# Writer-migration drift categories.
 #
 # These three patterns identify REMOVED lines in the diff between a checked-in
 # CHANGELOG (committed under older writer rules) and a fresh regeneration from
@@ -203,13 +229,13 @@ _HEADING_LINE_RE = re.compile(r"^## (v\d+\.\d+\.\d+).*$", re.MULTILINE)
 #
 # Category 3 — Fenced ``## Fixed`` sub-section header:
 #   Older writer emitted a ``## Fixed`` sub-section header inside each release
-#   entry.  Current writer omits it (title-only projection from an earlier defect).
+#   entry.  Current writer omits it (title-only projection).
 # Category 4 — Hyphen-prefixed KI-resolved line:
 #   Older writer emitted ``- KI-N.N.N.N — resolved`` for resolved Known Issues.
 #   Current writer emits a full-format KI title line instead.
 # Category 5 — Embedded triple-backtick code fence:
 #   Older writer embedded ``` fences inside KI descriptions and Fixed entries.
-#   Current writer strips them (title-only projection from an earlier defect).
+#   Current writer strips them (title-only projection).
 # ---------------------------------------------------------------------------
 
 # Category 3: exactly "## Fixed" (optional trailing whitespace, no other content).
@@ -221,6 +247,13 @@ _DRIFT_KI_RESOLVED_RE = re.compile(r"^-\s+KI-\d+\.\d+\.\d+\.\d+\s+—\s+resolved
 # Category 5: a line consisting only of triple-backtick (code fence open/close).
 # Allows optional trailing whitespace.
 _DRIFT_TRIPLE_BACKTICK_RE = re.compile(r"^```\s*$")
+
+# Category 6: the placeholder the writer renders for a Known Issues section
+# with no entries, and the heading such a section sits under.  The placeholder
+# is a tolerable removal only when the diff line directly after it is a
+# Category 1 KI addition — the section's first entry taking its place.
+_KNOWN_ISSUES_HEADING_RE = re.compile(r"^###\s+Known\s+Issues\s*$")
+_EMPTY_SECTION_PLACEHOLDER_RE = re.compile(r"^None\s*$")
 
 
 def _get_temp_root() -> pathlib.Path:
@@ -274,20 +307,6 @@ def _resolve_bugs_dir() -> pathlib.Path:
     return kanban_root / "projects" / _DEFAULT_PROJECT_NAME / "bugs"
 
 
-def _extract_ki_ids(text: str) -> set[str]:
-    """Return the set of KI Public IDs that appear in the given text.
-
-    Scans for all occurrences of ``KI-X.X.X.N`` in text.
-
-    Args:
-        text: CHANGELOG content (or any string) to scan.
-
-    Returns:
-        Set of Public ID strings (e.g. {"KI-1.0.0.1", "KI-1.0.0.2"}).
-    """
-    return set(_KI_ID_IN_CHANGELOG_RE.findall(text))
-
-
 def _extract_release_versions_from_headings(text: str) -> set[str]:
     """Return the set of release versions referenced by ## vX.Y.Z headings in text.
 
@@ -303,7 +322,9 @@ def _extract_release_versions_from_headings(text: str) -> set[str]:
 
 
 def _diff_is_rc_tolerable(
-    checked_in_text: str, regenerated_text: str
+    checked_in_text: str,
+    regenerated_text: str,
+    extra_release_notes_dir: pathlib.Path | None = None,
 ) -> tuple[bool, str]:
     """Return whether the diff between checked-in and regenerated CHANGELOG is
     tolerable in RC mode, and a log message identifying which tolerance clause fired.
@@ -311,7 +332,7 @@ def _diff_is_rc_tolerable(
     A diff is tolerable when ALL of the following hold:
 
       a) Every REMOVED line falls into one of three accepted writer-migration
-         drift categories (an earlier defect enumeration):
+         drift categories:
 
          Category 3 — Fenced ``## Fixed`` sub-section header:
            The removed line exactly matches ``## Fixed`` (optional trailing
@@ -328,6 +349,13 @@ def _diff_is_rc_tolerable(
            older writer embedded these fences inside KI descriptions and Fixed
            entries; the current writer strips them.
 
+         Category 6 — Empty Known Issues placeholder replaced by its first entry:
+           The removed line is the ``None`` placeholder directly under a
+           ``### Known Issues`` heading, and the diff line directly after it
+           is a Category 1 addition.  The placeholder is the writer's own
+           rendering of an empty section, so a first entry taking its place
+           removes no content.
+
       b) Every ADDED line falls into one of two accepted categories:
 
          Category 1 — Post-RC bug-ledger KI addition:
@@ -341,8 +369,9 @@ def _diff_is_rc_tolerable(
            (ii) the version heading is NOT already in the checked-in artifact,
                 confirming it is a new entry rather than a modification.
 
-    If any removed line does NOT match one of the three drift categories, the
-    gate rejects immediately (removal of genuine content is never tolerable).
+    If any removed line does NOT match one of the three drift categories or the
+    replaced placeholder, the gate rejects immediately (removal of genuine
+    content is never tolerable).
     Similarly, if any added line does not satisfy Category 1 or Category 2, the
     gate rejects.
 
@@ -353,12 +382,21 @@ def _diff_is_rc_tolerable(
     Args:
         checked_in_text:  Content of the checked-in CHANGELOG artifact.
         regenerated_text: Content of a fresh regeneration from the bugs dir.
+        extra_release_notes_dir: Optional overlay directory consulted for a
+                         Category 2 release-notes file when it is not found
+                         under the dev tree's release-notes/ directory. Lets
+                         a caller (a test fixture, most commonly) prove a
+                         new-release-section addition is backed by a
+                         release-notes file without writing that file into
+                         the real repository tree. Ignored when None
+                         (default); production behavior is unchanged when
+                         this argument is omitted.
 
     Returns:
         Tuple of (is_tolerable, clause_description) where clause_description
         names which tolerance clause(s) fired for use in log messages.
     """
-    existing_ki_ids = _extract_ki_ids(checked_in_text)
+    existing_ki_ids = extract_ki_ids(checked_in_text)
     existing_versions = _extract_release_versions_from_headings(checked_in_text)
 
     # Derive the dev-tree root from this file's location to look up release-notes.
@@ -374,6 +412,18 @@ def _diff_is_rc_tolerable(
     has_ki_additions = False
     has_new_release_section = False
     has_drift_removals = False  # True when writer-migration drift lines are removed.
+    # True when an empty Known Issues placeholder was replaced by its first entry.
+    has_placeholder_replacements = False
+
+    # Category 6 state: a removed ``None`` placeholder is admitted only once the
+    # very next diff line proves to be a Category 1 addition.  The most recent
+    # context line says which section heading the placeholder sat under.
+    _pending_placeholder_removal: bool = False
+    _last_context_line: str = ""
+    # True from the entry that replaced a placeholder until the next context
+    # line or hunk: every further addition in that run must also be a
+    # Category 1 KI entry, so nothing but ledger entries fills the section.
+    _in_placeholder_replacement: bool = False
 
     # Category 5 drift fence context: once a removed ``` line is seen, subsequent
     # removed lines (the code block content) are inside a drift fence and are also
@@ -416,26 +466,44 @@ def _diff_is_rc_tolerable(
         if diff_line.startswith("---") or diff_line.startswith("+++"):
             continue
         if diff_line.startswith("@@"):
+            # A removed placeholder that no addition followed within its own
+            # hunk was not replaced — genuine content went missing.
+            if _pending_placeholder_removal:
+                return False, ""
             # A new diff hunk resets the section-tracking context.
             current_section_valid = False
             pending_preamble = []
             pending_preamble_clean = True
             _inside_drift_fence = False
+            _last_context_line = ""
+            _in_placeholder_replacement = False
             continue
         if diff_line.startswith(" "):
+            # A context line directly after a removed placeholder means nothing
+            # took its place — genuine content went missing.
+            if _pending_placeholder_removal:
+                return False, ""
             # Context line (unchanged): marks the end of any in-progress section
             # and any drift-fence context.
             current_section_valid = False
             pending_preamble = []
             pending_preamble_clean = True
             _inside_drift_fence = False
+            _last_context_line = diff_line[1:].rstrip("\n")
+            _in_placeholder_replacement = False
             continue
         if diff_line.startswith("-"):
             # A line was removed from the checked-in artifact.
             # RC-mode tolerance allows removal of writer-migration drift lines
-            # (an earlier defect enumeration: Categories 3, 4, and 5).  Any other removal
-            # is a hard failure (genuine content was deleted or modified).
+            # (Categories 3, 4, and 5) and of a replaced empty Known Issues
+            # placeholder (Category 6).  Any other removal is a hard failure
+            # (genuine content was deleted or modified).
             removed_content = diff_line[1:]  # Strip the leading '-'.
+
+            # A second removal directly after a removed placeholder means the
+            # placeholder was not simply replaced by a first entry.
+            if _pending_placeholder_removal:
+                return False, ""
 
             # Category 5 — drift fence context: if we are inside a triple-backtick
             # fence (opened by a previous Category 5 removal), any removed line is
@@ -459,12 +527,26 @@ def _diff_is_rc_tolerable(
                 has_drift_removals = True
                 _inside_drift_fence = True
                 continue
+            if (                                                     # Category 6
+                _EMPTY_SECTION_PLACEHOLDER_RE.match(removed_content)
+                and _KNOWN_ISSUES_HEADING_RE.match(_last_context_line)
+            ):
+                # The empty-section placeholder; admitted only if the next diff
+                # line is the section's first entry (a Category 1 addition).
+                _pending_placeholder_removal = True
+                continue
             return False, ""
         if diff_line.startswith("+"):
             content = diff_line[1:]  # Strip the leading '+' from the diff line.
 
             # --- Category 1: KI-line addition ---
             ki_match = _KI_LINE_RE.match(content)
+            if not ki_match and (
+                _pending_placeholder_removal or _in_placeholder_replacement
+            ):
+                # Something other than a KI entry took the placeholder's place,
+                # or followed the entry that did.
+                return False, ""
             if ki_match:
                 public_id = "KI-" + ki_match.group(1)
                 if public_id in existing_ki_ids:
@@ -475,6 +557,11 @@ def _diff_is_rc_tolerable(
                     return False, ""
                 # Valid KI addition: new ID not present in the committed artifact.
                 has_ki_additions = True
+                if _pending_placeholder_removal:
+                    # The section's first entry, standing where ``None`` was.
+                    _pending_placeholder_removal = False
+                    _in_placeholder_replacement = True
+                    has_placeholder_replacements = True
                 # A KI line cannot start or continue a release section.
                 current_section_valid = False
                 pending_preamble = []
@@ -491,8 +578,13 @@ def _diff_is_rc_tolerable(
                     # This version is already in the committed artifact.
                     # The heading is being modified — hard failure.
                     return False, ""
-                # Check whether a release-notes file exists for this version.
+                # Check whether a release-notes file exists for this version,
+                # falling back to the injected overlay directory (test
+                # fixtures only in practice) when it is not under the dev
+                # tree's real release-notes/ directory.
                 notes_file = release_notes_dir / f"{version}.md"
+                if not notes_file.exists() and extra_release_notes_dir is not None:
+                    notes_file = extra_release_notes_dir / f"{version}.md"
                 if not notes_file.exists():
                     # No backing release-notes file — hard failure.
                     return False, ""
@@ -530,6 +622,10 @@ def _diff_is_rc_tolerable(
             # But if we reach the end without confirming a heading, the dirty
             # preamble means the diff was not tolerable.
 
+    # A placeholder removed as the very last diff line was never replaced.
+    if _pending_placeholder_removal:
+        return False, ""
+
     # After all diff lines are processed, check for unresolved dirty preamble.
     if pending_preamble and not pending_preamble_clean and not current_section_valid:
         # Accumulated non-preamble lines that were never confirmed by a heading.
@@ -563,6 +659,11 @@ def _diff_is_rc_tolerable(
             "(fenced ## Fixed headers, hyphen-prefix KI-resolved lines, "
             "and/or embedded triple-backtick code fences)"
         )
+    if has_placeholder_replacements:
+        clauses.append(
+            "empty Known Issues placeholder replaced by its first "
+            "post-commit entry tolerated"
+        )
     clause_description = "; ".join(clauses)
 
     return True, clause_description
@@ -571,6 +672,8 @@ def _diff_is_rc_tolerable(
 def _regenerate_to_temp(
     temp_root: pathlib.Path,
     bugs_dir: pathlib.Path,
+    extra_release_notes_dir: pathlib.Path | None = None,
+    published_changelog: pathlib.Path | None = None,
 ) -> pathlib.Path | None:
     """Regenerate CHANGELOG.md to a temp file and return the path.
 
@@ -585,6 +688,19 @@ def _regenerate_to_temp(
     Args:
         temp_root:  Directory under the framework temp root to use.
         bugs_dir:   Path to the project-scoped bug ledger.
+        extra_release_notes_dir: Optional overlay directory of additional
+                    vX.Y.Z.md release-notes files to fold into discovery
+                    alongside the real release-notes/ directory, without
+                    writing into the real repository tree. Lets a caller (a
+                    test fixture, most commonly) exercise a new-release-
+                    section regeneration for a version that does not exist
+                    on disk under the dev tree. Ignored when None (default);
+                    production behavior is unchanged when this argument is
+                    omitted.
+        published_changelog: The artifact whose Public IDs the writer treats
+                    as spent and whose orphaned KI lines it keeps — the one
+                    this gate is comparing against.  None falls back to the
+                    writer's default, CHANGELOG.md under the dev tree root.
 
     Returns:
         Path to the regenerated temp file, or None if regeneration failed
@@ -633,6 +749,19 @@ def _regenerate_to_temp(
     )
     versions = [p.stem for p in found]
 
+    # Fold in versions available only from the injected overlay directory
+    # (test fixtures only in practice) so a fixture can exercise a
+    # new-release-section regeneration without a real release-notes file.
+    if extra_release_notes_dir is not None and extra_release_notes_dir.is_dir():
+        extra_versions = [
+            p.stem
+            for p in extra_release_notes_dir.glob("v*.md")
+            if p.stem not in versions
+        ]
+        versions = sorted(
+            versions + extra_versions, key=_parse_version, reverse=True
+        )
+
     # Write to a named temp file under the framework temp root.
     fd, tmp_str = tempfile.mkstemp(
         prefix="changelog_fresh_", suffix=".md", dir=str(temp_root)
@@ -641,7 +770,16 @@ def _regenerate_to_temp(
     tmp_path = pathlib.Path(tmp_str)
 
     try:
-        content = regenerate(repo_root, versions, published, bugs_dir)
+        regenerate_kwargs = {"extra_notes_dir": extra_release_notes_dir}
+        if published_changelog is not None:
+            regenerate_kwargs["published_changelog"] = published_changelog
+        content = regenerate(
+            repo_root,
+            versions,
+            published,
+            bugs_dir,
+            **regenerate_kwargs,
+        )
         tmp_path.write_text(content, encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         print(
@@ -690,6 +828,7 @@ def _current_git_branch(repo_root: pathlib.Path) -> str:
             text=True,
         )
         if result2.returncode == 0:
+            branch_prefix = _resolve_branch_prefix()
             for branch in result2.stdout.splitlines():
                 branch = branch.strip()
                 # Skip git's detached-HEAD sentinel and any bare-parenthesized
@@ -697,7 +836,7 @@ def _current_git_branch(repo_root: pathlib.Path) -> str:
                 if not branch or branch.startswith("("):
                     continue
                 # Prefer an rc-prefixed branch if one is present at HEAD.
-                if _is_rc_branch(branch):
+                if _is_rc_branch(branch, branch_prefix=branch_prefix):
                     return branch
             # No rc-prefixed branch at HEAD — fall through to empty string.
     except Exception:  # noqa: BLE001
@@ -705,16 +844,56 @@ def _current_git_branch(repo_root: pathlib.Path) -> str:
     return ""
 
 
-def _is_rc_branch(branch: str) -> bool:
-    """Return True when branch is an rc/* or ai_rc/* branch name.
+def _resolve_branch_prefix() -> str:
+    """Return this project's configured branch_prefix.
+
+    Delegates to the shared reader in ``pgai_agent_kanban.lib.branch_prefix``
+    (project.cfg ``[project] branch_prefix`` for _DEFAULT_PROJECT_NAME, read
+    via the canonical kanban-root resolver), so RC-branch detection tracks
+    whatever prefix the project is actually configured with instead of a
+    literal baked into the pattern. Falls back to _DEFAULT_BRANCH_PREFIX only
+    when the live project.cfg cannot be read at all — a project.cfg that IS
+    readable always wins, including one that deliberately configures an
+    empty prefix (mirrors project_paths.sh's pp_branch_prefix, which is
+    identity on an empty configured prefix).
+
+    Returns:
+        Branch prefix string (e.g. "ai_"), or "" when configured empty.
+    """
+    team_str = str(_TEAM_DIR)
+    if team_str not in sys.path:
+        sys.path.insert(0, team_str)
+
+    try:
+        from pgai_agent_kanban.lib.branch_prefix import resolve_branch_prefix
+    except ImportError:
+        return _DEFAULT_BRANCH_PREFIX
+    return resolve_branch_prefix(
+        project_name=_DEFAULT_PROJECT_NAME, default=_DEFAULT_BRANCH_PREFIX
+    )
+
+
+def _is_rc_branch(branch: str, branch_prefix: str = "") -> bool:
+    """Return True when branch is an rc/* branch, bare or prefix-qualified.
 
     Args:
         branch: Git branch name string (may be empty).
+        branch_prefix: The project's configured branch_prefix (e.g. "ai_"),
+            typically from _resolve_branch_prefix(). The bare "rc/"
+            alternative is always tested regardless of this value, so an
+            unprefixed project and a pre-prefix leftover branch both still
+            match; the prefixed form is tested alongside it, never in
+            place of it.
 
     Returns:
-        True when the branch name matches the rc/* or ai_rc/* pattern.
+        True when the branch name matches "rc/*" or "<branch_prefix>rc/*".
     """
-    return bool(branch) and bool(re.match(r"^(rc/|ai_rc/)", branch))
+    if not branch:
+        return False
+    alternatives = ["rc/"]
+    if branch_prefix:
+        alternatives.append(re.escape(branch_prefix) + "rc/")
+    return bool(re.match("^(" + "|".join(alternatives) + ")", branch))
 
 
 def _is_rc_mode() -> bool:
@@ -724,12 +903,13 @@ def _is_rc_mode() -> bool:
 
     1. The PGAI_LINT_CHANGELOG_MODE environment variable is set to the exact
        string "rc" (case-sensitive).
-    2. The current git branch is an RC branch (rc/* or ai_rc/* prefix).
+    2. The current git branch is an RC branch (rc/* or <branch_prefix>rc/*).
 
-    When on ai_main or any other non-RC branch, RC-mode tolerance is suppressed
-    unconditionally, even when the env var is set to "rc".  This ensures that
-    writer-migration drift is caught on ai_main before an RC opens (fail-fast),
-    rather than being masked by RC-mode tolerance at every RC verification.
+    When on the project's main branch or any other non-RC branch, RC-mode
+    tolerance is suppressed unconditionally, even when the env var is set to
+    "rc".  This ensures that writer-migration drift is caught on main before
+    an RC opens (fail-fast), rather than being masked by RC-mode tolerance
+    at every RC verification.
 
     Returns:
         True when both the env var is "rc" AND the current branch is rc/*.
@@ -738,7 +918,7 @@ def _is_rc_mode() -> bool:
     if os.environ.get("PGAI_LINT_CHANGELOG_MODE", "") != "rc":
         return False
     branch = _current_git_branch(_DEV_TREE_ROOT)
-    return _is_rc_branch(branch)
+    return _is_rc_branch(branch, branch_prefix=_resolve_branch_prefix())
 
 
 def _extract_heading_lines(text: str) -> dict[str, str]:
@@ -758,6 +938,63 @@ def _extract_heading_lines(text: str) -> dict[str, str]:
     return {m.group(1): m.group(0) for m in _HEADING_LINE_RE.finditer(text)}
 
 
+def _ki_entry_lines(text: str) -> dict[str, list[tuple[int, str]]]:
+    """Return {public_id: [(line_number, line), ...]} for every KI entry line in text.
+
+    An entry line is one that starts with a Public ID (after an optional
+    list marker); line numbers are 1-based positions in *text*.
+    """
+    entries: dict[str, list[tuple[int, str]]] = {}
+    for number, line in enumerate(text.splitlines(), start=1):
+        public_id = leading_ki_id(line)
+        if public_id:
+            entries.setdefault(public_id, []).append((number, line))
+    return entries
+
+
+def _build_collision_causes(
+    changelog_path: pathlib.Path,
+    checked_in_text: str,
+    regenerated_text: str,
+) -> list[str]:
+    """Name every published KI entry a fresh regeneration would rewrite.
+
+    A Public ID that appears in the checked-in artifact is spent: the line
+    that carries it is what readers have already been shown.  When the
+    regeneration carries the same ID with a different title, the ID has
+    been handed to a different bug — a collision, named as such with the
+    published line's location.  When only the trailing status clause
+    differs, the entry is the same bug whose status moved, and the cause
+    says that instead.
+    """
+    causes: list[str] = []
+    checked_entries = _ki_entry_lines(checked_in_text)
+    regen_entries = _ki_entry_lines(regenerated_text)
+    for public_id in sorted(set(checked_entries) & set(regen_entries)):
+        checked_lines = checked_entries[public_id]
+        regen_lines = regen_entries[public_id]
+        if [line for _, line in checked_lines] == [line for _, line in regen_lines]:
+            continue
+        for number, published_line in checked_lines:
+            published_title = ki_line_title(published_line)
+            regenerated_titles = [ki_line_title(line) for _, line in regen_lines]
+            if all(same_ki_title(published_title, t) for t in regenerated_titles):
+                causes.append(
+                    f"{changelog_path}:{number}: '{public_id}' entry's status "
+                    f"clause differs from a fresh regeneration — the same bug, "
+                    f"re-rendered from its current ## Status / ## Fixed In"
+                )
+                continue
+            causes.append(
+                f"{changelog_path}:{number}: collision — '{public_id}' is already "
+                f"published as {published_title!r} but a fresh regeneration renders "
+                f"it as {regenerated_titles[0]!r}; a published Public ID is spent "
+                f"and may never be reissued to a different bug (the bug file that "
+                f"persists it is due a fresh ID, and the published line stays)"
+            )
+    return causes
+
+
 def _build_causes(
     changelog_path: pathlib.Path,
     checked_in_text: str,
@@ -768,10 +1005,11 @@ def _build_causes(
     Compares release-section headings between the checked-in artifact and a
     fresh regeneration to name Release-Date field placement drift by version
     (the gate-derivable location a reader needs — see docs/coding-standards.md
-    "Gates prescribe, not just diagnose").  Falls back to a bounded line-level
-    diff summary when no heading-level cause is found (e.g. a change to
-    ### Implemented / ### Fixed / ### Known Issues body content, not the
-    heading itself).
+    "Gates prescribe, not just diagnose"), then names every published KI
+    entry the regeneration would rewrite — a collision when the title
+    changed, a status move when only the trailing clause did.  Falls back
+    to a bounded line-level diff summary when neither kind of cause is
+    found (e.g. a change to ### Implemented body content).
 
     Args:
         changelog_path:   Path to the checked-in artifact (used in messages).
@@ -808,6 +1046,10 @@ def _build_causes(
             f"regeneration derives it from release-notes/{version}.md, but the "
             "checked-in artifact does not have it"
         )
+
+    causes.extend(
+        _build_collision_causes(changelog_path, checked_in_text, regenerated_text)
+    )
 
     if not causes:
         # No heading-level divergence — the drift is inside a section body
@@ -932,6 +1174,7 @@ def _format_remedy_block(
 def check_freshness(
     changelog_path: pathlib.Path = _DEFAULT_CHANGELOG_PATH,
     bugs_dir: pathlib.Path | None = None,
+    extra_release_notes_dir: pathlib.Path | None = None,
 ) -> bool:
     """Assert that changelog_path is byte-identical to a fresh regeneration.
 
@@ -948,7 +1191,9 @@ def check_freshness(
             (Category 2).
           - Removed lines: writer-migration drift — fenced ## Fixed headers
             (Category 3), hyphen-prefix KI-resolved lines (Category 4), and
-            embedded triple-backtick code fences (Category 5).
+            embedded triple-backtick code fences (Category 5); and the ``None``
+            placeholder of an empty Known Issues section when a new KI entry
+            takes its place (Category 6).
         Any other difference is a hard failure.
 
         This approach does NOT rely on filesystem mtime — bug files'
@@ -959,6 +1204,16 @@ def check_freshness(
         changelog_path: Path to the checked-in CHANGELOG.md artifact to verify.
         bugs_dir:       Path to the project-scoped bug ledger.  When None,
                         resolved via _resolve_bugs_dir().
+        extra_release_notes_dir: Optional overlay directory of additional
+                        vX.Y.Z.md release-notes files, consulted alongside
+                        the real release-notes/ directory during
+                        regeneration and Category 2 tolerance checking.
+                        Lets a caller (a test fixture, most commonly)
+                        exercise the new-release-section RC-mode tolerance
+                        clause without writing a synthetic file into the
+                        real repository tree.  Ignored when None (default);
+                        production behavior is unchanged when this argument
+                        is omitted.
 
     Returns:
         True when the artifact is fresh (or all staleness is tolerable in RC
@@ -970,7 +1225,12 @@ def check_freshness(
     temp_root = _get_temp_root()
     rc_mode = _is_rc_mode()
 
-    regen_path = _regenerate_to_temp(temp_root, bugs_dir)
+    regen_path = _regenerate_to_temp(
+        temp_root,
+        bugs_dir,
+        extra_release_notes_dir=extra_release_notes_dir,
+        published_changelog=changelog_path,
+    )
     if regen_path is None:
         return False
 
@@ -1004,7 +1264,9 @@ def check_freshness(
     if rc_mode:
         # Interpret the diff in RC-mode tolerance terms.
         is_tolerable, clause_description = _diff_is_rc_tolerable(
-            checked_in_text, regenerated_text
+            checked_in_text,
+            regenerated_text,
+            extra_release_notes_dir=extra_release_notes_dir,
         )
         if is_tolerable:
             print(
@@ -1023,7 +1285,8 @@ def check_freshness(
                     "RC-mode tolerance is active on this branch, but the diff above "
                     "is not entirely attributable to tolerable in-flight-RC changes "
                     "(new KI additions, a new-release section backed by a "
-                    "release-notes file, or writer-migration drift removals).",
+                    "release-notes file, writer-migration drift removals, or an "
+                    "empty Known Issues placeholder replaced by its first entry).",
                 ],
             ),
             file=sys.stderr,
@@ -1057,7 +1320,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "\n"
             "Set PGAI_LINT_CHANGELOG_MODE=rc to enable RC-mode tolerance: KI-line "
             "additions caused by bugs filed after the CHANGELOG.md git commit are "
-            "tolerated (the diff must be only new KI lines with no removals)."
+            "tolerated (the diff must be only new KI lines, each free to replace "
+            "the None placeholder of a previously empty Known Issues section, "
+            "plus writer-migration drift removals)."
         ),
     )
     parser.add_argument(

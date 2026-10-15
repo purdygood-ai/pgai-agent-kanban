@@ -291,6 +291,112 @@ def test_comment_mentioning_function_name_is_not_a_call_site(tmp_path: Path) -> 
 
 
 # ---------------------------------------------------------------------------
+# Availability-probe operands are not call sites (guarded self-source idiom)
+# ---------------------------------------------------------------------------
+
+
+def test_command_v_probe_guard_is_not_a_call_site(tmp_path: Path) -> None:
+    """The idiomatic guarded self-source -- 'if ! command -v <emitter>
+    >/dev/null 2>&1; then source ...; fi' -- names the emitter only as the
+    operand of an availability probe. It must not be reported as a call
+    missing its fields."""
+    bash_dir = tmp_path / "scripts"
+    bash_dir.mkdir()
+    _write_bash_file(
+        bash_dir,
+        "fixture_probe_guard.sh",
+        "#!/usr/bin/env bash\n"
+        "if ! command -v pgai_emit_error_contract >/dev/null 2>&1; then\n"
+        '  source "$(dirname "${BASH_SOURCE[0]}")/error_contract.sh"\n'
+        "fi\n",
+    )
+
+    findings = _lint._scan_bash_file(bash_dir / "fixture_probe_guard.sh")
+    assert findings == []
+
+    result = _lint.main([
+        "--bash-dirs", str(bash_dir),
+        "--python-dir", str(_empty_python_dir(tmp_path)),
+    ])
+    assert result == 0
+
+
+def test_type_probe_guard_is_not_a_call_site(tmp_path: Path) -> None:
+    """'type <emitter>' is an availability probe, same family as 'command -v'."""
+    bash_dir = tmp_path / "scripts"
+    bash_dir.mkdir()
+    _write_bash_file(
+        bash_dir,
+        "fixture_type_guard.sh",
+        "#!/usr/bin/env bash\n"
+        "if ! type pgai_emit_error_contract >/dev/null 2>&1; then\n"
+        '  source "$(dirname "${BASH_SOURCE[0]}")/error_contract.sh"\n'
+        "fi\n",
+    )
+
+    findings = _lint._scan_bash_file(bash_dir / "fixture_type_guard.sh")
+    assert findings == []
+
+
+def test_type_dash_t_probe_guard_is_not_a_call_site(tmp_path: Path) -> None:
+    """'type -t <emitter>' is an availability probe, same family as 'command -v'."""
+    bash_dir = tmp_path / "scripts"
+    bash_dir.mkdir()
+    _write_bash_file(
+        bash_dir,
+        "fixture_type_t_guard.sh",
+        "#!/usr/bin/env bash\n"
+        'if [[ "$(type -t pgai_emit_error_contract)" != "function" ]]; then\n'
+        '  source "$(dirname "${BASH_SOURCE[0]}")/error_contract.sh"\n'
+        "fi\n",
+    )
+
+    findings = _lint._scan_bash_file(bash_dir / "fixture_type_t_guard.sh")
+    assert findings == []
+
+
+def test_declare_dash_f_probe_guard_is_not_a_call_site(tmp_path: Path) -> None:
+    """'declare -F <emitter>' is an availability probe, same family as 'command -v'."""
+    bash_dir = tmp_path / "scripts"
+    bash_dir.mkdir()
+    _write_bash_file(
+        bash_dir,
+        "fixture_declare_f_guard.sh",
+        "#!/usr/bin/env bash\n"
+        "if ! declare -F pgai_emit_error_contract >/dev/null 2>&1; then\n"
+        '  source "$(dirname "${BASH_SOURCE[0]}")/error_contract.sh"\n'
+        "fi\n",
+    )
+
+    findings = _lint._scan_bash_file(bash_dir / "fixture_declare_f_guard.sh")
+    assert findings == []
+
+
+def test_probe_guard_alongside_real_malformed_call_reports_only_the_call(
+    tmp_path: Path,
+) -> None:
+    """A file carrying both the guarded self-source idiom and a genuinely
+    malformed call must still report exactly one finding -- the malformed
+    call's line -- and not the probe's line."""
+    bash_dir = tmp_path / "scripts"
+    bash_dir.mkdir()
+    _write_bash_file(
+        bash_dir,
+        "fixture_probe_and_bad_call.sh",
+        "#!/usr/bin/env bash\n"
+        "if ! command -v pgai_emit_error_contract >/dev/null 2>&1; then\n"
+        '  source "$(dirname "${BASH_SOURCE[0]}")/error_contract.sh"\n'
+        "fi\n"
+        'pgai_emit_error_contract "gate.example" "something stopped"\n',
+    )
+
+    findings = _lint._scan_bash_file(bash_dir / "fixture_probe_and_bad_call.sh")
+    assert len(findings) == 1
+    assert findings[0].line == 5
+    assert findings[0].affected_fields == ["remedy"]
+
+
+# ---------------------------------------------------------------------------
 # Acceptance criterion 2: the lint never returns a fatal exit code
 # ---------------------------------------------------------------------------
 
@@ -466,6 +572,9 @@ def test_real_tree_produces_zero_findings(capsys) -> None:
     """Every dual-channel call site already converted in this codebase
     supplies all three fields. A regression here means a call site lost a
     field in a later edit."""
+    # Deliberately exercises the real tree via the lint's default scan
+    # roots (not a fixture): this is a live regression guard proving every
+    # already-converted call site still supplies all three fields.
     result = _lint.main([])
     assert result == 0
 

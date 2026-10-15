@@ -1,0 +1,325 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "v2.21.0 is a test-estate robustness release: one shared external-binary guard\nreplacing four private tmux probes and adopted across 60+ docker/git-reaching\ntest modules; a self-located subprocess-cwd and diagnostic contract for the\ndoc-lint suite; a claim-then-gate rewrite of the gated runners' findings-file\nhandling with a run-identity sidecar and a dual-channel refusal; an AST-based\nskip-citation scanner replacing the line-oriented grep on the Python surface;\nacceptance-layer coverage that drives the real wake entry point from a foreign\ncwd under a rebuilt environment; f-string coverage for the bare-`/tmp`\nanti-pattern lint; a deflake of the transient-retry watchdog tests; a new\nthree-host green-matrix verb and a new order-independence verb; and a\nsubstantial expansion of `docs/test-authoring-guidelines.md`.\n\nEvery deliverable in the requirements doc is present and, where it is\npreventive logic, was exercised against the failure mode it prevents rather\nthan inspected: the skip gate was fed an inline `if x: pytest.skip(\"BUG-SKIP-…\")`\nand a multi-line citation (both caught) alongside a fixture string mentioning a\nbug-shaped ID (correctly not flagged); the AP2 lint was fed all four f-string\nforms (all four flagged); the findings-file claim was seeded with a stale\ndocument and a simulated concurrent reclaim (cleared, then refused\ndual-channel); the three-host matrix was forced down its not-attempted path\n(named the unavailable resource, exited 1, never reported green); the doc-lint\nsuite returned identical verdicts from three invoking directories and, with an\nassertion deliberately broken in a throwaway copy, quoted the subprocess's own\nstderr in the failure message.\n\nThe unit gated runner exited 0 (4390 passed, 31 skipped). The **integration\ngated runner exited 1**: one pre-existing, environment-coupled golden-file test\nfails because the verifying host's `max_task_seconds` (10800) differs from the\nvalue baked into the golden (5400). That single failure is what takes the\nrecommendation off PASS. It is not caused by this RC — the offending line and\nthe golden are byte-identical on `ai_main` — but it does mean the RC's own\nacceptance criterion \"full suite green on the dev tree\" is not met as verified.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "integration gated runner exits 1 on an environment-coupled golden",
+      "heading": "Finding 1: integration gated runner exits 1 on an environment-coupled golden",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a real defect that ships and gets fixed next iteration — the estate's own instrument is red on a legitimately configured host, but nothing about the release is worse than `ai_main` in this respect; see the Systemic-Risk Rubric in `team/SOP.md`)\n**Regression:** no (`git diff ai_main..ai_rc/v2.21.0 -- team/tests/integration/test_engine_behavior_baseline_harness.py` shows this RC added only an autouse `require_binary(\"git\", …)` fixture; the `env = dict(os.environ)` line and `team/tests/fixtures/engine-baseline/wake-log.txt` are byte-identical on `ai_main`, and the golden was last touched at v2.14.0)\n**Integrity Damage:** no\n**Filed As:** BUG-0262 (Path C — autonomous follow-up filing, non-blocking; Path C-A, filed as BUG)\n\n`_run_harness()` in the engine-behaviour baseline test builds its subprocess\nenvironment with `env = dict(os.environ)` and overrides only\n`PGAI_AGENT_KANBAN_TEMP_DIR`. The wake bootstrap it drives derives and logs a\nbackground-wait ceiling from `MAX_TASK_SECONDS`, and the golden records the\n5400-second default. The verifying host resolves `MAX_TASK_SECONDS=10800` from\n`kanban.cfg [wake] max_task_seconds`, so the only differing line in the golden\ndiff is:\n\n```\n-… derived BASH_MAX_TIMEOUT_MS=5430000 from MAX_TASK_SECONDS=5400s + KILL_GRACE_SECONDS=30s\n+… derived BASH_MAX_TIMEOUT_MS=10830000 from MAX_TASK_SECONDS=10800s + KILL_GRACE_SECONDS=30s\n```\n\nProven to be environment coupling and nothing else, by running the single test\ntwice against the same tree:\n\n```\npython3 -m pytest …::test_compare_against_goldens_is_clean_on_unmodified_tree -q -p no:randomly\n  -> 1 failed\nMAX_TASK_SECONDS=5400 python3 -m pytest …::test_compare_against_goldens_is_clean_on_unmodified_tree -q -p no:randomly\n  -> 1 passed\n```\n\nThis is anti-pattern 2 (environment-coupled fixture) in the estate's own\nguidelines — the class this very release set out to close — surviving in a\nmodule the release touched only to add a binary guard. Until it is fixed, no\nRC verified on this host can record a PASS, because the integration gated\nrunner is the PASS precondition.",
+      "filed_as": "BUG-0262",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug (pre-existing)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a real defect that ships and gets fixed next iteration — the estate's own instrument is red on a legitimately configured host, but nothing about the release is worse than `ai_main` in this respect; see the Systemic-Risk Rubric in `team/SOP.md`)",
+        "regression": "no (`git diff ai_main..ai_rc/v2.21.0 -- team/tests/integration/test_engine_behavior_baseline_harness.py` shows this RC added only an autouse `require_binary(\"git\", …)` fixture; the `env = dict(os.environ)` line and `team/tests/fixtures/engine-baseline/wake-log.txt` are byte-identical on `ai_main`, and the golden was last touched at v2.14.0)",
+        "filed_as": "BUG-0262 (Path C — autonomous follow-up filing, non-blocking; Path C-A, filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "the new order-coupling checker does not control the order it compares",
+      "heading": "Finding 2: the new order-coupling checker does not control the order it compares",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (a diagnostic verb, run on demand; no shipped runtime path and neither gated runner depends on it)\n**Regression:** yes (`team/scripts/verify-test-order-independence.sh` is new in this RC, so this RC's changes are what produced the defect; nothing regressed from v2.20.2, which had no such verb)\n**Integrity Damage:** no\n**Filed As:** BUG-0263 (Path C-A)\n\nThe script's header states its forward pass runs \"in pytest's normal collection\norder\" and its reverse pass is that order reversed. `pytest-randomly` 4.1.0 is\ninstalled in the venv the agents run under and re-seeds every session, and\nnothing in `team/pyproject.toml`, either gated runner, or the script disables or\npins it. Both passes therefore start from independent random orders. Measured\ndirectly — two consecutive `PGAI_TEST_ORDER=reverse` runs of the same file\nexecuted different orders, each printing its own `Using --randomly-seed=` value.\nThe `shuffle:<seed>` reproducibility contract documented in\n`team/tests/conftest.py` is defeated the same way.\n\nConsequence: the check can still notice a coupling by luck, but it cannot make\nthe claim its own documentation and `docs/test-authoring-guidelines.md` rely on\n— that a named divergence is reproducible, and that a clean run is evidence\nabout the two named orders. A related discrepancy worth recording: the plugin is\nnot declared in `requirements-test.txt`, so the dev host randomises while the\ngitless/tmux-less container hosts built by `run-three-host-matrix.sh` (which\ninstall only `requirements-test.txt`) do not.",
+      "filed_as": "BUG-0263",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (a diagnostic verb, run on demand; no shipped runtime path and neither gated runner depends on it)",
+        "regression": "yes (`team/scripts/verify-test-order-independence.sh` is new in this RC, so this RC's changes are what produced the defect; nothing regressed from v2.20.2, which had no such verb)",
+        "filed_as": "BUG-0263 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "the blocking-site census rollup understates its own table",
+      "heading": "Finding 3: the blocking-site census rollup understates its own table",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (hygiene — a governance document's summary line lags its own table; no reader is steered into a wrong action, only a wrong count)\n**Regression:** no (the drift predates this RC: `ai_main` already carries 59 table rows against the same `57 sites` rollup. This RC widened it by one by adding row 60 without touching the summary.)\n**Integrity Damage:** no\n**Filed As:** BUG-0264 (Path C-A)\n\n`docs/blocking-site-census.md` reads `**Rollup: 57 sites, 0 unclassified.** 29\nBLOCK-WORTHY, 26 CONVERT, 2 AGENT-RESOLVABLE.` while the table above it holds 60\nnumbered rows classified 32 / 26 / 2. The census lint reconciles anchors against\nthe tree and the Locator Index but not the rollup, so it reports `0 offenders`\nwith the summary wrong. This RC's new gate (`gated-runner-stale-findings-claim-01`)\ncorrectly carried all three halves the SOP's new-gate rule requires — class\ncomment, dual-channel emitter, anchor plus Locator Index entry — and the rollup\nis simply not part of that rule.",
+      "filed_as": "BUG-0264",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (hygiene — a governance document's summary line lags its own table; no reader is steered into a wrong action, only a wrong count)",
+        "regression": "no (the drift predates this RC: `ai_main` already carries 59 table rows against the same `57 sites` rollup. This RC widened it by one by adding row 60 without touching the summary.)",
+        "filed_as": "BUG-0264 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "environment-guarded fixtures — shared binary guard",
+      "heading": "Finding 4: environment-guarded fixtures — shared binary guard",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/fixtures/binary_guard.py` (new) provides `binary_available`,\n`try_resolve_binary`, `require_binary`, `narrate_binary_skip`,\n`docker_daemon_reachable`, `require_docker_daemon`, and\n`BinaryGuard.teardown()`. Both `tests/unit/conftest.py` and\n`tests/integration/conftest.py` re-export the surface. 64 test modules and\nfixtures now route tmux/docker/git through it; `grep -rn 'shutil.which(\"tmux\"|\"docker\"|\"git\"|\"podman\")' team/tests/`\nreturns nothing, so no private probe survives.\n\n`teardown()` is a no-op when setup never resolved (the `FileNotFoundError`/\n`TypeError`-in-`finally` class) and deliberately does not suppress a genuine\nteardown fault. `require_docker_daemon()` keeps the absent-binary and\nunreachable-daemon reasons distinct rather than blurring them.\n\n`team/tests/unit/test_binary_guard_contract.py` (new, 325 lines) seeds a\nviolation of each guard class and pairs it with the guarded companion:\nunguarded absent binary, a guard that raises instead of skipping, an\nunconditional teardown after a skipped setup, present-docker/unreachable-daemon,\nand absent git — satisfying the requirements' \"seeded violations of each guard\nclass fail loud in their own suite.\"\n\n`team/pgai_agent_kanban/ops/write.py` additionally degrades\n`_git_delete_feature_branch` and `_git_worktree_prune` to warnings on a gitless\nhost, and `team/scripts/container-shell.sh` now validates `--mount` shape before\nresolving the engine so a malformed value is a usage error on a dockerless host\nrather than an unrelated exit 1.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "sandboxed doc-lint suite — cwd contract and surfaced stderr",
+      "heading": "Finding 5: sandboxed doc-lint suite — cwd contract and surfaced stderr",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/unit/test_doc_lint_harness.py` routes every subprocess through one\n`_run()` helper whose `cwd` defaults to a repo root computed from\n`pathlib.Path(__file__).parent.parent.parent.parent` — not an environment\nvariable, not `git rev-parse` — and never calls `chdir`. Every\nsubprocess-dependent assertion routes its message through `_diagnostic()`.\n\nVerified behaviorally, not by reading:\n\n- Invoked from the repo root, from a directory outside the repository, and from\n  `/` (with `PYTHONPATH` set to `team/` so the `tests` package resolves — a\n  pre-existing estate property, unrelated to this change): **14 passed** in all\n  three, identical verdicts.\n- With one assertion deliberately flipped in a throwaway copy, the pytest\n  failure message quoted the doc-lint subprocess's own `--- stdout ---` block\n  *and* its `--- stderr ---` block (four `WARNING: audited file not found` lines)\n  — the \"no swallowed confessions\" deliverable, demonstrated.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "findings files written on all exit paths (clear-then-gate)",
+      "heading": "Finding 6: findings files written on all exit paths (clear-then-gate)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`gated_runner_claim_findings_file` now runs at the top of both gated runners,\nbefore the pytest-missing, breakage-class, and Dockerfile-static gates: it writes\na fresh empty findings document (so no prior invocation's file can survive an\nabort) and records a run-identity token in a `<path>.runid` sidecar.\n`gated_runner_record_finding` writes a `runner_incomplete` finding at each fatal\ngate so an aborted run is not byte-identical to a clean one.\n`gated_runner_assert_findings_claim` is the consumer-side refusal before the\naggregate bug filer runs.\n\nExercised directly:\n\n- Seeded a stale `{\"stale\": true}` document at the target path, called the claim,\n  and confirmed the file came back as the empty schema-1 document with a matching\n  sidecar token — clear-then-gate ordering, proven.\n- Asserted with the correct token: silent pass.\n- Simulated a concurrent reclaim, then asserted with the original token: returned\n  1 and emitted the full dual-channel contract (`error: gated_runner.stale_findings_claim`,\n  a message naming both tokens, and a runnable remedy).\n- Deleted the sidecar and asserted: refused, rendering the absent token as\n  `<absent>`.\n\nReal-world confirmation from this very verification: the integration runner's\npytest run failed, and the exit hook still wrote\n`findings-integration.json (3 finding(s))` — the exact path that previously\nskipped the write and left a stranger's file in place. `--help` and an\nunknown-flag usage error also each produced a findings-file write.\n\nThe new refusal declares its census class in a code comment, emits through the\nshared error-contract emitter, carries `# CENSUS-ANCHOR: gated-runner-stale-findings-claim-01`,\nand has the matching Locator Index entry in `docs/blocking-site-census.md`. The\ncensus lint passes with 0 offenders. (Only the document's rollup line was not\nupdated — Finding 3.)",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "acceptance fixtures drive the production entry point",
+      "heading": "Finding 7: acceptance fixtures drive the production entry point",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/integration/wake_entrypoint_acceptance_harness.py` (new, 386 lines)\nsupplies `build_synthetic_kanban_root`, `build_stub_provider_cli`,\n`scrubbed_wake_env`, `run_wake_entrypoint`, and `make_foreign_cwd`. The\nenvironment is rebuilt from an explicit minimal name set rather than\n`dict(os.environ)` with deletions — `HOME` points at an empty scratch directory\nso no operator config can leak in, and `MAX_TASK_SECONDS` / `KILL_GRACE_SECONDS`\n/ `BASH_MAX_TIMEOUT_MS` are deliberately absent unless a case adds them back.\n(This is precisely the discipline Finding 1's older harness lacks.)\n\n`team/tests/integration/test_wake_entrypoint_bg_ceiling_acceptance.py` (new, 521\nlines) carries six cases, including the central negative proof\n(`test_broken_wiring_fails_acceptance_layer_but_not_mechanism_fixture`): it\ncomments out the single `source .../wake_bootstrap.sh` line in a throwaway copy,\nasserts the real entry point then fails and never logs the derivation, and\nasserts the block-extraction mechanism fixture still passes against the\nuntouched dev-tree file — the ceiling-fix lesson, demonstrated rather than\nasserted. A sixth case snapshots the live kanban root and the real `crontab -l`\nbefore and after and asserts both are byte-identical. All six passed in the\nintegration run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "skip-gates match statements, not line shapes",
+      "heading": "Finding 8: skip-gates match statements, not line shapes",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/scripts/lib/skip_bug_citation_scan.py` (new, 225 lines) parses each `*.py`\nfile with `ast` and treats only the source segment of a real skip `Call` node\n(`pytest.skip`, bare `skip`, `mark.skip`, `mark.skipif`) as a citation\ncandidate; `lint_skip_bug_gate.sh` excludes `*.py` from its greps and merges the\nstructural results, keeping the line-oriented grep for `*.sh`/`*.md` where there\nis no AST.\n\nExercised against a purpose-built corpus:\n\n| Seeded case | Expected | Observed |\n|---|---|---|\n| `if x: pytest.skip(\"deferred: BUG-SKIP-1\")` (inline, one line) | caught | caught |\n| bare `skip(\"BUG-SKIPPY\")` via `from pytest import skip` | caught | caught |\n| `@pytest.mark.skipif(..., reason=(\"waiting on \" \"BUG-9999\"))` across 6 lines | caught | caught |\n| module-level string `reason=BUG-SKIP-placeholder`, and a returned string containing `pytest.skip(reason=BUG-Foo)` | **not** flagged | not flagged |\n| `--tests-dir` that does not exist | exit 2 | exit 2 |\n\nEnd-to-end through the gate itself: a clean tree containing a fixture string\nmentioning `BUG-SKIP-…` passed (exit 0); an inline placeholder skip failed with\nthe offending line named (exit 1); a multi-line citation of a non-existent\n`BUG-9999` failed with `no matching file found` (exit 1).\n\nStep 6.13 standing check: no placeholder IDs anywhere under `team/tests/` outside\n`artifacts/` run logs, and every `BUG-NNNN` the structural scanner extracts\nresolves to a file in `bugs/` (the scanner returns no citations at all on this\ntree). The corpus IDs `BUG-1234`…`BUG-1239` inside\n`test_skip_bug_citation_scan.py` are string data, never skip-call arguments —\nthe old grep would have flagged them, which is the change working.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "suite hygiene — `/tmp` literals, order seam, deflake",
+      "heading": "Finding 9: suite hygiene — `/tmp` literals, order seam, deflake",
+      "level": 3,
+      "body": "**Category:** pass\n\n`lint_test_anti_patterns.py` gained f-string-prefix coverage (`[a-zA-Z]{0,2}`\nbefore the quote) on the `Path()`, `open()`, `os.makedirs()` and variable-assign\nAP2 patterns, plus `{` in the trailing character class so an interpolation\nstarting immediately after `/tmp/` is still reachable. Verified by seeding all\nfour forms — `Path(f\"/tmp/{name}\")`, `open(f\"/tmp/{name}.log\",\"w\")`,\n`q = f\"/tmp/{name}\"`, `os.makedirs(f\"/tmp/{name}/d\")` — and getting exactly four\nfindings. The bare-`/tmp` subject-matter whitelist is deliberately narrow: it\ndrops only the `Path()`/`open()` checks, for one named file, whose own probe\nhelper appends a `uuid4` suffix per call. The full lint reports `0 findings\nacross 482 file(s)` on the RC, and a manual sweep of `team/tests/**/*.py` for\nnon-framework `/tmp/` literals leaves only sample-data strings, argument values\nnever used as paths, the whitelisted litter-check probe, and the pre-existing\ndeliberate bad-example fixture.\n\n`team/tests/conftest.py` adds a `pytest_collection_modifyitems` seam keyed on\n`PGAI_TEST_ORDER` (`reverse`, `shuffle:<seed>`), a no-op when unset, covered by\nsix unit tests. `team/scripts/verify-test-order-independence.sh` (new) drives it\n— see Finding 2 for the defect in that verb.\n\n`test_wake_telemetry_safeguard_retry.py` replaces `assert elapsed < 10` with an\ninjected `sleep` shell function that counts poll iterations and asserts\n`sleep_calls <= 3`, removing the wall-clock dependence. `team/scripts/lib/temp.sh`\nfixes a genuine strict-mode defect the new matrix verb exposed: both\n`pgai_listener_snapshot` and `pgai_listener_cleanliness_check` piped/assigned\n`_pgai_listener_scan_matches` in a form that let its documented return of 2\n(\"neither ss nor lsof available\") abort a caller running under `set -e -o pipefail`\nbefore pytest ever launched.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "three-host green matrix verb",
+      "heading": "Finding 10: three-host green matrix verb",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`team/scripts/run-three-host-matrix.sh` (new, 639 lines) runs the real\n`run-unit-tests.sh` and `run-integration-tests.sh` — no second test-running path\n— across the dev tree plus gitless and tmux-less containers layered on the\nproject's own shipped `docker/debian/Dockerfile`. `--help` names every argument\n(coding-standards directive 6). Its bootstrap refusal carries a census class\ncomment and `# CENSUS-ANCHOR: run-three-host-matrix-env-bootstrap-01`.\n\nExercised down its not-attempted path with\n`--host gitless --engine pgai-no-such-engine-xyz`: it reported\n`verdict: not-attempted`, named the unavailable resource verbatim\n(`configured --engine 'pgai-no-such-engine-xyz' is not an executable on PATH`),\nprinted the image/container before/after line, and exited **1** — a\nnot-attempted host is correctly never conflated with a pass.\n\n**Caveat:** the gitless and tmux-less hosts were not built or run during this\nverification. A full matrix is two complete suite runs per host on top of cold\ncontainer builds — roughly an hour of wall clock — which is DEEP-VERIFY-class\ncost that `team/SOP.md` keeps out of per-RC verification (TESTER Step 5d: no\ncontainer build, no container engine started during an RC). The verb, its help\nsurface, its refusal path, and its reporting shape were verified; the claim\n\"full suite green on a gitless install and a tmux-less container\" was not\nindependently reproduced here and rests on the CODER task's own record.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "caveat": "the gitless and tmux-less hosts were not built or run during this"
+      },
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "documentation layer",
+      "heading": "Finding 11: documentation layer",
+      "level": 3,
+      "body": "**Category:** pass\n\n`docs/test-authoring-guidelines.md` grows by 166 lines. Read in full. Every\nfactual claim it makes was checked against the implementation rather than taken\non trust: `team/tests/conftest.py` does set `PYTEST_DEBUG_TEMPROOT`; the\n`# anti-pattern-allowlist: 2 (justification: …)` marker is a real opt-out the\nlint honours; the whitelist really drops only the two constructor checks; the\nfour harness functions it names (`build_synthetic_kanban_root`,\n`scrubbed_wake_env`, `run_wake_entrypoint`, `make_foreign_cwd`) all exist with\nthose spellings; `require_docker_daemon()` does probe the daemon after the binary\nresolves; the guard is re-exported from both conftests. Every relative markdown\nlink in the file resolves.\n\n`docs/README.md`, `team/TESTING.md` and `team/roles/TESTER.md` were each updated\nto point at the new section, and `team/TESTING.md`'s helper table gained rows for\nthe binary guard and the acceptance harness. The four contracts the role file\nadvertises are the four the document delivers.\n\nOne accurate-but-untestable instruction, recorded because it misled this\nverification briefly: the guidelines' \"cheap confirmation\" for the cwd contract\nsays to run the suite from the repo root, from `team/`, and from outside the\nrepository. Run literally, the first and third fail at collection with\n`ModuleNotFoundError: No module named 'tests'`, because the estate requires\npytest to be invoked from `team/` (or `PYTHONPATH` to include it). That is a\npre-existing property of the estate, not of this change, and the contract itself\nholds once the import path is supplied. Noted as an observation, not filed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "release-state drift check",
+      "heading": "Finding 12: release-state drift check",
+      "level": 3,
+      "body": "**Category:** pass\n\n`## Active RC` is `v2.21.0`, matching the branch under test; `## RC Opened At`\nand `## RC Opened By Task` are populated and name `CM-20260913-026-open-rc-2-21-0`,\na DONE task. `pp_last_released_version(\"pgai-agent-kanban\")` returns `v2.20.2`\nfrom git tags and `semver_gt v2.21.0 v2.20.2` holds. `## Last Released` reads\n`v2.20.2`, a well-formed `vX.Y.Z` value — present by design, not drift, and not\ncompared against the tag-derived value. No HALT or HALT-AFTER flag exists at\neither scope.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "pre-flight, prerequisite graph and RC hygiene",
+      "heading": "Finding 13: pre-flight, prerequisite graph and RC hygiene",
+      "level": 3,
+      "body": "**Category:** pass\n\nPre-flight merge verification passed: no DONE task in the project has a\nsurviving local feature branch (CODER/WRITER delete theirs after merge), so\nneither an unmerged branch nor a zero-unique-commit BUG-92 anomaly is present.\nAll ten prerequisite tasks plus `CM-20260913-026-open-rc-2-21-0` are DONE with\n`Needs Human: no`.\n\nThe dependency graph is acyclic and correctly bookended: CM-open has no\nprerequisites; each CODER task depends on CM-open and its predecessors; WRITER-025\ndepends on all nine CODER tasks; this TESTER task depends on all ten;\n`CM-20260913-029-release-2-21-0` (WAITING) depends on all ten plus this task.\nEvery referenced task ID resolves to a real task folder.\n\n`ai_main` has had no commits since the RC was opened (its tip is the v2.20.2\nrelease-notes polish at 2026-09-13T08:49), so the fidelity gate has nothing\nworking against it. `lint_rc_empty_commits` reports no empty non-merge commits\nacross `ai_main..ai_rc/v2.21.0`. `bash -n` passes on all 8 changed shell scripts\nand `py_compile` on all changed Python files. No hardcoded credentials appear in\nthe diff.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "synthetic release simulation (Step 6.8)",
+      "heading": "Finding 14: synthetic release simulation (Step 6.8)",
+      "level": 3,
+      "body": "**Category:** pass\n\nSkipped as a dedicated step with note: the RC's diff touches no\nrelease-lifecycle script — `cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`\nand `team/scripts/lib/project_paths.sh` are all unchanged. The only change to\n`team/tests/integration/test_cm_release_synthetic.py` is an autouse\n`require_binary(\"git\", …)` fixture. The test itself ran as part of the\nintegration suite and passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

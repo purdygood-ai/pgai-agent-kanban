@@ -1,0 +1,26 @@
+# team/config/api-route-impl-launchers.txt
+#
+# Documented launchers for team/scripts/lint_api_route_impl.py: operator
+# verbs whose whole job is to start a process or a lane, so their REST
+# route starts that process by design and there is no in-process function
+# for the route and the CLI script to share. A launcher keeps
+# "impl shell" in team/config/operator_verbs.manifest; listing it here moves
+# it out of the count of shell rows still to be ported to a module.
+#
+# Format: one launcher per line, "<verb><TAB><reason>". The verb is the
+# manifest's verb name; the reason is free text saying why the verb only
+# launches. Any run of blanks or tabs separates the two. Blank lines and
+# lines starting with "#" are comments.
+#
+# Every launcher carries a reason. The lint reports a line with no reason
+# (launcher-without-reason) and keeps that verb in the shell rows to port,
+# reports a verb the manifest does not declare (launcher-unknown-verb), and
+# reports a verb whose manifest impl is not "shell" (launcher-not-shell).
+#
+# Launcher rows still count toward the "shell_rows" baseline in
+# team/config/api-route-impl-baseline.txt, which holds every impl shell
+# row; adding a verb here never lowers the ratchet.
+#
+wake-now	Fires wake-batch.sh for one agent or every pipeline agent and returns; after validating its flags it only starts the wake process (exec in the foreground form, backgrounded with --bg or --all). The work is the fired agent's wake cycle, not anything wake-now does in-process.
+cold-build-now	Validates --project and execs deep-verify.sh --project NAME; it owns no state change of its own. Its route starts that lane detached and returns before it finishes. What the lane does is deep-verify's row.
+deep-verify	Starts the operator-only cold-build lane (run-cold-build-tests.sh), which builds images and runs containers for many minutes; its route starts deep-verify.sh detached and returns before the lane finishes, and no in-process function can run the lane without starting a process. Every decision around the launch is a pgai_agent_kanban.deep_verify function the script reaches through pp_run_ops: the scheduled due-check (schedule), the ledger read and write (ledger), verdict classification (classify) and failure-path bug filing (bug_filer).

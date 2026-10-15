@@ -3,25 +3,35 @@ test_pm_agent_ceiling_semantics_bash.py
 ========================================
 Behavioral unit tests for the version ceiling gate in team/scripts/pm-agent.sh.
 
-These tests invoke pm-agent.sh directly via bash to assert three behavioral
-requirements introduced by an earlier defect:
+These tests invoke pm-agent.sh directly via bash to assert these behavioral
+requirements:
 
 1. Label-version project passes through pm-agent without crash.
    A project whose workflow plugin declares version_semantics=label (or none)
    must have its ceiling block skipped entirely.  The script must create the
    task folder, append a pm_backlog entry, and emit the expected "Folder :"
-   line.  Pre-fix: unbound-variable crash at the arithmetic step.
+   line.  Defect shape guarded: an unbound-variable crash at the arithmetic step.
 
 2. Semver regression: ceiling-exceeded on a semver project still produces the
-   precise component ceiling error message unchanged from pre-fix behavior.
-   This asserts the fix did not change the happy-ceiling-check path.
+   precise component ceiling error message.
+   This asserts the label-version skip leaves the happy-ceiling-check path unchanged.
 
 3. Hardening: a garbage version string on a semver project produces a named
    parse/ceiling error and exits non-zero, never an unbound-variable crash.
    This covers the case where pp_version_within_ceiling returns non-zero but
    the version string itself cannot be split into numeric components.
 
-Test naming follows SOP.md Anti-pattern 6: names describe behavior, not the
+4. The PM ticket's max-tasks constraint reads as a hard safety ceiling, not a
+   target, in both the written ticket and the --dry-run preview: it carries
+   the interpolated value and points at the role file's twelve-ticket cap.
+
+5. Absent, ``none`` and malformed ceilings: a project.cfg with no
+   [versioning] section refuses v1.0.0 on the default max_major=0; an
+   explicit ``max_major = none`` lets it through; a malformed
+   ``max_major = O`` refuses it with exactly one line naming the key and the
+   value (stderr is not discarded) and creates no task folder.
+
+Test naming follows roles/TESTER.md Anti-pattern 6: names describe behavior, not the
 bug ID or task ID that prompted them.
 """
 
@@ -79,7 +89,9 @@ def _build_kanban_root_for_pm_agent(
         max_patch:        Ceiling max_patch value.
         versioning_section:
                           When True (default), write a [versioning] section to
-                          project.cfg.  Set False to omit it (no ceiling defined).
+                          project.cfg.  Set False to omit it: every ceiling then
+                          reads as its documented default (max_major 0,
+                          max_minor 13, max_patch 21).
 
     Returns:
         pathlib.Path — the kanban root.
@@ -188,6 +200,7 @@ def _run_pm_agent(
     project_name: str,
     *,
     extra_env: dict | None = None,
+    extra_args: str = "",
 ) -> object:
     """Invoke pm-agent.sh with the given fixture tree.
 
@@ -200,6 +213,8 @@ def _run_pm_agent(
         requirements_file: Path to the requirements document.
         project_name:      Project name (resolves to PGAI_PROJECT_NAME).
         extra_env:         Additional env overrides.
+        extra_args:        Extra command-line arguments appended after the
+                           requirements file (e.g. "--dry-run").
 
     Returns:
         BashResult from run_bash.
@@ -213,7 +228,7 @@ def _run_pm_agent(
     if extra_env:
         env.update(extra_env)
 
-    script = f"bash {_PM_AGENT} {requirements_file}"
+    script = f"bash {_PM_AGENT} {requirements_file} {extra_args}".rstrip()
     return run_bash(tmp_path, script, extra_env=env)
 
 
@@ -225,9 +240,9 @@ def _run_pm_agent(
 class TestLabelVersionProjectPassesThrough:
     """pm-agent passes a label-version requirements doc without crashing.
 
-    an earlier defect: pre-fix, the ceiling arithmetic evaluated 'v20260712-fieldtest'
-    and treated the hyphen as subtraction, triggering an unbound-variable crash.
-    Post-fix: when version_semantics != semver the ceiling block is skipped.
+    Defect shape guarded: ceiling arithmetic that evaluates 'v20260712-fieldtest'
+    treats the hyphen as subtraction and triggers an unbound-variable crash.
+    When version_semantics != semver the ceiling block is skipped.
     """
 
     def test_label_version_pm_agent_exits_zero(self, tmp_path: pathlib.Path) -> None:
@@ -235,7 +250,7 @@ class TestLabelVersionProjectPassesThrough:
 
         A testing-only project (version_semantics=label) must process a
         requirements file whose Target Version is v20260712-fieldtest without
-        crashing.  Pre-fix exit code was non-zero due to unbound-variable error.
+        crashing.  An unbound-variable error at the ceiling arithmetic exits non-zero.
         """
         root = _build_kanban_root_for_pm_agent(
             tmp_path, "label-proj", "testing-only"
@@ -247,7 +262,7 @@ class TestLabelVersionProjectPassesThrough:
 
         assert result.returncode == 0, (
             "pm-agent.sh must exit 0 for a label-version project.\n"
-            "Pre-fix: unbound-variable crash at ceiling arithmetic.\n"
+            "A non-zero exit here is the unbound-variable crash at ceiling arithmetic.\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
@@ -346,10 +361,10 @@ class TestLabelVersionProjectPassesThrough:
 class TestSemverCeilingExceededProducesPreciseError:
     """Semver regression: ceiling-exceeded still yields the component error message.
 
-    The fix must not change the behavior for semver projects when Target Version
-    exceeds the project ceiling.  The precise component message (e.g. "minor
-    version N exceeds max_minor=M") must be present in stderr and exit must be
-    non-zero.
+    The label-version skip must not change the behavior for semver projects
+    when Target Version exceeds the project ceiling.  The precise component
+    message (e.g. "minor version N exceeds max_minor=M") must be present in
+    stderr and exit must be non-zero.
     """
 
     def test_semver_ceiling_exceeded_exits_nonzero(
@@ -381,7 +396,7 @@ class TestSemverCeilingExceededProducesPreciseError:
         """Ceiling-exceeded error message names the violated component.
 
         The error must identify which ceiling was exceeded (major, minor, or patch)
-        to match the pre-fix precise-error behavior.
+        -- the precise-error behavior semver projects rely on.
         """
         root = _build_kanban_root_for_pm_agent(
             tmp_path,
@@ -439,9 +454,9 @@ class TestGarbageVersionOnSemverProjectYieldsNamedError:
     """Hardening: garbage version string on a semver project must not crash.
 
     an earlier defect hardening rider: any unparseable version on a semver project must
-    produce a named parse/ceiling error and exit non-zero.  Pre-fix: the
-    arithmetic path could still crash with an unbound-variable error if the
-    version reached the error-detail path with non-numeric components.
+    produce a named parse/ceiling error and exit non-zero.  Defect shape
+    guarded: the arithmetic path crashing with an unbound-variable error when
+    the version reaches the error-detail path with non-numeric components.
     """
 
     def test_garbage_version_on_semver_project_exits_nonzero(
@@ -476,8 +491,8 @@ class TestGarbageVersionOnSemverProjectYieldsNamedError:
         """Garbage version string on a semver project produces a named parse error.
 
         The error output must contain a human-readable message (not just 'unbound
-        variable' or a bash arithmetic crash) that names the problem.  Pre-fix:
-        a crash with 'unbound variable' would appear; post-fix: a named parse error.
+        variable' or a bash arithmetic crash) that names the problem: a named parse
+        error, never a crash with 'unbound variable'.
         """
         root = _build_kanban_root_for_pm_agent(
             tmp_path, "semver-hardened", "release"
@@ -495,7 +510,7 @@ class TestGarbageVersionOnSemverProjectYieldsNamedError:
         # Must NOT produce 'unbound variable' (the crash symptom)
         assert "unbound variable" not in combined, (
             "pm-agent.sh must not crash with 'unbound variable' for a garbage version.\n"
-            "Post-fix behavior: a named parse/ceiling error message.\n"
+            "Expected behavior: a named parse/ceiling error message.\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
         # Must produce a named error (ERROR: prefix from pm-agent, or ceiling message)
@@ -528,6 +543,99 @@ class TestGarbageVersionOnSemverProjectYieldsNamedError:
 
 
 # ---------------------------------------------------------------------------
+# Tests: the PM ticket's max-tasks constraint reads as a ceiling, not a target
+# ---------------------------------------------------------------------------
+
+
+def _constraints_section(readme_text: str) -> str:
+    """Return the body of the '## Constraints' section of a ticket README."""
+    lines = readme_text.splitlines()
+    body: list[str] = []
+    inside = False
+    for line in lines:
+        if line.strip() == "## Constraints":
+            inside = True
+            continue
+        if inside and line.startswith("## "):
+            break
+        if inside:
+            body.append(line)
+    return "\n".join(body)
+
+
+def _assert_ceiling_wording(constraints: str, max_tasks: str, context: str) -> None:
+    """Assert the constraint line names a ceiling, not a target, with its value."""
+    assert "Maximum tasks to generate" not in constraints, (
+        f"{context}: the constraint must not read as a target.\n{constraints}"
+    )
+    assert "Hard ceiling" in constraints, f"{context}:\n{constraints}"
+    assert "not a target" in constraints, f"{context}:\n{constraints}"
+    assert f"{max_tasks} tasks" in constraints, (
+        f"{context}: the ceiling value must be interpolated.\n{constraints}"
+    )
+    assert "twelve-ticket cap" in constraints, f"{context}:\n{constraints}"
+    assert "team/roles/PM.md" in constraints, f"{context}:\n{constraints}"
+
+
+class TestPmTicketMaxTasksReadsAsCeiling:
+    """The PM ticket states the max-tasks value as a safety ceiling, not a target.
+
+    Both ticket templates in pm-agent.sh — the written README and the
+    --dry-run preview — carry the same constraint line.
+    """
+
+    _MAX_TASKS = "21"
+
+    def test_written_ticket_states_max_tasks_as_ceiling(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """The written PM ticket README names a hard ceiling with the PM_MAX_TASKS value."""
+        root = _build_kanban_root_for_pm_agent(
+            tmp_path, "label-proj", "testing-only"
+        )
+        req = _write_requirements_file(
+            tmp_path, "req-ceiling-written.md", "v20260712-fieldtest"
+        )
+        result = _run_pm_agent(
+            tmp_path, root, req, "label-proj",
+            extra_env={"PM_MAX_TASKS": self._MAX_TASKS},
+        )
+        assert result.returncode == 0, (
+            f"pm-agent.sh exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+        tasks_dir = root / "projects" / "label-proj" / "tasks"
+        readmes = [
+            d / "README.md" for d in tasks_dir.iterdir()
+            if d.is_dir() and d.name.startswith("PM-")
+        ]
+        assert len(readmes) == 1, f"Expected one PM task folder, found: {readmes}"
+        constraints = _constraints_section(readmes[0].read_text(encoding="utf-8"))
+        _assert_ceiling_wording(constraints, self._MAX_TASKS, "written ticket")
+
+    def test_dry_run_preview_states_max_tasks_as_ceiling(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """The --dry-run preview names a hard ceiling with the --max-tasks value."""
+        root = _build_kanban_root_for_pm_agent(
+            tmp_path, "label-proj", "testing-only"
+        )
+        req = _write_requirements_file(
+            tmp_path, "req-ceiling-dry-run.md", "v20260712-fieldtest"
+        )
+        result = _run_pm_agent(
+            tmp_path, root, req, "label-proj",
+            extra_args=f"--dry-run --max-tasks {self._MAX_TASKS}",
+        )
+        assert result.returncode == 0, (
+            f"pm-agent.sh --dry-run exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert "DRY-RUN" in result.stdout, result.stdout
+        constraints = _constraints_section(result.stdout)
+        _assert_ceiling_wording(constraints, self._MAX_TASKS, "dry-run preview")
+
+
+# ---------------------------------------------------------------------------
 # Tests: structural — pm-agent ceiling block uses wf_version_semantics
 # ---------------------------------------------------------------------------
 
@@ -553,7 +661,7 @@ class TestCeilingBlockUsesVersionSemanticsAccessor:
     def test_ceiling_block_references_wf_version_semantics(self) -> None:
         """pm-agent.sh's ceiling block references the wf_version_semantics accessor.
 
-        The fix routes version_semantics through the workflow plugin dispatcher.
+        pm-agent.sh routes version_semantics through the workflow plugin dispatcher.
         The accessor call must appear in the script so the ceiling block branches
         on a capability flag rather than a hardcoded type comparison.
         """
@@ -603,3 +711,55 @@ class TestCeilingBlockUsesVersionSemanticsAccessor:
             "The ceiling block must branch on the version_semantics capability value "
             "(_pm_version_semantics), not the workflow_type string (_pm_wf_type)."
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: absent ceilings read as the defaults; none lifts; malformed blocks
+# ---------------------------------------------------------------------------
+
+
+def _pm_task_folders(root: pathlib.Path, project_name: str) -> list:
+    tasks_dir = root / "projects" / project_name / "tasks"
+    return [d for d in tasks_dir.iterdir() if d.is_dir() and d.name.startswith("PM-")]
+
+
+class TestCeilingDefaultsNoneAndMalformed:
+    """pm-agent's manual ceiling check applies the shared ceiling rule."""
+
+    def test_absent_max_major_refuses_v1_on_the_default_zero(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_for_pm_agent(
+            tmp_path, "no-versioning", "release", versioning_section=False
+        )
+        req = _write_requirements_file(tmp_path, "req-v1-absent.md", "v1.0.0")
+        result = _run_pm_agent(tmp_path, root, req, "no-versioning")
+
+        assert result.returncode != 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        assert "major version 1 exceeds max_major=0" in result.stderr, result.stderr
+        assert not _pm_task_folders(root, "no-versioning")
+
+    def test_max_major_none_lets_v1_through(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_for_pm_agent(
+            tmp_path, "major-none", "release", max_major="none"
+        )
+        req = _write_requirements_file(tmp_path, "req-v1-none.md", "v1.0.0")
+        result = _run_pm_agent(tmp_path, root, req, "major-none")
+
+        assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        assert len(_pm_task_folders(root, "major-none")) == 1
+
+    def test_malformed_max_major_refuses_with_one_line_naming_key_and_value(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        root = _build_kanban_root_for_pm_agent(
+            tmp_path, "major-letter-o", "release", max_major="O"
+        )
+        req = _write_requirements_file(tmp_path, "req-v0-malformed.md", "v0.1.0")
+        result = _run_pm_agent(tmp_path, root, req, "major-letter-o")
+
+        assert result.returncode != 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        naming = [line for line in result.stderr.splitlines() if "max_major" in line and "'O'" in line]
+        assert len(naming) == 1, result.stderr
+        cfg = root / "projects" / "major-letter-o" / "project.cfg"
+        assert str(cfg) in naming[0]
+        assert "ceiling check failed" in result.stderr
+        assert not _pm_task_folders(root, "major-letter-o")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dashboard-costs.sh
+# costs.sh
 # Renders two cost-breakdown blocks for the pgai kanban dashboard:
 #   Block 1: Today's per-LLM cost breakdown, grouped by project then provider/model.
 #   Block 2: Current RC's per-LLM cost breakdown for projects with an active RC.
@@ -10,11 +10,11 @@
 #
 # Converts tokens to dollar costs using team/scripts/lib/token_pricing.json.
 #
-# Designed to run under `watch -t -c -n $REFRESH_INTERVAL dashboard-costs.sh`
-# in a tmux Costs window created by dashboard-create.sh.
+# Designed to run under `watch -t -c -n $REFRESH_INTERVAL costs.sh`
+# in a tmux Costs window created by dashboard/create.sh.
 #
 # Usage:
-#   dashboard-costs.sh [--kanban-root <path>] [--no-color]
+#   costs.sh [--kanban-root <path>] [--no-color]
 #
 # Options:
 #   --kanban-root <path>   Override the kanban root directory
@@ -55,7 +55,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -35
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:29}"
       exit 0
       ;;
     *)
@@ -75,9 +80,15 @@ source "${SCRIPT_DIR}/../lib/project_paths.sh"
 # shellcheck source=lib/projects.sh
 source "${SCRIPT_DIR}/../lib/projects.sh"
 
-# Source shared Python-helper resolver (live-install anchor first — D3 fix)
-# shellcheck source=lib/helper_resolver.sh
-source "${SCRIPT_DIR}/lib/helper_resolver.sh"
+# The cost blocks, the RC header detail and the day total come from
+# pgai_agent_kanban.lib.metrics (costs_pane), reached through pp_run_ops.
+# shellcheck source=../lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
+
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh).
+# shellcheck source=../lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # ANSI color support (honor NO_COLOR, TERM=dumb, and --no-color flag)
@@ -89,26 +100,12 @@ if [[ "$NO_COLOR_ARG" == "true" ]] || \
   USE_COLOR=false
 fi
 
-_c() {
-  [[ "$USE_COLOR" != "true" ]] && { printf ''; return; }
-  case "$1" in
-    bold)    printf '\033[1m' ;;
-    dim)     printf '\033[2m' ;;
-    reset)   printf '\033[0m' ;;
-    cyan)    printf '\033[0;36m' ;;
-    green)   printf '\033[0;32m' ;;
-    yellow)  printf '\033[0;33m' ;;
-    white)   printf '\033[0;37m' ;;
-    *)       printf '' ;;
-  esac
-}
-
-RESET="$(_c reset)"
-BOLD="$(_c bold)"
-DIM="$(_c dim)"
-CYAN="$(_c cyan)"
-GREEN="$(_c green)"
-YELLOW="$(_c yellow)"
+RESET="$(ansi_code reset)"
+BOLD="$(ansi_code bold)"
+DIM="$(ansi_code dim)"
+CYAN="$(ansi_code cyan)"
+GREEN="$(ansi_code green)"
+YELLOW="$(ansi_code yellow)"
 
 # ---------------------------------------------------------------------------
 # Locate token_pricing.json
@@ -122,39 +119,13 @@ if [[ -f "${SCRIPT_DIR}/../lib/token_pricing.json" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Section header helper (matches dashboard-metadata.sh style)
+# Shared helpers: section_header (lib/dashboard_common.sh) and _active_rc,
+# a project's Active RC or "" when none (lib/cm/common.sh).
 # ---------------------------------------------------------------------------
-section_header() {
-  local title="$1"
-  printf '%s%s%s\n' "${CYAN}${BOLD}" "=== ${title} ===" "$RESET"
-}
-
-# ---------------------------------------------------------------------------
-# Helper: read Active RC from release-state.md
-# Returns empty string if none.
-# Liberal parse — read first ## Active RC header only, trim whitespace,
-# validate: accept only vX.Y.Z semver; anything else (empty, malformed, 'none') → "".
-# ---------------------------------------------------------------------------
-_active_rc() {
-  local project_name="$1"
-  local release_state
-  release_state="$(KANBAN_ROOT="$KANBAN_ROOT" pp_project_root "$project_name" 2>/dev/null)/release-state.md" || { echo ""; return; }
-
-  if [[ ! -f "$release_state" ]]; then
-    echo ""
-    return
-  fi
-
-  local rc
-  rc="$(awk '/^##[[:space:]]+Active RC/{found=1;next} found && /^[[:space:]]*$/{next} found{print; exit}' \
-        "$release_state" 2>/dev/null | tr -d '[:space:]')"
-
-  if [[ "$rc" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "$rc"
-  else
-    echo ""
-  fi
-}
+# shellcheck source=../lib/dashboard_common.sh
+source "${SCRIPT_DIR}/../lib/dashboard_common.sh"
+# shellcheck source=../lib/cm/common.sh
+source "${SCRIPT_DIR}/../lib/cm/common.sh"
 
 # ---------------------------------------------------------------------------
 # Helper: find the daily rollup file for a project.
@@ -192,22 +163,18 @@ _rc_rollup_file() {
 }
 
 # ---------------------------------------------------------------------------
-# Python cost computation engine.
-# Delegates to team/pgai_agent_kanban/dashboard/render_costs.py.
-# Arguments: <rollup_json_path> <pricing_json_path> <indent_spaces>
+# _cost_block <rollup_json_path> <pricing_json_path> <indent_string>
+# Prints the roll-up's per-model cost block with each line prefixed by the
+# indent, preceded by one line carrying the block's total (the sum of its
+# printed subtotals, %.2f): pgai_agent_kanban.lib.metrics.cost_block().
+# Callers split the first line off with ${out%%$'\n'*} / ${out#*$'\n'}.
 # ---------------------------------------------------------------------------
-_render_cost_block_python() {
+_cost_block() {
   local rollup_file="$1"
   local pricing_file="$2"
   local indent="$3"
-  # Convert indent string to a space count for --indent flag
-  local indent_count="${#indent}"
-
-  # Resolve render_costs.py via shared helper resolver (live-install anchor first — D3 fix).
-  local _rcp_py
-  _rcp_py="$(resolve_dashboard_helper "$KANBAN_ROOT" "${PGAI_DEV_TREE_PATH:-}" "dashboard/render_costs.py")"
-  python3 "$_rcp_py" \
-    "$rollup_file" "${pricing_file:-}" --indent "$indent_count"
+  pp_run_ops pgai_agent_kanban.lib.metrics cost_block \
+    "$rollup_file" "${pricing_file:-}" "${#indent}"
 }
 
 # ---------------------------------------------------------------------------
@@ -228,7 +195,7 @@ done < <(KANBAN_ROOT="$KANBAN_ROOT" projects_cfg_list 2>/dev/null || true)
 if [[ ${#REGISTERED_PROJECTS[@]} -eq 0 ]]; then
   printf '%s(no projects registered)%s\n' "$DIM" "$RESET"
 else
-  DAY_GRAND_TOTAL=0
+  DAY_TOTALS=()
 
   for _proj in "${REGISTERED_PROJECTS[@]}"; do
     printf '  %s%s%s\n' "${BOLD}" "$_proj" "$RESET"
@@ -245,26 +212,16 @@ else
         printf '    %s(no data yet)%s\n' "$DIM" "$RESET"
       fi
     else
-      # Render cost breakdown via Python helper
-      _block_output="$(_render_cost_block_python "$_rollup_file" "${PRICING_FILE:-}" "    ")"
-      printf '%s\n' "$_block_output"
-
-      # Extract subtotal from the rendered block to compute day total
-      # (Sum all subtotal lines from the Python output)
-      _proj_total="$(echo "$_block_output" | python3 -c "
-import sys, re
-total = 0.0
-for line in sys.stdin:
-    m = re.search(r'subtotal:\s+\\\$([\d,]+\.?\d*)', line)
-    if m:
-        total += float(m.group(1).replace(',',''))
-print(f'{total:.2f}')
-" 2>/dev/null || echo "0.00")"
-      DAY_GRAND_TOTAL="$(python3 -c "print(f'{float(\"${DAY_GRAND_TOTAL}\") + float(\"${_proj_total}\"):.2f}')" 2>/dev/null || echo "$DAY_GRAND_TOTAL")"
+      # Render the cost breakdown; keep its total for the day total.
+      _block_output="$(_cost_block "$_rollup_file" "${PRICING_FILE:-}" "    ")"
+      DAY_TOTALS+=("${_block_output%%$'\n'*}")
+      printf '%s\n' "${_block_output#*$'\n'}"
     fi
     printf '\n'
   done
 
+  # Each running sum is rounded to cents; "0" when no project had a roll-up.
+  DAY_GRAND_TOTAL="$(pp_run_ops pgai_agent_kanban.lib.metrics sum_amounts "${DAY_TOTALS[@]}" 2>/dev/null || echo "0")"
   printf '  %sDay total: $%s%s\n' "${BOLD}" "$DAY_GRAND_TOTAL" "$RESET"
 fi
 
@@ -308,20 +265,8 @@ else
       # Build the project header line with RC info
       _rc_label="${_proj} ${_rc}"
       if [[ -n "$_rc_file" && -f "$_rc_file" ]]; then
-        # Extract started_at and task count from JSON if available
-        _started_at="$(python3 -c "
-import json, sys
-try:
-    d = json.load(open('${_rc_file}'))
-    s = d.get('shipped_at', '') or d.get('started_at', '')
-    tasks = len(d.get('tasks', []))
-    if s:
-        print(f'started {s}, {tasks} tasks')
-    else:
-        print(f'{tasks} tasks')
-except:
-    pass
-" 2>/dev/null || true)"
+        # "started <shipped_at>, <N> tasks" or "<N> tasks"; empty when unreadable.
+        _started_at="$(pp_run_ops pgai_agent_kanban.lib.metrics rc_label "$_rc_file" 2>/dev/null || true)"
         if [[ -n "$_started_at" ]]; then
           _rc_label="${_proj} ${_rc} (${_started_at})"
         fi
@@ -332,20 +277,10 @@ except:
       if [[ -z "$_rc_file" ]]; then
         printf '    %s(no data yet)%s\n' "$DIM" "$RESET"
       else
-        # Render cost breakdown
-        _rc_block_output="$(_render_cost_block_python "$_rc_file" "${PRICING_FILE:-}" "    ")"
-        printf '%s\n' "$_rc_block_output"
-
-        # RC total
-        _rc_total="$(echo "$_rc_block_output" | python3 -c "
-import sys, re
-total = 0.0
-for line in sys.stdin:
-    m = re.search(r'subtotal:\s+\\\$([\d,]+\.?\d*)', line)
-    if m:
-        total += float(m.group(1).replace(',',''))
-print(f'{total:.2f}')
-" 2>/dev/null || echo "0.00")"
+        # Render cost breakdown; its first line is the RC total.
+        _rc_block_output="$(_cost_block "$_rc_file" "${PRICING_FILE:-}" "    ")"
+        printf '%s\n' "${_rc_block_output#*$'\n'}"
+        _rc_total="${_rc_block_output%%$'\n'*}"
         printf '  %sRC total: $%s%s\n' "${BOLD}" "$_rc_total" "$RESET"
       fi
       printf '\n'

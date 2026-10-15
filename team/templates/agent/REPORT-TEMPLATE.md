@@ -111,11 +111,55 @@ Observations, edge cases, or quality signals noticed during verification that we
 
 ## Code Coverage
 
-Python code coverage captured from the gated runners (run with `--coverage` in Step 5a). This section is informational only — it does not feed the Recommendation, the Systemic Risk rating, or the PASS / SHIP-WITH-CONCERNS decision. `coverage unavailable` is a valid value: when `pytest-cov` is absent or the measurement failed, record that and move on. It is never a finding or a blocker.
+Python code coverage, when collected. Coverage is opt-in: the Step 5a certification runs do not use `--coverage`, and a separate run with it is optional. This section is informational only — it does not feed the Recommendation, the Systemic Risk rating, or the PASS / SHIP-WITH-CONCERNS decision. `coverage unavailable` and `not collected` are both valid values: when coverage was not run, `pytest-cov` is absent, or the measurement failed, record that and move on. It is never a finding or a blocker.
 
-- **Line coverage:** `<NN%>` | `coverage unavailable`
-- **Branch coverage:** `<NN%>` | `coverage unavailable`
+- **Line coverage:** `<NN%>` | `coverage unavailable` | `not collected`
+- **Branch coverage:** `<NN%>` | `coverage unavailable` | `not collected`
 - **Lowest-covered modules (optional):** `<module — NN%>`, `<module — NN%>`
+
+---
+
+## Slowest tests
+
+Where the suite time goes. **This section is informational only**, like Code Coverage. It does not feed the Recommendation, the Systemic Risk rating, or the PASS / SHIP-WITH-CONCERNS decision. A slow test, or a total slower than last time, is an observation for the reader and not a finding on its own.
+
+The source is the durations record each certification run writes: `$PGAI_AGENT_KANBAN_TEMP_DIR/lint/durations-unit.json` and `lint/durations-integration.json`. Each lists up to 25 tests, slowest first, each taking at least 1.0 s, plus `total_seconds` and `test_count`. Copy the top 10 entries per suite. Fewer than 10 is normal, because only tests of 1.0 s or more are listed. When a suite left no file, write `not recorded`.
+
+**Change since the previous RC.** Compare this run's `total_seconds` with the previous RC's. Use the copy of its durations file saved in that RC's TESTER task `artifacts/` when one exists. Otherwise use the total its report recorded here. When there is neither, write `no previous record`. If `[testing] workers` differed between the two runs, say so beside the change, because the worker count moves the total.
+
+The next certification run overwrites both files. Save copies of this run's two files in this task's `artifacts/`, so the next RC has something to compare against.
+
+### Unit
+
+| # | Test | Seconds |
+|---|------|---------|
+| 1 | `<test id>` | `<N.NN>` |
+
+- **Total:** `<total_seconds>` s over `<test_count>` tests | `not recorded`
+- **Change since previous RC:** `<+/-N.N s (+/-N%)> vs <vX.Y.Z>` | `no previous record`
+
+### Integration
+
+| # | Test | Seconds |
+|---|------|---------|
+| 1 | `<test id>` | `<N.NN>` |
+
+- **Total:** `<total_seconds>` s over `<test_count>` tests | `not recorded`
+- **Change since previous RC:** `<+/-N.N s (+/-N%)> vs <vX.Y.Z>` | `no previous record`
+
+---
+
+## Deep-Verify Freshness
+
+One line is the entire body of this section — no bullet, no sub-heading beneath it. It is a **fact the report states, never a verdict the report produces**: it is not a `## Findings` entry, and it never changes the `## Recommendation` or the `## Systemic Risk` rating. Write it on **every** report for a tree that ships Dockerfiles, including a tree never deep-verified and a tree whose last result was red. **A tree that ships no Dockerfiles omits this section.**
+
+Form A is the placeholder below — the record-exists form. Two other forms replace it: **Form B**, never run (`found=false`), and **Form C**, the ledger is unreadable. `team/roles/TESTER.md` Step 5d is the canon for choosing among the three, for the token rules, and for the one sentence each form owes; do not guess a form from this template alone.
+
+```
+deep-verify: found=true verdict=<built | failed-to-build | could-not-attempt> version=<vX.Y.Z> commit=<sha> timestamp=<ISO 8601 UTC> age=<N>d freshness=<fresh|stale> — <one sentence>
+```
+
+`verdict` is the ledger's own word, copied verbatim: `built`, `failed-to-build`, or `could-not-attempt`. Never PASS / FAIL.
 
 ---
 

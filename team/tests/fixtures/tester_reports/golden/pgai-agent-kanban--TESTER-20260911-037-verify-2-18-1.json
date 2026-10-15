@@ -1,0 +1,242 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "v2.18.1 is a single-bug patch RC. It closes BUG-0243, in which two shipped readers of the\nsame `project.cfg [release] deep_verify` key disagreed about what the key accepts: the\nkanban-wide `config_loader.sh` accepted `weekly|off|true|false`, while\n`pp_deep_verify_mode()` -- the reader the scheduled deep-verify dispatch actually consults --\naccepted only `weekly|off` and failed loud on the boolean spellings that every shipped\nconfiguration example, and every `project.cfg` written by `create-project.sh` since v2.18.0,\nadvertises as accepted. An operator who followed the comment scaffolded into their own\nproject file ended up with the weekly cold-build lane silently switched off.\n\nThe RC takes the widening direction the bug's Expected section named: `pp_deep_verify_mode`\nnow recognizes `true` as an alias of `weekly` and `false` as an alias of `off`, while still\nprinting only the two canonical mode words on stdout and still failing loud, with nothing on\nstdout, for any value outside the four. Three tickets landed: CODER-033 (the reader widening\nplus its dual-channel remedy and `--help` text, with unit and integration coverage),\nCODER-034 (a drift-proof integration test that derives the accepted-value list from the\ngenerated `project.cfg` comment itself rather than from a hardcoded list), and WRITER-035\n(one accepted-value set stated identically across `docs/operator-commands.md`,\n`docs/cm-release-reference.md`, and `team/SOP-core.md`).\n\nVerification covered pre-flight merge checks, both gated test suites, the quality-class lint\nfindings files, release-state drift, structural and content review of all eight changed\nfiles, executable acceptance criteria, behavioral guard verification (both the original\nfailure mode and the new normal case), the census lint, the skip-cites-real-bug gate, the\nsynthetic release simulation, whole-tree syntax checks, and the autonomous-operation\ncriterion. Everything the requirements doc and BUG-0243 ask for is met, and the fix was\nexercised end to end rather than read.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "`pp_deep_verify_mode` accepts every spelling the shipped comments advertise",
+      "heading": "Finding 1: `pp_deep_verify_mode` accepts every spelling the shipped comments advertise",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0243 acceptance item 1. Built a throwaway kanban root\n(`/tmp/pgai_kanban_tmp/probe.cX8F/kanban_root`, never the live install), created a project\nwith the shipped `team/scripts/create-project.sh`, and drove each value through the reader\nthe generated comment names. The generated `[release]` block reads:\n\n```\n# Accepted: weekly|off (true|false also accepted as aliases: true=weekly,\n# false=off). Default: weekly\n```\n\nObserved, one row per value (`source scripts/lib/project_paths.sh && pp_deep_verify_mode`):\n\n| `deep_verify =` | stdout | exit | stderr |\n|---|---|---|---|\n| `weekly` | `weekly` | 0 | (none) |\n| `off` | `off` | 0 | (none) |\n| `true` | `weekly` | 0 | (none) |\n| `false` | `off` | 0 | (none) |\n| (absent / commented out) | `weekly` | 0 | (none) |\n\nEvery value the comment advertises resolves, and the alias spelling is never echoed back --\nstdout carries exactly one of the two canonical mode words, which is the property the\nfunction's own header defends.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "a value outside the accepted set still fails loud with nothing on stdout",
+      "heading": "Finding 2: a value outside the accepted set still fails loud with nothing on stdout",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0243 acceptance item 1 (negative half) and the guard the widening must not weaken.\nSame throwaway root, four out-of-set values:\n\n| `deep_verify =` | stdout | exit | stderr |\n|---|---|---|---|\n| `WEEKLY` | *(empty)* | 1 | `unrecognized value 'WEEKLY' ... (expected 'weekly' or 'off', aliases 'true'/'false' also accepted; blank/absent defaults to 'weekly')` |\n| `True` | *(empty)* | 1 | same shape, naming `True` |\n| `weeklyish` | *(empty)* | 1 | same shape, naming `weeklyish` |\n| `yes` | *(empty)* | 1 | same shape, naming `yes` |\n\nThe widening did not degrade into case-insensitive or prefix matching: `WEEKLY`, `True`, and\n`weeklyish` are all still refused. The stderr diagnostic names the accepted set it now\nenforces, including the aliases. A caller can still tell \"resolved to a mode\" from \"refused\"\nwithout parsing prose.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "`deep-verify.sh --scheduled` no longer refuses an advertised spelling",
+      "heading": "Finding 3: `deep-verify.sh --scheduled` no longer refuses an advertised spelling",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0243 acceptance item 2, verified behaviorally against the same throwaway root at\n11:58 UTC (outside the default `03:00-03:59` off-hours window, so no container engine was\nstarted and no lane ran -- consistent with TESTER.md Step 5d).\n\n| `deep_verify =` | exit | stdout | `deep_verify.invalid_schedule_mode`? |\n|---|---|---|---|\n| `weekly` | 0 | `scheduled run not due (outside off-hours window 03:00-03:59 UTC; checked at 11:58 UTC)` | no |\n| `true` | 0 | identical not-due narration -- reaches the due-evaluation path exactly like `weekly` | no |\n| `off` | 0 | `scheduled run skipped (deep_verify=off)` | no |\n| `false` | 0 | identical skip narration -- skips exactly like `off` | no |\n| `bogus` | 1 | *(empty)* | **yes**, dual-channel with `error:` / `message:` / `remedy:` all populated |\n\nThe `bogus` row is the guard-still-fires half of Step 6.5: the refusal that BUG-0243 said was\nfiring on legitimate values still fires on a genuine typo, and its remedy now names the full\naccepted set (`Set project.cfg [release] deep_verify to 'weekly' or 'off' (aliases\n'true'/'false' also accepted) ...`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "the original failure mode reproduces against the pre-fix reader",
+      "heading": "Finding 4: the original failure mode reproduces against the pre-fix reader",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.5 requires synthesizing the original failure mode as well as the new normal case. An\nisolated copy of `team/scripts/lib/project_paths.sh` (with its whole sibling `lib/` tree, so\n`read_ini` and friends resolve) was patched back to the pre-fix `case \"$raw\" in weekly|off)`\narm under the temp root -- the RC worktree itself was never modified. Against that pre-fix\nreader, with the same `project.cfg` the shipped `create-project.sh` wrote:\n\n- `deep_verify = true` -> exit 1, empty stdout, `unrecognized value 'true' ... `\n- `deep_verify = false` -> exit 1, empty stdout, `unrecognized value 'false' ... `\n- `deep_verify = weekly` -> `weekly`, exit 0\n- `deep_verify = off` -> `off`, exit 0\n\nThat is BUG-0243's reported symptom reproduced exactly, and it confirms the new tests would\nfail against the pre-fix code. The old normal case (`weekly` / `off`) works identically\nbefore and after, so the fix did not trade one case for the other.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "the drift-proof test derives its value list from the comment, not a hardcoded copy",
+      "heading": "Finding 5: the drift-proof test derives its value list from the comment, not a hardcoded copy",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-034's deliverable. Exercised the three new module-level helpers in\n`team/tests/integration/test_create_project.py` directly against the real generated\n`project.cfg`:\n\n- `_extract_release_section` / `_extract_deep_verify_comment` returned the joined comment,\n  which spans two physical lines in the generated file and reads as one string.\n- `_parse_accepted_deep_verify_values` returned `['weekly', 'off', 'true', 'false']` -- all\n  four spellings, parsed from the comment text, with no list hardcoded in the test.\n- Negative probe: with the alias clause removed from the comment, the parser refuses with\n  `Could not find the '<word>|<word> also accepted as aliases: X=Y, Z=W' clause in the\n  deep_verify comment; if the comment's shape changed, update this parser to match.` It\n  fails loud rather than silently narrowing the value list it checks.\n\nEither half of the pair (comment or reader) being widened or narrowed without the other now\nfails the suite. See the caveat in Finding 11 about the parser's coupling to\n`create-project.sh`'s exact sentence shape.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "the two readers of `[release] deep_verify` agree on the accepted set",
+      "heading": "Finding 6: the two readers of `[release] deep_verify` agree on the accepted set",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0243 acceptance item 3. Both readers now carry byte-equivalent `case` arms:\n\n- `team/scripts/lib/config_loader.sh:532` -- `weekly|true)` -> `PGAI_DEEP_VERIFY=\"true\"`;\n  `off|false)` -> `\"false\"`; `*)` -> `config_loader.release.invalid_deep_verify`, return 1.\n- `team/scripts/lib/project_paths.sh:1838` -- `weekly|true)` -> prints `weekly`;\n  `off|false)` -> prints `off`; `*)` -> stderr diagnostic, return 1.\n\nA value accepted by one is accepted by the other, and a value refused by one is refused by\nthe other, including the case-sensitivity boundary (`True` and `WEEKLY` are refused by both).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "one accepted-value set named on every published surface",
+      "heading": "Finding 7: one accepted-value set named on every published surface",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0243 acceptance item 4 and WRITER-035's deliverable. Independently grepped every surface\nthat states the set:\n\n| Surface | Statement |\n|---|---|\n| `team/scripts/create-project.sh:497` (scaffolded comment) | `Accepted: weekly\\|off (true\\|false also accepted as aliases: true=weekly, false=off). Default: weekly` |\n| `project.cfg_example:222` | `Accepted: weekly\\|off (or true\\|false). Kanban-wide default: weekly` |\n| `kanban.cfg_example:532` | `Accepted: weekly\\|off (or true\\|false). Default: weekly` |\n| `team/scripts/lib/config_loader.sh:543` (remedy) | `Set [release] deep_verify to one of weekly\\|off (or true\\|false) in <cfg>.` |\n| `team/SOP-core.md:268` (`[release]` key registry) | `` `weekly`\\|`off` (or `true`\\|`false`) `` -- \"Not a boolean but a mode ... Every reader of the key accepts all four.\" |\n| `docs/operator-commands.md:661` (per-project switch table) | `` `weekly`\\|`off` (or `true`\\|`false`) `` plus \"The boolean spellings are aliases of the word spellings: `true`=`weekly`, `false`=`off`.\" |\n| `docs/cm-release-reference.md:172` (per-project switch prose) | \"`deep_verify` takes `weekly` (default) or `off`, with `true` and `false` accepted as aliases of those two words\" |\n| `team/scripts/deep-verify.sh` remedy + `--help` | `(weekly\\|off, true\\|false also accepted as aliases)` |\n\nAll eight name the identical set `{weekly, off, true, false}` with `true`=`weekly`,\n`false`=`off`. The never-guess doctrine is preserved and sharpened in the two operator docs\n(\"An alias is a recognized spelling, not a guess\"), which is what WRITER-035's brief asked\nfor. BUG-0243's Files Involved named `team/SOP.md`; that file no longer exists in the dev\ntree (renamed to `team/SOP-core.md` at v2.10.0, `git log --diff-filter=DR` -> `33ba4dc\nRelease v2.10.0`), and `team/SOP-core.md` is the surface that was correctly updated in its\nplace.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "requirements-doc acceptance criteria",
+      "heading": "Finding 8: requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n| Criterion | Result |\n|---|---|\n| Each bundled item is addressed in the implementation | BUG-0243's five acceptance items are each met -- see Findings 1-7 and 9. |\n| All Python files compile cleanly | 403 tracked `.py` files compiled via `py_compile`; 0 failures. |\n| All bash files pass syntax check | Every tracked `.sh` file passed `bash -n`; 0 failures. |",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "test coverage for the new behavior",
+      "heading": "Finding 9: test coverage for the new behavior",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0243 acceptance item 5 plus CODER-033's own criteria. New cases landed and are green\ninside the gated runners:\n\n- `team/tests/unit/test_project_paths_bash.py` -- parametrized\n  `test_deep_verify_mode_accepts_every_documented_spelling` covering all four spellings and\n  asserting the canonical word on stdout with empty stderr, plus\n  `test_deep_verify_mode_still_refuses_a_value_outside_the_widened_set` pinning `weeklyish`\n  as refused (explicitly guarding against prefix/case-blind matching).\n- `team/tests/integration/test_deep_verify_scheduled_dispatch.py` --\n  `test_true_alias_reaches_due_evaluation_like_weekly` and\n  `test_false_alias_skips_the_lane_like_off`, both asserting the absence of\n  `deep_verify.invalid_schedule_mode`. The pre-existing unrecognized-value refusal test is\n  unchanged and still passes.\n- `team/tests/integration/test_create_project.py` -- the drift-proof test of Finding 5. The\n  pre-existing `TestCreateProjectDeepVerifyReleaseSection` cases are unmodified in the diff.\n\nTest-fidelity checklist: the new integration cases exercise the real shipped bash entry\npoints (`create-project.sh`, `deep-verify.sh`) under a sandboxed `KANBAN_ROOT`, not a Python\nre-implementation, so an `errexit` chain-killer or a path-resolution defect would surface.\nNo state-mutating script is pointed at the live install, by the RC's tests or by this\nverification's own ad-hoc commands.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "structural, census, gate, and lifecycle checks",
+      "heading": "Finding 10: structural, census, gate, and lifecycle checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Pre-flight merge verification** -- every DONE task's feature branch is already deleted\n  post-merge (the normal Procedure A lifecycle); no unmerged branch and no BUG-92\n  zero-commits-ahead anomaly. Each of the three tickets contributed exactly one non-merge\n  commit (4, 1, and 3 files respectively); no empty commits on the RC.\n- **Ticket scope containment** -- `CODER-033` touched only `deep-verify.sh`,\n  `project_paths.sh`, and its two test files; `CODER-034` touched only\n  `test_create_project.py`; `WRITER-035` touched only `docs/cm-release-reference.md`,\n  `docs/operator-commands.md`, `team/SOP-core.md` -- satisfying WRITER-035's \"no file outside\n  the three documents\" criterion exactly.\n- **Census** -- `docs/blocking-site-census.md` Locator Index still carries\n  `team/scripts/deep-verify.sh:deep-verify-02 BLOCK-WORTHY` with its class unchanged, and the\n  anchor still resolves: `python3 team/scripts/lint_gate_census_compliance.py` -> `OK -- 34\n  file(s) checked, 0 offenders`, `FINDINGS_JSON: []`, exit 0.\n- **Skip-cites-real-bug (Step 6.13)** -- `bash team/scripts/lint_skip_bug_gate.sh` -> `OK --\n  all skip annotations are compliant`, `0 missing files`. No placeholder `BUG-SKIP` IDs in\n  live test sources (the only `BUG-NNNN`-shaped grep hits are inside archived runner logs\n  under `team/tests/artifacts/`, not skip annotations).\n- **Synthetic release simulation (Step 6.8)** -- triggered, because the diff touches\n  `team/scripts/lib/project_paths.sh` and `team/scripts/deep-verify.sh`.\n  `python3 -m pytest tests/integration/test_cm_release_synthetic.py` -> 15 passed, run under a\n  throwaway `PGAI_AGENT_KANBAN_ROOT_PATH`.\n- **Constraint negative checks (Step 6.9)** -- `set -euo pipefail` intact at\n  `deep-verify.sh:112`; `project_paths.sh` is a sourced library and correctly carries none.\n  The RC's diff adds and removes no `set -` line. No secrets, no banned patterns introduced.\n- **Release-state drift (Step 6.1)** -- `pp_last_released_version` -> `v2.18.0`;\n  `semver_gt v2.18.1 v2.18.0` is true. `release-state.md` holds `Active RC: v2.18.1`,\n  `RC Opened By Task: CM-20260911-036-open-rc-2-18-1`, and a well-formed\n  `Last Released: v2.18.0`. The `ai_rc/v2.18.1` branch exists and matches the worktree HEAD.\n  No drift.\n- **Prereq graph (Step 6.10)** -- this task's three prerequisites (CODER-033, CODER-034,\n  WRITER-035) all exist and are DONE; the lifecycle bookend `CM-20260911-036-open-rc-2-18-1`\n  exists and is DONE; sequence numbers 032-037 are consistent and non-colliding; no cycles.\n- **Coding-standards spot-check (Step 6.14)** -- no new script (so no new `--help` surface is\n  owed), no new hardcoded operational value, no re-implementation of an existing `lib/`\n  operation. Directive 8 (provenance) is clean for this RC's diff: the tree-wide hygiene lint\n  found exactly one provenance instance and it is in a pre-existing release-notes file, not\n  in anything this RC touched.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "accepted-value wording differs in shape between surfaces",
+      "heading": "Finding 11: accepted-value wording differs in shape between surfaces",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe accepted-value *set* is identical on all eight surfaces (Finding 7), which is what\nBUG-0243 acceptance item 4 and CODER-034's criterion require. The *sentence shape* is not:\n`create-project.sh` uses the long form that spells the alias mapping out\n(`(true|false also accepted as aliases: true=weekly, false=off)`), while\n`project.cfg_example`, `kanban.cfg_example`, and `config_loader.sh`'s remedy use the terser\n`(or true|false)`. CODER-034 recorded this deliberately in its completion note and left the\nalready-correct surfaces unedited.\n\nThe caveat is the coupling this creates: `_parse_accepted_deep_verify_values` matches the\nlong form's `also accepted as aliases: X=Y, Z=W` clause specifically, so a future editor who\nreworded `create-project.sh`'s comment into the terser shape used by its three siblings would\nbreak the test. That is the safe failure direction -- the parser asserts with an explicit\n\"if the comment's shape changed, update this parser to match\" message rather than silently\nchecking a narrower set (verified in Finding 5) -- so this is a note for whoever next edits\nthat comment, not a defect. No filing.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

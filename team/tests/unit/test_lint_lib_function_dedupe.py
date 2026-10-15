@@ -103,6 +103,9 @@ def test_clean_real_lib_dir_produces_no_violations() -> None:
     if not _REAL_LIB_DIR.is_dir():
         pytest.skip(f"Real lib dir not found at {_REAL_LIB_DIR}; skipping.")
 
+    # Deliberately exercises the real team/scripts/lib/ tree (not a
+    # fixture): this is a live regression guard, not an isolated behavior a
+    # fixture could stand in for.
     violations = _lint.find_duplicate_functions(_REAL_LIB_DIR, verbose=False)
 
     assert not violations, (
@@ -120,6 +123,9 @@ def test_clean_real_lib_dir_main_exits_zero() -> None:
     if not _REAL_LIB_DIR.is_dir():
         pytest.skip(f"Real lib dir not found at {_REAL_LIB_DIR}; skipping.")
 
+    # Deliberately exercises the real team/scripts/lib/ tree (not a
+    # fixture): this is a live regression guard, not an isolated behavior a
+    # fixture could stand in for.
     exit_code = _lint.main(["--lib-dir", str(_REAL_LIB_DIR)])
 
     assert exit_code == 0, (
@@ -187,9 +193,9 @@ def test_planted_duplicate_main_exits_nonzero(tmp_path: Path) -> None:
 def test_allow_list_suppresses_duplicate_for_allowed_pair(tmp_path: Path) -> None:
     """A duplicate whose all defining files are in the allow-list is not reported.
 
-    Models the provider-interface pattern: wake_claude_provider.sh and
-    wake_codex_provider.sh both define provider_preflight; both are in the
-    default allow-list; the duplicate must not trigger a violation.
+    Models the provider-interface pattern: provider_claude.sh and
+    provider_codex.sh both define provider_model_preflight; both are in
+    the default allow-list; the duplicate must not trigger a violation.
     """
     lib_dir = tmp_path / "lib"
     lib_dir.mkdir()
@@ -336,11 +342,11 @@ def test_default_allow_list_covers_provider_files() -> None:
     The default allow-list must include both so the lint does not report them
     as a violation when running against the real lib/ directory.
     """
-    assert "wake_claude_provider.sh" in _lint._DEFAULT_ALLOW_FILES, (
-        "wake_claude_provider.sh must be in the default allow-list to suppress "
+    assert "provider_claude.sh" in _lint._DEFAULT_ALLOW_FILES, (
+        "provider_claude.sh must be in the default allow-list to suppress "
         "the provider-polymorphic function-name duplicates."
     )
-    assert "wake_codex_provider.sh" in _lint._DEFAULT_ALLOW_FILES, (
-        "wake_codex_provider.sh must be in the default allow-list to suppress "
+    assert "provider_codex.sh" in _lint._DEFAULT_ALLOW_FILES, (
+        "provider_codex.sh must be in the default allow-list to suppress "
         "the provider-polymorphic function-name duplicates."
     )

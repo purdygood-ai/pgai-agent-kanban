@@ -26,11 +26,35 @@
 #   To run the full unit suite (all docker and non-docker tests), use
 #   run-unit-tests.sh instead.
 #
+# pytest basetemp:
+#   Every invocation of this script claims its own pytest basetemp under
+#   ${PGAI_AGENT_KANBAN_TEMP_DIR}/pytest/, a directory named
+#   gated-<scope>.XXXXXX where <scope> is PGAI_TASK_ID when the wake layer
+#   exported one and pid<pid> otherwise, and the random suffix is mktemp's
+#   (gated_runner_pytest_basetemp in team/scripts/lib/gated_runner_lint.sh).
+#   pytest removes and recreates whatever --basetemp it is given at session
+#   start, so a path shared with any other live pytest session on the host
+#   -- a second run of this script, a sibling agent's run, another runner --
+#   would delete that session's fixture directories mid-run; a directory
+#   per invocation removes the interference entirely. The directory is
+#   removed on this script's own exit path, whatever the exit code, so the
+#   pytest/ subtree never accumulates one directory per historical run.
+#
+# Repository root: run from a checkout (<repo>/team/scripts/), the runner
+# tests that checkout; run from an install (<kanban-root>/scripts/), it
+# tests the resolved dev tree -- PGAI_DEV_TREE_PATH, else kanban.cfg
+# [paths] dev_tree_path. resolve_runner_repo_root in
+# team/scripts/lib/dev_tree.sh holds the rule.
+#
 # Configuration:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: $HOME/pgai_agent_kanban)
+#   PGAI_DEV_TREE_PATH           — dev tree an install-layout run works in
 
 # --- Bootstrap: self-locate → source shell-env → fail loud ---
 # shellcheck source=lib/env_bootstrap.sh
+# BLOCK-WORTHY: an unreachable bootstrap prelude leaves every downstream
+# tunable/path resolution undefined for this runner.
+# CENSUS-ANCHOR: run-gated-tests-env-bootstrap-01
 source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
 
 # --- Resolve kanban root and script directory ---
@@ -50,6 +74,8 @@ if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
 fi
 # shellcheck source=lib/temp.sh
 [[ -f "${_RGT_SCRIPT_DIR}/lib/temp.sh" ]] && source "${_RGT_SCRIPT_DIR}/lib/temp.sh"
+# shellcheck source=lib/gated_runner_lint.sh
+[[ -f "${_RGT_SCRIPT_DIR}/lib/gated_runner_lint.sh" ]] && source "${_RGT_SCRIPT_DIR}/lib/gated_runner_lint.sh"
 
 # Self-locate fallback for dev tree.
 _RGT_SELF_ROOT="$(cd "${_RGT_SCRIPT_DIR}/../.." && pwd)"
@@ -65,17 +91,27 @@ require_dev_tree "${PGAI_DEV_TREE_PATH:-}" "$TEAM_ROOT/kanban.cfg"
 set -euo pipefail
 
 # --- Clean exit handling ---
-cleanup_on_exit() {
-  local exit_code=$?
-  jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
-  wait 2>/dev/null || true
-  exit $exit_code
-}
+# shellcheck source=lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
 trap cleanup_on_exit EXIT
 
-# --- Resolve script directory to find the repo root ---
+# --- Release this invocation's pytest basetemp on every exit path ---
+# Registered ahead of the claim below, through script_common.sh's
+# CLEANUP_ON_EXIT_PRE_HOOK, so it fires on a normal fall-through, the
+# pytest-failure `exit 1`, and a `set -e` abort alike. An abort before the
+# claim has happened is a no-op release (the helper ignores an empty path),
+# and the helper never affects this runner's own exit code.
+_rg_release_basetemp_on_exit() {
+  gated_runner_pytest_basetemp_cleanup "${_RGT_PYTEST_BASETEMP:-}"
+}
+CLEANUP_ON_EXIT_PRE_HOOK=_rg_release_basetemp_on_exit
+
+# --- Resolve script directory and the repository root ---
+# Run from a checkout (team/scripts/), the root is that checkout; run from an
+# install (scripts/), it is the resolved dev tree, PGAI_DEV_TREE_PATH
+# (resolve_runner_repo_root in lib/dev_tree.sh).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(resolve_runner_repo_root "$SCRIPT_DIR" "$TEAM_ROOT/kanban.cfg")"
 
 # --- Parse arguments ---
 VERBOSE=false
@@ -118,8 +154,7 @@ EOF
       ;;
     *)
       # Partial remedy (docs/coding-standards.md "Gates prescribe, not just
-      # diagnose"; classified in docs/audits/v1.27.2-gate-remedy-census.md,
-      # row 32): the offending argument is named deterministically, but which
+      # diagnose"): the offending argument is named deterministically, but which
       # valid flag the operator meant to pass is user intent this runner
       # cannot resolve — --help names every accepted flag as the next step.
       echo "FAIL: unrecognized argument '$1'." >&2
@@ -139,9 +174,8 @@ EOF
 done
 
 # --- Check pytest is available ---
-# Full remedy (docs/coding-standards.md "Gates prescribe, not just diagnose";
-# classified in docs/audits/v1.27.2-gate-remedy-census.md, row 31): pytest's
-# absence has one universal, verbatim-runnable fix.
+# Full remedy (docs/coding-standards.md "Gates prescribe, not just
+# diagnose"): pytest's absence has one universal, verbatim-runnable fix.
 if ! command -v pytest >/dev/null 2>&1 && ! python3 -m pytest --version >/dev/null 2>&1; then
   echo "FAIL: pytest is not installed in this Python environment." >&2
   echo "" >&2
@@ -155,16 +189,25 @@ if ! command -v pytest >/dev/null 2>&1 && ! python3 -m pytest --version >/dev/nu
   echo "" >&2
   echo "Rule: this runner requires pytest as a hard dependency; it cannot execute" >&2
   echo "the test suite without it." >&2
+  # BLOCK-WORTHY: verification unable to run at all -- pytest missing means
+  # this gated suite cannot execute, not that it ran clean.
+  # CENSUS-ANCHOR: run-gated-tests-pytest-missing-01
   exit 2
 fi
 
-# --- Redirect pytest basetemp under the framework temp root ---
+# --- Claim this invocation's own pytest basetemp under the framework temp root ---
+# gated_runner_pytest_basetemp (team/scripts/lib/gated_runner_lint.sh)
+# resolves a directory that belongs to this invocation alone (its shape is
+# in this script's header), keeping this run's fixture directories out of
+# reach of every other live pytest session on the host; the exit hook
+# registered above removes it on every exit path, so the pytest/ subtree
+# never holds one directory per historical run. The variable stays set,
+# unexported, so that hook can find it. PYTEST_ADDOPTS is appended to (not
+# overwritten) in case the caller already has flags set. The temp root is
+# exported first so conftest.py's PYTEST_DEBUG_TEMPROOT guard sees it.
 export PGAI_AGENT_KANBAN_TEMP_DIR="$(pgai_temp_dir)"
-mkdir -p "${PGAI_AGENT_KANBAN_TEMP_DIR}"
-_PYTEST_BASETEMP="${PGAI_AGENT_KANBAN_TEMP_DIR}/pytest/gated"
-mkdir -p "$_PYTEST_BASETEMP"
-export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:+${PYTEST_ADDOPTS} }--basetemp=${_PYTEST_BASETEMP}"
-unset _PYTEST_BASETEMP
+_RGT_PYTEST_BASETEMP="$(gated_runner_pytest_basetemp gated)"
+export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:+${PYTEST_ADDOPTS} }--basetemp=${_RGT_PYTEST_BASETEMP}"
 
 # --- Build pytest arguments ---
 # Run only the shipped-image entrypoint test module (the docker-gated suite).
@@ -199,6 +242,10 @@ if [[ $PYTEST_EXIT -ne 0 ]]; then
   echo "its short-test-summary 'FAILED <file>::<test>' lines name the specific" >&2
   echo "test and assertion that failed. Read that test's traceback for the" >&2
   echo "actual defect; there is no command that fixes a real test failure." >&2
+  # BLOCK-WORTHY: breakage-class -- a failing docker-gated test suite is
+  # an unusable build; this runner is the gate that would have caught it
+  # before it shipped.
+  # CENSUS-ANCHOR: run-gated-tests-pytest-failure-01
   exit 1
 fi
 

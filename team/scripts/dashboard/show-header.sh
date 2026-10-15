@@ -17,15 +17,33 @@
 # Also used as sub-component by show-status-window.sh.
 #
 # Usage:
-#   show-header.sh [--kanban-root <path>]
+#   show-header.sh [--kanban-root <path>] [-h|--help]
 #
-# Configuration (via config.cfg):
-#   PGAI_DASHBOARD_COLOR_HEADER   — header text color (default: cyan)
-#   PGAI_DASHBOARD_COLOR_HALT     — halt warning color (default: red)
+# Configuration (environment; show-multi.sh exports each from kanban.cfg
+# [dashboard] before it renders this pane):
+#   color_header / PGAI_DASHBOARD_COLOR_HEADER   — header text color (default: cyan)
+#   color_halt   / PGAI_DASHBOARD_COLOR_HALT     — halt warning color (default: red)
 #
 # Environment:
 #   TERM=dumb  — disables all ANSI codes
 #   NO_COLOR=1 — disables all ANSI codes
+
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # The header block up to its first non-comment line, however long it
+      # grows; awk writes it straight to stdout, so no pipe stage can race.
+      header_help_print "${BASH_SOURCE[0]}"
+      exit 0
+      ;;
+  esac
+done
 
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
@@ -47,11 +65,35 @@ export PGAI_GIT_LOCAL_ONLY=1
 # Source shared Python-helper resolver (live-install anchor first — D3 fix)
 # shellcheck source=lib/helper_resolver.sh
 source "${SCRIPT_DIR}/lib/helper_resolver.sh"
+# Source shared halt scope helper (single decision point for halt scope —
+# same function status-bottom.sh and status-right.sh call, so this header
+# can never disagree with the bottom bar about which scopes are active).
+# shellcheck source=lib/halt_scope.sh
+source "${SCRIPT_DIR}/lib/halt_scope.sh"
 # Source shared version helper (single tier-order decision point)
 # shellcheck source=lib/version.sh
 source "${SCRIPT_DIR}/lib/version.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
+# Source shared pane-geometry query + row-fit-with-marker helpers — the
+# same functions next-cron-firings.sh uses, so both next-fire homes
+# truncate identically rather than drifting apart.
+# shellcheck source=lib/next_fire_viewport.sh
+source "${SCRIPT_DIR}/lib/next_fire_viewport.sh"
+# Source the shared roster band renderer — the single "one renderer, two
+# call sites" home for packing the roster into a columnar band or falling
+# back to the vertical list. next-cron-firings.sh's schedule-window band
+# renders through the same functions, so window 0's tile can never
+# disagree with it entry-for-entry.
+# shellcheck source=lib/roster_band.sh
+source "${SCRIPT_DIR}/lib/roster_band.sh"
+# Source shared dashboard layout constants (PGAI_ROSTER_BAND_MAX_ROWS,
+# PGAI_ROSTER_BAND_SEPARATOR) — single source of truth, never hardcoded
+# independently here.
+# shellcheck source=../lib/dashboard_constants.sh
+source "${SCRIPT_DIR}/../lib/dashboard_constants.sh"
 
 # --- Pass through args ---
 DATA_ARGS=("$@")
@@ -86,34 +128,12 @@ if [[ "${TERM:-}" == "dumb" ]] || [[ "${NO_COLOR:-}" == "1" ]]; then
   USE_COLOR=false
 fi
 
-# Color defaults (configurable via config.cfg)
+# Color defaults (each overridden by its PGAI_DASHBOARD_COLOR_* variable; see Configuration above)
 COLOR_HEADER="${PGAI_DASHBOARD_COLOR_HEADER:-cyan}"
 COLOR_HALT="${PGAI_DASHBOARD_COLOR_HALT:-red}"
 COLOR_OK="${PGAI_DASHBOARD_COLOR_OK:-green}"
 
-ansi_code() {
-  # Returns ANSI escape code for a named color, or empty string if color disabled.
-  local color="$1"
-  if [[ "$USE_COLOR" != "true" ]]; then
-    echo ""
-    return
-  fi
-  case "$color" in
-    black)   echo $'\033[0;30m' ;;
-    red)     echo $'\033[0;31m' ;;
-    green)   echo $'\033[0;32m' ;;
-    yellow)  echo $'\033[0;33m' ;;
-    blue)    echo $'\033[0;34m' ;;
-    magenta) echo $'\033[0;35m' ;;
-    cyan)    echo $'\033[0;36m' ;;
-    white)   echo $'\033[0;37m' ;;
-    bold)    echo $'\033[1m' ;;
-    dim)     echo $'\033[2m' ;;
-    reset)   echo $'\033[0m' ;;
-    *)       echo "" ;;
-  esac
-}
-
+# ansi_code() is defined in lib/script_common.sh (sourced above).
 RESET="$(ansi_code reset)"
 C_HEADER="$(ansi_code "$COLOR_HEADER")"
 C_HALT="$(ansi_code "$COLOR_HALT")"
@@ -127,11 +147,9 @@ C_YELLOW="$(ansi_code yellow)"
 # --- Collect data ---
 DATA="$("$SCRIPT_DIR/data.sh" "${DATA_ARGS[@]}")"
 
-get_val() {
-  local key="$1"
-  local default="${2:-}"
-  echo "$DATA" | awk -F= -v k="$key" '$1 == k { sub(/^[^=]+=/, ""); print; found=1 } END { if (!found) print "'"$default"'" }'
-}
+# get_val reads one KEY=VALUE pair from DATA (lib/dashboard_common.sh).
+# shellcheck source=../lib/dashboard_common.sh
+source "${SCRIPT_DIR}/../lib/dashboard_common.sh"
 
 KANBAN_ROOT_VAL="$(get_val KANBAN_ROOT "${PGAI_AGENT_KANBAN_ROOT_PATH}")"
 LAST_RELEASED="$(get_val LAST_RELEASED "none")"
@@ -206,20 +224,25 @@ BAR=""
 for (( i=0; i<FILLED; i++ )); do BAR="${BAR}${FILLED_CHAR}"; done
 for (( i=0; i<EMPTY; i++ ));  do BAR="${BAR}${EMPTY_CHAR}"; done
 
-# --- Cron firings (via cron_parser.py) ---
+# --- Cron firings (via the shared roster renderer's entry fetcher) ---
 #
 # SHOW_HEADER_NOW: optional Unix timestamp (seconds since epoch) that fixes the
 # reference "now" for all cron-firing computations in this render cycle.  When
 # set, every agent's next-firing time is computed relative to that fixed point
 # rather than the live wall clock.  Intended for testing — inject a timestamp
-# that is not on a */5 boundary to guarantee deterministic "in N min" output.
+# that is not on a */5 boundary to guarantee deterministic countdown output.
 #
 # If SHOW_HEADER_NOW is unset or empty, we capture the current epoch once here
 # so that all per-agent computations within the same render cycle share a single
 # reference time (prevents sub-second drift between agents).
 NOW_TS="${SHOW_HEADER_NOW:-$(date +%s)}"
 
-declare -A CRON_FIRINGS
+# ROSTER_BAND_DISPLAY (populated below via roster_band_fetch_entries) is the
+# same entry-text array next-cron-firings.sh's schedule-window band renders
+# from — the "one renderer, two call sites" requirement: window 0's tile
+# and the schedule window agree entry-for-entry because both read the SAME
+# roster_entries.py output through the SAME lib/roster_band.sh functions,
+# never a second copy of this parsing.
 CRON_FIRINGS_AVAILABLE=false
 CRON_ERROR=false
 CRONTAB_TEXT="$(crontab -l 2>/dev/null || true)"
@@ -229,20 +252,11 @@ if [[ -n "$CRONTAB_TEXT" ]]; then
   # PGAI_DEV_TREE_PATH is prohibited for live-runtime scripts.
   CRON_PARSER="${KANBAN_ROOT}/pm-agent/lib/cron_parser.py"
   if [[ -f "$CRON_PARSER" ]]; then
-    # Resolve cron_firings.py via shared helper resolver (live-install anchor first — D3 fix).
-    CRON_FIRINGS_PY="$(resolve_dashboard_helper "$KANBAN_ROOT" "${PGAI_DEV_TREE_PATH:-}" "dashboard/cron_firings.py")"
-    CRON_JSON="$(python3 "$CRON_FIRINGS_PY" "$CRONTAB_TEXT" "$CRON_PARSER" "$NOW_TS" 2>/dev/null || true)"
-    if [[ -n "$CRON_JSON" ]]; then
+    # Resolve roster_entries.py via shared helper resolver (live-install anchor first — D3 fix).
+    ROSTER_ENTRIES_PY="$(resolve_dashboard_helper "$KANBAN_ROOT" "${PGAI_DEV_TREE_PATH:-}" "dashboard/roster_entries.py")"
+    if [[ -n "$ROSTER_ENTRIES_PY" ]]; then
       CRON_FIRINGS_AVAILABLE=true
-      # Parse JSON key=value pairs into associative array
-      while IFS='=' read -r key val; do
-        [[ -n "$key" ]] && CRON_FIRINGS["$key"]="$val"
-      done < <(python3 -c "
-import json, sys
-d = json.loads(sys.argv[1])
-for k,v in d.items():
-    print(f'{k}={v}')
-" "$CRON_JSON" 2>/dev/null || true)
+      roster_band_fetch_entries "$ROSTER_ENTRIES_PY" "$CRON_PARSER" "$CRONTAB_TEXT" "$NOW_TS"
     else
       CRON_ERROR=true
     fi
@@ -251,31 +265,65 @@ for k,v in d.items():
   fi
 fi
 
-# --- HALT indicator ---
-# CHAIN_STR is driven by HALT_SUMMARY (GLOBAL/PROJECT/none) from the data layer.
-# GLOBAL wins when both global and per-project halts are active (global is the master switch).
-# Project names are NOT rendered here — taskbar is width-constrained (see Tier-2 attention window).
-if [[ "$HALT_SUMMARY" == "GLOBAL" ]]; then
-  CHAIN_STR="${C_HALT}chain=HALT GLOBAL${RESET}"
-elif [[ "$HALT_SUMMARY" == "PROJECT" ]]; then
-  CHAIN_STR="${C_HALT}chain=HALT PROJECT${RESET}"
+# --- HALT / HALT-AFTER indicator — full enumeration ---
+# Delegates to lib/halt_scope.sh (dashboard_halt_scope), the single decision
+# point for halt scope — the SAME function status-bottom.sh and
+# status-right.sh call, so this header can never show a picture that
+# contradicts the bottom bar. Renders every ACTIVE scope simultaneously:
+# a global HALT and a project's own HALT-AFTER are not mutually exclusive
+# here, and two separately-halted projects are both named — neither
+# suppresses the other. Scope words are the SOP vocabulary exactly
+# ("GLOBAL" or the literal project name).
+#
+# CHAIN_STR stays a coarse fleet-health headline (chain=HALT / chain=RUNNING)
+# — the per-scope detail lives entirely in the bracketed segments that
+# follow, so the two never say the same thing twice.
+#
+# A draining segment's event token is rendered through
+# dashboard_halt_describe_event (lib/halt_scope.sh) — the one shared
+# "until vX.Y.Z" describer for a version-pinned token.
+_SH_HALT_SEGMENTS=()
+_sh_any_halted=false
+_sh_any_active=false
+
+while IFS=$'\t' read -r _sh_hs_state _sh_hs_scope _sh_hs_event; do
+  [[ "$_sh_hs_state" == "normal" ]] && continue
+  [[ -z "$_sh_hs_scope" ]] && continue
+  _sh_any_active=true
+
+  if [[ "$_sh_hs_state" == "halted" ]]; then
+    _sh_any_halted=true
+    _sh_hs_text="HALT ${_sh_hs_scope}"
+    _sh_hs_color="$C_HALT"
+  else
+    _sh_hs_described=""
+    if [[ -n "$_sh_hs_event" ]]; then
+      _sh_hs_described="$(dashboard_halt_describe_event "$KANBAN_ROOT_VAL" "${PGAI_DEV_TREE_PATH:-}" "$_sh_hs_event")"
+    fi
+    if [[ -n "$_sh_hs_described" ]]; then
+      _sh_hs_text="HALT-AFTER ${_sh_hs_scope} ${_sh_hs_described}"
+    else
+      _sh_hs_text="HALT-AFTER ${_sh_hs_scope}"
+    fi
+    _sh_hs_color="$C_YELLOW"
+  fi
+  _SH_HALT_SEGMENTS+=("${_sh_hs_color}[${_sh_hs_text}]${RESET}")
+done < <(dashboard_halt_scope "$KANBAN_ROOT_VAL" "${PGAI_DEV_TREE_PATH:-}" "${RESOLVED_PROJECT:-}")
+unset _sh_hs_state _sh_hs_scope _sh_hs_event _sh_hs_text _sh_hs_color _sh_hs_described
+
+if [[ "$_sh_any_halted" == "true" ]]; then
+  CHAIN_STR="${C_HALT}chain=HALT${RESET}"
+elif [[ "$_sh_any_active" == "true" ]]; then
+  CHAIN_STR="${C_YELLOW}chain=DRAINING${RESET}"
 else
   CHAIN_STR="${C_OK}chain=RUNNING${RESET}"
 fi
-HALT_STR="${CHAIN_STR}"
 
-# Append per-project halt text when non-empty.
-# HALT_TEXT is one of: "" (normal), "HALT-AFTER <event>" (draining), "HALT" (halted).
-if [[ -n "$HALT_TEXT" ]]; then
-  if [[ "$HALT_TEXT" == "HALT" ]]; then
-    _ht_color="$C_HALT"
-  else
-    # draining: HALT-AFTER <event> → yellow
-    _ht_color="$C_YELLOW"
-  fi
-  HALT_STR="${HALT_STR}  ${_ht_color}[${HALT_TEXT}]${RESET}"
-  unset _ht_color
-fi
+HALT_STR="$CHAIN_STR"
+for _sh_seg in "${_SH_HALT_SEGMENTS[@]}"; do
+  HALT_STR="${HALT_STR}  ${_sh_seg}"
+done
+unset _sh_seg _sh_any_halted _sh_any_active _SH_HALT_SEGMENTS
 
 # --- Render row 1: project name + version ---
 # When invoked with --project <P> (drill window): PROJECT_NAME is the drilled project,
@@ -299,20 +347,42 @@ LEFT_LINES+=("${C_HEADER}Project:${RESET} ${PROJECT_NAME}")
 LEFT_LINES+=("Progress: ${C_GREEN}${BAR}${RESET} ${PCT}%")
 LEFT_LINES+=("${TIMESTAMP}")
 
-# Right column: cron firings
+# Right column: cron firings.
+# ROSTER_BAND_DISPLAY (populated above via roster_band_fetch_entries) drives
+# the roster body, in roster order (pm first, never a literal agent tuple).
+# ROSTER_LINES holds just the per-entry rows so they can be rendered
+# separately from the fixed "Next cron firings:" title line above them.
 RIGHT_LINES=()
-CRON_AGENTS=("pm" "coder" "writer" "tester" "cm" "cleanup")
+ROSTER_LINES=()
 if [[ "$CRON_FIRINGS_AVAILABLE" == "true" ]]; then
   RIGHT_LINES+=("${C_CYAN}Next cron firings:${RESET}")
-  for agent in "${CRON_AGENTS[@]}"; do
-    firing="${CRON_FIRINGS[$agent]:-}"
-    if [[ -n "$firing" ]]; then
-      RIGHT_LINES+=("$(printf '  %-9s %s' "${agent}:" "$firing")")
-    fi
-  done
-  if [[ ${#RIGHT_LINES[@]} -eq 1 ]]; then
-    RIGHT_LINES+=("  (no kanban cron entries found)")
+  ROSTER_LINES=("${ROSTER_BAND_DISPLAY[@]}")
+  if [[ ${#ROSTER_LINES[@]} -eq 0 ]]; then
+    ROSTER_LINES+=("  (no kanban cron entries found)")
   fi
+
+  # Render through the shared roster band renderer: pack the full roster
+  # into a compact columnar band (at most PGAI_ROSTER_BAND_MAX_ROWS rows)
+  # when the pane's queryable width allows it, or fall back to one entry
+  # per line, fitted to the pane's queryable height — reserve the lines
+  # that print unconditionally around it (the project/version line, the
+  # blank line, and this column's own "Next cron firings:" title) and drop
+  # from the BOTTOM with a "+N more" marker when even the vertical list
+  # cannot fit. A pane whose geometry cannot be queried (non-tmux, piped,
+  # --no-tmux one-shot mode) renders every entry untruncated.
+  RESERVED_ROWS=3
+  PANE_HEIGHT="$(next_fire_pane_height)"
+  if [[ -n "$PANE_HEIGHT" ]]; then
+    ROSTER_BUDGET=$(( PANE_HEIGHT - RESERVED_ROWS ))
+    (( ROSTER_BUDGET < 0 )) && ROSTER_BUDGET=0
+  else
+    ROSTER_BUDGET=""
+  fi
+  PANE_WIDTH="$(next_fire_pane_width)"
+  while IFS= read -r roster_line; do
+    RIGHT_LINES+=("$roster_line")
+  done < <(roster_band_render "$PANE_WIDTH" "$PGAI_ROSTER_BAND_MAX_ROWS" \
+    "$PGAI_ROSTER_BAND_SEPARATOR" "$ROSTER_BUDGET" "${ROSTER_LINES[@]}")
 elif [[ "$CRON_ERROR" == "true" ]]; then
   RIGHT_LINES+=("${C_DIM}Next cron firings:${RESET}")
   RIGHT_LINES+=("  (crontab not parseable)")

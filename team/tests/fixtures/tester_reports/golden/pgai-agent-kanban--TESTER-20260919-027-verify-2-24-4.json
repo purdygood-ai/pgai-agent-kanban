@@ -1,0 +1,248 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": null,
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Bounded row count against a production-shaped repetition fixture",
+      "heading": "Finding 1: Bounded row count against a production-shaped repetition fixture",
+      "level": 3,
+      "body": "**Category:** pass\n\n`PRIORITY-0004` acceptance criterion 1. Built a fixture matching the shape the\npriority measured in production: 1,800 byte-identical\n`sweep-census: skipped — .../v2.24.1-bugfix-bundle-20260918.md: finalize=tag — not report`\nlines spread across all five agent logs (360 each), plus 60 distinct signal\nevents (20 dispatches, 20 completions, 20 promotions) and 2,500 lines of\nidle-cycle boilerplate. Rendered with a throwaway kanban root per the\nlive-install safety rule.\n\n| Render | Total rows | sweep-census rows | Distinct-event rows |\n|---|---|---|---|\n| `ai_main` baseline | 1860 | 1800 | 60 |\n| `ai_rc/v2.24.4` | 61 | 1 | 60 |\n\nEvery one of the 60 distinct events renders; the repetition costs exactly one\nrow. Render time 1.6 s wall clock.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "The repeated line's occurrence count is stated in the output",
+      "heading": "Finding 2: The repeated line's occurrence count is stated in the output",
+      "level": 3,
+      "body": "**Category:** pass\n\n`PRIORITY-0004` acceptance criterion 2. The folded row from Finding 1 reads:\n\n```\n[pm 00:00:00] wake(pm): sweep-census: skipped — $HOME/.../v2.24.1-bugfix-bundle-20260918.md: finalize=tag — not report (x1800, first seen 00:00:00)\n```\n\nThe count is the whole-day total across every agent, not a per-agent or\nper-run count, and the first-seen time and agent are the earliest occurrence\nin the merged stream. A reader can tell it happened 1,800 times.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "No other signal class changes its rendering",
+      "heading": "Finding 3: No other signal class changes its rendering",
+      "level": 3,
+      "body": "**Category:** pass\n\n`PRIORITY-0004` acceptance criterion 3, verified differentially rather than by\ninspection. Extracted `ai_main`'s `team/scripts` into a scratch tree, rendered\nthe identical fixture through both versions, and diffed the non-sweep-census\nrows: byte-for-byte identical, zero differences across all 60 rows. No\ndistinct-event row carries a fold suffix.\n\nSeparately probed the inverse failure mode: a non-collapsing class repeated\n25 times per agent (`promoted 3 task(s) from WAITING to BACKLOG`, five agents,\n125 occurrences) renders all 125 occurrences, confirming that absence of\ncollapse metadata means \"render every occurrence\" and that the fold is opt-in\nper pattern rather than a default.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Adding a new pattern remains a single-line edit",
+      "heading": "Finding 4: Adding a new pattern remains a single-line edit",
+      "level": 3,
+      "body": "**Category:** pass\n\n`PRIORITY-0004` acceptance criterion 4 and goal 3, verified behaviorally. Took\nan RC-tip copy of `team/scripts`, added exactly one line\n(`'brand-new-class: fired'`) to `EVENT_SIGNAL_PATTERNS` and nothing else —\nno renderer edit, no collapse-metadata entry — and rendered a fixture of 12\noccurrences. All 12 rendered, in chronologic order, with no fold suffix, exit\n0. The new collapse metadata lives in `EVENT_SIGNAL_COLLAPSE_KEYS` beside the\npattern array in the same library, keyed by the literal pattern string, and\n`event-band.sh` reaches it only through the\n`dashboard_event_signal_collapse_key` accessor — no per-class special case\nleaks into the renderer.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Doc-truth and census lints clean",
+      "heading": "Finding 5: Doc-truth and census lints clean",
+      "level": 3,
+      "body": "**Category:** pass\n\n`PRIORITY-0004` acceptance criterion 5, both commands run from the worktree\nroot:\n\n- `python3 team/scripts/dashboard/generate_window_docs.py --check` → exit 0,\n  \"all surfaces match the census.\"\n- `python3 team/scripts/lint_doc_command_truth.py` → exit 0, 0 findings across\n  all three passes (657 citations / 13 documents; key-parity 169 citations;\n  pane-parity 47 window/pane citations).\n\nThe window-4 prose in `docs/DASHBOARD-PANES.md` and `docs/dashboard.md` was\nread in full against the implemented behavior. The shipped example row shape\n(`(x37, first seen 06:02:11)`) matches what the renderer actually emits, and\nthe \"hides lines\" promise below the pane table was correctly widened to \"hides\nand folds lines\" so the collapse is stated as a property of the view only. One\nprose claim is contradicted by Finding 8 — see there.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Both gated runners exit 0",
+      "heading": "Finding 6: Both gated runners exit 0",
+      "level": 3,
+      "body": "**Category:** pass\n\n`PRIORITY-0004` acceptance criterion 6, plus the Step 8 suite precondition.\nRun with `--coverage` from the worktree root:\n\n- `bash team/scripts/run-unit-tests.sh --coverage` → `UNIT_EXIT=0`;\n  4883 passed, 31 skipped, 808.79 s. Lint pre-flight passed, bare-`/tmp`\n  residue check OK, listener-leak check OK.\n- `bash team/scripts/run-integration-tests.sh --coverage` → `INTEGRATION_EXIT=0`;\n  519 passed, 1 skipped, 543.39 s. Same pre-flight and post-run checks OK.\n\nPASS evidence here is the two runner exit codes, not a pytest line. Direct\npytest against the two changed test modules does not run outside the runner's\nenvironment (`ModuleNotFoundError: No module named 'tests'`), which is\nexpected and is not a finding — the gated runners are the authoritative\nsignal and both are green.\n\nCoverage, informational only and not part of the verdict: unit suite 76 %\nstatements / 63 % branches (73 % blended); integration suite 11 % statements /\n9 % branches (11 % blended). Extracted from the `totals` object in\n`/tmp/pgai_kanban_tmp/coverage/{unit,integration}.json`, field names verified\nagainst the generated files.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Bundle-level criteria met",
+      "heading": "Finding 7: Bundle-level criteria met",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe bundle document's own three criteria:\n\n- *Each bundled item is addressed* — `PRIORITY-0004` is the only bundled item;\n  its three goals and six acceptance criteria are covered by Findings 1–6, and\n  its scope list (`event-band.sh`, `lib/event_signal_patterns.sh`, both doc\n  files, both test modules) matches the RC diff exactly, with nothing outside\n  it touched. The two named out-of-scope items were respected: the wake driver\n  still logs what it logged, and `sweep-census` remains a signal class.\n- *All Python files compile cleanly* — `python3 -m compileall -q team docs`\n  exits 0; both changed test modules compile individually.\n- *All bash files pass syntax check* — `bash -n` exits 0 on both changed\n  shell files.\n\nConstraint negative checks (Step 6.9): `set -euo pipefail` preserved at\n`event-band.sh:60`; no secret-shaped assignments in either changed script; no\nprovenance tokens (bug ID, task ID, RC or version citation) in any changed\nscript, test, or document — `python3 team/scripts/lint_hygiene.py --classes provenance`\nreports 0 findings across 8 directories. Skip-cite gate (Step 6.13):\n`bash team/scripts/lint_skip_bug_gate.sh` → \"OK — all skip annotations are\ncompliant\", 0 missing files, and no placeholder skip shapes in the RC's tests.\nHelp presence (Step 6.14): `event-band.sh --help` exits 0 and prints the new\ncollapse paragraph.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "A tab in a signal line garbles the folded row and merges distinct collapse identities",
+      "heading": "Finding 8: A tab in a signal line garbles the folded row and merges distinct collapse identities",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one renderer's scratch-file format)\n**Filed As:** BUG-0343 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`event-band.sh` writes five tab-separated scratch columns\n(`sort_key`, `agent`, `display_time`, `collapse_key`, `rest`) and reads them\nback with `IFS=$'\\t' read`. The `collapse_key` column is new in this RC and\nholds arbitrary captured log text. When a signal line contains a literal tab,\nthe collapse key itself contains a tab, the column stops being one `read`\nfield, and everything after the embedded tab shifts into `rest` — the field\nthe band prints.\n\nTwo consequences, found by probing the failure mode rather than by the RC's\nown fixtures, which use no tab-bearing line:\n\n1. The row is garbled. Rendered output places the tail of the collapse key\n   first, then the whole original line, then the fold suffix.\n2. **A distinct event is silently dropped.** The identity truncates at the\n   first embedded tab, so two sweep-census events differing only after the tab\n   collapse to one identity. Reproduction: 3 ALPHA occurrences + 4 BETA\n   occurrences, both tab-bearing, render as **one** row carrying `(x7, ...)`,\n   with BETA absent entirely — 2 rows with `(x3, ...)` and `(x4, ...)` expected.\n\nThis is a regression against `ai_main`, confirmed differentially: the same\ntab-bearing fixture renders correctly and in full on the pre-RC renderer,\nbecause `rest` was then the last column and `read`'s overflow-into-last-field\nbehavior kept it intact. Inserting a second free-form column ahead of it broke\nthat property.\n\nIt contradicts `PRIORITY-0004` goal 2 (\"No signal class is silently dropped\")\nand the prose this RC shipped in `docs/DASHBOARD-PANES.md` (\"a different\nbundle or a different stated reason is a different identity and gets its own\nrow\").\n\nRated **medium**, not high, against `SOP-core.md` (\"Rating a Finding\") and its\ncalibration note: the triggering input does not occur in production today.\nNineteen lines across the five live `logs/cron-*.log` files contain tabs (pm 0,\ncoder 13, writer 2, tester 4, cm 0 — all git-status-shaped output), and none of\nthem are signal-class lines, so nothing currently depends on the broken path.\nThe band is also a view-only surface: nothing in the release pipeline, the wake\nchain, or task state reads it, so a defect here cannot corrupt state or stop\nthe chain. Full reproduction steps are in the filed bug.",
+      "filed_as": "BUG-0343",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one renderer's scratch-file format)",
+        "filed_as": "BUG-0343 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "A non-CM agent ran a remote git operation during the build",
+      "heading": "Finding 9: A non-CM agent ran a remote git operation during the build",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one self-disclosed instance; no state affected)\n**Filed As:** PRIORITY-0005 (Path C-B — filed as PRIORITY: enhancement / design change)\n\n`SOP-core.md` (\"Git Repositories: Roles and Boundaries\") states that CM is the\nonly toucher of any remote and that no other agent pushes, pulls, or fetches.\nTask `CODER-20260919-023-collapse-key-metadata` ran `git fetch --all` in its\ntask worktree during this build and recorded it in its own `status.md`\nSummary, citing DIRECTIVES rule 5.\n\nImpact verified independently, and it matches the agent's account: the RC\nbranch, `ai_main`, and the local `origin/main` remote-tracking ref all sit\nwhere the pipeline put them, and `git reflog show origin/main` records the ref\nmoving only \"by push\", never by a fetch. No release state, queue, or task\nstate was affected. Nothing was damaged.\n\nRecorded as a `gap` against the constraint rather than as a defect in the RC's\nown work, because the constraint was not held and the report should say so\nplainly. The substance of the follow-up is not the instance but that the\nboundary is enforced by nothing and detected by nothing — it surfaced only\nbecause the agent volunteered it, and Step 6.12's four checks do not cover a\nremote git operation. `git fetch` is the benign end of a range the same\nunenforced rule includes `git push` in.",
+      "filed_as": "PRIORITY-0005",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one self-disclosed instance; no state affected)",
+        "filed_as": "PRIORITY-0005 (Path C-B — filed as PRIORITY: enhancement / design change)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "A single occurrence of a collapsing class still carries a fold suffix",
+      "heading": "Finding 10: A single occurrence of a collapsing class still carries a fold suffix",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nA sweep-census line occurring exactly once renders as\n`... not report (x1, first seen 11:00:00)`, where the first-seen time is the\nrow's own timestamp. This is consistent with the shipped prose (\"carrying the\noccurrence total and that first-seen time\") and violates no acceptance\ncriterion — criterion 3 exempts the collapsing class itself — so it is not a\ngap. Noted because `PRIORITY-0004` observes that a sweep-census skip \"is a\nreal signal the first time it appears\", and on a quiet day the band now shows\nthat first appearance with redundant `(x1, first seen <its own time>)`\ndecoration. A future iteration may prefer to suppress the suffix at count 1.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "The `--help` slice length is a hand-maintained magic number",
+      "heading": "Finding 11: The `--help` slice length is a hand-maintained magic number",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`event-band.sh`'s help path slices its own header comment to a literal line\ncount, bumped from 48 to 58 in this RC to keep the new collapse paragraph\nvisible. Verified working: `--help` exits 0 and prints 58 lines ending on a\ncomplete sentence, with the collapse paragraph present at lines 22–29 (header\nis 164 comment lines, so the slice is doing real work). The constant must be\nre-tuned by hand on every header edit or help output silently truncates. The\nstatus note records that sibling renderers in the same directory each carry\ntheir own independently-set constant, so this is a pre-existing directory-wide\npattern rather than something this RC introduced, and it is correct as shipped.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

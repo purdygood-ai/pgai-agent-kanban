@@ -92,3 +92,41 @@ def parse_token(content: str) -> "str | None":
         ", ".join(sorted(SUPPORTED_TOKENS)),
     )
     return None
+
+
+def describe_token(token: str) -> str:
+    """Render a canonical HALT-AFTER token as operator-facing text.
+
+    This is the one shared definition of "what does this token mean, in
+    words" -- every surface that displays a HALT-AFTER token (a status
+    bar, an arm confirmation, an audit entry, why.sh's --details posture
+    pane) calls this instead of locally formatting the token, so none of
+    them can drift from what the others say.
+
+    A version-pinned token (``rc:vX.Y.Z``) names a release boundary, not a
+    literal event word, so it renders as the boundary itself: ``until
+    vX.Y.Z``. Every other token (the bare ``rc``, or one of the five role
+    tokens ``pm``/``coder``/``writer``/``tester``/``cm``) already reads as
+    a word an operator recognises, so it renders unchanged.
+
+    Args:
+        token: A canonical token as returned by parse_token() -- e.g.
+            ``"rc"``, ``"coder"``, or ``"rc:v2.9.15"``. Not validated
+            against SUPPORTED_TOKENS here; an unrecognised token is
+            rendered unchanged, matching parse_token's own "unknown token
+            passes through" fallback used elsewhere in this module.
+
+    Returns:
+        The operator-facing description string.
+
+    Examples:
+        >>> describe_token("rc")
+        'rc'
+        >>> describe_token("coder")
+        'coder'
+        >>> describe_token("rc:v2.9.15")
+        'until v2.9.15'
+    """
+    if token.startswith("rc:"):
+        return f"until {token[3:]}"
+    return token

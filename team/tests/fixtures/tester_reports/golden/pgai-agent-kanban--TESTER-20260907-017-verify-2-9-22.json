@@ -1,0 +1,317 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.9.22 is a single-bug bundle closing BUG-0167, the DEEP-VERIFY cold-build\nfailure recorded against v2.9.20. It ships two tickets. `CODER-20260907-014`\nrepaired the two shipped Dockerfile defects behind BUG-0167's three distinct\nfailing engine/flavor pairs — the duplicated `FROM FROM` keyword in\n`docker/claude-abliterated/Dockerfile` and the symbolic `COPY --chmod=+x` in\nthat file and in `docker/rocky9/Dockerfile`. `CODER-20260907-015` added\n`team/scripts/lint_dockerfile_static.py`, an engine-free static Dockerfile lint,\nwired it into `run-unit-tests.sh` as a second fatal (BLOCK-WORTHY) pre-flight\ncheck, covered it with 26 unit tests and four fixtures, and registered it as\ncensus row 54 with a matching anchor and Locator Index entry.\n\nVerification ran to completion. Pre-flight merge verification passed. Both\ngated runners exited 0 (unit: 3176 passed / 3 skipped; integration: 337 passed /\n1 skipped) with zero quality-class lint findings in either findings file. Every\nacceptance criterion from the requirements doc and from both bundled tickets was\nexecuted and passed. The new guard was verified behaviorally in both directions,\nincluding end-to-end through the runner: it exits 0 on the fixed tree, and it\nexits 1 — naming file, line, and a runnable remedy, through the dual-channel\nerror contract, before pytest ever starts — on a reconstruction of the pre-fix\ntree. Two findings came out of the standards and outside-the-spec spot-checks;\nneither is a defect in what the RC set out to do, and both are filed via Path C.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0167's three failing engine/flavor pairs are resolved in the shipped Dockerfiles",
+      "heading": "Finding 1: BUG-0167's three failing engine/flavor pairs are resolved in the shipped Dockerfiles",
+      "level": 3,
+      "body": "**Category:** pass\n\nTraces to: requirements doc acceptance criterion \"Each bundled item is addressed\nin the implementation\"; `CODER-20260907-014` acceptance criteria 1, 2 and 5.\n\nBUG-0167's eighteen duplicated lines describe three distinct failures:\n`docker/claude-abliterated` (FROM parse error), `podman/claude-abliterated` (the\nsame parse error in podman's wording), and `podman/rocky9` (the\n`COPY --chmod` step). Executed:\n\n```\n$ grep -c '^FROM' docker/claude-abliterated/Dockerfile\n1\n$ grep -n '^FROM' docker/*/Dockerfile\ndocker/claude-abliterated/Dockerfile:3:FROM t2fn/claude-abliterated:latest-amd64\ndocker/debian/Dockerfile:3:FROM node:20-bookworm AS nodejs\ndocker/debian/Dockerfile:6:FROM python:3.12-bookworm\ndocker/rocky9/Dockerfile:3:FROM rockylinux:9\n$ grep -rn -- '--chmod' docker/*/Dockerfile\ndocker/claude-abliterated/Dockerfile:62:COPY --chmod=755 docker/entrypoint.sh /entrypoint.sh\ndocker/debian/Dockerfile:80:COPY --chmod=755 docker/entrypoint.sh /entrypoint.sh\ndocker/rocky9/Dockerfile:65:COPY --chmod=755 docker/entrypoint.sh /entrypoint.sh\n$ grep -rn -- '--chmod=[^0-7]' docker/*/Dockerfile\n(no matches)\n```\n\nThe base image reference `t2fn/claude-abliterated:latest-amd64` is preserved\nbyte-for-byte, as the ticket's constraint required. `docker/debian/Dockerfile`\nis untouched and remains the in-tree precedent all three flavors now match. The\nticket's own commit `97adca7` touches exactly the two files its `Required\nOutput` names and nothing else.\n\nEngine-level confirmation is CODER's, recorded in its completion notes:\n`docker build --check` exited 0 with no warnings for all three Dockerfiles, and\n`podman build --no-cache -f docker/rocky9/Dockerfile .` completed a full image\nbuild. TESTER did not re-run these — `team/roles/TESTER.md` Step 5d forbids\ninvoking a container engine during RC verification.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "the new static lint fires on exactly the defect class BUG-0167 records — verified in both directions",
+      "heading": "Finding 2: the new static lint fires on exactly the defect class BUG-0167 records — verified in both directions",
+      "level": 3,
+      "body": "**Category:** pass\n\nTraces to: `CODER-20260907-015` acceptance criteria 1 and 2; TESTER.md Step 6.5\n(trigger the failure mode) and anti-pattern 6 (verify the original failure mode\nAND the new normal case).\n\n**Clean direction.** Against the repository's real `docker/` tree, run as a\nsubprocess with `PATH` set to a directory containing no binaries at all (so\nneither `docker` nor `podman` is resolvable):\n\n```\n$ env PATH=<empty-dir> /usr/bin/python3 team/scripts/lint_dockerfile_static.py --docker-dir <repo>/docker\nlint_dockerfile_static: OK -- 3 Dockerfile(s) checked, 0 violations.\nexit=0\n```\n\nThe engine-free claim is real, not asserted: the lint reads text and never\nprobes for an engine.\n\n**Failure direction, against the actual pre-fix tree — not a synthetic proxy.**\nReconstructed `ai_main`'s `docker/` via `git archive` and pointed the lint at it:\n\n```\nexit=1, 3 violations:\n  .../claude-abliterated/Dockerfile:3  -- malformed FROM instruction (found 2 argument(s) after the keyword ...)\n  .../claude-abliterated/Dockerfile:62 -- COPY --chmod=+x is not an octal mode ...\n  .../rocky9/Dockerfile:65             -- COPY --chmod=+x is not an octal mode ...\n```\n\nAll three of BUG-0167's distinct real defects are caught, each named by file and\nline, each with its own runnable remedy line. This is the regression direction\nthe ticket required, demonstrated against the genuine historical content rather\nthan only against fixtures.\n\n**Fixtures.** `bad_from` -> exit 1 naming line 6; `bad_chmod` -> exit 1 naming\nline 8; `clean` -> exit 0; `multistage_clean` (two well-formed `FROM` lines, one\nwith `AS`) -> exit 0. Multi-stage Dockerfiles are correctly unaffected.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "the runner wiring is genuinely fatal and aborts before pytest",
+      "heading": "Finding 3: the runner wiring is genuinely fatal and aborts before pytest",
+      "level": 3,
+      "body": "**Category:** pass\n\nTraces to: `CODER-20260907-015` acceptance criterion 5; TESTER.md Step 6.5 and\nanti-pattern 1 (structural checks do not prove a guard works).\n\nPresence of the call site was not accepted as proof. A throwaway copy of the RC\ntree was made under the framework temp root, the original `FROM FROM` defect was\nre-injected into `docker/claude-abliterated/Dockerfile`, and the real gated\nrunner was executed against it with `PGAI_AGENT_KANBAN_ROOT_PATH` repointed at a\ntemp root (live-install safety):\n\n```\nFAULT_UNIT_EXIT=1\n... lint_dockerfile_static: FAIL -- 1 violation(s) found ...\nerror:   run-unit-tests.dockerfile-static-lint\nmessage: The engine-free Dockerfile static lint found a malformed FROM instruction or a non-octal COPY/ADD --chmod mode in a docker/*/Dockerfile; ...\nremedy:  Scroll up to the Cause(s) list printed by lint_dockerfile_static.py above, fix each file:line it names, then re-run bash \"team/scripts/run-unit-tests.sh\".\n```\n\n`grep -c 'passed\\|failed'` on the captured output returns 0 — pytest never ran.\nThe refusal carries all three dual-channel fields with a stable machine key, and\nthe remedy is runnable by a stranger. The guard is real.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "New-gate rule compliance — class comment, error contract, census anchor and index",
+      "heading": "Finding 4: New-gate rule compliance — class comment, error contract, census anchor and index",
+      "level": 3,
+      "body": "**Category:** pass\n\nTraces to: `CODER-20260907-015` acceptance criterion 4 and its New-gate-rule\nconstraint; `team/SOP.md` \"New-gate rule (for every future gate)\".\n\n- Classification declared in a code comment at the refusal:\n  `run-unit-tests.sh:235-240` declares BLOCK-WORTHY and argues it from\n  `team/SOP.md`'s \"Unusable build blocks; an unavailable build environment does\n  not\". The reasoning is sound — the two checked shapes cannot be reduced to an\n  image by any engine this project ships, so this is doctrine's verdict 2, not\n  verdict 3.\n- Dual-channel emitter called with all three fields populated (shown above).\n- `# CENSUS-ANCHOR: dockerfile-static-lint-01` at `run-unit-tests.sh:234`;\n  token unique within the file.\n- Locator Index line `team/scripts/run-unit-tests.sh:245 BLOCK-WORTHY` added,\n  and line 245 is precisely the `exit 1` the anchor names. Two pre-existing\n  entries were correctly renumbered (209->210, 505->541) for the inserted block.\n- Census row 54 added; rollup updated 53->54 sites and 27->28 BLOCK-WORTHY.\n- `python3 team/scripts/lint_gate_census_compliance.py` exits 0, 0 offenders,\n  no half-authored-anchor finding.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "supporting lints and test registration",
+      "heading": "Finding 5: supporting lints and test registration",
+      "level": 3,
+      "body": "**Category:** pass\n\nTraces to: `CODER-20260907-015` acceptance criteria 3 and 6.\n\n```\nlint_help_presence:          exit 0 — 78 scripts checked, 0 offenders\nlint_gate_census_compliance: exit 0 — 32 files checked, 0 offenders, FINDINGS_JSON: []\nlint_orphan_tests:           exit 0 — 197 test files covered, no orphans\npython3 -m pytest tests/unit/test_lint_dockerfile_static.py  -> 26 passed\n```\n\n`--help` names every flag the parser accepts (`--docker-dir`, `--verbose/-v`,\n`-h`). Test fidelity is good: the module invokes the real script through\n`subprocess` under a restricted `PATH` for the engine-free claim, uses real\nfixture files rather than mocks for both negative cases, and parametrizes the\noctal/non-octal and FROM-arity boundaries.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "requirements-doc global acceptance criteria",
+      "heading": "Finding 6: requirements-doc global acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n```\nAll Python files compile cleanly  — py_compile over every *.py in the tree: exit 0\nAll bash files pass syntax check  — bash -n over every *.sh in the tree: 0 failures\n```",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "gated test suites",
+      "heading": "Finding 7: gated test suites",
+      "level": 3,
+      "body": "**Category:** pass\n\nAuthoritative verdict, from the gated runners (not from direct pytest):\n\n```\nbash team/scripts/run-unit-tests.sh --coverage         -> UNIT_EXIT=0\n    3176 passed, 3 skipped in 390.82s\nbash team/scripts/run-integration-tests.sh --coverage  -> INTEGRATION_EXIT=0\n    337 passed, 1 skipped in 213.45s\n```\n\nBoth runners reported `bare_tmp_cleanliness: OK` and\n`listener_cleanliness: OK`, and each wrote a findings file containing 0\nfindings. No test failures of any category — no `bug`, no `stale-assertion`,\nno `pre-existing-bug`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "new lint's docstring cites an internal framework version",
+      "heading": "Finding 8: new lint's docstring cites an internal framework version",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task — delete four words from one line)\n**Systemic Risk:** low (hygiene; no behavior is affected, no test is affected)\n**Regression:** yes (the line was added by this RC's commit `8d19391`; it did not exist in v2.9.21)\n**Integrity Damage:** no\n**Filed As:** BUG-0170 (Path C-A)\n\n`docs/coding-standards.md` directive 8 forbids citing internal framework\nversions in comments, docstrings, help text, log lines or output strings.\n`team/scripts/lint_dockerfile_static.py:10` reads:\n\n```\nthat broke the DEEP-VERIFY cold-build lane at v2.9.20:\n```\n\n`v2.9.20` is cited purely as provenance and is covered by none of directive 8's\nthree exceptions. A scan of every added line in the whole RC diff for bug IDs,\ntask IDs, priority IDs and version literals produced this one hit and nothing\nelse — the new call-site block in `run-unit-tests.sh`, the lint's `--help` text,\nits runtime output, the new test module and all four fixtures are clean.\n\nThe lint's own runtime output already phrases the same idea without the version\n(\"...the two shapes that previously broke the DEEP-VERIFY cold-build lane\nundetected\"), so the correct wording is already present in the file.\n\nIt escaped `lint_comment_provenance.py` because that lint scopes its version\nrules to version-bundle names and to a version paired with a \"Goal N\" phrase,\nand does not flag a bare `vX.Y.Z` in prose. That narrowness reads as deliberate\nfalse-positive avoidance, so BUG-0170 asks only for the literal to be removed\nand explicitly does not request widening the lint.",
+      "filed_as": "BUG-0170",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task — delete four words from one line)",
+        "systemic_risk": "low (hygiene; no behavior is affected, no test is affected)",
+        "regression": "yes (the line was added by this RC's commit `8d19391`; it did not exist in v2.9.21)",
+        "filed_as": "BUG-0170 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "`deep_verify = off` sits in the wrong INI section, so the switch is not in force",
+      "heading": "Finding 9: `deep_verify = off` sits in the wrong INI section, so the switch is not in force",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (a one-line config move; optionally one more CODER task for the warning)\n**Systemic Risk:** medium (an operator setting is silently not honoured, and the project pays a recurring ~13-minute cost it is configured not to pay)\n**Regression:** no (the misplaced key predates this RC; `project.cfg` is live kanban process state and is untouched by the v2.9.22 diff, which changes only `docker/`, `docs/`, `team/scripts/` and `team/tests/`)\n**Integrity Damage:** no\n**Filed As:** BUG-0171 (Path C-A)\n\n`projects/pgai-agent-kanban/project.cfg` ends with a bare `deep_verify = off`\nappended after the last key of `[training]`, with no `[release]` header between.\nThe key therefore belongs to `[training]`, and the `[release]`-scoped reader\nnever sees it:\n\n```\n$ pp_deep_verify_mode pgai-agent-kanban                              -> weekly\n$ _pp_read_cfg_key .../project.cfg release  deep_verify NOTFOUND     -> NOTFOUND\n$ _pp_read_cfg_key .../project.cfg training deep_verify NOTFOUND     -> off\n```\n\nThe mode in force is `weekly`, not `off`, and nothing warns. An unrecognised\n*value* is refused dual-channel; a recognised key in the wrong *section* is\nsilent, which is the failure shape `team/SOP.md`'s \"No silent skips\" section\nexists to prevent.\n\nIt is not theoretical: the ledger records a lane run against this project at\n2026-09-07T06:52:06+00:00, and SOP budgets a sweep at ~766 s per firing. Nor is\nthe intent ambiguous — `CODER-20260907-014`'s constraints name \"the project's\n'deep_verify = off' setting\" as something not to touch, and the PM plan note\nbehind `CODER-20260907-015` argues for the new static lint partly because \"this\nproject has 'deep_verify = off'\". Two tickets on this RC reasoned from a setting\nthat is not actually in effect.\n\nThis is live kanban process state, not the shipped tree, and it does not affect\nthe RC's correctness. It is reported under Step 6.11 (state drift), which exists\nfor exactly this class of finding.",
+      "filed_as": "BUG-0171",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (a one-line config move; optionally one more CODER task for the warning)",
+        "systemic_risk": "medium (an operator setting is silently not honoured, and the project pays a recurring ~13-minute cost it is configured not to pay)",
+        "regression": "no (the misplaced key predates this RC; `project.cfg` is live kanban process state and is untouched by the v2.9.22 diff, which changes only `docker/`, `docs/`, `team/scripts/` and `team/tests/`)",
+        "filed_as": "BUG-0171 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "release-state drift check",
+      "heading": "Finding 10: release-state drift check",
+      "level": 3,
+      "body": "**Category:** pass\n\n```\npp_last_released_version pgai-agent-kanban  -> v2.9.21\nsemver_gt v2.9.22 v2.9.21                   -> true\nrelease-state.md '## Last Released'         -> v2.9.21 (well-formed vX.Y.Z)\nrelease-state.md '## Active RC'             -> v2.9.22, and branch ai_rc/v2.9.22 exists\n```\n\nNo drift. `## Last Released` is present by design and is not reported as drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "pre-flight merge verification",
+      "heading": "Finding 11: pre-flight merge verification",
+      "level": 3,
+      "body": "**Category:** pass\n\nEvery DONE task in the project carrying a non-`none` `## Feature Branch` was\nscanned. All 28 such branches — including both of this RC's,\n`ai_feature/CODER-20260907-014-fix-dockerfile-build-defects` and\n`ai_feature/CODER-20260907-015-dockerfile-static-lint` — have already been\ndeleted post-merge, which is the normal CODER/WRITER lifecycle, so both checks\nare skipped for them per the role file. Zero UNMERGED anomalies, zero BUG-92\nzero-unique-commit anomalies. Both RC merge commits (`66af01d`, `ff1fb38`) are\npresent on the RC and `ai_main` is an ancestor of `ff1fb38`.\n\nWorktree HEAD `ff1fb38` matches `ai_rc/v2.9.22` exactly; `git status --short`\nis empty; `git stash list` is empty.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "prerequisite dependency graph",
+      "heading": "Finding 12: prerequisite dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CM-016 (open RC, DONE)` -> `CODER-014 (DONE)` -> `CODER-015 (DONE)` ->\n`TESTER-017 (WORKING)` -> `CM-019 (release, WAITING)`. No cycles, every\nreferenced task ID exists, lifecycle bookends correctly linked, sequence numbers\nconsistent and non-colliding. Queue markers agree with task states\n(`[x]` CM-016, `[A]` TESTER-017, `[W]` CM-019).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "constraint negative checks",
+      "heading": "Finding 13: constraint negative checks",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo hardcoded secrets, keys or tokens in any changed file. `set -euo pipefail`\nis preserved at `run-unit-tests.sh:74`; the new block's `set +e` / `set -e`\npairing around the lint invocation matches the file's existing idiom for the\nother pre-flight checks and restores strict mode immediately. The new lint\nscript is mode `0755`, matching the other `lint_*.py` scripts.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "synthetic release simulation",
+      "heading": "Finding 14: synthetic release simulation",
+      "level": 3,
+      "body": "**Category:** pass (trigger condition not met; ran anyway as part of the suite)\n\nThe RC's diff touches `team/scripts/run-unit-tests.sh`, which is not a\nrelease-lifecycle file — it takes no part in the open/close cycle — so Step 6.8's\ntrigger condition is not met. `team/tests/integration/test_cm_release_synthetic.py`\nis present and ran green (15 tests) inside the integration suite regardless.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass (trigger condition not met; ran anyway as part of the suite)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

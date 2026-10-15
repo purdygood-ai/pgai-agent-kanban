@@ -25,7 +25,7 @@ Negative proof: a deliberately broken temp file (unbalanced ``fi``) is passed
 to ``bash -n`` to demonstrate the gate *detects* broken syntax, not merely
 that the real files happen to parse cleanly.
 
-TEST NAMING CONVENTION (SOP.md Anti-pattern 6)
+TEST NAMING CONVENTION (roles/TESTER.md Anti-pattern 6)
 -----------------------------------------------
 All test function names describe behavior, not the bug ID that prompted them.
 """
@@ -39,6 +39,18 @@ import tempfile
 import pytest
 
 from tests.unit.shell_harness import run_bash
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="shell-syntax-gate")
 
 
 # ---------------------------------------------------------------------------

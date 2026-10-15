@@ -144,6 +144,8 @@ _PACKAGE_TO_IMPORT_NAMES: dict[str, frozenset[str]] = {
     "pyyaml": frozenset({"yaml"}),
     # pytest-cov is a pytest plugin — it does not expose a top-level import.
     "pytest_cov": frozenset(),
+    # pytest-xdist installs as the 'xdist' module.
+    "pytest_xdist": frozenset({"xdist"}),
 }
 
 

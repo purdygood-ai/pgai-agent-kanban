@@ -1,0 +1,137 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `rc/v0.4.2` of the pgai-chomp-man game against its\nrequirements bundle (`requirements/v0.4.2-priority-bundle-20260806.md`), which\nbundles the single priority item `PRIORITY-0003-extra-life-per-two-dragons`.\nThe RC adds a cumulative `dragons_eaten_total` accumulator to\n`resolve_dragon_collisions()` in `pgai-chomp-man.py` and a `Lives.add_life()`\nmethod in `lives.py`, awarding one extra life every time the cumulative count of\neaten vulnerable dragons reaches a multiple of `DRAGONS_PER_EXTRA_LIFE` (2).\nThe worktree HEAD (`ab19ad6`) matches `rc/v0.4.2`, the tree is clean, no stashes\nare present, and both feature commits merged cleanly. `python3 -m py_compile`\npasses on every changed file. The full pytest suite is green (177 passed), and\nan independent behavioral re-derivation of the award logic confirmed the\nfloor(total/2) award schedule for 1..8 dragons, no-award on odd counts, and a\nsingle award when two dragons are eaten in one tick. No bugs, gaps, or stale\nassertions were found.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "PRIORITY-0003 award logic (AC1)",
+      "heading": "Finding 1: PRIORITY-0003 award logic (AC1)",
+      "level": 3,
+      "body": "**Category:** pass\nEating 2 dragons yields exactly +1 life; 4 yields +2; odd counts (1, 3) yield no\nnew life until the next even dragon. Verified three ways: (a) the production\nlogic `if dragons_eaten_total % DRAGONS_PER_EXTRA_LIFE == 0: lives.add_life()`\nafter a per-dragon increment; (b) the dedicated test suite\n`tests/test_dragon_eat_life_award.py` (odd/even, two-at-once, 3-yields-1,\n4-yields-2); (c) an independent TESTER-run re-derivation:\n`(total_eaten, lives_gained)` for 1..8 == `[(1,0),(2,1),(3,1),(4,2),(5,2),(6,3),(7,3),(8,4)]`,\nmatching floor(total/2). Two vulnerable dragons eaten in a single tick correctly\nproduce total=2, +1 life.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Counter persistence across death, reset on new game (AC2)",
+      "heading": "Finding 2: Counter persistence across death, reset on new game (AC2)",
+      "level": 3,
+      "body": "**Category:** pass\n`dragons_eaten_total` is a `run()`-local threaded through the loop and back\nthrough `resolve_dragon_collisions()`; a NORMAL-dragon collision (death) costs a\nlife via `apply_life_loss()` and resets positions but does not touch the counter.\n`test_dragons_eaten_total_persists_across_a_death_and_still_awards_the_2nd_life`\nexercises eat->die->eat and confirms the 2nd eat still fires the award. Reset on a\nnew game is satisfied by the plain `dragons_eaten_total = 0` local re-init on each\nfresh `run()` call (no restart flow exists this release);\n`test_a_new_game_starts_the_counter_back_at_zero` pins the accumulator contract.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Lives HUD updates immediately (AC3)",
+      "heading": "Finding 3: Lives HUD updates immediately (AC3)",
+      "level": 3,
+      "body": "**Category:** pass\n`Lives.add_life()` increments `self.remaining`, and `scoring.render_score_hud()`\nreads `lives.remaining` live, so the award reflects on the next HUD render with no\nseparate display path. Tests assert `lives.remaining` directly after each award.\nThe literal on-screen visual is manual confirmation per the priority's own\nTESTER notes; the programmatic path is verified.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Compilation (AC4)",
+      "heading": "Finding 4: Compilation (AC4)",
+      "level": 3,
+      "body": "**Category:** pass\n`python3 -m py_compile lives.py pgai-chomp-man.py` and `python3 -m py_compile *.py`\nboth succeed. Bundle AC \"all bash files pass syntax check\" is trivially satisfied\n(no bash files in the project).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "No regression (AC5)",
+      "heading": "Finding 5: No regression (AC5)",
+      "level": 3,
+      "body": "**Category:** pass\nFull suite: 177 passed in 2.00s. Existing dragon-eat scoring/combo, power-pellet,\ndragon respawn (send-to-den), and board-clear behavior are unchanged -- the diff\nonly ADDs the cumulative counter and threads a third tuple element; the\n`score.add(dragon_eat_bonus(...))` scoring line is untouched.\n`tests/test_dragon_eat_collision.py` was updated to the new 3-tuple signature and\nadds assertions that the two accumulators (combo bonus vs. cumulative total) do not\ninterfere -- legitimate same-RC CODER changes, not stale assertions.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Bundle acceptance criteria",
+      "heading": "Finding 6: Bundle acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\nEach bundled item (PRIORITY-0003) is addressed in the implementation; all Python\nfiles compile cleanly; there are no bash files to syntax-check.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

@@ -17,15 +17,16 @@ Covers:
      tmux Auto-Resolutions rendered output also appears in the endpoint
      JSON, and vice versa, against a fixture with resolutions in two
      projects — proving both surfaces consume the same underlying data
-     function (v2.0.0 Goal 6: browser tab is the sibling of the tmux
-     surface, both read the ledger).
+     function (the browser tab is the sibling of the tmux surface, both
+     read the ledger).
 
 Design notes
 -----------
 - All tests use the FastAPI TestClient (no real network socket).
 - Fixture sandboxes are built under tmp_path (no bare /tmp paths).
-- PGAI_AGENT_KANBAN_ROOT_PATH is monkeypatched to point at the sandbox so the
-  endpoint's _live_kanban_root() reads from the fixture, not the live install.
+- The app's ApiConfig kanban_root is the sandbox (and PGAI_AGENT_KANBAN_ROOT_PATH
+  is monkeypatched to it too), so the endpoint reads the fixture, not the live
+  install.
 - Ledger fixtures are built with pgai_agent_kanban.overwatch.ledger.append_entry,
   mirroring team/tests/unit/test_auto_resolutions_window.py's fixture pattern.
 """
@@ -121,10 +122,8 @@ def _make_client(
 ) -> TestClient:
     """Create a TestClient with PGAI_AGENT_KANBAN_ROOT_PATH set to sandbox_root.
 
-    The ApiConfig kanban_root is set to _TEAM_DIR so that
-    ``kanban_root / "scripts"`` resolves to real scripts (needed for other
-    endpoints in the same app; /auto-resolutions does not shell out but
-    other read-layer routes do).
+    The ApiConfig kanban_root is the sandbox root: /auto-resolutions reads its data
+    from the server's own configured root, as every route does.
 
     Args:
         sandbox_root: Kanban root the endpoint should scan for ledger data.
@@ -142,7 +141,7 @@ def _make_client(
     cfg = ApiConfig(
         host="127.0.0.1",
         port=0,
-        kanban_root=_TEAM_DIR,
+        kanban_root=sandbox_root,
     )
     return TestClient(create_app(cfg=cfg), raise_server_exceptions=True)
 
@@ -515,8 +514,8 @@ class TestAutoResolutionsPathConfinement:
 
 class TestAutoResolutionsReadOnly:
     """The endpoint never emits an approve/reject/close/wontdo affordance —
-    it informs, it never mutates state (v2.0.0 Goal 6 constraint, and the
-    task's own 'Read-only: no approve/mutate affordances' constraint)."""
+    it informs, it never mutates state ('Read-only: no approve/mutate
+    affordances')."""
 
     def test_response_contains_no_action_commands(
         self,
@@ -553,8 +552,8 @@ class TestAutoResolutionsJsonVsTmuxWindow:
     This proves that the tmux renderer and the endpoint consume the same
     underlying data function (collect_auto_resolutions /
     _collect_auto_resolutions in scan_auto_resolutions.py) — one
-    implementation, two surfaces (browser tab is the tmux surface's sibling,
-    per the task notes).
+    implementation, two surfaces (the browser tab is the tmux surface's
+    sibling).
     """
 
     def _parse_tmux_records(self, rendered: str) -> set[tuple[str, str, str]]:

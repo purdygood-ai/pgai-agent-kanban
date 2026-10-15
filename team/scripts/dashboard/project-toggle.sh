@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# dashboard-project-toggle.sh
+# project-toggle.sh
 # Cycles the tmux session through overview and per-project drill windows.
 #
-# Called by the tmux key binding registered in dashboard-create.sh:
-#   bind-key p run-shell "dashboard-project-toggle.sh [--session <name>]"
+# Called by the tmux key binding registered in dashboard/create.sh:
+#   bind-key p run-shell "project-toggle.sh [--session <name>]"
 #
 # Cycle order:
 #   overview (main window)  →  drill-1  →  drill-2  →  ...  →  overview
@@ -24,7 +24,7 @@
 #   main  →  drill-1  →  drill-2  →  ...  →  main
 #
 # Usage:
-#   dashboard-project-toggle.sh [--session <name>]
+#   project-toggle.sh [--session <name>]
 #
 # Options:
 #   --session <name>   tmux session to operate on (default: pgai-kanban-dashboard)
@@ -53,7 +53,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -45
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:35}"
       exit 0
       ;;
     *)

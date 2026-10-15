@@ -42,9 +42,10 @@
 #   This file does NOT duplicate the palette; callers source projects_cfg.sh
 #   first, then iterate the registered projects to fill in the PROJECT half
 #   of the legend.
-# - Status-to-ANSI mapping lives in dashboard-column-render.sh
-#   (status_to_color() helper). The renderer paints the status keywords in
-#   the legend with the same function so legend and grid never disagree.
+# - Status-to-ANSI mapping lives in pgai_agent_kanban.dashboard.column_render
+#   (cells.status_color(), the board column panes' one mapping). The legend
+#   maps the status keywords through the same arms (running; done and
+#   wont-do; blocked; open) so legend and grid never disagree.
 #
 # Template variables
 # ------------------
@@ -91,8 +92,8 @@ readonly DASHBOARD_LEGEND_STATUS_KEYWORDS
 # The character used as the project color tag in the PROJECT half of the
 # legend. Defaults to a filled Unicode square so the tag is visible at a
 # glance; renderers in NO_COLOR or dumb-terminal mode substitute a short
-# bracketed abbreviation ("[abbr]") via dashboard-column-render.sh's
-# plain_tag() helper.
+# bracketed abbreviation ("[abbr]"), as the board column panes do
+# (pgai_agent_kanban.dashboard.column_render.multi).
 # ---------------------------------------------------------------------------
 DASHBOARD_LEGEND_PROJECT_TAG_GLYPH='■'
 readonly DASHBOARD_LEGEND_PROJECT_TAG_GLYPH

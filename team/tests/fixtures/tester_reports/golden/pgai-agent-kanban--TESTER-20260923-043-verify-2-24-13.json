@@ -1,0 +1,157 @@
+{
+  "recommendation": "ship-with-serious-concerns",
+  "systemic_risk": "high",
+  "summary": "Verification of release candidate `ai_rc/v2.24.13` for project `pgai-agent-kanban`\nagainst `requirements/v2.24.13-bugfix-bundle-20260923.md` — a discovery-minted BUG\nbundle carrying eight items (BUG-0375 … BUG-0382) — and the nine tickets PM\ndecomposed from it. All reads and runs happened in the detached worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260923-043-verify-2-24-13`,\nHEAD `dfdd8a0` == `ai_rc/v2.24.13`, clean tree, no stashes. Seven of the eight\nbundled items are implemented and behaviourally verified; one (BUG-0379, the\ndashboard switch-storm pane death) was never implemented because its fix ticket\nended `WONT-DO`.\n\nBoth gated runners were run with `--coverage`: the integration runner exited 0\n(547 passed), the unit runner exited 1 on twelve failures that reproduce\nidentically on the pre-RC `ai_main` tip and are traced to the wake layer's\ngit-guard environment pin rather than to anything in this RC. Six findings were\nrecorded and all six filed via Path C as BUG-0383 … BUG-0388. The RC's own\ncontent is clean under every lint and every other test; the recommendation is\ndriven by a framework-level defect the RC neither introduced nor can fix, which\nFinding 1 argues explicitly so CM can weigh it.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "gated unit runner cannot exit 0 inside an agent wake session",
+      "heading": "Finding 1: gated unit runner cannot exit 0 inside an agent wake session",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** high (a framework-level regression outside this RC that\nbreaks the one authoritative pass/fail signal for every non-CM role, on every\ncycle)\n**Regression:** no\n**Integrity:** breakage\n**Filed As:** BUG-0383 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`UNIT_EXIT=1`, with all twelve failures in\n`team/tests/unit/test_git_boundary_guard.py`. Isolated to two variables the\nwake layer exports into every non-CM agent's environment: `GIT_GUARD_REAL_GIT`\n(pinned by `scripts/lib/wake_guard_wiring.sh` to the real git binary before the\nshim directory is prepended to `PATH`) and `PGAI_GIT_GUARD_DEPTH` (the\nrecursion sentinel). Those tests install their own stub `git` ahead of\neverything on `PATH` and assert on what the shim does with it; the shim reads\n`_gbg_real_git=\"${GIT_GUARD_REAL_GIT:-}\"` before consulting `PATH`, so the stub\nis never reached.\n\nEvidence, in order:\n\n1. `bash team/scripts/run-unit-tests.sh --coverage` → exit 1, the twelve names\n   listed in `gaps.md`.\n2. `cd team && python3 -m pytest tests/unit/test_git_boundary_guard.py -q\n   -p no:cacheprovider -p no:randomly` → 12 failed, 24 passed.\n3. The same command under\n   `env -u GIT_GUARD_REAL_GIT -u PGAI_GIT_GUARD_DEPTH` → **36 passed**.\n4. A pristine clone of `ai_main` at `700b42d` (the shipped v2.24.12 tip), run\n   under the same ambient environment → the same twelve failures. This is what\n   establishes `Regression: no`: the RC's diff touches no guard file and cannot\n   reach this.\n\n`run-unit-tests.sh` already scrubs three variables from the pytest environment\n(`env -u PYTHONHASHSEED -u PGAI_LINT_CHANGELOG_MODE -u KANBAN_ROOT`) and does\nnot scrub these two, which is the cheapest place to fix it.\n\n**Why this is rated `high` rather than `medium`, stated plainly for CM.** The\nfinding is not about v2.24.13's content, which is clean. It is that the\nframework currently cannot produce a green gated unit suite from inside its own\nwake harness. Every CODER and WRITER acceptance criterion that reads \"exits 0\"\nis unsatisfiable there; TESTER's `PASS` precondition is unreachable, so every\nfuture cycle inherits a red signal it must re-diagnose; and three separate\nagents in this RC (WRITER-035, CODER-039, CODER-040) each burned effort proving\nthe failures were not theirs. That is a broader framework regression breaking\nmultiple components, which is the rubric's definition of `high`.\n\n**And the counter-argument, also stated plainly.** Stopping v2.24.13 does not\nfix this. The defect predates the RC, lives in already-shipped framework code,\nand reproduces identically with the RC's work reverted. A clean signal is\nobtainable today — 36/36 with two variables unset — and the RC's own diff is\ngreen under every lint and every other test. Shipping v2.24.13 and taking\nBUG-0383 as the next cycle's first ticket costs nothing and removes the defect\nsooner than a halt does. The rating is the honest reading of the rubric; the\ndisposition is CM's.",
+      "filed_as": "BUG-0383",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "breakage",
+      "fix_effort": "small",
+      "systemic_risk": "high",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "high (a framework-level regression outside this RC that",
+        "regression": "no",
+        "integrity": "breakage",
+        "filed_as": "BUG-0383 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "one of eight bundled items was never implemented",
+      "heading": "Finding 2: one of eight bundled items was never implemented",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** medium (3-5 CODER tasks — the fault is non-deterministic and the\nreproduction is constrained by a hard resource-safety envelope)\n**Systemic Risk:** medium (could recur in similar RCs: a ticket whose\nverification method is barred by the host's resource envelope will stall the\nsame way again)\n**Filed As:** BUG-0384 (Path C-A)\n\nThe requirements document's first acceptance criterion is \"Each bundled item is\naddressed in the implementation.\" Seven of the eight are; the dashboard\nswitch-storm pane death is not. `git log ai_main..ai_rc/v2.24.13 --\nteam/scripts/dashboard/` is empty, and the owning ticket\n`CODER-20260923-038-dashboard-pane-race` ended `WONT-DO` after its agent was\nkilled (exit 137) attempting to force the race.\n\nThe defect is intermittent. `test_thirty_immediate_window_switches_leave_every_pane_alive`\npassed in this verification's integration run; that is recorded as an\nobservation, not as evidence the fault is gone.\n\nBUG-0384 is a carry-forward re-file rather than a duplicate: without it,\nFinding 3 closes the original report at ship time and the defect leaves the\nqueue.",
+      "filed_as": "BUG-0384",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "medium (3-5 CODER tasks — the fault is non-deterministic and the",
+        "systemic_risk": "medium (could recur in similar RCs: a ticket whose",
+        "filed_as": "BUG-0384 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "the ship will mark the unfixed bundled item done",
+      "heading": "Finding 3: the ship will mark the unfixed bundled item done",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (structural — it applies to every bundle whose fix\nticket ends `WONT-DO`, not just this one)\n**Filed As:** BUG-0385 (Path C-A)\n\n`team/scripts/cm/promote_bundled_items.py` (the cm-release Step 16b helper)\npromotes every `BUG-*.md` enumerated in the bundle's `## Bundled Items` from\n`running` to `done`, consulting only the enumeration and the item's current\nstatus. The unfixed item from Finding 2 is enumerated and still `running`, so\nthe tag will close it. Discovery treats `done` as terminal and unconditionally\nskips it, so a wrong promotion is invisible afterwards.\n\nThe script's second, task-scanning derivation path already applies the correct\nrule — its own invariants say it \"ONLY promotes a bug if it is explicitly\nreferenced by a DONE task README\" — so the fix is to hold the primary\nenumeration path to the same standard and report carried items in the post-ship\nsummary. `tasks_dir` is already passed in, so the data needed is on hand.",
+      "filed_as": "BUG-0385",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (structural — it applies to every bundle whose fix",
+        "filed_as": "BUG-0385 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "the hygiene lint's own docstring ships an internal bug identifier",
+      "heading": "Finding 4: the hygiene lint's own docstring ships an internal bug identifier",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one line of one file)\n**Filed As:** BUG-0386 (Path C-A)\n\n`team/scripts/lint_hygiene.py:183` reads\n\"(BUG-0377 already tracks them by name for a follow-on ticket to reword or\nallowlist)\". The line was added on this RC (commit `6d6720e`). It matches none\nof `SOP-core.md`'s three sanctioned exceptions — the neighbouring `BUG-9999`\nand `BUG-9001` tokens in the same docstring are worked examples and are fine;\nthis one is a provenance citation.\n\nThe lint reports zero findings tree-wide because `lint_hygiene.py` is a member\nof its own `_FILE_WHITELIST` and is excluded from every surface. Verified by\nprobe: appending `# BUG-9998 probe comment` to `lint_hygiene.py` yields zero\nfindings, while the identical comment in a sibling file under `team/scripts/`\nis reported. There is also no sidecar entry for the line, so it is neither\nreported nor deliberately retained with a justification — the two dispositions\nthe ticket's own constraints allow.\n\nThe self-exclusion is well founded (the module necessarily carries\nidentifier-shaped pattern strings), so the finding is as much about the blind\nspot as the line: the one file that enforces this rule is the one file that can\nbreak it unseen.",
+      "filed_as": "BUG-0386",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one line of one file)",
+        "filed_as": "BUG-0386 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "the troubleshooting page states eight halt triggers; there are nine",
+      "heading": "Finding 5: the troubleshooting page states eight halt triggers; there are nine",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one sentence)\n**Filed As:** BUG-0387 (Path C-A)\n\n`docs/operator-troubleshooting.md:206` tells an operator the CM halt trigger is\n\"one of the eight enumerated in `docs/OPERATIONS.md`\". That document enumerates\nnine and says \"nine\" three times, and `docs/operator-commands.md:1982` says\nnine. The count was corrected in `operator-commands.md` during this cycle and\nleft stale here, so the ninth trigger (\"The release-notes status stamp failed\")\nis missing from the set the reader is told to expect.",
+      "filed_as": "BUG-0387",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one sentence)",
+        "filed_as": "BUG-0387 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "boundary-guard evidence records on every agent's test run",
+      "heading": "Finding 6: boundary-guard evidence records on every agent's test run",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (signal hygiene; no boundary was actually crossed)\n**Filed As:** BUG-0388 (Path C-A)\n\nThis is the Step 6.12 question (5) YES, written up as its own finding. Three of\nthis cycle's build task folders carry `git-boundary-guard.jsonl` records — 11\nfor CODER-039, 19 for CODER-040, 16 for WRITER-035 — and this verification run\nproduced 11 more of its own under role `tester`, for 57 across four folders.\nEvery one is a\n`git -C <temp-root fixture repo> fetch origin --tags --quiet` issued by\nproduction code inside a pytest fixture repository.\n\nBehaviourally probed rather than inferred: a temp-root repository whose\n`origin` resolves to another temp-root path passes the guard with exit 0 and\n**no** record, so the fixture-local exemption itself works. These records come\nfrom the documented conservative fallback for a destination that cannot be\nresolved at all (no `origin` configured, or the `-C` directory already gone) —\nthe guard refuses rather than assume local. Rated `low` per the reference's\nown rule: the attempts were refused, read nothing, and moved no ref state.\n\nThe cost is that question (5) now answers YES every cycle, so a real crossing\nwould arrive indistinguishable from fixture noise.",
+      "filed_as": "BUG-0388",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (signal hygiene; no boundary was actually crossed)",
+        "filed_as": "BUG-0388 (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-SERIOUS-CONCERNS",
+    "systemic_risk": "high"
+  }
+}

@@ -2,33 +2,37 @@
 test_cm_release_worktree_removal_guard.py
 ==========================================
 Regression coverage for the Step 10.5 leftover-worktree removal guard
-(_cm_remove_stale_worktrees_for_branch) in team/scripts/cm/release.sh (BUG-0051).
+(_cm_remove_stale_worktrees_for_branch), now defined in
+team/scripts/lib/cm/release_finalize.sh (moved from
+team/scripts/cm/release.sh by the v2.9.20 engine-decomposition — see that
+file's own module doc for why it lives there as a file-scope helper).
 
 WHY THIS EXISTS
 ----------------
-The v2.3.7 fix for BUG-0049 added `_cm_remove_stale_worktrees_for_branch()` and
-a "Step 10.5" call site that force-removes any linked git worktree still
-checked out on the RC branch before `git branch -D` runs. Neither the helper
-nor the call site carried an automated regression test — test_cm_release_
-synthetic.py's fixtures create only the main worktree, so the guard's removal
-path was never exercised by the suite. A future refactor could silently drop
-or reorder the Step 10.5 call and every existing test would stay green while
-re-opening BUG-0049.
+`_cm_remove_stale_worktrees_for_branch()` and its "Step 10.5" call site
+force-remove any linked git worktree still checked out on the RC branch
+before `git branch -D` runs. Neither the helper nor the call site carried
+an automated regression test — test_cm_release_synthetic.py's fixtures
+create only the main worktree, so the guard's removal path was never
+exercised by the suite. A future refactor could silently drop or reorder
+the Step 10.5 call and every existing test would stay green while
+reintroducing the branch-delete failure this guard exists to prevent.
 
 WHY EXTRACTION, NOT REPLICATION
 --------------------------------
-`_cm_remove_stale_worktrees_for_branch` is a private function defined inline
-in release.sh (not factored into team/scripts/lib/), so it cannot be
-`source`d in isolation the way library functions can. Rather than hand-retype
-its body into the test (risking silent drift from the real script), this file
-extracts the function verbatim from the live release.sh text at test time and
-sources the extracted text into a bash harness — the same technique used by
+`_cm_remove_stale_worktrees_for_branch` is a private helper defined at file
+scope in release_finalize.sh, not part of the lib's public API, so it cannot
+be `source`d and called directly the way cm_release_finalize can. Rather
+than hand-retype its body into the test (risking silent drift from the real
+script), this file extracts the function verbatim from the live
+release_finalize.sh text at test time and sources the extracted text into a
+bash harness — the same technique used by
 tests/unit/test_cm_release_hook_failure_remedy.py for `_run_release_hook`.
 The test therefore exercises the production function body, not a copy of it.
 
 This file lives under tests/integration/ (rather than tests/unit/, where the
-sibling extraction test lives) so it is picked up by run-integration-tests.sh
-per this ticket's acceptance criteria, even though the technique itself is a
+sibling extraction test lives) so it is picked up by run-integration-tests.sh,
+even though the technique itself is a
 focused function-level test rather than a full cm-open-rc.sh -> cm-release.sh
 end-to-end run.
 
@@ -36,8 +40,8 @@ COVERAGE
 --------
   - leftover-worktree-removed: a linked worktree pinned to the target branch
     is force-removed by the guard, unblocking a subsequent `git branch -D`
-    that fails BEFORE the guard runs (documenting the BUG-0049 failure mode)
-    and succeeds AFTER.
+    that fails BEFORE the guard runs (documenting the branch-delete
+    failure the guard exists to prevent) and succeeds AFTER.
   - no-op: no worktree is pinned to the target branch -> the guard is a
     silent success (rc 0, no removal message), and `git branch -D` already
     works without the guard doing anything.
@@ -57,9 +61,22 @@ import pathlib
 import subprocess
 
 from tests.unit.shell_harness import run_bash, BashResult
+import pytest
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="cm-release-worktree-removal-guard")
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
-_RELEASE_SH = _TEAM_DIR / "scripts" / "cm" / "release.sh"
+_RELEASE_FINALIZE_SH = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_finalize.sh"
 
 _FUNCTION_NAME = "_cm_remove_stale_worktrees_for_branch"
 _TEST_BRANCH = "rc/v9.9.9"
@@ -71,9 +88,10 @@ def _extract_function(source_path: pathlib.Path, function_name: str) -> str:
     Scans for a line exactly matching "<function_name>() {" and returns
     every line up to and including the next line that is exactly "}"
     (the closing brace of a function defined at column 0 — the convention
-    every function in release.sh follows). Raises AssertionError if the
-    function or its closing brace cannot be found, so a rename or reformat
-    upstream fails this test loudly rather than silently testing nothing.
+    release_finalize.sh's file-scope helpers follow). Raises AssertionError
+    if the function or its closing brace cannot be found, so a rename or
+    reformat upstream fails this test loudly rather than silently testing
+    nothing.
     """
     text = source_path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -122,7 +140,7 @@ def _run_guard(
 ) -> BashResult:
     """Source the real _cm_remove_stale_worktrees_for_branch() and invoke it
     against *repo_root* and *branch*."""
-    fn_body = _extract_function(_RELEASE_SH, _FUNCTION_NAME)
+    fn_body = _extract_function(_RELEASE_FINALIZE_SH, _FUNCTION_NAME)
     script = f"""\
 set -uo pipefail
 
@@ -156,15 +174,16 @@ class TestLeftoverWorktreeRemoved:
         worktree_path = tmp_path / "leftover_worktree"
         _git("worktree", "add", str(worktree_path), _TEST_BRANCH, cwd=repo_root)
 
-        # Document the BUG-0049 failure mode: a bare `git branch -D` fails
-        # while a linked worktree still pins the branch.
+        # Document the failure mode the guard exists to prevent: a bare
+        # `git branch -D` fails while a linked worktree still pins the
+        # branch.
         pre_guard_delete = _git(
             "branch", "-D", _TEST_BRANCH, cwd=repo_root, check=False
         )
         assert pre_guard_delete.returncode != 0, (
             "git branch -D must fail BEFORE the guard runs, while a linked "
             "worktree still pins the branch -- this is the failure mode "
-            "BUG-0049 fixed and this test documents.\n"
+            "this test guards against.\n"
             f"stdout: {pre_guard_delete.stdout}\nstderr: {pre_guard_delete.stderr}"
         )
         assert "worktree" in (

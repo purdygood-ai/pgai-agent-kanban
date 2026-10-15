@@ -73,16 +73,18 @@ _intake_usage() {
         "Copy semantics:" \
         "  - Source file is NOT moved or deleted (copy only)." \
         "  - Deposited copy is always mode 644." \
-        "  - Copy is atomic (temp + rename); discovery never sees a partial file." \
+        "  - Copy is atomic (temp + link into place); discovery never sees a partial file." \
         "  - REFUSED if the target already exists (no clobber)." \
         "" \
         "NOTE: intake.sh is a DUMB router. It does NOT validate file contents," \
-        "assign numbers, or check headings. Malformed files are still routed" \
-        "to .rejected/ by the discovery pipeline." \
+        "assign numbers, or check headings. The discovery pipeline checks names" \
+        "afterwards and quarantines a file it keeps rejecting into" \
+        "projects/<name>/rejected/ (legacy fallback: <intake>/.rejected/);" \
+        "list-rejected.sh and recover-rejected.sh find and restore it." \
         "" \
         "Examples:" \
-        "  intake.sh --project myproject /tmp/an earlier defect-some-slug.md" \
-        "  intake.sh --project myproject --file /tmp/PRIORITY-NNNN-urgent.md" \
+        "  intake.sh --project myproject \$PGAI_AGENT_KANBAN_TEMP_DIR/BUG-NNNN-some-slug.md" \
+        "  intake.sh --project myproject --file \$PGAI_AGENT_KANBAN_TEMP_DIR/PRIORITY-NNNN-urgent.md" \
         "" \
         "Exit codes:" \
         "  0  File deposited (prints the deposited path)" \
@@ -184,6 +186,9 @@ fi
 # --- Resolve kanban root ---
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
+
+# --- Resolve project name by exact match then unambiguous prefix ---
+_project_value="$(pp_resolve_project_name "${_project_value}")" || exit 1
 
 # --- Resolve project root ---
 _project_root="$(pp_project_root "${_project_value}")" || exit 1

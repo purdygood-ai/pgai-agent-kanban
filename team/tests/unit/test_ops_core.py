@@ -20,7 +20,9 @@ All tests use tmp_path.  No live filesystem paths, no process-env leakage.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -32,6 +34,7 @@ from pgai_agent_kanban.ops.errors import (
     NotFound,
     OpsError,
     Refused,
+    cli_exit_code,
 )
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.ops.resolve import (
@@ -41,7 +44,7 @@ from pgai_agent_kanban.ops.resolve import (
     _read_task_state,
     resolve_item,
 )
-from pgai_agent_kanban.lib.terminal_states import is_terminal, normalize
+from pgai_agent_kanban.lib.terminal_states import CLOSED_STATES, canonical_state, is_terminal, normalize
 from pgai_agent_kanban.ops.write import (
     halt,
     halt_after,
@@ -53,6 +56,7 @@ from pgai_agent_kanban.ops.write import (
     delete_item,
     wontdo_item,
     reset_item,
+    _cli_main as _write_cli_main,
 )
 
 
@@ -639,6 +643,141 @@ def test_deposit_intake_preserves_file_content(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ops/write — deposit_intake no-clobber at placement time
+#
+# deposit_intake pre-checks the target, copies the source to a temp file in
+# the destination directory, then places it.  A target that appears between
+# the pre-check and the placement must be refused by the placement itself.
+# The tests below force that interleaving deterministically by hooking the
+# copy step (the point between pre-check and placement) rather than by
+# racing two threads or processes and hoping the scheduler cooperates.
+# ---------------------------------------------------------------------------
+
+
+_INTAKE_TEMP_PREFIX = ".deposit_intake_tmp_"
+
+
+def _temp_files_in(directory: Path) -> list[str]:
+    """Return the names of deposit temp files left in ``directory``."""
+    return sorted(n for n in os.listdir(directory) if n.startswith(_INTAKE_TEMP_PREFIX))
+
+
+def _copy2_then(callback):
+    """Build a shutil.copy2 stand-in that runs ``callback`` once, after the first copy.
+
+    The first call performs the real copy and then invokes ``callback()``;
+    every later call (including one made from inside the callback) is a plain
+    real copy.  Patching shutil.copy2 with the result injects work at the
+    exact point between deposit_intake's pre-check and its placement.
+    """
+    real_copy2 = shutil.copy2
+    fired = {"done": False}
+
+    def hooked(src, dst, *args, **kwargs):
+        result = real_copy2(src, dst, *args, **kwargs)
+        if not fired["done"]:
+            fired["done"] = True
+            callback()
+        return result
+
+    return hooked
+
+
+def test_deposit_intake_refuses_target_that_appears_after_precheck(tmp_path: Path) -> None:
+    """A target created after the pre-check passes is refused at placement, not overwritten.
+
+    The pre-existing content survives byte-for-byte and the refusal is the
+    same no-clobber OpsError the pre-check raises.
+    """
+    project_root, ctx = _make_project_tree(tmp_path)
+    src = tmp_path / "BUG-0060.md"
+    src.write_text("late depositor\n", encoding="utf-8")
+    target = project_root / "bugs" / "BUG-0060.md"
+    winner_bytes = b"# already landed\n\nbinary-ish \x00 payload\n"
+
+    def land_first() -> None:
+        target.write_bytes(winner_bytes)
+
+    with patch("shutil.copy2", new=_copy2_then(land_first)):
+        with pytest.raises(OpsError, match="no clobber"):
+            deposit_intake(ctx, "my-project", src)
+
+    assert target.read_bytes() == winner_bytes, (
+        "placement must not replace a target that appeared after the pre-check"
+    )
+
+
+def test_deposit_intake_leaves_no_temp_file_after_placement_refusal(tmp_path: Path) -> None:
+    """The temp file is removed from the destination directory when placement is refused."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    src = tmp_path / "BUG-0061.md"
+    src.write_text("late depositor\n", encoding="utf-8")
+    bugs_dir = project_root / "bugs"
+
+    def land_first() -> None:
+        (bugs_dir / "BUG-0061.md").write_text("first\n", encoding="utf-8")
+
+    with patch("shutil.copy2", new=_copy2_then(land_first)):
+        with pytest.raises(OpsError, match="no clobber"):
+            deposit_intake(ctx, "my-project", src)
+
+    assert _temp_files_in(bugs_dir) == []
+    assert sorted(os.listdir(bugs_dir)) == ["BUG-0061.md"]
+
+
+def test_deposit_intake_leaves_no_temp_file_after_success(tmp_path: Path) -> None:
+    """Only the deposited file remains in the destination directory after a successful deposit."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    src = tmp_path / "BUG-0062.md"
+    src.write_text("content\n", encoding="utf-8")
+    bugs_dir = project_root / "bugs"
+
+    dest = deposit_intake(ctx, "my-project", src)
+
+    assert _temp_files_in(bugs_dir) == []
+    assert sorted(os.listdir(bugs_dir)) == ["BUG-0062.md"]
+    assert dest.stat().st_nlink == 1, "the temp name must be unlinked after placement"
+    assert dest.stat().st_mode & 0o777 == 0o644
+
+
+def test_deposit_intake_interleaved_depositors_first_placement_wins(tmp_path: Path) -> None:
+    """Two depositors of one basename yield exactly one exit 0 and one exit 3 via the CLI path.
+
+    Depositor A passes the pre-check first but is held before placement;
+    depositor B runs to completion in that window and places its file.
+    When A resumes, its placement is refused (exit 3) and B's content is
+    what survives -- the first file to land is the one kept.  Driving
+    ``_cli_main`` exercises the same exit-code mapping intake.sh relies on.
+    """
+    project_root, ctx = _make_project_tree(tmp_path)
+    src_a = tmp_path / "a" / "BUG-0063-same-name.md"
+    src_b = tmp_path / "b" / "BUG-0063-same-name.md"
+    src_a.parent.mkdir()
+    src_b.parent.mkdir()
+    src_a.write_text("depositor A\n", encoding="utf-8")
+    src_b.write_text("depositor B\n", encoding="utf-8")
+    bugs_dir = project_root / "bugs"
+    exit_codes: list[int] = []
+
+    def depositor_b_runs_to_completion() -> None:
+        exit_codes.append(
+            _write_cli_main(["deposit_intake", str(project_root), str(src_b)])
+        )
+
+    with patch("shutil.copy2", new=_copy2_then(depositor_b_runs_to_completion)):
+        exit_codes.append(
+            _write_cli_main(["deposit_intake", str(project_root), str(src_a)])
+        )
+
+    assert sorted(exit_codes) == [0, 3], f"expected one success and one no-clobber refusal, got {exit_codes}"
+    assert exit_codes == [0, 3], "B (first to place) succeeds; A (held past the pre-check) is refused"
+    target = bugs_dir / "BUG-0063-same-name.md"
+    assert target.read_text(encoding="utf-8") == "depositor B\n"
+    assert _temp_files_in(bugs_dir) == []
+    assert sorted(os.listdir(bugs_dir)) == ["BUG-0063-same-name.md"]
+
+
+# ---------------------------------------------------------------------------
 # ops/write — close_item on agent task
 # ---------------------------------------------------------------------------
 
@@ -693,8 +832,45 @@ def test_close_item_raises_ops_error_for_invalid_intake_state(
     """close_item raises OpsError when an invalid state is supplied for an intake item."""
     project_root, ctx = _make_project_tree(tmp_path)
     _write_intake_file(project_root / "bugs", "BUG-0001", status="open")
-    with pytest.raises(OpsError, match="invalid state"):
+    with pytest.raises(OpsError, match="close.invalid_state"):
         close_item(ctx, "my-project", "BUG-0001", state="invalid-state")
+
+
+def test_close_item_refuses_retired_superseded_state_with_wont_do_remedy(tmp_path: Path) -> None:
+    """``superseded`` is not a close state: close_item refuses it dual-channel,
+    naming --state wont-do with the real project and key, and writes nothing."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    bug = _write_intake_file(project_root / "bugs", "BUG-0001", status="open")
+    before = bug.read_text(encoding="utf-8")
+    with pytest.raises(OpsError) as excinfo:
+        close_item(ctx, "my-project", "BUG-0001", state="superseded")
+    text = str(excinfo.value)
+    assert cli_exit_code(excinfo.value) == 1
+    assert "error:   close.invalid_state" in text
+    assert "message: " in text
+    remedy = next(line for line in text.splitlines() if line.startswith("remedy:"))
+    assert "--state wont-do" in remedy
+    assert "--project my-project" in remedy and "--key BUG-0001" in remedy
+    assert "<" not in remedy
+    assert bug.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("state", CLOSED_STATES)
+def test_close_item_closes_an_intake_item_to_each_closed_state(tmp_path: Path, state: str) -> None:
+    """done and wont-do -- the closed states -- still close an intake item."""
+    project_root, ctx = _make_project_tree(tmp_path)
+    bug = _write_intake_file(project_root / "bugs", "BUG-0001", status="open")
+    close_item(ctx, "my-project", "BUG-0001", state=state)
+    assert f"## Status\n{state}\n" in bug.read_text(encoding="utf-8")
+
+
+def test_closed_states_and_the_retired_alias() -> None:
+    """The closed states are done and wont-do; superseded reads as wont-do."""
+    assert CLOSED_STATES == ("done", "wont-do")
+    assert canonical_state("superseded") == "wont-do"
+    assert canonical_state(" Superseded ") == "wont-do"
+    assert canonical_state("WONT-DO") == "wont-do"
+    assert canonical_state("open") == "open"
 
 
 def test_close_item_dry_run_does_not_modify_status_md(tmp_path: Path) -> None:
@@ -895,11 +1071,12 @@ def test_normalize_lowercases_and_strips() -> None:
         ("open", False),  # non-terminal intake state
         ("WORKING", False),  # non-terminal task state
         ("blocked", False),  # non-terminal state
-        ("superseded", False),  # close state but not terminal for delete
+        ("superseded", True),  # retired value in an existing file: reads as wont-do
     ],
 )
 def test_is_terminal(state: str, expected: bool) -> None:
-    """is_terminal recognizes done/wont-do (either case) as terminal, everything else as not."""
+    """is_terminal recognizes done/wont-do (either case, and the retired
+    "superseded" read as wont-do) as terminal, everything else as not."""
     assert is_terminal(state) is expected
 
 

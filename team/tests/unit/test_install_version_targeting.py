@@ -27,6 +27,26 @@ WHAT IS TESTED
    successful version-targeted install and a failed (nonexistent-tag) one
    — the operator's checkout is never touched, on either path.
 
+5. **Installed tag stamped in VERSION_DETAIL.** A fresh install of
+   ``v1.1.0`` that resolves to the prefixed tag ``ai_v1.1.0``, with no
+   project registered and an older bare ``v1.0.0`` tag reachable, writes a
+   VERSION_DETAIL naming ``ai_v1.1.0`` and that tag's commit.
+
+6. **Plain install stamps the prefixed tag.** ``./install.sh`` with no
+   version argument, from a checkout whose HEAD carries ``ai_v1.1.0`` and
+   whose older commit carries ``v1.0.0``, writes a VERSION_DETAIL naming
+   ``ai_v1.1.0`` and HEAD.
+
+7. **Linked-worktree source.** ``install.sh vA`` run out of a linked
+   ``git worktree`` of the fixture repo (whose ``.git`` is a pointer file,
+   not a directory) resolves and lays down vA, with VERSION_DETAIL naming
+   vA and its commit.
+
+8. **No-.git source refused.** ``install.sh vA`` run out of a plain copy of
+   the tree with no ``.git`` at all exits 1 with the "a version argument
+   was given ... is not a git checkout" refusal and its remedy, and creates
+   no install root.
+
 SANDBOX DESIGN
 --------------
 install.sh resolves the requested version against git tags in the
@@ -42,10 +62,12 @@ requirements doc's acceptance language. Every install.sh invocation in
 this file runs against one of these throwaway repos, never against the
 real dev tree this test suite lives in.
 
-Both PGAI_AGENT_KANBAN_ROOT_PATH (the install target) and HOME (so
---add-claude-agents/--add-codex-agents are never implicitly triggered,
-and any provider-CLI probing lands in a throwaway HOME) are redirected
-under tmp_path for every run. ``--no-system-cron`` keeps the OS crontab
+Every run uses the full live-install sandbox: PGAI_AGENT_KANBAN_ROOT_PATH
+and KANBAN_ROOT (the install target), PGAI_AGENT_KANBAN_TEMP_DIR, and HOME
+(so --add-claude-agents/--add-codex-agents are never implicitly
+triggered, and any provider-CLI probing lands in a throwaway HOME) are
+redirected under tmp_path, and PGAI_TASKS_DIR and PGAI_PROJECT_ROOT are
+removed from the environment. ``--no-system-cron`` keeps the OS crontab
 untouched (on top of the suite's autouse crontab sandbox in conftest.py).
 No network access is required — the fixture repo is fully local.
 
@@ -62,6 +84,18 @@ import shutil
 import subprocess
 
 import pytest
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="install-version-targeting")
 
 # ---------------------------------------------------------------------------
 # Paths to the real scripts under test
@@ -176,16 +210,29 @@ def _run_install(
     creates for its own bookkeeping.
     """
     home.mkdir(parents=True, exist_ok=True)
+    # Sibling of HOME, never inside kanban_root: a refused install must
+    # leave kanban_root uncreated.
+    temp_dir = home.parent / f"{home.name}_tmp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
 
     args = ["bash", str(source_repo / "install.sh")]
     if version_arg is not None:
         args.append(version_arg)
     args += ["--force", "--no-system-cron"]
 
-    env = dict(os.environ)
+    # Full sandbox: both roots and the temp dir repointed, and the two
+    # pre-resolved live-install paths removed rather than repointed (see
+    # docs/test-authoring-guidelines.md, "Live-install safety").
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT")
+    }
     env.update(
         {
             "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
+            "KANBAN_ROOT": str(kanban_root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(temp_dir),
             "HOME": str(home),
         }
     )
@@ -409,4 +456,222 @@ def test_source_repo_branch_and_worktree_list_unchanged_across_success_and_failu
         f"after both runs — no leaked detached worktrees from either the "
         f"success or the failure path.\ngit worktree list --porcelain:\n"
         f"{after_failure[1]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Acceptance 5: the resolved tag is what VERSION_DETAIL names.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not _REAL_INSTALL_SH.exists(),
+    reason=f"Real install.sh not found at {_REAL_INSTALL_SH}; skipping.",
+)
+def test_fresh_version_targeted_install_stamps_resolved_prefixed_tag_in_version_detail(
+    tmp_path: pathlib.Path,
+) -> None:
+    """``install.sh v1.1.0`` resolving to ``ai_v1.1.0`` stamps that tag.
+
+    The fixture repo carries a bare ``v1.0.0`` tag and ``ai_v1.1.0`` on a
+    later commit.  A fresh root has no registered project, so no branch
+    prefix is known; a prefix-less describe would walk back to ``v1.0.0``.
+    VERSION_DETAIL must instead start with the tag the install resolved and
+    laid down, followed by that tag's commit as the deposit SHA.
+    """
+    source_repo = _build_tagged_source_repo(
+        tmp_path, "src_bare_then_prefixed", tags=["v1.0.0", "ai_v1.1.0"]
+    )
+    tag_sha = _run_git(source_repo, "rev-parse", "ai_v1.1.0^{commit}").stdout.strip()
+    kanban_root = tmp_path / "root_prefixed_tag"
+
+    result = _run_install(
+        source_repo,
+        kanban_root=kanban_root,
+        home=tmp_path / "home_prefixed_tag",
+        version_arg="v1.1.0",
+    )
+    output = _combined_output(result)
+
+    assert result.returncode == 0, f"install.sh v1.1.0 failed:\n{output}"
+    assert "resolved to tag 'ai_v1.1.0'" in output, output
+    assert not (kanban_root / "projects.cfg").exists(), (
+        "fixture precondition: a fresh install registers no project"
+    )
+
+    detail_file = kanban_root / "VERSION_DETAIL"
+    assert detail_file.exists(), f"VERSION_DETAIL was not written:\n{output}"
+    detail = detail_file.read_text(encoding="utf-8")
+    assert detail.startswith("ai_v1.1.0 "), (
+        f"VERSION_DETAIL must start with the installed tag ai_v1.1.0; got: {detail!r}"
+    )
+    assert detail.strip().endswith(f"deposit-sha={tag_sha}"), (
+        f"VERSION_DETAIL must carry the installed tag's commit {tag_sha}; got: {detail!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Acceptance 6: a plain install (no version argument) names the prefixed tag.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not _REAL_INSTALL_SH.exists(),
+    reason=f"Real install.sh not found at {_REAL_INSTALL_SH}; skipping.",
+)
+def test_plain_install_from_checkout_stamps_prefixed_tag_in_version_detail(
+    tmp_path: pathlib.Path,
+) -> None:
+    """``./install.sh`` with no version argument stamps the prefixed tag at HEAD.
+
+    The fixture repo carries a bare ``v1.0.0`` tag and ``ai_v1.1.0`` on the
+    later, checked-out commit.  No project is registered on a fresh root, so
+    no branch prefix is known and no tag was resolved; VERSION_DETAIL must
+    still start with ``ai_v1.1.0`` and carry HEAD as the deposit SHA.
+    """
+    source_repo = _build_tagged_source_repo(
+        tmp_path, "src_plain_bare_then_prefixed", tags=["v1.0.0", "ai_v1.1.0"]
+    )
+    head_sha = _run_git(source_repo, "rev-parse", "HEAD").stdout.strip()
+    kanban_root = tmp_path / "root_plain_install"
+
+    result = _run_install(
+        source_repo,
+        kanban_root=kanban_root,
+        home=tmp_path / "home_plain_install",
+    )
+    output = _combined_output(result)
+
+    assert result.returncode == 0, f"plain install.sh failed:\n{output}"
+    assert not (kanban_root / "projects.cfg").exists(), (
+        "fixture precondition: a fresh install registers no project"
+    )
+
+    detail_file = kanban_root / "VERSION_DETAIL"
+    assert detail_file.exists(), f"VERSION_DETAIL was not written:\n{output}"
+    detail = detail_file.read_text(encoding="utf-8")
+    assert detail == f"ai_v1.1.0  deposit-sha={head_sha}\n", (
+        f"VERSION_DETAIL must name the prefixed tag at HEAD; got: {detail!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Acceptance 7: a linked worktree (a .git pointer file) is a git checkout.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not _REAL_INSTALL_SH.exists(),
+    reason=f"Real install.sh not found at {_REAL_INSTALL_SH}; skipping.",
+)
+def test_version_targeted_install_from_linked_worktree_lands_requested_tag(
+    tmp_path: pathlib.Path,
+) -> None:
+    """``install.sh vA`` run out of a linked worktree lays down vA.
+
+    The worktree is checked out (detached) at the newest tag vC, so a
+    laydown of vA proves the requested tag was resolved through the
+    worktree's ``.git`` pointer file rather than the worktree's own tree
+    being copied.  The worktree is removed before the test ends.
+    """
+    repo = _build_tagged_source_repo(tmp_path, "source_repo")
+    worktree = tmp_path / "linked_worktree"
+    _run_git(repo, "worktree", "add", "--detach", str(worktree), _TAG_C)
+    try:
+        assert (worktree / ".git").is_file(), (
+            "fixture precondition: a linked worktree's .git is a pointer file"
+        )
+        worktrees_before = _run_git(repo, "worktree", "list", "--porcelain").stdout
+        tag_sha = _run_git(repo, "rev-parse", f"{_TAG_A}^{{commit}}").stdout.strip()
+        kanban_root = tmp_path / "kanban_root_from_worktree"
+
+        result = _run_install(
+            worktree,
+            kanban_root=kanban_root,
+            home=tmp_path / "home_from_worktree",
+            version_arg=_TAG_A,
+        )
+        output = _combined_output(result)
+
+        assert result.returncode == 0, (
+            f"install.sh {_TAG_A} from a linked worktree failed:\n{output}"
+        )
+        assert f"resolved to tag '{_TAG_A}'" in output, output
+        assert _installed_version(kanban_root) == _TAG_A, (
+            f"Installed VERSION must equal the requested tag {_TAG_A!r}, not "
+            f"the worktree's checked-out {_TAG_C!r}.\n"
+            f"Got: {_installed_version(kanban_root)!r}"
+        )
+
+        detail_file = kanban_root / "VERSION_DETAIL"
+        assert detail_file.exists(), f"VERSION_DETAIL was not written:\n{output}"
+        detail = detail_file.read_text(encoding="utf-8")
+        assert detail.startswith(f"{_TAG_A} "), (
+            f"VERSION_DETAIL must start with the installed tag {_TAG_A}; got: {detail!r}"
+        )
+        assert detail.strip().endswith(f"deposit-sha={tag_sha}"), (
+            f"VERSION_DETAIL must carry the installed tag's commit {tag_sha}; got: {detail!r}"
+        )
+
+        worktrees_after = _run_git(repo, "worktree", "list", "--porcelain").stdout
+        assert worktrees_after == worktrees_before, (
+            f"The install must leave no extra worktree registered.\n"
+            f"Before:\n{worktrees_before}\nAfter:\n{worktrees_after}"
+        )
+    finally:
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "remove", "--force", str(worktree)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        _run_git(repo, "worktree", "prune")
+
+
+# ---------------------------------------------------------------------------
+# Acceptance 8: a tree with no .git is refused, with its remedy.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not _REAL_INSTALL_SH.exists(),
+    reason=f"Real install.sh not found at {_REAL_INSTALL_SH}; skipping.",
+)
+def test_version_targeted_install_from_tree_without_git_is_refused_with_remedy(
+    tmp_path: pathlib.Path,
+) -> None:
+    """``install.sh vA`` from a copy of the tree with no ``.git`` exits 1.
+
+    The refusal names the requested version, says the tree is not a git
+    checkout, prints its remedy, and no install root is created.
+    """
+    plain_tree = tmp_path / "plain_tree"
+    shutil.copytree(_REPO_ROOT, plain_tree, ignore=_FIXTURE_COPY_IGNORE)
+    assert not (plain_tree / ".git").exists(), (
+        "fixture precondition: the copied tree carries no .git"
+    )
+    kanban_root = tmp_path / "kanban_root_no_git"
+
+    result = _run_install(
+        plain_tree,
+        kanban_root=kanban_root,
+        home=tmp_path / "home_no_git",
+        version_arg=_TAG_A,
+    )
+    output = _combined_output(result)
+
+    assert result.returncode == 1, (
+        f"install.sh {_TAG_A} from a tree with no .git must exit 1.\n{output}"
+    )
+    assert (
+        f"a version argument was given ('{_TAG_A}') but '{plain_tree}' "
+        f"is not a git checkout (no .git found)."
+    ) in output, output
+    assert (
+        "Fix: run install.sh from a git clone of the repo, or omit the "
+        "version argument to install from this tree as-is."
+    ) in output, output
+    assert not kanban_root.exists(), (
+        f"No partial laydown: {kanban_root} must not be created when the "
+        f"source tree is refused.\nOutput was:\n{output}"
     )

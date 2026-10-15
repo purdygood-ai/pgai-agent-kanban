@@ -19,6 +19,11 @@ from collections import Counter
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.config import get_config
 
+# The pgai_agent_kanban package sits one level up from pm-agent/ in the same
+# tree (the pm_materialize.py idiom); status.md is read through task_status.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from pgai_agent_kanban.task_status import read_section, read_state  # noqa: E402
+
 
 STATE_EMOJI = {
     "BACKLOG": "⬜",
@@ -32,26 +37,14 @@ STATE_EMOJI = {
 
 
 def get_status_fields(status_file):
-    """Parse a status.md file into a dict of heading -> body."""
+    """Parse a status.md file into a dict of heading -> body.
+
+    Each body is read by task_status.read_section, the one status.md
+    section reader.
+    """
     text = status_file.read_text()
-    fields = {}
-    current_heading = None
-    current_body = []
-
-    for line in text.splitlines():
-        m = re.match(r'^## (.+)$', line)
-        if m:
-            if current_heading:
-                fields[current_heading] = "\n".join(current_body).strip()
-            current_heading = m.group(1).strip()
-            current_body = []
-        elif current_heading:
-            current_body.append(line)
-
-    if current_heading:
-        fields[current_heading] = "\n".join(current_body).strip()
-
-    return fields
+    headings = [h.strip() for h in re.findall(r'^## (.+)$', text, re.M)]
+    return {heading: read_section(text, heading) or "" for heading in headings}
 
 
 def is_queue_entry(line):
@@ -153,8 +146,7 @@ def check_desync(tasks_dir, team_root):
                 # Cannot validate — skip silently
                 continue
 
-            fields = get_status_fields(status_file)
-            state = fields.get("State", "UNKNOWN").strip()
+            state = read_state(status_file) or "UNKNOWN"
 
             state_done = state in DONE_STATES
 
@@ -237,6 +229,13 @@ def print_queue_dashboard(tasks_dir, team_root):
 
 
 def main():
+    """Run the status CLI: print the kanban's task table, or its queues.
+
+    ``[--team-root ROOT] [--filter STATE] [--verbose] [--owner PREFIX]
+    [--queues] [--check-desync]``. Exit codes: 0 printed (with
+    ``--check-desync``: no marker/state mismatch); 1 the tasks directory is
+    missing, or ``--check-desync`` found a mismatch; 2 usage error (argparse).
+    """
     parser = argparse.ArgumentParser(description="Kanban status dashboard")
     parser.add_argument("--team-root", default=None, help="Kanban root path")
     parser.add_argument("--filter", default=None, help="Filter by state (e.g., WORKING, BLOCKED)")
@@ -307,7 +306,7 @@ def main():
             continue
 
         fields = get_status_fields(status_file)
-        state = fields.get("State", "UNKNOWN")
+        state = read_state(status_file) or "UNKNOWN"
         if args.filter and state != args.filter.upper():
             continue
 

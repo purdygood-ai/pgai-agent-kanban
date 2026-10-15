@@ -6,14 +6,14 @@ Unit tests for the filename_contract module and an earlier defect acceptance cri
 an earlier defect root cause: the eligibility sieve in _disc_list_all_eligible_requirements
 encoded a semver-shape requirement (vX.Y.Z-slug.md) for ALL requirements files,
 independent of version_semantics.  Label-semantics files with honest names like
-v20260712-pvg-fieldtest.md (no dots) were silently rejected before the semantics
+v20260712-my-app-fieldtest.md (no dots) were silently rejected before the semantics
 branch could accept them.
 
 This file tests:
 
   1. filename_contract module: patterns, helpers, structural single-source guarantee.
   2. _disc_list_all_eligible_requirements behavior for an earlier defect acceptance criteria:
-     a. The exact an earlier defect fixture filename (v20260712-pvg-fieldtest.md, NO dots) is
+     a. The exact an earlier defect fixture filename (v20260712-my-app-fieldtest.md, NO dots) is
         selected under label semantics.
      b. A dotless file under semver semantics emits a named skip line containing
         "semver-shape-required" and is NOT selected.
@@ -40,6 +40,12 @@ import pytest
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _SCRIPTS_LIB = _TEAM_DIR / "scripts" / "lib"
 _DISCOVERY_SH = _SCRIPTS_LIB / "discovery.sh"
+# _disc_list_all_eligible_requirements was extracted from discovery.sh into
+# discovery_state.sh by the v2.9.20-engine-decomposition, and later into its
+# own single-purpose stage, discovery_eligibility.sh, once that function's
+# own growth pushed discovery_state.sh over the engine-decomposition's line
+# ceiling; the structural import check below follows the move.
+_DISCOVERY_STATE_SH = _SCRIPTS_LIB / "discovery_eligibility.sh"
 _WRITE_PY = _TEAM_DIR / "pgai_agent_kanban" / "ops" / "write.py"
 _FILENAME_CONTRACT_PY = (
     _TEAM_DIR / "pgai_agent_kanban" / "lib" / "filename_contract.py"
@@ -140,9 +146,9 @@ class TestFilenameContractPatterns:
         from pgai_agent_kanban.lib.filename_contract import INTAKE_REQUIREMENTS_RE
 
         # The load-bearing an earlier defect fixture filename per acceptance criterion 1.
-        assert INTAKE_REQUIREMENTS_RE.match("v20260712-pvg-fieldtest.md"), (
+        assert INTAKE_REQUIREMENTS_RE.match("v20260712-my-app-fieldtest.md"), (
             "INTAKE_REQUIREMENTS_RE must match label-shaped filenames like "
-            "v20260712-pvg-fieldtest.md — this is the intake contract."
+            "v20260712-my-app-fieldtest.md — this is the intake contract."
         )
 
     def test_semver_requirements_re_matches_dotted_filename(self) -> None:
@@ -161,9 +167,9 @@ class TestFilenameContractPatterns:
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import SEMVER_REQUIREMENTS_RE
 
-        assert not SEMVER_REQUIREMENTS_RE.match("v20260712-pvg-fieldtest.md"), (
+        assert not SEMVER_REQUIREMENTS_RE.match("v20260712-my-app-fieldtest.md"), (
             "SEMVER_REQUIREMENTS_RE must NOT match dotless filenames — "
-            "v20260712-pvg-fieldtest.md has no dots and must be rejected by this pattern."
+            "v20260712-my-app-fieldtest.md has no dots and must be rejected by this pattern."
         )
 
     def test_filename_semantics_eligible_label_accepts_dotless(self) -> None:
@@ -172,7 +178,7 @@ class TestFilenameContractPatterns:
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import filename_semantics_eligible
 
-        eligible, reason = filename_semantics_eligible("v20260712-pvg-fieldtest.md", "label")
+        eligible, reason = filename_semantics_eligible("v20260712-my-app-fieldtest.md", "label")
         assert eligible, (
             "filename_semantics_eligible must return eligible=True for a dotless "
             "filename under label semantics."
@@ -188,7 +194,7 @@ class TestFilenameContractPatterns:
             SKIP_REASON_SEMVER_SHAPE_REQUIRED,
         )
 
-        eligible, reason = filename_semantics_eligible("v20260712-pvg-fieldtest.md", "semver")
+        eligible, reason = filename_semantics_eligible("v20260712-my-app-fieldtest.md", "semver")
         assert not eligible, (
             "filename_semantics_eligible must return eligible=False for a dotless "
             "filename under semver semantics."
@@ -216,8 +222,8 @@ class TestFilenameContractPatterns:
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import skip_log_line
 
-        line = skip_log_line("v20260712-pvg-fieldtest.md", "semver-shape-required")
-        assert line == "discovery: skipping v20260712-pvg-fieldtest.md: semver-shape-required", (
+        line = skip_log_line("v20260712-my-app-fieldtest.md", "semver-shape-required")
+        assert line == "discovery: skipping v20260712-my-app-fieldtest.md: semver-shape-required", (
             f"skip_log_line produced unexpected format: {line!r}"
         )
 
@@ -225,6 +231,56 @@ class TestFilenameContractPatterns:
 # ---------------------------------------------------------------------------
 # 2. Structural single-source guarantee (an earlier defect acceptance criterion 3)
 # ---------------------------------------------------------------------------
+
+
+class TestIntakeDestination:
+    """intake_destination: the one intake filename check, shared by the API and intake.sh."""
+
+    @pytest.mark.parametrize(
+        "name, subdir",
+        [
+            ("BUG-0001-x.md", "bugs"),
+            ("PRIORITY-0001-x.md", "priority"),
+            ("v1.2.3.md", "requirements"),
+            ("v20260712-my-app-fieldtest.md", "requirements"),
+        ],
+    )
+    def test_bare_routable_name_returns_its_subdirectory(self, name: str, subdir: str) -> None:
+        from pgai_agent_kanban.lib.filename_contract import intake_destination
+
+        assert intake_destination(name) == subdir
+
+    @pytest.mark.parametrize(
+        "name",
+        ["/tmp/x.md", "../x.md", "a/b.md", "..", "BUG-0001/../../x.md",
+         "BUG-0001..x.md", "BUG-0001\\x.md", "BUG-0001%2fx.md", "BUG-0001\x00.md"],
+    )
+    def test_name_that_is_a_path_is_refused_as_not_bare(self, name: str) -> None:
+        from pgai_agent_kanban.lib.filename_contract import (
+            INTAKE_FILENAME_NOT_BARE,
+            IntakeFilenameRefused,
+            intake_destination,
+        )
+
+        with pytest.raises(IntakeFilenameRefused) as caught:
+            intake_destination(name)
+        assert caught.value.error == INTAKE_FILENAME_NOT_BARE
+        assert caught.value.message.strip()
+        if len(name) > 2:
+            assert name not in caught.value.message, "the refusal must not echo the refused path"
+
+    @pytest.mark.parametrize("name", ["notes.md", "bug-0001-x.md", "README.md", "vX.md"])
+    def test_bare_name_with_no_routing_prefix_is_refused_as_unroutable(self, name: str) -> None:
+        from pgai_agent_kanban.lib.filename_contract import (
+            INTAKE_FILENAME_UNROUTABLE,
+            IntakeFilenameRefused,
+            intake_destination,
+        )
+
+        with pytest.raises(IntakeFilenameRefused) as caught:
+            intake_destination(name)
+        assert caught.value.error == INTAKE_FILENAME_UNROUTABLE
+        assert f"cannot route '{name}'" in caught.value.message
 
 
 class TestSingleSourceStructural:
@@ -256,15 +312,19 @@ class TestSingleSourceStructural:
             f"filename_contract.py.  This is the single-source location."
         )
 
-    def test_write_py_imports_intake_re_from_filename_contract(self) -> None:
-        """write.py imports INTAKE_REQUIREMENTS_RE from filename_contract, not locally."""
+    def test_write_py_routes_intake_through_filename_contract(self) -> None:
+        """write.py routes intake names with filename_contract's check, not a local table."""
         text = _WRITE_PY.read_text(encoding="utf-8")
         # Must import from filename_contract
         assert "from pgai_agent_kanban.lib.filename_contract import" in text, (
             "write.py must import from pgai_agent_kanban.lib.filename_contract"
         )
-        assert "INTAKE_REQUIREMENTS_RE" in text, (
-            "write.py must reference INTAKE_REQUIREMENTS_RE from filename_contract"
+        assert "intake_destination" in text, (
+            "write.py must route intake names with intake_destination from filename_contract"
+        )
+        assert not re.search(r"""re\.compile\s*\(\s*r?['"]\^(BUG|PRIORITY)-""", text), (
+            "write.py must not compile its own intake routing patterns; "
+            "INTAKE_ROUTES lives in filename_contract"
         )
 
     def test_write_py_does_not_duplicate_intake_pattern_inline(self) -> None:
@@ -285,12 +345,20 @@ class TestSingleSourceStructural:
         )
 
     def test_discovery_sh_imports_filename_contract_in_eligibility_function(self) -> None:
-        """discovery.sh's eligibility function imports from filename_contract."""
-        text = _DISCOVERY_SH.read_text(encoding="utf-8")
-        # The import must appear inside the eligibility Python heredoc.
-        assert "pgai_agent_kanban.lib.filename_contract" in text, (
-            "discovery.sh must import from pgai_agent_kanban.lib.filename_contract "
-            "inside _disc_list_all_eligible_requirements."
+        """discovery's eligibility function imports from filename_contract."""
+        text = _DISCOVERY_STATE_SH.read_text(encoding="utf-8")
+        # The shell function runs the eligibility module, which imports the
+        # contract.
+        assert "pgai_agent_kanban.discovery.eligibility" in text, (
+            "discovery_eligibility.sh's _disc_list_all_eligible_requirements must "
+            "run pgai_agent_kanban.discovery.eligibility."
+        )
+        module_text = (_SCRIPTS_LIB.parent.parent / "pgai_agent_kanban" / "discovery" / "eligibility.py").read_text(
+            encoding="utf-8"
+        )
+        assert "pgai_agent_kanban.lib.filename_contract" in module_text, (
+            "pgai_agent_kanban.discovery.eligibility must import from "
+            "pgai_agent_kanban.lib.filename_contract."
         )
 
     def test_discovery_sh_does_not_contain_old_bundle_re_with_semver_arm(self) -> None:
@@ -299,14 +367,14 @@ class TestSingleSourceStructural:
         The old pattern was:
           r'^(v[0-9]+\\.[0-9]+\\.[0-9]+-.+|PRIORITY-...|BUG-...)\\..md$'
         This combined semver and non-semver arms in a single RE that silently
-        rejected label-shaped filenames.  After the fix it must not exist.
+        rejected label-shaped filenames.  It must not exist in discovery.sh.
         """
         text = _DISCOVERY_SH.read_text(encoding="utf-8")
         # The old BUNDLE_RE assigned the combined pattern to a variable named BUNDLE_RE.
         old_assignment = re.compile(r'\bBUNDLE_RE\s*=\s*re\.compile\s*\(')
         assert not old_assignment.search(text), (
             "discovery.sh still contains a BUNDLE_RE = re.compile(...) assignment. "
-            "The fix replaces this with imports from filename_contract."
+            "Bundle patterns must be imported from filename_contract."
         )
 
 
@@ -328,7 +396,7 @@ class TestEligibilityFilenameGateSemantics:
     ) -> None:
         """The an earlier defect fixture filename is selected under label semantics.
 
-        v20260712-pvg-fieldtest.md (NO dots) with a label Target Version must
+        v20260712-my-app-fieldtest.md (NO dots) with a label Target Version must
         appear in the eligible list when version_semantics=label.
 
         This is an earlier defect acceptance criterion 1.  The fixture filename is
@@ -337,8 +405,8 @@ class TestEligibilityFilenameGateSemantics:
         req_dir = tmp_path / "requirements"
         _make_requirements_file(
             req_dir,
-            "v20260712-pvg-fieldtest.md",   # an earlier defect fixture filename — NO dots
-            "v20260712-pvg-fieldtest",       # label Target Version
+            "v20260712-my-app-fieldtest.md",   # an earlier defect fixture filename — NO dots
+            "v20260712-my-app-fieldtest",       # label Target Version
         )
 
         result = _run_eligibility(req_dir, "label")
@@ -352,8 +420,8 @@ class TestEligibilityFilenameGateSemantics:
             for line in result.stdout.strip().splitlines()
             if line.strip()
         ]
-        assert "v20260712-pvg-fieldtest.md" in output_names, (
-            f"Expected v20260712-pvg-fieldtest.md in eligible list under label semantics; "
+        assert "v20260712-my-app-fieldtest.md" in output_names, (
+            f"Expected v20260712-my-app-fieldtest.md in eligible list under label semantics; "
             f"got {output_names!r}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
@@ -406,7 +474,7 @@ class TestEligibilityFilenameGateSemantics:
         """A dotted vX.Y.Z-slug.md file is still selected on a semver project.
 
         This is the regression check: the semver path must be byte-identical
-        for properly-shaped dotted filenames — the fix must not break them.
+        for properly-shaped dotted filenames — label support must not break them.
 
         an earlier defect acceptance criterion 2 (semver regression).
         """
@@ -445,8 +513,8 @@ class TestEligibilityFilenameGateSemantics:
         req_dir = tmp_path / "requirements"
         _make_requirements_file(
             req_dir,
-            "v20260712-pvg-fieldtest.md",
-            "v20260712-pvg-fieldtest",
+            "v20260712-my-app-fieldtest.md",
+            "v20260712-my-app-fieldtest",
         )
         _make_requirements_file(
             req_dir,
@@ -464,7 +532,7 @@ class TestEligibilityFilenameGateSemantics:
             for line in result.stdout.strip().splitlines()
             if line.strip()
         ]
-        assert "v20260712-pvg-fieldtest.md" in output_names, (
+        assert "v20260712-my-app-fieldtest.md" in output_names, (
             f"Dotless label filename must be selected under label semantics; "
             f"got {output_names!r}"
         )

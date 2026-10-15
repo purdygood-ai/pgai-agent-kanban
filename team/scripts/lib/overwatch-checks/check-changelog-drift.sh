@@ -19,9 +19,28 @@
 #   3. Regenerate CHANGELOG.md to a temp buffer via changelog_writer.py.
 #   4. Byte-compare the buffer against the checked-in CHANGELOG.md.
 #   5. When they match: log "changelog-drift-none" and return 0 (no drift).
-#   6. When they differ: install the buffer as CHANGELOG.md, stage it, and
-#      commit to ai_main using git commit.  Log "changelog-drift-fixed" and
-#      return 0.
+#   6. When they differ: report the drift, then repair through OVERWATCH's
+#      normal repair path, overwatch_halt_first_fix (overwatch_protocol.sh).
+#      That takes the project's repo lock -- the same
+#      $KANBAN_ROOT/locks/repo-wake-<project>.lock every wake chain, CM's
+#      release scripts included, holds for its whole run -- recording
+#      holder=overwatch, pid, op and task=none, and holds it across the
+#      repair.  Under the lock, Active RC is read again; only when it is
+#      still "none" is the buffer installed as CHANGELOG.md, staged and
+#      committed to ai_main.  Log "changelog-drift-fixed" and return 0.
+#
+# Repair skipped, drift reported, nothing changed (return 0):
+#   - The repo lock is held by another process (a wake chain or a CM
+#     release): narrated with the holder, logged "changelog-drift-skipped-
+#     lock-held".  The next sweep retries.
+#   - An active RC is in progress, before or once the lock is taken:
+#     narrated, logged "changelog-drift-skipped-active-rc".  The release
+#     pipeline owns CHANGELOG.md during an RC.
+#   - HALT_OVERWATCH is set: narrated, logged
+#     "changelog-drift-skipped-halt-overwatch".
+#   - A HALT is present (the fleet-wide one, or the project's own that
+#     OVERWATCH did not create): the fix is deferred, narrated, logged
+#     "changelog-drift-skipped-halt".
 #
 # Auto-fix class: deterministic write — the changelog_writer is idempotent
 # and its output is fully determined by the bug ledger and release notes.
@@ -33,8 +52,6 @@
 #   - CHANGELOG.md absent from dev tree (unusual state; do not create it here).
 #   - Regeneration fails (Python/import error); logs the failure and returns 0
 #     so the sweep continues rather than halting on a transient error.
-#   - An active RC is present for the project (release pipeline owns the
-#     changelog during an active RC; OVERWATCH must not interfere).
 #
 # Module contract:
 #   - Sourceable without side effects.
@@ -135,24 +152,22 @@ _ccd_resolve_env() {
     return 0
 }
 
+# release_state_value reads Active RC through the one release-state reader.
+# shellcheck source=../cm/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../cm/common.sh"
+# The shared dual-channel emitter, for the repair's backup-failure abort.
+if ! declare -F pgai_emit_error_contract >/dev/null 2>&1; then
+    # shellcheck source=../error_contract.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/../error_contract.sh"
+fi
+
 # ---------------------------------------------------------------------------
 # _ccd_read_active_rc <release_state_file>
-# Echo the current Active RC value from release-state.md, or "none".
+# Echo the current Active RC value from release-state.md as written, or
+# "none" when the file, the heading or a value is missing.
 # ---------------------------------------------------------------------------
 _ccd_read_active_rc() {
-    local rs_file="$1"
-    if [[ ! -f "${rs_file}" ]]; then
-        echo "none"
-        return 0
-    fi
-    local val
-    val="$(awk '/^## Active RC/{found=1; next} found && /^[[:space:]]*$/{next} found{print; exit}' "${rs_file}" \
-        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-    if [[ -z "${val}" ]]; then
-        echo "none"
-    else
-        echo "${val}"
-    fi
+    release_state_value "$1" "Active RC"
 }
 
 # ---------------------------------------------------------------------------
@@ -256,15 +271,9 @@ overwatch_check_changelog_drift() {
         return 0
     fi
 
-    # Guard 2: skip when an active RC is in progress.
-    # The release pipeline owns CHANGELOG.md during an active RC.
+    # Guard 2 -- Active RC -- is read where the repair would happen, after
+    # detection, so a drift found during an RC is still reported.
     local release_state_file="${kanban_root}/projects/${project_name}/release-state.md"
-    local active_rc
-    active_rc="$(_ccd_read_active_rc "${release_state_file}")"
-    if [[ "${active_rc}" != "none" ]]; then
-        echo "check-changelog-drift: [${project_name}] active RC '${active_rc}' in progress; skipping drift check." >&2
-        return 0
-    fi
 
     # Guard 3: CHANGELOG.md must exist in the dev tree.
     local changelog_path="${dev_tree}/CHANGELOG.md"
@@ -344,53 +353,204 @@ overwatch_check_changelog_drift() {
         return 0
     fi
 
-    # Backup the current CHANGELOG.md before overwriting.
-    local backup_path=""
-    if declare -f overwatch_backup_file >/dev/null 2>&1; then
-        overwatch_backup_file "${changelog_path}" "${project_name}" \
-        2>/dev/null || true
-        # overwatch_backup_file writes the backup path to its own log; we pass
-        # "none" to overwatch_log_action below since we do not capture the path.
-        backup_path="none"
-    fi
-
-    # Install the fresh regeneration as CHANGELOG.md.
-    if ! cp "${regen_file}" "${changelog_path}"; then
-        echo "check-changelog-drift: [${project_name}] failed to install regenerated CHANGELOG.md" >&2
+    # The release pipeline owns CHANGELOG.md during an active RC: report the
+    # drift and change nothing.
+    local active_rc
+    active_rc="$(_ccd_read_active_rc "${release_state_file}")"
+    if [[ "${active_rc}" != "none" ]]; then
+        _ccd_narrate_skip "${project_name}" "${main_branch}" "changelog-drift-skipped-active-rc" \
+            "active RC '${active_rc}' in progress"
         rm -f "${regen_file}" 2>/dev/null || true
         return 0
     fi
+
+    # Repair through OVERWATCH's normal repair path: overwatch_halt_first_fix
+    # holds the project's repo lock (the lock every wake chain and CM release
+    # holds for the dev tree) across the whole install-and-commit, so no
+    # release can squash, tag or commit in this tree between our check and
+    # our commit.
+    if ! declare -f overwatch_halt_first_fix >/dev/null 2>&1; then
+        local _ccd_protocol
+        _ccd_protocol="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/overwatch_protocol.sh"
+        # shellcheck source=../overwatch_protocol.sh
+        [[ -f "${_ccd_protocol}" ]] && source "${_ccd_protocol}"
+    fi
+    if ! declare -f overwatch_halt_first_fix >/dev/null 2>&1; then
+        _ccd_narrate_skip "${project_name}" "${main_branch}" "changelog-drift-skipped-no-repair-path" \
+            "overwatch_protocol.sh (overwatch_halt_first_fix) could not be loaded"
+        rm -f "${regen_file}" 2>/dev/null || true
+        return 0
+    fi
+
+    _CCD_REPAIR_DEV_TREE="${dev_tree}"
+    _CCD_REPAIR_MAIN_BRANCH="${main_branch}"
+    _CCD_REPAIR_REGEN_FILE="${regen_file}"
+    _CCD_REPAIR_RELEASE_STATE="${release_state_file}"
+    _CCD_REPAIR_PROJECT="${project_name}"
+    _CCD_REPAIR_RC_SEEN=""
+
+    local fix_rc=0
+    overwatch_halt_first_fix _ccd_commit_regenerated || fix_rc=$?
     rm -f "${regen_file}" 2>/dev/null || true
 
-    # Stage and commit.
-    local commit_msg="Regenerate CHANGELOG.md (drift detected by OVERWATCH sweep)"
-    local commit_rc=0
+    case "${fix_rc}" in
+        0)
+            echo "check-changelog-drift: [${project_name}] CHANGELOG.md regenerated and committed to ${main_branch}." >&2
+            if declare -f overwatch_log_action >/dev/null 2>&1; then
+                overwatch_log_action \
+                    "check-changelog-drift" \
+                    "${project_name}" \
+                    "changelog-drift-fixed" \
+                    "none" \
+                    "CHANGELOG.md drift on ${main_branch} regenerated and committed under the repo lock" \
+                2>/dev/null || true
+            fi
+            ;;
+        3)
+            _ccd_narrate_skip "${project_name}" "${main_branch}" "changelog-drift-skipped-halt-overwatch" \
+                "HALT_OVERWATCH is set"
+            ;;
+        5)
+            _ccd_narrate_skip "${project_name}" "${main_branch}" "changelog-drift-skipped-halt" \
+                "fix deferred: HALT present"
+            ;;
+        4)
+            local _ccd_lock_file="" _ccd_holder="(holder unknown)"
+            if declare -f pp_repo_lock_path >/dev/null 2>&1; then
+                _ccd_lock_file="$(pp_repo_lock_path "${project_name}" 2>/dev/null)" || _ccd_lock_file=""
+            fi
+            if [[ -n "${_ccd_lock_file}" ]] && declare -f pgai_lock_read_provenance >/dev/null 2>&1 \
+                && declare -f pgai_lock_describe_provenance >/dev/null 2>&1; then
+                _ccd_holder="$(pgai_lock_describe_provenance "$(pgai_lock_read_provenance "${_ccd_lock_file}" 2>/dev/null)" 2>/dev/null)" \
+                    || _ccd_holder="(holder unknown)"
+            fi
+            _ccd_narrate_skip "${project_name}" "${main_branch}" "changelog-drift-skipped-lock-held" \
+                "the project's repo lock ${_ccd_lock_file:-repo-wake-${project_name}.lock} is held by ${_ccd_holder:-(holder unknown)}"
+            ;;
+        "${_CCD_RC_ACTIVE_UNDER_LOCK}")
+            _ccd_narrate_skip "${project_name}" "${main_branch}" "changelog-drift-skipped-active-rc" \
+                "active RC '${_CCD_REPAIR_RC_SEEN}' opened before the repo lock was taken"
+            ;;
+        "${_CCD_HEAD_LEFT_MAIN_UNDER_LOCK}")
+            _ccd_narrate_skip "${project_name}" "${main_branch}" "changelog-drift-skipped-head-moved" \
+                "HEAD moved to '${_CCD_REPAIR_BRANCH_SEEN}' before the repo lock was taken"
+            ;;
+        "${_CCD_BACKUP_FAILED}")
+            _ccd_narrate_skip "${project_name}" "${main_branch}" "changelog-drift-skipped-backup-failed" \
+                "CHANGELOG.md could not be backed up before the rewrite"
+            ;;
+        *)
+            echo "check-changelog-drift: [${project_name}] CHANGELOG.md repair did not complete (rc=${fix_rc}); see the lines above." >&2
+            ;;
+    esac
 
-    git -C "${dev_tree}" add "CHANGELOG.md" 2>/dev/null || {
-        echo "check-changelog-drift: [${project_name}] git add CHANGELOG.md failed" >&2
-        return 0
-    }
+    unset _CCD_REPAIR_DEV_TREE _CCD_REPAIR_MAIN_BRANCH _CCD_REPAIR_REGEN_FILE \
+        _CCD_REPAIR_RELEASE_STATE _CCD_REPAIR_PROJECT _CCD_REPAIR_RC_SEEN _CCD_REPAIR_BRANCH_SEEN
+    return 0
+}
 
-    git -C "${dev_tree}" commit -m "${commit_msg}" 2>/dev/null || {
-        commit_rc=$?
-        echo "check-changelog-drift: [${project_name}] git commit failed (rc=${commit_rc})" >&2
-        # Unstage to leave the working tree clean.
-        git -C "${dev_tree}" reset HEAD CHANGELOG.md 2>/dev/null || true
-        return 0
-    }
+# Return code _ccd_commit_regenerated uses when Active RC is no longer
+# "none" once the repo lock is held.  Distinct from overwatch_halt_first_fix's
+# own sentinels (1, 3, 4, 5).
+_CCD_RC_ACTIVE_UNDER_LOCK=10
+# Return code when HEAD is no longer the main branch once the lock is held.
+_CCD_HEAD_LEFT_MAIN_UNDER_LOCK=11
+# Return code when CHANGELOG.md could not be backed up (nothing changed).
+_CCD_BACKUP_FAILED=12
 
-    echo "check-changelog-drift: [${project_name}] CHANGELOG.md regenerated and committed to ${main_branch}." >&2
-
+# ---------------------------------------------------------------------------
+# _ccd_narrate_skip <project> <main_branch> <action> <reason>
+# Report a detected drift whose repair is skipped: one stderr line naming
+# the drift and why nothing was changed, plus one OVERWATCH action-log row.
+# ---------------------------------------------------------------------------
+_ccd_narrate_skip() {
+    local project_name="$1" main_branch="$2" action="$3" reason="$4"
+    echo "check-changelog-drift: [${project_name}] CHANGELOG.md drift on ${main_branch} left unrepaired: ${reason}; nothing was changed. The next sweep retries." >&2
     if declare -f overwatch_log_action >/dev/null 2>&1; then
         overwatch_log_action \
             "check-changelog-drift" \
             "${project_name}" \
-            "changelog-drift-fixed" \
-            "${backup_path:-none}" \
-            "CHANGELOG.md drift on ${main_branch} regenerated and committed" \
+            "${action}" \
+            "none" \
+            "drift detected on ${main_branch}; repair skipped: ${reason}" \
         2>/dev/null || true
     fi
+}
 
+# ---------------------------------------------------------------------------
+# _ccd_commit_regenerated
+# The repair, run by overwatch_halt_first_fix while it holds the project's
+# repo lock.  Reads its inputs from the _CCD_REPAIR_* variables the caller
+# sets.  Re-reads Active RC and HEAD under the lock (an RC opened, or a
+# checkout made, after detection means the commit no longer belongs on
+# main), backs CHANGELOG.md up, then installs the regeneration and commits
+# CHANGELOG.md alone -- whatever else is staged in the dev tree stays staged
+# and out of the commit.
+#
+# Returns 0 when committed, _CCD_RC_ACTIVE_UNDER_LOCK when an RC is now
+# active, _CCD_HEAD_LEFT_MAIN_UNDER_LOCK when HEAD left the main branch,
+# _CCD_BACKUP_FAILED when the backup failed (nothing changed in any of
+# those three), 1 when the install or commit failed (working tree
+# restored).
+# ---------------------------------------------------------------------------
+_ccd_commit_regenerated() {
+    local dev_tree="${_CCD_REPAIR_DEV_TREE}"
+    local project_name="${_CCD_REPAIR_PROJECT}"
+    local changelog_path="${dev_tree}/CHANGELOG.md"
+
+    local active_rc
+    active_rc="$(_ccd_read_active_rc "${_CCD_REPAIR_RELEASE_STATE}")"
+    if [[ "${active_rc}" != "none" ]]; then
+        _CCD_REPAIR_RC_SEEN="${active_rc}"
+        return "${_CCD_RC_ACTIVE_UNDER_LOCK}"
+    fi
+
+    local branch_now
+    branch_now="$(_ccd_current_branch "${dev_tree}")"
+    if [[ "${branch_now}" != "${_CCD_REPAIR_MAIN_BRANCH}" ]]; then
+        _CCD_REPAIR_BRANCH_SEEN="${branch_now}"
+        return "${_CCD_HEAD_LEFT_MAIN_UNDER_LOCK}"
+    fi
+
+    # Back up the current CHANGELOG.md before overwriting; without a backup
+    # the rewrite is not revertible, so a failed backup aborts the repair.
+    if ! declare -f overwatch_backup_file >/dev/null 2>&1 \
+        || ! overwatch_backup_file "${changelog_path}" "${project_name}" >/dev/null 2>&1; then
+        local backups_dir="${KANBAN_ROOT}/projects/${project_name}/overwatch/backups"
+        # CONVERT (docs/blocking-site-census.md): the repair declines this
+        # sweep and is narrated and logged by the caller; CHANGELOG.md is
+        # untouched and the next sweep retries once the backup can be taken.
+        pgai_emit_error_contract "overwatch.changelog-drift.backup-failed" \
+            "check-changelog-drift: [${project_name}] backing up ${changelog_path} before the rewrite failed; the repair was aborted and CHANGELOG.md is unchanged." \
+            "mkdir -p '${backups_dir}' && test -w '${backups_dir}'" \
+            "${project_name}" || true
+        # CENSUS-ANCHOR: check-changelog-drift-backup-failed-01
+        return "${_CCD_BACKUP_FAILED}"
+    fi
+
+    if ! cp "${_CCD_REPAIR_REGEN_FILE}" "${changelog_path}"; then
+        echo "check-changelog-drift: [${project_name}] failed to install regenerated CHANGELOG.md" >&2
+        return 1
+    fi
+
+    git -C "${dev_tree}" add "CHANGELOG.md" 2>/dev/null || {
+        echo "check-changelog-drift: [${project_name}] git add CHANGELOG.md failed" >&2
+        git -C "${dev_tree}" checkout -- CHANGELOG.md 2>/dev/null || true
+        return 1
+    }
+
+    # --only: the commit carries CHANGELOG.md and nothing else already
+    # staged in the dev tree's index; those entries stay staged.
+    local commit_rc=0
+    git -C "${dev_tree}" commit --only -m "Regenerate CHANGELOG.md (drift detected by OVERWATCH sweep)" \
+        -- CHANGELOG.md 2>/dev/null || commit_rc=$?
+    if [[ ${commit_rc} -ne 0 ]]; then
+        echo "check-changelog-drift: [${project_name}] git commit failed (rc=${commit_rc})" >&2
+        # Unstage and restore to leave the working tree clean.
+        git -C "${dev_tree}" reset -q HEAD CHANGELOG.md 2>/dev/null || true
+        git -C "${dev_tree}" checkout -- CHANGELOG.md 2>/dev/null || true
+        return 1
+    fi
     return 0
 }
 

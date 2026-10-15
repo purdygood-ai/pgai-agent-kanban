@@ -16,10 +16,14 @@ which trips the CHANGELOG freshness gate and the internal-bug-
 identifier unit test. Write the notes; let CM regenerate the changelog.
 
 The release-notes body must describe every resolved item by SUBSTANCE —
-what was wrong and what changed, drawn from the bug's own Symptom/Fix
+what was wrong, drawn from the opening sentence of the bug's own Symptom
 text — never by the bare internal ticket ID (BUG-NNNN, PRIORITY-NNNN).
+A bug's Fix section is never a source: in a filed bug it proposes a
+remedy before the work is done, often as a list of options, so it does
+not say what shipped. The generated Bug Fixes section follows the same
+rule: each bug's bullet reads "Fixed: " followed by that Symptom sentence.
 There is no lint carve-out for this file: release-notes/*.md is scanned
-by team/scripts/lint_comment_provenance.py the same as production code.
+by team/scripts/lint_hygiene.py's provenance class the same as production code.
 When an item has already been disclosed, cite its public KI-N.N.N.N
 identifier alongside the substance description — that public namespace
 is unchanged by this rule and is exactly what a reader outside the
@@ -30,12 +34,12 @@ a backstop, not a license to write bare ticket IDs here.
 STATUS FIELD GUIDE
 ==================
 WRITER authors notes with "## Status: PENDING-RELEASE" as a placeholder.
-cm-release.sh stamps the actual ship decision at release time based on TESTER's recommendation:
+scripts/cm/release.sh stamps the actual ship decision at release time based on TESTER's recommendation:
   PASS                    → Status: FUNCTIONAL
   SHIP-WITH-CONCERNS      → Status: KNOWN-BUGS
   SHIP-WITH-SERIOUS-CONCERNS → Status: NON-FUNCTIONAL
 
-Do NOT change "PENDING-RELEASE" to a concrete value — cm-release.sh will
+Do NOT change "PENDING-RELEASE" to a concrete value — scripts/cm/release.sh will
 replace it with the correct decision. Writing a concrete value here risks
 mismatching the actual ship policy applied at release time.
 
@@ -72,7 +76,7 @@ no lint carve-out for this file.
 ---
 
 ## Status
-<!-- cm-release.sh stamps this field at release time. WRITER must leave the value below as-is. -->
+<!-- scripts/cm/release.sh stamps this field at release time. WRITER must leave the value below as-is. -->
 PENDING-RELEASE
 
 ---
@@ -95,9 +99,10 @@ Features, improvements, and changes included in this release.
 ## Bugs Resolved
 
 Bugs that were identified and fixed in this release, described by substance
-(drawn from each bug's own Symptom/Fix text) — never by the bare internal
-ticket ID. Cite the public KI-N.N.N.N identifier when one has been assigned;
-that public namespace is unaffected by this rule.
+(drawn from the opening sentence of each bug's own Symptom text, not from a
+proposed Fix) — never by the bare internal ticket ID. Cite the public
+KI-N.N.N.N identifier when one has been assigned; that public namespace
+is unaffected by this rule.
 
 | Substance (what was wrong / what changed) | Public ID (if disclosed) | Severity | Resolution |
 |--------------------------------------------|---------------------------|----------|------------|
@@ -108,6 +113,33 @@ If no bugs were resolved, write "None."
 ---
 
 ## Bugs Skipped
+
+<!--
+THIS SECTION IS RENDERED AT RELEASE TIME, NOT AUTHORED.
+
+Where the TESTER report for this RC carries bug, gap, or stale-assertion
+findings, the release script replaces this section's entire body — this
+comment included — with a freshly rendered table, whatever was typed here.
+Nothing you write below survives that render, so do not treat it as the
+shipped record.
+
+What the pipeline guarantees. One row per qualifying finding, in the four
+columns below: the substance taken from that bug's own Symptom text, its
+public identifier (or "internal-only" where none has been assigned), its
+severity, and the finding's own rationale text. Every rendered cell passes
+through the internal-identifier scrub, so a rationale that quotes another
+release's finding cannot re-leak that finding's kanban task ID. A bug
+already rendered under "## Known Issues" is never repeated here. The render
+is independent of the ship decision — a release carries deferred bugs under
+any status.
+
+What you are still responsible for. The text below is the fallback for the
+one case the render does not cover: a report with no qualifying finding. In
+that case your text ships exactly as typed, with no scrub in front of it.
+Write "None." there when nothing was skipped, describe anything else by
+substance rather than by the bare internal ticket ID, and never type a
+kanban task identifier into it.
+-->
 
 Bugs that were identified during verification but intentionally not fixed in this release, described by substance — never by the bare internal ticket ID. Include the rationale for each.
 

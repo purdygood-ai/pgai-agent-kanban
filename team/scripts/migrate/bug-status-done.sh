@@ -5,7 +5,7 @@
 # all items that appeared in any already-shipped requirements bundle.
 #
 # Background:
-#   The cm-release.sh success path (Step 16b) promotes bundled items from
+#   The cm/release.sh success path (Step 16b) promotes bundled items from
 #   "running" to "done" on each release. But items bundled before that step
 #   was introduced remain stuck at "running" even though their RCs already shipped.
 #   This script performs the retroactive promotion for those items.
@@ -25,10 +25,15 @@
 # This script is IDEMPOTENT — safe to run multiple times.
 #
 # Usage:
-#   bash team/scripts/migrate/bug-status-done.sh [--dry-run]
+#   bash team/scripts/migrate/bug-status-done.sh [--dry-run] [--help]
 #
 # Options:
 #   --dry-run   Print what would be changed without writing any files.
+#   --help, -h  Print this usage and exit 0 without reading or writing anything.
+#
+# Exit codes:
+#   0 — success (or --help)
+#   1 — unknown argument, kanban root not found, or a missing helper library
 #
 # Dependencies:
 #   - python3 (stdlib only)
@@ -38,12 +43,17 @@
 
 set -euo pipefail
 
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/header_help.sh
+source "$_SCRIPT_DIR/../lib/header_help.sh"
+
 # --- Parse arguments ---
 DRY_RUN=false
 for arg in "$@"; do
   case "$arg" in
+    --help|-h) header_help_print "${BASH_SOURCE[0]}"; exit 0 ;;
     --dry-run) DRY_RUN=true ;;
-    *) echo "Unknown argument: $arg" >&2; exit 1 ;;
+    *) echo "Unknown argument: $arg (run with --help for usage)" >&2; exit 1 ;;
   esac
 done
 
@@ -57,7 +67,6 @@ if [[ ! -d "$KANBAN_ROOT" ]]; then
 fi
 
 # --- Source project_paths.sh helpers ---
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ ! -f "$_SCRIPT_DIR/../lib/project_paths.sh" ]]; then
   echo "ERROR: lib/project_paths.sh not found relative to $0" >&2
   exit 1
@@ -67,7 +76,7 @@ export KANBAN_ROOT
 # shellcheck source=lib/project_paths.sh
 source "$_SCRIPT_DIR/../lib/project_paths.sh"
 
-echo "=== migrate-bug-status-done.sh ==="
+echo "=== scripts/migrate/bug-status-done.sh ==="
 echo "Kanban root: $KANBAN_ROOT"
 [[ "$DRY_RUN" == "true" ]] && echo "(DRY RUN — no files will be written)"
 echo ""
@@ -258,5 +267,5 @@ PYEOF
   echo ""
 done
 
-echo "=== migrate-bug-status-done.sh: complete ==="
+echo "=== scripts/migrate/bug-status-done.sh: complete ==="
 [[ "$DRY_RUN" == "true" ]] && echo "(DRY RUN — no files were written)"

@@ -3,7 +3,7 @@ test_gated_runner_lint.py
 ==========================
 Behavioral tests for team/scripts/lib/gated_runner_lint.sh — the shared
 warn-file-continue wrapper that implements the CONVERT class of
-docs/blocking-site-census.md (v2.3.6): a quality-class finding must warn
+docs/blocking-site-census.md: a quality-class finding must warn
 (dual-channel: printed in full to the console, then filed into the
 GATED_RUNNER_FINDINGS accumulator / findings-file), and MUST NOT abort the
 calling gated runner regardless of the wrapped command's own exit code.
@@ -51,14 +51,14 @@ representative per family"):
      task converts both call sites to the same wrapper.  The real
      pgai_tmp_cleanliness_check / pgai_listener_cleanliness_check functions
      scan actual bare /tmp and real /proc listener state, which a unit test
-     must not perturb (SOP.md "Test Authoring Guidelines" -- no bare-/tmp
+     must not perturb (roles/TESTER.md "Test Authoring Guidelines" -- no bare-/tmp
      writes from tests); this suite instead exercises a synthetic stand-in
      function with the identical zero/non-zero contract, invoked through
      gated_runner_run_quality_lint exactly as run-unit-tests.sh and
      run-integration-tests.sh now do it.
      -> test_post_suite_cleanliness_style_check_warns_files_and_continues
 
-Also covered: the finding-detail regression this task fixed
+Also covered: a non-empty finding detail
 (_gated_runner_build_finding previously always produced an empty "detail"
 field because its heredoc-fed `python3 -` invocation consumed stdin for the
 script source, leaving nothing for the script's own sys.stdin.read() to
@@ -73,11 +73,20 @@ import pathlib
 from tests.unit.shell_harness import run_bash
 
 _LIB = "scripts/lib/gated_runner_lint.sh"
+_ERROR_CONTRACT_LIB = "scripts/lib/error_contract.sh"
 
 
 def _source(snippet: str) -> str:
     """Return a bash snippet that sources gated_runner_lint.sh then runs *snippet*."""
     return f"set -uo pipefail\nsource {_LIB}\n{snippet}"
+
+
+def _source_with_error_contract(snippet: str) -> str:
+    """Same as _source, but also sources error_contract.sh first -- required
+    by gated_runner_assert_findings_claim, which calls pgai_emit_error_contract
+    (both real gated runners source error_contract.sh before gated_runner_lint.sh
+    for exactly this reason)."""
+    return f"set -uo pipefail\nsource {_ERROR_CONTRACT_LIB}\nsource {_LIB}\n{snippet}"
 
 
 # ---------------------------------------------------------------------------
@@ -219,13 +228,17 @@ def test_post_suite_cleanliness_style_check_warns_files_and_continues(
     quality-class check.
 
     pgai_tmp_cleanliness_check itself scans real bare /tmp and must not be
-    exercised from a unit test (SOP.md "Test Authoring Guidelines" bans
+    exercised from a unit test (roles/TESTER.md "Test Authoring Guidelines" bans
     bare-/tmp writes from tests); this fixture uses a synthetic stand-in
     function with the identical contract (0 = clean, 1 = residue found,
     diagnostic printed to stderr) invoked through the exact wrapper call
     shape now used in both runner scripts, proving the conversion's actual
     code path rather than re-testing the underlying scanner.
     """
+    # The /tmp/pgai_orphan_test_residue below is diagnostic sample text this
+    # synthetic stand-in echoes to stderr -- it names no real path and is
+    # never created, opened, or deleted; it only proves the wrapper surfaces
+    # the underlying check's diagnostic line unchanged.
     script = _source(
         """
 _synthetic_bare_tmp_cleanliness_check() {
@@ -294,3 +307,174 @@ def test_write_findings_file_written_even_when_empty(tmp_path: pathlib.Path) -> 
     assert result.returncode == 0
     doc = json.loads(out_path.read_text(encoding="utf-8"))
     assert doc["findings"] == []
+
+
+# ---------------------------------------------------------------------------
+# gated_runner_record_finding
+# ---------------------------------------------------------------------------
+
+
+def test_record_finding_appends_a_hand_authored_quality_finding(tmp_path: pathlib.Path) -> None:
+    """A caller with no command output to summarize (a fatal pre-flight
+    gate noting it aborted the run) can still add a well-shaped finding."""
+    script = _source(
+        """
+gated_runner_record_finding "runner_incomplete" "aborted before pytest ran"
+echo "FINDINGS_COUNT=${#GATED_RUNNER_FINDINGS[@]}"
+echo "FINDING_JSON=${GATED_RUNNER_FINDINGS[0]}"
+"""
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0
+    assert "FINDINGS_COUNT=1" in result.stdout
+    finding_line = next(
+        line for line in result.stdout.splitlines() if line.startswith("FINDING_JSON=")
+    )
+    finding = json.loads(finding_line.removeprefix("FINDING_JSON="))
+    assert finding == {
+        "lint": "runner_incomplete",
+        "severity": "quality",
+        "summary": "aborted before pytest ran",
+    }
+
+
+# ---------------------------------------------------------------------------
+# gated_runner_claim_findings_file / gated_runner_assert_findings_claim --
+# the "clear or claim" mechanism and its consumer-side refusal.
+# ---------------------------------------------------------------------------
+
+
+def test_claim_writes_empty_findings_document_and_a_matching_sidecar_token(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Claiming a path resets it to an empty, THIS-run findings document
+    (proving the "clear" half of clear-then-gate) and records the same
+    token in the sidecar it echoes -- the token round-trips."""
+    out_path = tmp_path / "findings.json"
+    script = _source(
+        f"""
+echo "PRE-EXISTING CONTENT" > "{out_path}"
+TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
+echo "TOKEN=$TOKEN"
+"""
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0
+    token_line = next(line for line in result.stdout.splitlines() if line.startswith("TOKEN="))
+    token = token_line.removeprefix("TOKEN=")
+    assert token, "the claim must echo a non-empty run-identity token"
+
+    doc = json.loads(out_path.read_text(encoding="utf-8"))
+    assert doc["findings"] == [], (
+        "claiming must overwrite whatever was on disk with a fresh, empty "
+        "findings document -- this is the 'clear' half of clear-then-gate"
+    )
+    assert doc["runner"] == "test-runner.sh"
+
+    sidecar = pathlib.Path(f"{out_path}.runid")
+    assert sidecar.read_text(encoding="utf-8") == token, (
+        "the sidecar '<path>.runid' file must hold exactly the token the "
+        "claim echoed -- gated_runner_assert_findings_claim reads it back "
+        "to verify no other invocation reclaimed the path"
+    )
+
+
+def test_assert_findings_claim_succeeds_when_uncontested(tmp_path: pathlib.Path) -> None:
+    """The common case: nothing else touched the path between claim and
+    assert, so the token still matches and the assert is silent (returns 0,
+    prints nothing)."""
+    out_path = tmp_path / "findings.json"
+    script = _source_with_error_contract(
+        f"""
+TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
+gated_runner_assert_findings_claim "{out_path}" "$TOKEN"
+echo "ASSERT_RETURNED=$?"
+"""
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0
+    assert "ASSERT_RETURNED=0" in result.stdout
+    assert "error:   gated_runner.stale_findings_claim" not in result.stderr, (
+        "an uncontested claim must not print the stale-claim refusal"
+    )
+
+
+def test_assert_findings_claim_refuses_with_dual_channel_contract_when_reclaimed(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The consumer-side refusal: when the sidecar token
+    has moved (simulating a concurrent invocation of a gated runner
+    reclaiming the same host-wide path), the assert refuses rather than
+    letting the caller trust content that may belong to a different run --
+    and the refusal carries the full dual-channel contract (error key,
+    message, remedy) plus a census anchor comment at the refusal site."""
+    out_path = tmp_path / "findings.json"
+    script = _source_with_error_contract(
+        f"""
+TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
+echo "a-different-invocations-token" > "{out_path}.runid"
+gated_runner_assert_findings_claim "{out_path}" "$TOKEN"
+echo "ASSERT_RETURNED=$?"
+"""
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, "the wrapping script must still complete (assert never exits)"
+    assert "ASSERT_RETURNED=1" in result.stdout, (
+        "a moved token must make the assert return 1 so the caller can "
+        "skip trusting the file (e.g. skip handing it to the bug filer)"
+    )
+    assert "error:   gated_runner.stale_findings_claim" in result.stderr, (
+        "the refusal's machine key must be stable and grep-able"
+    )
+    assert "no longer carries this invocation's run-identity claim" in result.stderr, (
+        "the refusal's plain-language message must explain what happened"
+    )
+    assert "Re-run the gated runner that owns" in result.stderr, (
+        "the refusal's remedy must be runnable, naming the concrete next step"
+    )
+    assert str(out_path) in result.stderr, "the remedy must name the actual file at issue"
+
+
+def test_assert_findings_claim_refuses_when_sidecar_absent(tmp_path: pathlib.Path) -> None:
+    """A findings file with no sidecar at all (never claimed by this
+    mechanism -- e.g. a stale file written before any claim) is refused exactly
+    like a mismatched token, never silently trusted."""
+    out_path = tmp_path / "findings.json"
+    out_path.write_text('{"schema_version": 1, "findings": []}\n', encoding="utf-8")
+    script = _source_with_error_contract(
+        f'gated_runner_assert_findings_claim "{out_path}" "some-token"\n'
+        'echo "ASSERT_RETURNED=$?"\n'
+    )
+    result = run_bash(tmp_path, script)
+    assert "ASSERT_RETURNED=1" in result.stdout
+    assert "error:   gated_runner.stale_findings_claim" in result.stderr
+    assert "<absent>" in result.stderr, (
+        "the message must say the sidecar was absent, not just print an "
+        "empty token"
+    )
+
+
+def test_reclaiming_after_a_refused_assert_succeeds(tmp_path: pathlib.Path) -> None:
+    """The refusal's own remedy, demonstrated: re-running the claim step
+    produces a fresh token that the sidecar now agrees with, so a
+    subsequent assert against the NEW token succeeds."""
+    out_path = tmp_path / "findings.json"
+    script = _source_with_error_contract(
+        f"""
+TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
+echo "a-different-invocations-token" > "{out_path}.runid"
+gated_runner_assert_findings_claim "{out_path}" "$TOKEN" 2>/dev/null
+echo "FIRST_ASSERT_RETURNED=$?"
+
+NEW_TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
+gated_runner_assert_findings_claim "{out_path}" "$NEW_TOKEN"
+echo "SECOND_ASSERT_RETURNED=$?"
+"""
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0
+    assert "FIRST_ASSERT_RETURNED=1" in result.stdout
+    assert "SECOND_ASSERT_RETURNED=0" in result.stdout, (
+        "re-claiming (the refusal's own remedy) must make the very next "
+        "assert against the freshly-claimed token succeed"
+    )

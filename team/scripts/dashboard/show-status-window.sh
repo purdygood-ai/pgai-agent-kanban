@@ -26,13 +26,30 @@
 #   └─────────────────────────────────────────────────────────────────────────┘
 #
 # Usage:
-#   show-status-window.sh [--kanban-root <path>]
+#   show-status-window.sh [--kanban-root <path>] [-h|--help]
 #
-# Auto-refresh is handled by the caller (dashboard-create.sh uses watch -n N).
+# Auto-refresh is handled by the caller (dashboard/create.sh uses watch -n N).
 #
 # Environment:
 #   NO_COLOR=1 — disables all ANSI codes
 #   TERM=dumb  — disables all ANSI codes
+
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:34}"
+      exit 0
+      ;;
+  esac
+done
 
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
@@ -51,6 +68,8 @@ source "${SCRIPT_DIR}/lib/helper_resolver.sh"
 source "${SCRIPT_DIR}/lib/version.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
 
 # --- Pass through args ---
 DATA_ARGS=("$@")
@@ -84,25 +103,7 @@ if [[ "${TERM:-}" == "dumb" ]] || [[ "${NO_COLOR:-}" == "1" ]]; then
   USE_COLOR=false
 fi
 
-ansi_code() {
-  local color="$1"
-  if [[ "$USE_COLOR" != "true" ]]; then echo ""; return; fi
-  case "$color" in
-    black)   echo $'\033[0;30m' ;;
-    red)     echo $'\033[0;31m' ;;
-    green)   echo $'\033[0;32m' ;;
-    yellow)  echo $'\033[0;33m' ;;
-    blue)    echo $'\033[0;34m' ;;
-    magenta) echo $'\033[0;35m' ;;
-    cyan)    echo $'\033[0;36m' ;;
-    white)   echo $'\033[0;37m' ;;
-    bold)    echo $'\033[1m' ;;
-    dim)     echo $'\033[2m' ;;
-    reset)   echo $'\033[0m' ;;
-    *)       echo "" ;;
-  esac
-}
-
+# ansi_code() is defined in lib/script_common.sh (sourced above).
 RESET="$(ansi_code reset)"
 C_BOLD="$(ansi_code bold)"
 C_DIM="$(ansi_code dim)"
@@ -115,11 +116,9 @@ C_WHITE="$(ansi_code white)"
 # --- Collect data ---
 DATA="$("$SCRIPT_DIR/data.sh" "${DATA_ARGS[@]}")"
 
-get_val() {
-  local key="$1"
-  local default="${2:-}"
-  echo "$DATA" | awk -F= -v k="$key" 'NR==1{OFS="="} $1 == k { $1=""; sub(/^=/, ""); print; found=1 } END { if (!found) print "'"$default"'" }'
-}
+# get_val reads one KEY=VALUE pair from DATA (lib/dashboard_common.sh).
+# shellcheck source=../lib/dashboard_common.sh
+source "${SCRIPT_DIR}/../lib/dashboard_common.sh"
 
 KANBAN_ROOT_VAL="$(get_val KANBAN_ROOT "${PGAI_AGENT_KANBAN_ROOT_PATH}")"
 ACTIVE_RC="$(get_val ACTIVE_RC "none")"
@@ -147,34 +146,21 @@ fi
 KANBAN_VERSION="$(get_kanban_version "$KANBAN_ROOT_VAL" "$REPO_ROOT" "${LAST_RELEASED:-}")"
 
 # --- RC opened-time ---
+# RC Opened At comes from data.sh (RC_OPENED_AT), which reads it with Active
+# RC through the one release-state reader; empty when it is not recorded.
 RC_AGE_STR=""
-# Resolve project-scoped release-state.md (canonical location).
-RELEASE_STATE_FILE=""
-if command -v pp_project_root >/dev/null 2>&1; then
-  # Use the project already resolved from data.sh output (no default substitution).
-  # RESOLVED_PROJECT is set below from get_val PROJECT_NAME, but data.sh is called
-  # before this block; re-resolve here from the DATA variable already captured.
-  _proj_name="$(echo "$DATA" | awk -F= '$1 == "PROJECT_NAME" { $1=""; sub(/^=/, ""); print; exit }')"
-  if [[ -n "$_proj_name" ]] && [[ -f "$(KANBAN_ROOT="$KANBAN_ROOT" pp_project_root "$_proj_name" 2>/dev/null)/release-state.md" ]]; then
-    RELEASE_STATE_FILE="$(KANBAN_ROOT="$KANBAN_ROOT" pp_project_root "$_proj_name")/release-state.md"
-  fi
-fi
-if [[ -f "$RELEASE_STATE_FILE" ]]; then
-  # Liberal parse — read first ## RC Opened At header only, skip blank lines,
-  # stop at any next ## header, trim whitespace.
-  RC_OPENED_AT="$(awk '/^## RC Opened At/{found=1;next} found && /^##[[:space:]]/{exit} found && /^[[:space:]]*$/{next} found{print; exit}' "$RELEASE_STATE_FILE" 2>/dev/null | tr -d '[:space:]')" || RC_OPENED_AT=""
-  if [[ -n "$RC_OPENED_AT" ]]; then
-    RC_EPOCH="$(date -d "$RC_OPENED_AT" +%s 2>/dev/null || echo "")"
-    if [[ -n "$RC_EPOCH" ]]; then
-      NOW_EPOCH="$(date +%s)"
-      RC_ELAPSED=$(( NOW_EPOCH - RC_EPOCH ))
-      if [[ "$RC_ELAPSED" -lt 3600 ]]; then
-        RC_AGE_STR="$(( RC_ELAPSED / 60 ))m active"
-      elif [[ "$RC_ELAPSED" -lt 86400 ]]; then
-        RC_AGE_STR="$(( RC_ELAPSED / 3600 ))h $(( (RC_ELAPSED % 3600) / 60 ))m active"
-      else
-        RC_AGE_STR="$(( RC_ELAPSED / 86400 ))d active"
-      fi
+RC_OPENED_AT="$(get_val RC_OPENED_AT "")"
+if [[ -n "$RC_OPENED_AT" ]]; then
+  RC_EPOCH="$(date -d "$RC_OPENED_AT" +%s 2>/dev/null || echo "")"
+  if [[ -n "$RC_EPOCH" ]]; then
+    NOW_EPOCH="$(date +%s)"
+    RC_ELAPSED=$(( NOW_EPOCH - RC_EPOCH ))
+    if [[ "$RC_ELAPSED" -lt 3600 ]]; then
+      RC_AGE_STR="$(( RC_ELAPSED / 60 ))m active"
+    elif [[ "$RC_ELAPSED" -lt 86400 ]]; then
+      RC_AGE_STR="$(( RC_ELAPSED / 3600 ))h $(( (RC_ELAPSED % 3600) / 60 ))m active"
+    else
+      RC_AGE_STR="$(( RC_ELAPSED / 86400 ))d active"
     fi
   fi
 fi
@@ -397,16 +383,17 @@ if [[ "$BLOCKED_COUNT" -gt 0 ]]; then
   if [[ -n "$RESOLVED_PROJECT" ]]; then
       _ssw_tasks_dir="$(KANBAN_ROOT="$KANBAN_ROOT" pp_tasks_dir "$RESOLVED_PROJECT" 2>/dev/null || true)"
   fi
-  python3 - "${_ssw_tasks_dir}" "$USE_COLOR" <<'PY' 2>/dev/null || true
+  python3 - "${_ssw_tasks_dir}" "$USE_COLOR" "$RESET" "$C_RED" "$C_DIM" "$C_BOLD" <<'PY' 2>/dev/null || true
 import os, re, sys, pathlib
 
 tasks_root = pathlib.Path(sys.argv[1])
 use_color  = sys.argv[2].lower() == "true"
 
-RESET  = "\033[0m" if use_color else ""
-C_RED  = "\033[0;31m" if use_color else ""
-C_DIM  = "\033[2m" if use_color else ""
-C_BOLD = "\033[1m" if use_color else ""
+# RESET/C_RED/C_DIM/C_BOLD are already the single-sourced escapes (or ""
+# in NO_COLOR mode) computed by the bash caller via ansi_code()
+# (team/scripts/lib/script_common.sh) -- threaded through argv rather
+# than a second hand-transcribed copy of the same escape table.
+RESET, C_RED, C_DIM, C_BOLD = sys.argv[3:7]
 
 def read_field(text, heading):
     pat = re.compile(r'^##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)

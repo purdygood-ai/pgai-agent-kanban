@@ -29,7 +29,7 @@
 #                          projects/<project>/metrics/rc/ sorted by RC version.
 #                          Can be combined with --project.
 #   --tail                 Live-tail history.csv using tail -f.  Streams each new row
-#                          as it is appended by cm-release.sh / metrics_csv_writer.py.
+#                          as it is appended by cm/release.sh / metrics_csv_writer.py.
 #                          Press Ctrl-C to stop.
 #   --project <name>       Project to operate on (required; or set PGAI_PROJECT_NAME env).
 #   --kanban-root <path>   Override PGAI_AGENT_KANBAN_ROOT_PATH.
@@ -62,6 +62,10 @@ LIB_DIR="${SCRIPT_DIR}/lib"
 source "${LIB_DIR}/project_paths.sh"
 # shellcheck source=lib/projects.sh
 source "${LIB_DIR}/projects.sh"
+# shellcheck source=lib/script_common.sh
+source "${LIB_DIR}/script_common.sh"
+# shellcheck source=lib/pp_run_ops.sh
+source "${LIB_DIR}/pp_run_ops.sh"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -79,9 +83,16 @@ _PROJECT_EXPLICIT=0   # 1 when --project was explicitly passed
 # ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
-_usage() {
-    sed -n '2,/^set -euo pipefail/{ /^set -euo pipefail/d; s/^# \{0,1\}//; p }' "$0"
-}
+# Usage text as data (per lib/script_common.sh's print_usage_and_exit contract):
+# the header comment block of this file, self-read via sed.  The sentinel
+# capture preserves the header block's trailing blank line, which plain
+# command substitution would otherwise swallow (it strips ALL trailing
+# newlines); one newline is then trimmed back off because
+# print_usage_and_exit's own printf adds exactly one — together this
+# reproduces the pre-refactor byte-for-byte --help output.
+_USAGE_TEXT="$(sed -n '2,/^set -euo pipefail/{ /^set -euo pipefail/d; s/^# \{0,1\}//; p }' "$0"; printf 'x')"
+_USAGE_TEXT="${_USAGE_TEXT%x}"
+_USAGE_TEXT="${_USAGE_TEXT%$'\n'}"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -123,8 +134,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            _usage
-            exit 0
+            print_usage_and_exit 0 "$_USAGE_TEXT"
             ;;
         *)
             echo "ERROR: unknown argument: $1" >&2
@@ -318,44 +328,16 @@ if [[ "$MODE" == "csv" ]]; then
 
     # Filter by project column when --project was explicitly passed;
     # otherwise emit the entire CSV unmodified (multi-project history files
-    # are valid and callers may want all rows).
-    # Use Python for reliable CSV column extraction to handle quoting correctly.
+    # are valid and callers may want all rows). The CSV is re-read and
+    # re-written by pgai_agent_kanban.lib.metrics.history_csv(), which
+    # handles quoting and prints the header alone when no row matches.
     _CSV_PROJECT_FILTER=""
     if [[ "$_PROJECT_EXPLICIT" -eq 1 ]]; then
         _CSV_PROJECT_FILTER="$PROJECT_NAME"
     fi
 
-    python3 - "$HISTORY_CSV" "$_CSV_PROJECT_FILTER" <<'PY_CSV_FILTER'
-import csv, sys, pathlib
-
-csv_path = pathlib.Path(sys.argv[1])
-project_filter = sys.argv[2]   # filter to this project; "" means all
-
-rows = []
-header = None
-
-with open(csv_path, newline="", encoding="utf-8") as fh:
-    reader = csv.DictReader(fh)
-    header = reader.fieldnames or []
-    for row in reader:
-        if not project_filter or row.get("project", "") == project_filter:
-            rows.append(row)
-
-if not rows:
-    # Print header even when no rows match so callers can parse the schema
-    print(",".join(header))
-    sys.exit(0)
-
-import io
-buf = io.StringIO()
-writer = csv.DictWriter(buf, fieldnames=header, lineterminator="\n",
-                        extrasaction="ignore")
-writer.writeheader()
-writer.writerows(rows)
-print(buf.getvalue(), end="")
-PY_CSV_FILTER
-
-    exit "${PIPESTATUS[0]:-$?}"
+    pp_run_ops pgai_agent_kanban.lib.metrics history_csv "$HISTORY_CSV" "$_CSV_PROJECT_FILTER"
+    exit 0
 fi
 
 # ===========================================================================
@@ -381,37 +363,17 @@ if [[ "$MODE" == "jsonl" ]]; then
         exit 2
     fi
 
-    # Emit each JSON file on a single line (compact JSON).
-    # Pass project name as filter only when --project was explicitly given.
+    # Emit each JSON file on a single line (compact, keys sorted) through
+    # pgai_agent_kanban.lib.metrics.rc_rollups_jsonl(); an unreadable file
+    # is skipped with a warning on stderr. Pass project name as filter only
+    # when --project was explicitly given.
     _JSONL_PROJECT_FILTER=""
     if [[ "$_PROJECT_EXPLICIT" -eq 1 ]]; then
         _JSONL_PROJECT_FILTER="$PROJECT_NAME"
     fi
 
-    python3 - "${RC_FILES[@]}" "$_JSONL_PROJECT_FILTER" <<'PY_JSONL'
-import json, sys, pathlib
-
-# Last arg is project name (filter); all prior args are file paths
-project_filter = sys.argv[-1]
-file_paths = sys.argv[1:-1]
-
-for path_str in file_paths:
-    p = pathlib.Path(path_str)
-    if not p.is_file():
-        continue
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        import sys as _sys
-        print(f"WARNING: skipping {p}: {exc}", file=_sys.stderr)
-        continue
-    if project_filter and data.get("project", "") != project_filter:
-        continue
-    # Emit as compact single-line JSON
-    print(json.dumps(data, separators=(",", ":"), sort_keys=True))
-PY_JSONL
-
-    exit "${PIPESTATUS[0]:-$?}"
+    pp_run_ops pgai_agent_kanban.lib.metrics rc_rollups_jsonl "$_JSONL_PROJECT_FILTER" "${RC_FILES[@]}"
+    exit 0
 fi
 
 # ===========================================================================

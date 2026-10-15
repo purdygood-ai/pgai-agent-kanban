@@ -1,0 +1,344 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "v2.23.13 is a five-item BUG bundle: the status-bar defer posture (BUG-0317), the\nthree-headed stale-lock fix (BUG-0318: atomic release, contention-path reaping,\nwhy.sh STUCK-LOCK correlation), the surviving provenance citation (BUG-0319),\nthe hygiene lint's unscanned second test tree (BUG-0320), and the agent-metrics\nwall column (BUG-0321). Every bundled item was verified behaviorally, not just\nstructurally: all four BUG-0317 status-bar fixtures were exercised against a\nthrowaway kanban root, all three BUG-0318 heads were exercised by killing and\nsignalling real lock holders, the widened hygiene lint was re-pointed at a\nfreshly-seeded third test tree, and the wall-metrics self-heal was confirmed\nagainst the live v2.23.12 rollup. **Every bundled item is addressed and works.**\n\nBoth gated runners nevertheless exited non-zero. `run-unit-tests.sh` exited 1\nwith 7 failures and `run-integration-tests.sh` exited 1 with 1 failure. The\nfailures fall into exactly two causes, both introduced by this RC's own work:\n(1) `docs/api/icd.json` was not regenerated after CODER-005 edited the\n`get_verdicts` docstring the ICD generator reads, which fails three tests plus\nthe `icd_freshness` quality lint in both suites; and (2) CODER-004's new stale-lock\nreaper legitimately changed the contention verdict for a provenance-less lock,\nwhich invalidates two OVERWATCH tests that hold locks with a bare `flock` and no\nprovenance record. A third cluster — CODER-004's own new reap fixtures —\npasses in isolation and under the runner's environment but fails inside the full\nsuite, a test-isolation defect in newly shipped test code.\n\nRe-running the unit suite over the identical commit produced a *different* set of\nnine failures rather than the same seven, which established the third cluster as\nunstable rather than merely wrong and surfaced one further, pre-existing flaky\ncheck. `pytest-randomly` is active in both certifying runners with no seed pinned\nor echoed, so the authoritative pass/fail signal is not reproducible run to run —\nworth an operator's attention independently of this release.\n\nFour follow-ups are filed: BUG-0322 (the stale ICD artifact), BUG-0323 (the two\nOVERWATCH lock fixtures), BUG-0324 (the cwd- and order-coupled reap fixtures), and\nBUG-0325 (the pre-existing flaky documentation-truth check).\n\nFour CODER tickets merged after the ICD artifact went stale; three of them\nrecorded the failures and classified them \"pre-existing\" against a baseline\ncommit *inside this same RC* rather than against `ai_main`. That rationalization\nis the reason a two-command fix reached TESTER as a red suite.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0317 — the status bar renders the resolved defer posture",
+      "heading": "Finding 1: BUG-0317 — the status bar renders the resolved defer posture",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll four acceptance fixtures were exercised against a throwaway kanban root\n(`/tmp/pgai_kanban_tmp/deferfix-SAFyEb`), never the live install:\n\n| Fixture | Rendered status line (NO_COLOR) |\n|---|---|\n| campaign file `until=v2.24.0` + 2 deferred lows | `... \\| BUGS DEFERRED 2 (<=low) until v2.24.0 \\| ...` |\n| cfg-only posture, no campaign file | `... \\| BUGS DEFERRED 2 (<=low) \\| ...` |\n| seeded malformed campaign file | `... \\| DEFER CONFIG UNREADABLE: <path> \\| ...` |\n| no deferral in force | no segment |\n\n`why.sh --project demo --details` reported `deferred_bugs=true (campaign file)`,\n`deferred_bug_level=low (campaign file)`, `until=v2.24.0 (campaign file: <path>)`\nfor the same posture, so the bar and the resolver agree in all four states. The\ndefining never-lie failure fixture the bug names — a present, well-formed\ncampaign file with zero bar indication — does **not** reproduce.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0317 was addressed by documentation, not code",
+      "heading": "Finding 2: BUG-0317 was addressed by documentation, not code",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`CODER-20260918-002` produced exactly one commit, `48ade34`, touching only\n`docs/DASHBOARD-PANES.md`: it added the BUGS DEFERRED segment to the dashboard\ntour's segment list and rich-mode glyph legend. The rendering itself already\nexisted on `ai_main` — `git log ai_main..ai_rc/v2.23.13 -- team/scripts/dashboard/`\nis empty. Finding 1 confirms the rendering works, so the caveat is only that the\noperator's originally-reported symptom could not be reproduced and its root cause\nwas therefore never established; the most likely explanation is that the operator\nobserved an installed copy predating the segment. Two cosmetic deviations from\nthe bug's own Expected text, both pre-existing and both now documented: the glyph\nis `✋` rather than `💤`, and the level comparator renders `<=` rather than `≤`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0318 head 1 — lock release is atomic on every exit path",
+      "heading": "Finding 3: BUG-0318 head 1 — lock release is atomic on every exit path",
+      "level": 3,
+      "body": "**Category:** pass\n\nExercised directly against `team/scripts/lib/lock_provenance.sh` in a throwaway\nsandbox, with a real holder process in each case:\n\n- Holder acquires and exits cleanly **without** calling `pgai_lock_release`\n  (the shape of the HALT-detected \"exiting cleanly\" path the bug's addendum\n  names as prime suspect) → the `pgai_lock_release_all_held` trap fires,\n  narrates, and both the lock file and its provenance are gone.\n- Holder receives `SIGTERM` while holding → same result, file gone.\n- Holder receives `SIGKILL` while holding → the file survives with its\n  provenance intact (unavoidable; a killed process runs no handler), and the\n  next waiter reaps it (Finding 4).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0318 head 2 — the contention-path reaper reaps and proceeds",
+      "heading": "Finding 4: BUG-0318 head 2 — the contention-path reaper reaps and proceeds",
+      "level": 3,
+      "body": "**Category:** pass\n\nAfter `kill -9` of a lock holder whose `sleep` child still held the inherited\nflock, the next `pgai_lock_acquire` emitted\n`error: lock.provenance.stale_reaped.dead_pid` with the holder pid and age, then\n**returned 0** — the fleet self-recovers within one firing with no operator\naction, which is the acceptance criterion. The same was confirmed for a\nsynthetic dead-pid provenance record. A live, well-provenanced, recent holder\nstill falls through to the unchanged `lock.provenance.contended` refusal.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0318 head 3 — why.sh reports STUCK-LOCK, never IDLE/none-needed",
+      "heading": "Finding 5: BUG-0318 head 3 — why.sh reports STUCK-LOCK, never IDLE/none-needed",
+      "level": 3,
+      "body": "**Category:** pass\n\nWith one `BACKLOG` task queued and a provenance-less lock backdated three hours\nat the `pp_repo_lock_path` location, `why.sh --project demo --details` produced:\n\n```\ndemo: STUCK-LOCK — cause: 1 task(s) are queued but ⚠️ VIOLATION: lock .../repo-wake-demo.lock\n(age 3h 0m) carries no provenance record at all ...; remedy: release it:\nteam/scripts/release-locks.sh --release repo-wake-demo ...\n```\n\nand the `== locks ==` pane carried the `⚠️ VIOLATION` marker rather than a shrug.\nThe pre-fix verdict for this state was `IDLE / \"remedy: none needed\"`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0319 — the surviving provenance citation is gone",
+      "heading": "Finding 6: BUG-0319 — the surviving provenance citation is gone",
+      "level": 3,
+      "body": "**Category:** pass\n\n`grep -rn \"CODER-009\" --include='*.py' team/pgai_agent_kanban/` returns nothing.\n`test_cli_rest_agent_metrics_parity.py:100` now reads\n``# Per-task wall data (the `wall.by_agent` block): coder averages`` and the four\nfollowing comment lines preserving the deliberately-different-figures point are\nunchanged.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0320 — the hygiene lint now reads the second test tree",
+      "heading": "Finding 7: BUG-0320 — the hygiene lint now reads the second test tree",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_hygiene.py --classes provenance -v` now lists 20 files\nunder `team/pgai_agent_kanban/api/tests/`, and the tree-wide run reports\n`OK — 0 findings across 8 scan director(y/ies)` with that directory genuinely\nwalked. The general form was chosen over the narrow one: seeding a *third* test\ntree at `team/pgai_agent_kanban/lib/tests/` in a scratch copy of the tree, with a\n`CODER-20260101-001` citation in a comment, produced three scan lines for that\ndirectory and reported the seeded citation — so a test tree added later is routed\nautomatically rather than silently dropped. `team/tests/unit/test_lint_hygiene.py`\ngained the two regression cases the bug asked for\n(`test_tests_dir_nested_under_code_surface_is_routed_not_dropped` and\n`test_tests_dir_scanned_directly_as_code_target_is_not_routed`), both passing.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0321 — the wall-metrics self-heal is real and now documented",
+      "heading": "Finding 8: BUG-0321 — the wall-metrics self-heal is real and now documented",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe bug's own step-4 verification now succeeds against the live install:\n`projects/pgai-agent-kanban/metrics/rc/v2.23.12.json` carries a `wall` block\n(`cm`, `coder`, `pm`, `tester`), where every older rollup carries `None`. The\nlive `scripts/dashboard/agent-metrics.sh --window 10` column that showed `--` for\nevery agent now shows `cm 2`, `coder 30`, `pm 5`, `tester 30` (`writer` remains\n`--`: no writer task in the one wall-bearing RC, which is the documented\nplaceholder meaning). The RC additionally documents the one-release lag and the\nno-backfill decision in the module docstrings of `metrics_aggregator.py` (write\nside) and `agent_metrics.py` (read side), so the condition under which the column\nfills is stated rather than discovered.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "`docs/api/icd.json` was not regenerated after the verdict docstring changed",
+      "heading": "Finding 9: `docs/api/icd.json` was not regenerated after the verdict docstring changed",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** medium (recurs on any RC that edits a docstring the ICD generator embeds)\n**Filed As:** BUG-0322 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nCommit `f4e9e46` added `STUCK-LOCK` to `get_verdicts()`'s documented verdict\nvocabulary in `team/pgai_agent_kanban/api/reads.py` and changed \"four verdict\nwords\" to \"five\". The ICD generator embeds that docstring verbatim as\n`paths./verdicts.get.description`, and `docs/api/icd.json` is not in\n`git diff --name-only ai_main..ai_rc/v2.23.13`. Regenerating to a temp path with\n`bash team/scripts/generate-icd.sh --output <tmp>` and diffing against the\ncommitted artifact yields **one** changed line — that description string.\n\nConsequences: three unit tests fail, and the `icd_freshness` quality lint fires\nin the pre-flight of BOTH runners, so `run-unit-tests.sh` and\n`run-integration-tests.sh` each exit 1. Both exited 0 on v2.23.12, so this is a\nregression this RC introduced, and the remedy is `bash team/scripts/generate-icd.sh`\nplus a commit of `docs/api/icd.json`.\n\nThe RC's own docstring edits are correct and must stay; only the generated\nartifact needs to catch up. `SOP-core.md`'s Documentation Discipline Rule already\nbinds this case — the generated artifact is the matching documentation artifact\nfor a docstring the generator reads.",
+      "filed_as": "BUG-0322",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "medium (recurs on any RC that edits a docstring the ICD generator embeds)",
+        "filed_as": "BUG-0322 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "two OVERWATCH lock-contention tests hold their lock without provenance",
+      "heading": "Finding 10: two OVERWATCH lock-contention tests hold their lock without provenance",
+      "level": 3,
+      "body": "**Category:** stale-assertion\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (two fixtures, one holder-script shape, already fixed once in a sibling test)\n**Filed As:** BUG-0323 (Path C-A)\n\n**Step 7 evidence.**\n\n- *Test file and line:* `team/tests/unit/test_overwatch_lock_halt_protocol.py:157`\n  (`test_repo_lock_path_matches_for_project_other_than_pgai_kanban`) and\n  `team/tests/integration/test_cross_cutting.py`\n  (`TestPerRepoLockContention::test_overwatch_protocol_declines_when_repo_lock_is_held`).\n- *Failing assertion, expected vs actual:* expected `'EXIT_CODE=4' in stdout`\n  (sentinel 4 = contended, OVERWATCH declines); actual stdout\n  `'noop ran\\nEXIT_CODE=0\\n'` — OVERWATCH acquired the lock and ran its repair\n  function.\n- *Production file and line where the behavior changed:*\n  `team/scripts/lib/lock_provenance.sh`, the staleness-reap branch inside\n  `pgai_lock_acquire` (around lines 525-555), which classifies a lock with no\n  provenance record as stale, narrates\n  `lock.provenance.stale_reaped.no_provenance`, removes it, and retries once.\n  That narration appears verbatim in both failures' stderr.\n- *RC commit / task ID that changed it:* `3bdddcc`,\n  `CODER-20260918-004-stale-lock-reaping`.\n- *Why the new value is correct per the requirements doc:* `BUG-0318` head 2\n  names \"no provenance at all\" as one of the three independently-verifiable\n  reap conditions, and its acceptance list includes \"Fixture: provenance-less\n  lock → reaped + ⚠️ narration naming the atomicity violation.\" Both fixtures\n  hold their lock with a bare `exec 9>file; flock -x 9` and never write a\n  provenance record, which is precisely that shape. No production holder has it:\n  `team/scripts/wake/harness.sh:437`, `team/scripts/lib/wake_driver.sh` and\n  `team/scripts/lib/overwatch_protocol.sh:427` all take the repo lock through\n  `pgai_lock_acquire`, which always writes `holder`/`pid`/`op`/`task`. I confirmed\n  separately that a live, well-provenanced holder still produces\n  `lock.provenance.contended` and return 1, unchanged.\n- *Recommendation:* **the tests, not the production code, need to change.** Give\n  each fixture's holder a provenance record naming its own live pid — the same\n  repair `CODER-20260918-004` already applied to\n  `team/tests/unit/test_lock_provenance.py`'s contended-acquisition fixture in\n  the same commit. Changing `lock_provenance.sh` to make these tests pass would\n  undo `BUG-0318` head 2.\n\nCaveat worth CODER's attention: these two are the only coverage that OVERWATCH\ndeclines while an agent is mid-flight, so that protection is unverified until\nthey are repaired.",
+      "filed_as": "BUG-0323",
+      "filed_by": null,
+      "severity": null,
+      "category": "stale-assertion",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "test_file_and_line": "team/tests/unit/test_overwatch_lock_halt_protocol.py:157",
+        "failing_assertion_expected_vs_actual": "expected `'EXIT_CODE=4' in stdout`",
+        "rc_commit_task_id_that_changed_it": "`3bdddcc`,",
+        "why_the_new_value_is_correct_per_the_requirements_doc": "`BUG-0318` head 2",
+        "recommendation": "the tests, not the production code, need to change.** Give"
+      },
+      "raw": {
+        "category": "stale-assertion",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (two fixtures, one holder-script shape, already fixed once in a sibling test)",
+        "filed_as": "BUG-0323 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "BUG-0318 head 1 and head 3 landed with no acceptance gap; head 2's fixtures did not",
+      "heading": "Finding 11: BUG-0318 head 1 and head 3 landed with no acceptance gap; head 2's fixtures did not",
+      "level": 3,
+      "body": "**Category:** pass\n\nRecorded for completeness alongside Findings 3-5: every acceptance bullet in\n`BUG-0318` was exercised and met. The two fixtures the addendum added — a HALT\ndrop mid-chain while the lock is held, and `SIGTERM`/`SIGKILL` of the holder —\nwere both reproduced against the shipped library, and the fix does live in one\nplace (`pgai_lock_release_all_held`, installed as either the wake chain's\nexisting `CLEANUP_ON_EXIT_PRE_HOOK` or this library's own EXIT/SIGTERM/SIGINT\ntrap) rather than at each exit site, which is what the addendum asked for.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "three new reap fixtures are cwd- and order-coupled, and fail inside the gated runner",
+      "heading": "Finding 12: three new reap fixtures are cwd- and order-coupled, and fail inside the gated runner",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task for the fixtures; the runner-determinism question is a separate decision)\n**Systemic Risk:** medium (the certifying suite's verdict is currently a property of the run, not of the tree)\n**Filed As:** BUG-0324 (Path C-A)\n\n`team/tests/unit/test_lock_contention_staleness_reap.py` — new in this RC — fails\ninside `run-unit-tests.sh` and passes everywhere else I could put it: alone\n(`8 passed`), alone three times while the full suite loaded the machine, alone\nunder the runner's own environment, and inside a full\n`python3 -m pytest tests/unit/` pass that produced only the ICD and OVERWATCH\nfailures. Which of its fixtures fail is not stable either — three in the first\ngated run (`test_dead_pid_holder_lock_is_reaped_and_narrated`,\n`test_provenance_less_contended_lock_is_reaped_with_atomicity_narration`,\n`test_live_pid_lock_older_than_threshold_is_reaped_on_age`) and those three plus\n`test_kill9_holder_self_recovers_on_next_acquisition` in the confirming re-run\nover the identical commit.\n\nTwo concrete defects were isolated, and one question was left open.\n\n1. **The file is cwd-coupled — proven.** It resolves the library under test as\n   the relative string `\"scripts/lib/lock_provenance.sh\"`. Its *holder*\n   subprocesses are launched with `cwd=str(_repo_root())`, computed from the test\n   file's own location, but the *acquirer* goes through\n   `run_bash()` in `team/tests/unit/shell_harness.py`, which passes no `cwd` to\n   `subprocess.run` and therefore inherits the interpreter's. Invoking pytest on\n   this one file from any directory other than `<dev tree>/team` produces\n   `7 failed, 1 passed`, every failure reading\n   `bash: line 2: scripts/lib/lock_provenance.sh: No such file or directory`.\n   `docs/test-authoring-guidelines.md` (around line 344) states this rule and\n   predicts this exact symptom: \"green from the repo root, red from `team/` or\n   from a scratch directory, with a failure that accuses the tree.\"\n2. **The gated suites run in a randomised order — proven.** `pytest-randomly`\n   4.1.0 is installed and active: the run's header reads\n   `Using --randomly-seed=3961743329` and the per-file progress lines are\n   non-alphabetical. The estate already knows about this plugin and neutralises\n   it where order must be stated (`team/scripts/verify-test-order-independence.sh`\n   passes `-p no:randomly`, and `test_order_independence_plugin_neutralization.py`\n   keeps that flag in place), but neither gated runner passes it. So the\n   authoritative pass/fail signal executes in a different order on every\n   invocation, which is why this file is green in one full run and red in\n   another with no change to the tree.\n3. **The specific failure path was not isolated (open).** In the gated run the\n   `source` clearly succeeded — the reaper's own narration is in the captured\n   stderr — yet `pgai_lock_acquire` returned 1 without emitting the\n   `lock.provenance.contended` contract that is its only other non-zero\n   contention-branch exit. Under the fixture's `set -euo pipefail`, an abort at a\n   command substitution inside the bounded reap retry would produce exactly that\n   shape. Which one it is is in the bug for CODER to trace.\n\n**The shipped library is not implicated, and that was checked rather than\nassumed.** Every behavior these three fixtures cover was exercised directly\nagainst `team/scripts/lib/lock_provenance.sh` outside pytest, and all of it is\ncorrect — see Findings 3 and 4. This is a defect in test code; it is rated `bug`\nrather than `stale-assertion` because no literal this RC changed is being\nasserted, and it is rated high in its own filing because the gated runner is the\nonly authoritative pass/fail signal this framework has and it is red.",
+      "filed_as": "BUG-0324",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task for the fixtures; the runner-determinism question is a separate decision)",
+        "systemic_risk": "medium (the certifying suite's verdict is currently a property of the run, not of the tree)",
+        "filed_as": "BUG-0324 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "the doc-command-truth help check reports a false failure inside the full suite",
+      "heading": "Finding 13: the doc-command-truth help check reports a false failure inside the full suite",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing — this RC's diff does not touch the surface)\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** medium (same class as Finding 12: the certifying suite's verdict is not stable)\n**Filed As:** BUG-0325 (Path C-A)\n\n`tests/unit/test_lint_doc_command_truth.py::test_real_tree_default_exempt_list_closes_the_named_process_internal_citations`\nfailed in the confirming re-run with\n`HELP FAILS: team/scripts/dashboard/metadata.sh in: docs/OPERATIONS.md:1457`, and\npassed in the first gated run over the identical commit. The tree is not at fault\nand that was checked three ways: `bash team/scripts/dashboard/metadata.sh --help`\nexits 0; `python3 team/scripts/lint_doc_command_truth.py` reports\n`OK — 0 findings` across 653 citations in 13 documents; and\n`python3 -m pytest tests/unit/test_lint_doc_command_truth.py` gives `26 passed`.\n\nThe lint probes each cited command by invoking its `--help` in a subprocess, which\nmakes the check sensitive to conditions the full suite creates — a probe slow\nenough under load to hit a timeout, or an environment the session left behind.\n`git diff --name-only ai_main..ai_rc/v2.23.13` touches none of\n`lint_doc_command_truth.py`, `dashboard/metadata.sh`, `docs/OPERATIONS.md`, or\n`team/config/doc-command-truth-help-exempt.txt`, so this is pre-existing rather\nthan a regression this RC introduced. It is filed on its own rather than folded\ninto BUG-0324 because it is a different test with a different cause; the two share\nonly the property that the suite is not reproducible.",
+      "filed_as": "BUG-0325",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing — this RC's diff does not touch the surface)",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "medium (same class as Finding 12: the certifying suite's verdict is not stable)",
+        "filed_as": "BUG-0325 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "structural, constraint and standards checks",
+      "heading": "Finding 14: structural, constraint and standards checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Acceptance criterion \"All Python files compile cleanly\"** — `python3 -m py_compile`\n  on every `.py` in `git diff --name-only ai_main..ai_rc/v2.23.13`: clean.\n- **Acceptance criterion \"All bash files pass syntax check\"** — `bash -n` on every\n  `.sh` in the same diff: clean.\n- **Documentation Discipline** — the RC adds one tunable,\n  `[locks] stale_lock_reap_after_wake_periods`. It is documented in\n  `kanban.cfg_example` (+37 lines) and `project.cfg_example` (+23 lines), carries\n  a `config_loader.sh` Key Registry entry, and names its in-code fallback\n  (`pp_stale_lock_reap_after_wake_periods()`, default 3) so removing the line\n  changes nothing.\n- **New gate authoring contract** — the new refusal site declares its census\n  class in a comment (`# BLOCK-WORTHY: invariant-by-design ...`), emits the\n  dual-channel `error`/`message`/`remedy` contract, and carries\n  `# CENSUS-ANCHOR: lock-provenance-contended-01` with a matching\n  `docs/blocking-site-census.md` Locator Index entry at line 1092.\n  `lint_gate_census_compliance.py` reports `[]`; the dual-channel-pair lint\n  findings files for both suites are `[]`.\n- **Strict mode preserved** — `set -euo pipefail` present in every changed\n  executable script (`why.sh:110`, `release-locks.sh:80`, `verdict-report.sh`);\n  the changed files under `team/scripts/lib/` are sourced libraries, which\n  correctly do not set it.\n- **No secrets** — grepping the diff for added lines assigning a literal to a\n  `password`/`api_key`/`secret`/`token` name: no hits.\n- **Step 6.13 skip-cites-a-real-bug** — `bash team/scripts/lint_skip_bug_gate.sh`\n  exits 0: `0 missing files`, no placeholder shapes.\n- **Step 6.8 synthetic release simulation** — applicable (the diff touches\n  `team/scripts/lib/project_paths.sh`). `tests/integration/test_cm_release_synthetic.py`\n  ran inside the gated integration suite: 17 passed.\n- **Step 6.1 release-state sanity** — all four fields well-formed;\n  `## Active RC` is `v2.23.13`, `## Last Released` is `v2.23.12`, and\n  `semver_gt v2.23.13 v2.23.12` (via `team/scripts/lib/semver.sh`, never an\n  inline compare) is true.\n- **Step 6.10 prerequisite graph** — acyclic; every referenced task ID exists;\n  bookends correct (`CM-20260918-010-open-rc-2-23-13` at the head,\n  `TESTER-20260918-011-verify-2-23-13` then `CM-20260918-013-release-2-23-13`\n  at the tail); sequence numbers non-colliding (012 is unused, not duplicated).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "spot-checks outside the spec (Step 6.11)",
+      "heading": "Finding 15: spot-checks outside the spec (Step 6.11)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **State drift** — none. `release-state.md`'s `## Active RC` value matches the\n  branch actually under verification, and the worktree HEAD equals\n  `git rev-parse ai_rc/v2.23.13`.\n- **Untested new mechanisms** — none found. Each new mechanism ships with\n  coverage: the reaper with `test_lock_contention_staleness_reap.py` (8 fixtures),\n  the STUCK-LOCK verdict with `test_why_stuck_lock_verdict.py` (419 lines, all\n  passing), atomic release with `test_lock_release_atomicity.py` (253 lines, all\n  passing), the config tier with 5 new cases in `test_project_paths_bash.py`, and\n  the lint routing with 2 new cases in `test_lint_hygiene.py`.\n- **Regressions of prior gaps** — the two gaps this RC inherits from the previous\n  TESTER round (BUG-0319 and BUG-0320) are both closed and were re-verified from\n  scratch rather than taken on the ticket's word (Findings 6 and 7).\n- One leftover branch, `ai_feature/CODER-20260917-020-agent-metrics-avg-wall`,\n  still exists locally. Its task is `WONT-DO`, so Step 2's merge checks (which\n  apply to `DONE` tasks) do not cover it and it is not an anomaly — recorded as an\n  observation, not a finding.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

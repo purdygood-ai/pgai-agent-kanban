@@ -13,8 +13,8 @@
 #      to exactly WIDTH x HEIGHT using `tmux resize-window` (works in non-interactive /
 #      non-TTY environments where `tmux new-session -x WIDTH` is capped to the controlling
 #      terminal's width).
-#   2. Splits the visibility window into the same 3+5 pane layout used by dashboard-create.sh.
-#   3. Applies the same explicit-resize logic from dashboard-create.sh:
+#   2. Splits the visibility window into the same 3+5 pane layout used by dashboard/create.sh.
+#   3. Applies the same explicit-resize logic from dashboard/create.sh:
 #        TOP_AVAIL = WIDTH - 2  (subtract 2 inter-pane borders, top row)
 #        TOP_COL   = TOP_AVAIL / 3
 #        BOT_AVAIL = WIDTH - 4  (subtract 4 inter-pane borders, bottom row)
@@ -106,7 +106,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -50
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:50}"
       exit 0
       ;;
     *)
@@ -187,7 +192,7 @@ verify_width() {
   local fail=0
 
   # Reference targets — computed from WIDTH using the same formula as
-  # dashboard-create.sh: border-aware integer division.
+  # dashboard/create.sh: border-aware integer division.
   # TOP_COL uses TOP_AVAIL = WIDTH - 2 (2 borders in 3-pane top row)
   # BOT_COL uses BOT_AVAIL = WIDTH - 4 (4 borders in 5-pane bottom row)
   local TOP_AVAIL=$(( WIDTH - 2 ))
@@ -234,13 +239,13 @@ verify_width() {
   # tmux resize-window is not constrained by the controlling terminal width.
   _tmux resize-window -t "${SESSION_NAME}:visibility" -x "$WIDTH" -y "$SESSION_HEIGHT"
 
-  # Replicate the visibility window split and resize logic from dashboard-create.sh.
-  # This is deliberately kept in sync with the dashboard-create.sh implementation
+  # Replicate the visibility window split and resize logic from dashboard/create.sh.
+  # This is deliberately kept in sync with the dashboard/create.sh implementation
   # (Window 6 / Visibility section) so that the verification matches the actual
-  # product behaviour.  If dashboard-create.sh changes its split or resize logic,
+  # product behaviour.  If dashboard/create.sh changes its split or resize logic,
   # this script must be updated to match.
   #
-  # Split sequence (same as dashboard-create.sh comments):
+  # Split sequence (same as dashboard/create.sh comments):
   #   Step 2: split pane 0 -v  → pane 0 (top half), pane 1 (bottom half)
   #   Step 3: split pane 0 -h  → pane 0=top-left, pane 1=top-right; former pane 1 → pane 2
   #   Step 4: split pane 1 -h  → pane 1=top-mid, pane 2=top-right; former pane 2 → pane 3
@@ -261,13 +266,13 @@ verify_width() {
   VIS_WIDTH=$(_tmux display-message -t "${SESSION_NAME}:visibility" -p '#{window_width}')
   VIS_HEIGHT=$(_tmux display-message -t "${SESSION_NAME}:visibility" -p '#{window_height}')
 
-  # Sanity guards (same as dashboard-create.sh)
+  # Sanity guards (same as dashboard/create.sh)
   VIS_WIDTH=${VIS_WIDTH:-120}
   VIS_HEIGHT=${VIS_HEIGHT:-24}
   [[ "$VIS_WIDTH"  -lt 45  ]] && VIS_WIDTH=45
   [[ "$VIS_HEIGHT" -lt 10  ]] && VIS_HEIGHT=10
 
-  # Compute column widths — same formula as dashboard-create.sh.
+  # Compute column widths — same formula as dashboard/create.sh.
   local A_TOP_AVAIL=$(( VIS_WIDTH - 2 ))
   local A_TOP_COL=$(( A_TOP_AVAIL / 3 ))
   local A_TOP_REM=$(( A_TOP_AVAIL % 3 ))
@@ -280,7 +285,7 @@ verify_width() {
   [[ "$A_BOT_COL" -lt "$MIN_WIDTH" ]] && A_BOT_COL=$MIN_WIDTH
   [[ "$A_HALF_H"  -lt 5  ]]           && A_HALF_H=5
 
-  # Non-edge panes absorb the remainder (same assignment as dashboard-create.sh)
+  # Non-edge panes absorb the remainder (same assignment as dashboard/create.sh)
   local A_TOP_MID_COL=$(( A_TOP_COL + A_TOP_REM ))  # pane 1 = priority
   local A_BOT_MID_COL=$(( A_BOT_COL + A_BOT_REM ))  # pane 5 = writer
 

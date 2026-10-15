@@ -14,6 +14,10 @@
 #   6. Crontab seam invariant: safe_overwrite.sh routes all crontab calls
 #      through _run_crontab (no direct 'crontab ' calls).
 #   7. install-crontab.sh requires explicit --yes flag for no-TTY installs.
+#   8. Git boundary guard shim: a fresh install actually deposits an
+#      executable scripts/wake/git-guard/git shim — the file
+#      wake_guard_wiring.sh's availability check requires, not merely the
+#      directory that is meant to hold it.
 #
 # Usage:
 #   team/scripts/verify-install-policy.sh [--simulate-fresh] [--check-only]
@@ -68,8 +72,14 @@ SIMULATE_FRESH=false
 CHECK_ONLY=false
 VERBOSE=false
 
-_print_usage() {
-  cat >&2 <<USAGE
+# shellcheck source=lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
+
+# Usage text as data (per lib/script_common.sh's documented convention).
+# This script's usage intentionally prints to stderr on every path (--help's
+# exit 0 included), so the destination is pinned here rather than delegated
+# to print_usage_and_exit (which routes exit 0 to stdout).
+_USAGE_TEXT="$(cat <<USAGE
 Usage: $(basename "$0") [--simulate-fresh] [--check-only] [--verbose] [--help]
 
 Verify install.sh re-run safety and path-resolution policies.
@@ -89,17 +99,17 @@ Exit codes:
   1  One or more checks failed.
   2  Usage error or prerequisite missing.
 USAGE
-}
+)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --simulate-fresh)     SIMULATE_FRESH=true; shift ;;
     --check-only)         CHECK_ONLY=true; shift ;;
     --verbose)            VERBOSE=true; shift ;;
-    --help|-h)            _print_usage; exit 0 ;;
+    --help|-h)            printf '%s\n' "$_USAGE_TEXT" >&2; exit 0 ;;
     *)
       echo "Unknown argument: $1" >&2
-      _print_usage
+      printf '%s\n' "$_USAGE_TEXT" >&2
       exit 2
       ;;
   esac
@@ -200,7 +210,7 @@ if [[ -f "$_CRON_SPOOL" ]]; then
   # lsattr is the only safe way to check immutable flag without modifying anything.
   if command -v lsattr >/dev/null 2>&1; then
     _lsattr_out="$(lsattr "$_CRON_SPOOL" 2>/dev/null || true)"
-    if echo "$_lsattr_out" | grep -qE '^[^ ]*i[^ ]* '; then
+    if grep -qE '^[^ ]*i[^ ]* ' <<< "$_lsattr_out"; then
       note "Crontab spool file is LOCKED immutable (chattr +i): $_CRON_SPOOL"
       note "install.sh EPERM handler will activate on next crontab install attempt."
       note "To verify the handler: run install.sh (not --dry-run) — it should emit a warn and continue."
@@ -259,7 +269,7 @@ if [[ "$SIMULATE_FRESH" == "true" && "$CHECK_ONLY" == "false" ]]; then
   fi
 
   # Check 2: install target must be the canonical path (pgai_agent_kanban)
-  if echo "$_sim_fresh_output" | grep -q "Install target:.*pgai_agent_kanban"; then
+  if grep -q "Install target:.*pgai_agent_kanban" <<< "$_sim_fresh_output"; then
     _check_pass "SIM-A: install target correctly set to canonical default path (pgai_agent_kanban)"
   else
     _check_fail "SIM-A: install target does NOT point to pgai_agent_kanban"
@@ -463,7 +473,7 @@ else
     info "  Output: $_notty_output"
   fi
 
-  if printf '%s\n' "$_notty_output" | grep -qiE 'no TTY|non-interactive|--yes|require'; then
+  if grep -qiE 'no TTY|non-interactive|--yes|require' <<< "$_notty_output"; then
     _check_pass "CHECK 6: no-TTY decline message references --yes requirement"
   else
     _check_fail "CHECK 6: no-TTY decline message does not mention --yes requirement"
@@ -472,6 +482,59 @@ else
 
   rm -rf "$_notty_home" "$_notty_kanban"
 fi
+
+# ---------------------------------------------------------------------------
+# CHECK 7 — Git boundary guard shim is actually deposited by a real install
+# ---------------------------------------------------------------------------
+info ""
+info "=== Check 7: git-boundary-guard shim is actually installed ==="
+
+# An install that creates the scripts/wake/git-guard/ directory but never
+# deposits the "git" shim file inside it looks identical to a healthy
+# install unless something actually checks for the file. This check runs
+# a real (non-dry-run) install into an isolated HOME/KANBAN_ROOT — never
+# the live install — and asserts the deposited tree actually carries the
+# executable shim wake_guard_wiring.sh requires, not merely the directory
+# that is meant to hold it.
+_guard_home="$(mktemp -d "$_TEMP_ROOT/guard_shim_home_XXXXXX")"
+_guard_kanban="$(mktemp -d "$_TEMP_ROOT/guard_shim_kanban_XXXXXX")"
+# install.sh refuses a target directory that already looks like an install
+# (kanban.cfg/VERSION/scripts present); mktemp -d leaves it empty, so the
+# fresh-install path runs. --no-system-cron keeps this off the real OS
+# crontab entirely (pseudocron config, a local file, is unaffected).
+_guard_output=""
+_guard_exit=0
+_guard_output=$(
+  HOME="$_guard_home" \
+  PGAI_AGENT_KANBAN_ROOT_PATH="$_guard_kanban" \
+  bash "$INSTALL_SH" --no-system-cron 2>&1
+) || _guard_exit=$?
+
+if [[ "$VERBOSE" == "true" ]]; then
+  echo "$_guard_output"
+fi
+
+if [[ "$_guard_exit" -eq 0 ]]; then
+  _check_pass "CHECK 7: install.sh (real, isolated) exited 0"
+else
+  _check_fail "CHECK 7: install.sh (real, isolated) exited $_guard_exit (expected 0)"
+  echo "$_guard_output" | tail -20 | sed 's/^/  /'
+fi
+
+_guard_shim_file="$_guard_kanban/scripts/wake/git-guard/git"
+if [[ -f "$_guard_shim_file" && -x "$_guard_shim_file" ]]; then
+  _check_pass "CHECK 7: git-boundary-guard shim deposited and executable: $_guard_shim_file"
+else
+  _check_fail "CHECK 7: git-boundary-guard shim missing or not executable at $_guard_shim_file"
+  if [[ -d "$_guard_kanban/scripts/wake/git-guard" ]]; then
+    info "  Directory exists but the shim file is absent or not executable:"
+    ls -la "$_guard_kanban/scripts/wake/git-guard" 2>&1 | sed 's/^/    /'
+  else
+    info "  Directory itself is absent: $_guard_kanban/scripts/wake/git-guard"
+  fi
+fi
+
+rm -rf "$_guard_home" "$_guard_kanban"
 
 # ---------------------------------------------------------------------------
 # Final report

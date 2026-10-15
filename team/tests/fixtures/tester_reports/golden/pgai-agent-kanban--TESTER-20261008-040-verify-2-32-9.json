@@ -1,0 +1,61 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "I verified RC `ai_rc/v2.32.9` (HEAD 293d6168) against `requirements/v2.32.9-bugfix-bundle-20261008.md`. The bundle covers BUG-0626 (the SHIP-KNOWN-ISSUE resolver used its own level-3-only heading rule; medium), BUG-0627 (a nested finding heading dropped the outer block; low) and BUG-0628 (the ship-policy heredoc was over its inline-Python allowlist; low). They were implemented by CODER-20261008-036, CODER-20261008-037 and WRITER-20261008-038. Pre-flight was clean. Both gated runners exited 0: unit 10658+5 passed, integration 959 passed, 0 lint findings. Every acceptance criterion of the three bundled bugs and the three tickets was met with run evidence. The original failures reproduce on an ai_main export and are fixed on the RC: all four readers agree on all seven heading shapes. Reader outputs over all 94 install TESTER reports are unchanged, and a stressed variant changes only the one report that uses `####` headings, which is the intended fix. Inline-Python lint is clean, and the new tests fail on the old code. The spot-check found two pre-existing defects of the same reader-disagreement class, both filed via Path C (autonomous follow-up filing — non-blocking) as Path C-A (filed as BUG — code defect): BUG-0629 (OVERWATCH reads TESTER reports with its own heading rule, which makes this RC's new \"every reader\" text untrue) and BUG-0630 (field-line rules still differ, so a SHIP-KNOWN-ISSUE bug can be missing from both release-notes sections). Both are medium. Neither makes the release unusable, so the recommendation is SHIP-WITH-CONCERNS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "OVERWATCH's TESTER-report parser is a fifth finding reader with its own heading rule, contradicting the RC's \"every reader\" text",
+      "heading": "Finding 1: OVERWATCH's TESTER-report parser is a fifth finding reader with its own heading rule, contradicting the RC's \"every reader\" text",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the same class — a heading-rule fix that names a fixed set of readers and misses one — has now recurred across consecutive RCs)\n**Severity:** medium\n**Filed As:** BUG-0629 (Path C-A — filed as BUG: code defect)\n\nTraces to: BUG-0626 Expected (\"Every reader that decides 'a finding block starts here' in a TESTER report uses `stop_bug_files.finding_heading_level` ... The docstrings and role text that say every reader shares the rule are then true\") and WRITER-038 AC1 (\"The Step 9 paragraph's statement of which readers share the heading rule is true\").\n\nThe RC's text now states a universal property: `team/roles/TESTER.md` Step 9 — \"Every reader of the report's findings splits it by this one rule, so all of them see the same blocks\"; `team/pgai_agent_kanban/cm/stop_bug_files.py` module docstring — \"Every reader of a TESTER report's findings splits through finding_blocks ... So all four split any report into the same blocks, for every heading shape and every nesting.\" That is false. `team/pgai_agent_kanban/overwatch/resolution_matrix.py:152` `parse_tester_report_findings` (called from `resolution_stage.py:1346` and `_fact_findings_all_filed`) reads TESTER reports with its own `^#{2,4}\\s*Finding\\s+\\d+\\s*:` and runs each block to the next finding header with no shallower-heading cut.\n\nMeasured on the RC (sandbox; report with one finding, `**Filed As:** none`):\n\n| Heading | shared `finding_blocks` | OVERWATCH findings | OVERWATCH `findings_all_filed` |\n|---|---|---|---|\n| `### Finding 1:` / `#### Finding 1:` | 1 | 1 | False |\n| `##### Finding 1:` / `###### Finding 1:` | 1 | **0** | **True** (vacuous) |\n| `## Finding 1:` / `###Finding 1:` | 0 | **1** | False |\n| `### Finding: no number` | 1 | **0** | **True** (vacuous) |\n\nExtent: for `### Finding 1: a` / `**Filed As:** BUG-0001` / `### Step 7` / `**Filed As:** none`, the shared splitter's block holds only `BUG-0001`; OVERWATCH reads `filed_as = none` from the step's prose. Over the 94 real TESTER reports in the install, 10 are split into a different number of findings by the two parsers (e.g. this project's `TESTER-20261008-028-verify-2-32-7/artifacts/report.md`: 3 vs 1). An unfiled finding under a deeper heading turning `findings_all_filed` vacuously True is fail-open against that fact's own documented fail-closed intent. The parser is unchanged from ai_main (code predates the RC); the overclaiming text is this RC's. Calibration: real defect in a shipped artefact on a path consulted only in OVERWATCH HALT resolution, so medium, not high.",
+      "filed_as": "BUG-0629",
+      "filed_by": null,
+      "severity": "medium",
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the same class — a heading-rule fix that names a fixed set of readers and misses one — has now recurred across consecutive RCs)",
+        "severity": "medium",
+        "filed_as": "BUG-0629 (Path C-A — filed as BUG: code defect)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "The four report readers still read a finding's field lines by different rules, so a SHIP-KNOWN-ISSUE bug can be named in neither Known Issues nor Bugs Skipped",
+      "heading": "Finding 2: The four report readers still read a finding's field lines by different rules, so a SHIP-KNOWN-ISSUE bug can be named in neither Known Issues nor Bugs Skipped",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (same reader-disagreement class as the bundle; recurs until field reading is shared like block splitting now is)\n**Severity:** medium\n**Filed As:** BUG-0630 (Path C-A — filed as BUG: code defect)\n\nFound in the Step 6.11 spot-check (\"regressions of prior gaps\"), probing BUG-0626's Expected outcome (\"A ... high-risk finding that makes the matrix return SHIP-KNOWN-ISSUE is resolved to its bug file\") with field shapes rather than heading shapes. CODER-036 noted the stricter field parsing in its status and left it out of scope by design; this RC's spec covered block boundaries only, so this is not a gap in the RC's deliverables. It is identical on ai_main (Regression: no).\n\nSandbox, `### Finding 1:` finding with Systemic Risk high, Regression no, Integrity none, Fix Effort small:\n\n| Field-line shape | dims / decision | KI resolver | stop list | Bugs Skipped |\n|---|---|---|---|---|\n| `**Label:** value`, `**Filed As:** BUG-0003` | no none / SHIP-KNOWN-ISSUE | 1 | 1 | 1 |\n| plain `Label: value` (no bold) | no none / SHIP-KNOWN-ISSUE | **0** | 1 | **0** |\n| ``**Filed As:** `BUG-0003` `` | no none / SHIP-KNOWN-ISSUE | **0** | 1 | **0** |\n| `**Filed As:** see BUG-0003` | no none / SHIP-KNOWN-ISSUE | **0** | 1 | **0** |\n\nIn those rows the bug appears in neither release-notes section, although the release ships *because of* it. The ship-policy reader tolerates missing bold markers (its header: \"the bold markers are tolerated either way\"); the resolver (`release_known_issue.sh` heredoc `field_value`, bold-only, `re.match` on `BUG-`) and `skipped_bug_pairs._field_value` do not. A real install report already uses the cite shape (`my-app/tasks/TESTER-20260903-006-verify-0-26-4/artifacts/report.md:250`, `**Filed As:** cites the existing BUG-0058-...`); under the stressed comparison it is the one report where the stop list and the resolver disagree. Rated medium: incorrect release-notes output on a reachable path, with a workaround (TESTER writes canonical `**Label:** BUG-NNNN` fields).",
+      "filed_as": "BUG-0630",
+      "filed_by": null,
+      "severity": "medium",
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (same reader-disagreement class as the bundle; recurs until field reading is shared like block splitting now is)",
+        "severity": "medium",
+        "filed_as": "BUG-0630 (Path C-A — filed as BUG: code defect)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

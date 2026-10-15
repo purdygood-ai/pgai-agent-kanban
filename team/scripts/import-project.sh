@@ -4,6 +4,20 @@
 # Import a project from a portable .tar.gz archive produced by export-project.sh
 # and optionally register it in projects.cfg.
 #
+# The archive is extracted into a private staging directory under projects/
+# (projects/.import-staging-XXXXXX) and the extracted tree is moved straight
+# to projects/<final-name>/. Only the final name is ever checked for a
+# collision or backed up, so importing under --name never moves, renames or
+# overwrites the project that carries the archive's original name. The
+# staging directory is removed on every exit path, success or failure.
+#
+# When the export carries the project's archive (the embedded <name>/ARCHIVE/
+# directory export-project.sh writes from $KANBAN_ROOT/archive/<name>/), it
+# is moved to $KANBAN_ROOT/archive/<final-name>/ after extraction, byte for
+# byte, ARCHIVE-LEDGER.tsv included. The ledger's rows are left exactly as
+# exported: their paths are relative to the kanban root and keep naming the
+# project the items were archived from.
+#
 # Usage:
 #   import-project.sh --archive <path>
 #   import-project.sh --archive <path> [--name <newname>] [--register] [--force]
@@ -17,11 +31,19 @@
 #                     registration data from the archive's MANIFEST file.
 #                     Without this flag a notice is printed with the line the
 #                     operator must add manually.
-#   --force           Optional. Allow overwriting an existing projects/<name>/.
-#                     Without this flag the script exits non-zero if the target
-#                     directory already exists.  With this flag the existing
-#                     directory is moved to projects/<name>.bak-<UTCstamp>
-#                     before extraction.
+#   --force           Optional. Allow overwriting an existing
+#                     projects/<final-name>/ (and, when the export carries an
+#                     archive, an existing archive/<final-name>/).
+#                     <final-name> is --name when given, else the archive's
+#                     own name; no other project directory is ever touched.
+#                     Without this flag the script exits non-zero if either
+#                     target directory already exists.  With this flag the
+#                     existing project directory is moved to
+#                     projects/<final-name>.bak-<UTCstamp> once extraction
+#                     has succeeded, just before the imported tree takes its
+#                     place, and an existing archive directory to
+#                     archive/<final-name>.bak-<UTCstamp> before the imported
+#                     archive takes its place.  Nothing is deleted.
 #   --help / -h       Print this help and exit 0.
 #
 # Exit codes:
@@ -29,8 +51,13 @@
 #   1 — usage error, unknown option, or missing required argument
 #   2 — archive not found or not readable
 #   3 — kanban root not found (PGAI_AGENT_KANBAN_ROOT_PATH or $HOME/pgai_agent_kanban)
-#   4 — target project directory already exists and --force not given
-#   5 — extraction or registration error
+#   1 — also: the final project name (--name, else the archive's own) is not
+#       one plain name (letters, digits, '_' and '-', starting with a letter
+#       or digit); or the export carries an archive and it is not a valid
+#       archive project name (lower-case letters, digits and '-')
+#   4 — projects/<final-name>/ (or archive/<final-name>/, when the export
+#       carries an archive) already exists and --force not given
+#   5 — staging, extraction, archive placement, or registration error
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
@@ -55,6 +82,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/lib/project_paths.sh"
+# shellcheck source=lib/error_contract.sh
+source "${SCRIPT_DIR}/lib/error_contract.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -69,7 +98,7 @@ FORCE=false
 
 # Value-taking flags: script-specific (archive, name).
 # Boolean flags: register, force, help.
-argparse_parse --value-flags "archive name" -- "$@"
+operator_args_argparse --value-flags "archive name" -- "$@"
 
 # Emit clear errors for value-taking flags given with no value.
 if argparse_missing "archive"; then
@@ -90,7 +119,10 @@ if argparse_has "help" || argparse_has "h"; then
         "  --archive PATH       Archive file to import (required)" \
         "  --name NEWNAME       Import under a different project name (optional)" \
         "  --register           Register project in projects.cfg from archive MANIFEST" \
-        "  (--force: backs up existing projects/<name>/ before overwriting)"
+        "  (--force: backs up an existing projects/<final-name>/ before replacing it;" \
+        "   <final-name> is --name when given, and no other project is touched)" \
+        "  (an export carrying the project's archive is placed in archive/<name>/;" \
+        "   --force backs up an existing archive/<name>/ first)"
     exit 0
 fi
 
@@ -171,91 +203,194 @@ fi
 
 # Determine the destination project name.
 # If --name was supplied, the final resting place is projects/<newname>/.
-# We still extract to the archive-native name first, then rename below.
+# The archive-native name (DEST_NAME) only names the extracted tree inside
+# the staging directory; projects/<archive-name>/ itself is never read,
+# checked, moved or written unless it is also the final name.
 DEST_NAME="$ARCHIVE_PROJECT_NAME"
-DEST_DIR="${KANBAN_ROOT}/projects/${DEST_NAME}"
 FINAL_NAME="${NEW_NAME:-${DEST_NAME}}"
 FINAL_DIR="${KANBAN_ROOT}/projects/${FINAL_NAME}"
 
 # ---------------------------------------------------------------------------
-# Clobber guard for the archive-native destination (projects/<archive-name>/)
+# The project's archive: export-project.sh embeds archive/<name>/ (ledger
+# included) as <name>/ARCHIVE/. When the export carries one, it is placed at
+# $KANBAN_ROOT/archive/<final-name>/ after extraction. Both checks below run
+# before anything on disk changes, so a refusal leaves the kanban root as it
+# was.
+# ---------------------------------------------------------------------------
+CARRIES_ARCHIVE=false
+if [[ $'\n'"${ARCHIVE_LISTING}" == *$'\n'"${ARCHIVE_PROJECT_NAME}/ARCHIVE/"* ]]; then
+    CARRIES_ARCHIVE=true
+fi
+ARCHIVE_DEST="${KANBAN_ROOT}/archive/${FINAL_NAME}"
+ARCHIVE_BACKUP_DIR=""
+
+# Re-run line for the remedies below: this invocation's own arguments.
+_rerun="$(printf '%q ' "$0" --archive "$ARCHIVE")"
+[[ "$REGISTER" == true ]] && _rerun+="--register "
+# The same, carrying --name and --force as given, for remedies that re-run
+# this exact invocation unchanged.
+_rerun_as_given="$_rerun"
+if [[ -n "$NEW_NAME" ]]; then
+    _rerun_as_given+="$(printf -- '--name %q ' "$NEW_NAME")"
+fi
+if [[ "$FORCE" == true ]]; then
+    _rerun_as_given+="--force"
+fi
+_rerun_as_given="${_rerun_as_given% }"
+
+# A sanitised final name for the two name refusals' remedies: lower-cased,
+# every other character turned into '-', leading separators dropped.
+_suggested="${FINAL_NAME,,}"
+_suggested="${_suggested//[^a-z0-9-]/-}"
+_suggested="${_suggested#"${_suggested%%[a-z0-9]*}"}"
+[[ -n "$_suggested" ]] || _suggested="imported-project"
+
+# Every import -- with or without an embedded archive, under --name or the
+# archive's own name -- lands at projects/<final-name>/, so the final name
+# must be one plain registrable name (the rule add-project.sh applies).
+if [[ ! "$FINAL_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+    # BLOCK-WORTHY (docs/blocking-site-census.md): the final name is joined
+    # into projects/<final-name>/, which --force moves aside and the import
+    # replaces; a separator, '..' or a leading '-' would put the project --
+    # or the backup -- outside projects/. Nothing has been extracted or
+    # moved yet; the import stops here.
+    # CENSUS-ANCHOR: import-project-name-01
+    pgai_emit_error_contract "import.invalid_project_name" \
+        "import-project.sh: '${FINAL_NAME}' is not a valid project name (letters, digits, '_' and '-', starting with a letter or digit), so it cannot name projects/${FINAL_NAME}/; nothing was imported." \
+        "${_rerun}$(printf -- '--name %q' "$_suggested")$([[ "$FORCE" == true ]] && printf ' --force')"
+    exit 1
+fi
+
+if [[ "$CARRIES_ARCHIVE" == true && ! "$FINAL_NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+    # BLOCK-WORTHY (docs/blocking-site-census.md): the archive is placed at
+    # archive/<final-name>/, and a name carrying a separator, '..' or other
+    # characters outside the project-name shape would put archived items
+    # outside archive/ or under a name no archive reader resolves. Nothing
+    # has been extracted or moved yet; the import stops here.
+    # CENSUS-ANCHOR: import-project-archive-name-01
+    pgai_emit_error_contract "import.invalid_archive_project_name" \
+        "import-project.sh: the export carries the project's archive, and '${FINAL_NAME}' is not a valid project name (lower-case letters, digits and '-', starting with a letter or digit), so it cannot name archive/${FINAL_NAME}/; nothing was imported." \
+        "${_rerun}$(printf -- '--name %q' "$_suggested")$([[ "$FORCE" == true ]] && printf ' --force')"
+    exit 1
+fi
+
+if [[ "$CARRIES_ARCHIVE" == true && -e "$ARCHIVE_DEST" && "$FORCE" == false ]]; then
+    # BLOCK-WORTHY (docs/blocking-site-census.md): archive/<final-name>/
+    # already holds archived items and their ledger; placing the imported
+    # archive there would overwrite or mix two ledgers. Nothing has been
+    # extracted or moved yet; --force backs the existing directory up first.
+    # CENSUS-ANCHOR: import-project-archive-exists-01
+    pgai_emit_error_contract "import.archive_destination_exists" \
+        "import-project.sh: the export carries the project's archive, and ${ARCHIVE_DEST} already exists; nothing was imported. Re-running with --force moves the existing directory to ${ARCHIVE_DEST}.bak-<UTCstamp> first and deletes nothing." \
+        "${_rerun}$([[ -n "$NEW_NAME" ]] && printf -- '--name %q ' "$NEW_NAME")--force"
+    exit 4
+fi
+
+# ---------------------------------------------------------------------------
+# Clobber guard for the final destination (projects/<final-name>/).
+# This is the only project directory the import ever checks, backs up or
+# replaces: with --name, projects/<archive-name>/ is not touched at all.
+# Checked before anything on disk changes.
+# ---------------------------------------------------------------------------
+if [[ -e "$FINAL_DIR" && "$FORCE" == false ]]; then
+    # BLOCK-WORTHY (docs/blocking-site-census.md): projects/<final-name>/
+    # already holds a project, and replacing it unasked would discard it.
+    # Nothing has been extracted or moved yet; --force backs it up first.
+    # CENSUS-ANCHOR: import-project-destination-exists-01
+    pgai_emit_error_contract "import.destination_exists" \
+        "import-project.sh: ${FINAL_DIR} already exists; nothing was imported. Re-running with --force moves the existing directory to ${FINAL_DIR}.bak-<UTCstamp> once extraction has succeeded and deletes nothing; re-running with a different --name leaves it alone." \
+        "${_rerun}$([[ -n "$NEW_NAME" ]] && printf -- '--name %q ' "$NEW_NAME")--force"
+    exit 4
+fi
+
+# ---------------------------------------------------------------------------
+# Staging directory: the archive is extracted into a fresh
+# projects/.import-staging-XXXXXX/ (same filesystem as the final name, so the
+# final move is a rename) and never straight into projects/. The EXIT trap
+# removes it on every exit path, so a failed or interrupted import leaves no
+# staging directory and no half-extracted tree behind.
+# ---------------------------------------------------------------------------
+STAGING_DIR=""
+
+_remove_staging_dir() {
+    if [[ -n "$STAGING_DIR" && -d "$STAGING_DIR" ]]; then
+        rm -rf -- "$STAGING_DIR" \
+            || echo "WARNING: could not remove the import staging directory; remove it by hand: rm -rf -- ${STAGING_DIR}" >&2
+    fi
+}
+trap _remove_staging_dir EXIT
+# Route INT/TERM through exit so the EXIT trap still runs.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if ! mkdir -p "${KANBAN_ROOT}/projects" \
+    || ! STAGING_DIR="$(mktemp -d "${KANBAN_ROOT}/projects/.import-staging-XXXXXX")"; then
+    STAGING_DIR=""
+    # BLOCK-WORTHY (docs/blocking-site-census.md): with no staging directory
+    # there is nowhere to extract that cannot clobber an existing project.
+    # CENSUS-ANCHOR: import-project-staging-01
+    pgai_emit_error_contract "import.staging_unavailable" \
+        "import-project.sh: could not create a staging directory under ${KANBAN_ROOT}/projects (missing or not writable); nothing was extracted or moved." \
+        "$(printf 'mkdir -p %q && test -w %q && ' "${KANBAN_ROOT}/projects" "${KANBAN_ROOT}/projects")${_rerun_as_given}"
+    exit 5
+fi
+
+# ---------------------------------------------------------------------------
+# Extract the archive into the staging directory.
+#
+# The archive top-level entry is <archive-name>/ so tar creates
+# <staging>/<archive-name>/. A failure here changes nothing under projects/:
+# no existing project has been moved yet, and the EXIT trap removes the
+# partial extraction.
+# ---------------------------------------------------------------------------
+if ! tar xzf "$ARCHIVE" -C "$STAGING_DIR"; then
+    echo "ERROR: extraction failed for archive: $ARCHIVE" >&2
+    echo "  Nothing under ${KANBAN_ROOT}/projects was changed; the partial extraction is removed." >&2
+    exit 5
+fi
+
+STAGED_DIR="${STAGING_DIR}/${DEST_NAME}"
+if [[ ! -d "$STAGED_DIR" ]]; then
+    echo "ERROR: extraction appeared to succeed but the archive's project directory '${DEST_NAME}/' is missing from it: $ARCHIVE" >&2
+    exit 5
+fi
+
+# ---------------------------------------------------------------------------
+# Move the extracted tree to projects/<final-name>/. With --force an
+# existing projects/<final-name>/ is first moved aside to
+# projects/<final-name>.bak-<UTCstamp>; if the move then fails, it is moved
+# back. mv -T never moves the tree *into* a directory that appeared since the
+# guard above ran.
 # ---------------------------------------------------------------------------
 BACKUP_DIR=""
 
-if [[ -d "$DEST_DIR" ]]; then
-    if [[ "$FORCE" == false ]]; then
-        echo "ERROR: destination already exists: ${DEST_DIR}" >&2
-        echo "Use --force to overwrite (the existing directory will be backed up)." >&2
-        exit 4
-    fi
-
-    # --force: move existing directory to a backup before extracting
+if [[ -e "$FINAL_DIR" && "$FORCE" == true ]]; then
     UTC_STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
-    BACKUP_DIR="${DEST_DIR}.bak-${UTC_STAMP}"
-    mv "$DEST_DIR" "$BACKUP_DIR" || {
+    BACKUP_DIR="${FINAL_DIR}.bak-${UTC_STAMP}"
+    if ! mv -T "$FINAL_DIR" "$BACKUP_DIR"; then
         echo "ERROR: failed to move existing directory to backup: $BACKUP_DIR" >&2
+        echo "  Nothing was imported; ${FINAL_DIR} is unchanged." >&2
         exit 5
-    }
-fi
-
-# ---------------------------------------------------------------------------
-# Clobber guard for the rename target (projects/<newname>/) when --name is
-# supplied and the rename target is different from the extraction target.
-# Checked before extraction so that a collision is detected early with no
-# side-effects on disk.
-# ---------------------------------------------------------------------------
-RENAME_BACKUP_DIR=""
-
-if [[ -n "$NEW_NAME" && "$FINAL_NAME" != "$DEST_NAME" && -d "$FINAL_DIR" ]]; then
-    if [[ "$FORCE" == false ]]; then
-        echo "ERROR: rename target already exists: ${FINAL_DIR}" >&2
-        echo "Use --force to overwrite (the existing directory will be backed up)." >&2
-        exit 4
     fi
-
-    # --force: move existing rename-target directory to a backup before we
-    # rename into it after extraction.
-    UTC_STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
-    RENAME_BACKUP_DIR="${FINAL_DIR}.bak-${UTC_STAMP}"
-    mv "$FINAL_DIR" "$RENAME_BACKUP_DIR" || {
-        echo "ERROR: failed to move existing rename-target to backup: $RENAME_BACKUP_DIR" >&2
-        exit 5
-    }
 fi
 
-# ---------------------------------------------------------------------------
-# Extract the archive into $KANBAN_ROOT/projects/
-#
-# The archive top-level entry is <name>/ so tar will create
-# $KANBAN_ROOT/projects/<name>/ directly.
-# ---------------------------------------------------------------------------
-tar xzf "$ARCHIVE" -C "${KANBAN_ROOT}/projects" || {
-    echo "ERROR: extraction failed for archive: $ARCHIVE" >&2
-    # If we moved an existing dir to backup, restore it so the destination
-    # is left byte-identical to what it was before the attempt.
-    if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" && ! -d "$DEST_DIR" ]]; then
-        mv "$BACKUP_DIR" "$DEST_DIR" || true
+if ! mv -T "$STAGED_DIR" "$FINAL_DIR"; then
+    echo "ERROR: failed to move the extracted project from '${STAGED_DIR}' to '${FINAL_DIR}'" >&2
+    if [[ -n "$BACKUP_DIR" && -e "$BACKUP_DIR" && ! -e "$FINAL_DIR" ]]; then
+        if mv -T "$BACKUP_DIR" "$FINAL_DIR"; then
+            echo "  The previous ${FINAL_DIR} was restored from its backup." >&2
+        else
+            echo "  The previous ${FINAL_DIR} is still at ${BACKUP_DIR}." >&2
+        fi
     fi
     exit 5
-}
-
-# ---------------------------------------------------------------------------
-# Verify the expected destination directory was created by extraction
-# ---------------------------------------------------------------------------
-if [[ ! -d "$DEST_DIR" ]]; then
-    echo "ERROR: extraction appeared to succeed but destination directory is missing: $DEST_DIR" >&2
-    exit 5
 fi
 
 # ---------------------------------------------------------------------------
-# Rename: if --name <newname> was supplied, move the extracted directory to
-# projects/<newname>/ and update project_name in project.cfg.
+# Rename: if --name <newname> was supplied, update project_name in the
+# imported project.cfg to the final name.
 # ---------------------------------------------------------------------------
 if [[ -n "$NEW_NAME" && "$FINAL_NAME" != "$DEST_NAME" ]]; then
-    mv "$DEST_DIR" "$FINAL_DIR" || {
-        echo "ERROR: failed to rename extracted directory from '${DEST_DIR}' to '${FINAL_DIR}'" >&2
-        exit 5
-    }
 
     # Rewrite project_name in the renamed project.cfg.
     PROJECT_CFG="${FINAL_DIR}/project.cfg"
@@ -270,6 +405,44 @@ if [[ -n "$NEW_NAME" && "$FINAL_NAME" != "$DEST_NAME" ]]; then
         fi
     else
         echo "WARNING: project.cfg not found at ${PROJECT_CFG}; skipping project_name rename." >&2
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Place the project's archive: move the extracted <final-name>/ARCHIVE/ to
+# $KANBAN_ROOT/archive/<final-name>/. With --force an existing archive
+# directory is first moved aside to archive/<final-name>.bak-<UTCstamp>;
+# if the placement then fails, it is moved back.
+# ---------------------------------------------------------------------------
+EXTRACTED_ARCHIVE="${FINAL_DIR}/ARCHIVE"
+if [[ -d "$EXTRACTED_ARCHIVE" ]]; then
+    _placement_error=""
+    if ! mkdir -p "${KANBAN_ROOT}/archive"; then
+        _placement_error="could not create ${KANBAN_ROOT}/archive"
+    elif [[ -e "$ARCHIVE_DEST" ]]; then
+        ARCHIVE_BACKUP_DIR="${ARCHIVE_DEST}.bak-$(date -u '+%Y%m%dT%H%M%SZ')"
+        if ! mv "$ARCHIVE_DEST" "$ARCHIVE_BACKUP_DIR"; then
+            _placement_error="could not move the existing ${ARCHIVE_DEST} aside to ${ARCHIVE_BACKUP_DIR}"
+            ARCHIVE_BACKUP_DIR=""
+        fi
+    fi
+    if [[ -z "$_placement_error" ]] && ! mv "$EXTRACTED_ARCHIVE" "$ARCHIVE_DEST"; then
+        _placement_error="could not move ${EXTRACTED_ARCHIVE} to ${ARCHIVE_DEST}"
+        if [[ -n "$ARCHIVE_BACKUP_DIR" && -d "$ARCHIVE_BACKUP_DIR" && ! -e "$ARCHIVE_DEST" ]]; then
+            mv "$ARCHIVE_BACKUP_DIR" "$ARCHIVE_DEST" && ARCHIVE_BACKUP_DIR=""
+        fi
+    fi
+    if [[ -n "$_placement_error" ]]; then
+        # BLOCK-WORTHY (docs/blocking-site-census.md): the project tree is
+        # extracted but its archive could not be put in place (a filesystem
+        # failure). Continuing would report an import whose archived items
+        # and ledger are not where every archive reader looks. Nothing is
+        # deleted: the imported archive stays inside the extracted project.
+        # CENSUS-ANCHOR: import-project-archive-placement-01
+        pgai_emit_error_contract "import.archive_placement_failed" \
+            "import-project.sh: the project was extracted to ${FINAL_DIR}, but its archive could not be placed: ${_placement_error}. The imported archive is still at ${EXTRACTED_ARCHIVE}${ARCHIVE_BACKUP_DIR:+, and the previous archive is at ${ARCHIVE_BACKUP_DIR}}; nothing was deleted." \
+            "$(printf 'mkdir -p %q && mv -T %q %q' "${KANBAN_ROOT}/archive" "$EXTRACTED_ARCHIVE" "$ARCHIVE_DEST")"
+        exit 5
     fi
 fi
 
@@ -388,7 +561,7 @@ if [[ "$REGISTER" == true ]]; then
         ')"
 
     # Verify the rewritten block has a valid header.
-    if ! printf '%s\n' "$REWRITTEN_BLOCK" | grep -qE '^\[project:[a-zA-Z0-9_-]+\]$'; then
+    if ! grep -qE '^\[project:[a-zA-Z0-9_-]+\]$' <<< "$REWRITTEN_BLOCK"; then
         echo "ERROR: registration block from MANIFEST does not contain a valid [project:NAME] header." >&2
         echo "  Block content:" >&2
         printf '%s\n' "$REWRITTEN_BLOCK" | sed 's/^/    /' >&2
@@ -445,18 +618,21 @@ fi
 # ---------------------------------------------------------------------------
 # Success output
 # ---------------------------------------------------------------------------
-echo "Imported project '${DEST_NAME}' to: ${DEST_DIR}"
+echo "Imported project '${DEST_NAME}' to: ${FINAL_DIR}"
 if [[ -n "$BACKUP_DIR" ]]; then
     echo "  previous directory backed up to: ${BACKUP_DIR}"
 fi
 if [[ -n "$NEW_NAME" && "$FINAL_NAME" != "$DEST_NAME" ]]; then
     echo "  renamed to: ${FINAL_DIR}"
-    if [[ -n "$RENAME_BACKUP_DIR" ]]; then
-        echo "  rename target backed up to: ${RENAME_BACKUP_DIR}"
-    fi
 fi
 echo "  archive: ${ARCHIVE}"
 echo "  final location: ${FINAL_DIR}"
+if [[ -d "$ARCHIVE_DEST" && "$CARRIES_ARCHIVE" == true ]]; then
+    echo "  archived items placed in: ${ARCHIVE_DEST}"
+    if [[ -n "$ARCHIVE_BACKUP_DIR" ]]; then
+        echo "  previous archive backed up to: ${ARCHIVE_BACKUP_DIR}"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Operator notice: blanked env-specific fields and next-step guidance.

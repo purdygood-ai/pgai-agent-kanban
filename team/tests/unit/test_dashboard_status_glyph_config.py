@@ -1,7 +1,7 @@
 """
 test_dashboard_status_glyph_config.py
 ======================================
-Unit tests for PRIORITY-0007 — dashboard_status_glyph kanban.cfg key.
+Unit tests for the dashboard_status_glyph kanban.cfg key.
 
 Covers three acceptance behaviors:
 
@@ -29,7 +29,7 @@ Fixture structure built under pytest tmp_path:
         tasks/
           queues/
             coder_backlog.md          — one task entry for the coder queue
-          CODER-20260721-001-test/
+          CODER-YYYYMMDD-NNN-test/
             status.md                 — state WORKING
 
 Tests invoke bash scripts via subprocess, matching the pattern in
@@ -159,7 +159,7 @@ def _run_column_render(
 def test_default_glyph_absent_key_byte_identical(tmp_path: pathlib.Path) -> None:
     """Absent dashboard_status_glyph key renders "■" byte-identical to explicit "■" cfg.
 
-    PRIORITY-0007 acceptance criterion 1 (default byte-parity):
+    Acceptance criterion 1 (default byte-parity):
     When kanban.cfg has no dashboard_status_glyph key, column-render.sh must
     produce output that is byte-identical to output from a run where the key
     is explicitly set to the default "■" character.  This confirms the default
@@ -209,7 +209,7 @@ def test_ascii_override_swaps_glyph_and_widths_remain_aligned(
 ) -> None:
     """ASCII override in kanban.cfg swaps glyph; column widths stay aligned.
 
-    PRIORITY-0007 acceptance criterion 2 (ASCII override alignment):
+    Acceptance criterion 2 (ASCII override alignment):
     When kanban.cfg sets dashboard_status_glyph = # (a single ASCII char),
     column-render.sh renders '#' instead of '■' in every tagged row.  Column
     widths remain aligned because TAG_VIS_LEN = len(glyph) + 1, which is 2
@@ -295,7 +295,7 @@ def test_ascii_override_swaps_glyph_and_widths_remain_aligned(
 def test_multichar_glyph_rejected_with_error_naming_key(tmp_path: pathlib.Path) -> None:
     """Multi-character dashboard_status_glyph causes config loader to exit non-zero.
 
-    PRIORITY-0007 acceptance criterion 3 (multi-char rejection):
+    Acceptance criterion 3 (multi-char rejection):
     When kanban.cfg sets dashboard_status_glyph to a value with more than one
     character, load_config in config_loader.sh must:
     - exit with a non-zero return code

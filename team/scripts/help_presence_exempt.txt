@@ -18,6 +18,14 @@
 #                       operator flags and have no help surface.
 #
 # ---------------------------------------------------------------------------
-# No entries currently exempt.  All previously listed scripts now implement
-# --help/-h and are operator-facing.
+# process-internal: parses positional arguments (bundle_file, version, ...)
+# via sys.argv with no --help/-h handling; invoked by cm/finalize.sh and
+# cm/release_finalize.sh as a release-mechanics helper, not directly by
+# operators in normal operation.  Flagged when the scan set widened to cover
+# .py entry points; left unexempted from a --help contract of its own for a
+# follow-up ticket to add rather than fixed here.  Named as a bare basename
+# (not "cm/promote_bundled_items.py") so the entry matches both the default
+# two-directory scan and a direct --scripts-dir scan of cm/ alone — the
+# only script with this basename in the tree lives in cm/.
+promote_bundled_items.py
 # ---------------------------------------------------------------------------

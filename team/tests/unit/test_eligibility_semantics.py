@@ -28,9 +28,17 @@ import pytest
 
 # ---------------------------------------------------------------------------
 # Path to the eligibility source file
+#
+# _disc_list_all_eligible_requirements was extracted from discovery.sh into
+# discovery_state.sh by the v2.9.20-engine-decomposition, and from there
+# into its own single-purpose stage, discovery_eligibility.sh, once that
+# function's own growth pushed discovery_state.sh over the
+# engine-decomposition's line ceiling; this constant follows the move (kept
+# as _DISCOVERY_SH for minimal diff noise below).
 # ---------------------------------------------------------------------------
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
-_DISCOVERY_SH = _TEAM_DIR / "scripts" / "lib" / "discovery.sh"
+_DISCOVERY_SH = _TEAM_DIR / "scripts" / "lib" / "discovery_eligibility.sh"
+_ELIGIBILITY_PY = _TEAM_DIR / "pgai_agent_kanban" / "discovery" / "eligibility.py"
 
 # ---------------------------------------------------------------------------
 # Known workflow-type string literals that must NOT appear in the eligibility
@@ -153,7 +161,9 @@ def test_eligibility_code_contains_no_workflow_type_string_literal(
     type names for documentation purposes.
     """
     source = _DISCOVERY_SH.read_text(encoding="utf-8")
-    region = _extract_eligibility_region(source)
+    # The shell function delegates to the eligibility module, so the module's
+    # code is part of the region.
+    region = _extract_eligibility_region(source) + "\n" + _ELIGIBILITY_PY.read_text(encoding="utf-8")
 
     # Search for the literal as a quoted string (single or double quotes).
     # We allow the literal to appear as a comment (# line) since comments are
@@ -186,7 +196,7 @@ def test_eligibility_code_contains_no_workflow_type_string_literal(
 def test_eligibility_code_uses_version_semantics_variable() -> None:
     """Eligibility code region references the version_semantics variable.
 
-    Confirms the fix is present: the function must read from a `version_semantics`
+    Confirms the capability branch is present: the function must read from a `version_semantics`
     variable (the capability value from the plugin manifest) rather than hardcoding
     type comparisons.
 

@@ -1,0 +1,128 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "v2.15.0 ships the diagnostics suite the requirements document asked for, and the\nsubstance of it works. `why.sh` with no arguments now walks every registered\nproject in `projects.cfg` priority order and prints one verdict line each; each\nline carries the verdict word, a cause, and a runnable remedy in the same\nsentence; the exit codes are severity-ordered and the no-argument walk exits with\nthe maximum across the walk. I exercised all four verdict words plus the stalled\nvariant against a throwaway fixture kanban root and confirmed every documented\nexit code (0/2/3/4/5) and both dual-channel refusals (`why.project_not_found`,\n`why.details_requires_project`) fire as specified, that the walk is idempotent\n(fixture byte-identical after three invocations), and that `--details` renders\nlocks with holder/age/provenance, queue tails with raw markers beside each task's\nreal `status.md` state, the embedded `show-queues --details` pane, the full\nposture block (the four deferral lines survive byte-identical), and the most\nrecent refusal from the new per-project refusal ledger. The ledger itself\nbehaves as specified: a bash-emitted and a Python-emitted refusal produce\nbyte-compatible records read by the one shared reader, a second refusal replaces\nthe first rather than appending, an unwritable ledger path leaves the refusal's\nexit status and stderr text untouched, and a malformed record refuses by name\ninstead of reporting a healthy \"never recorded\" empty state. `verify-rc-state.sh`\nroutes every branch name through `pp_prefix_branch` and no longer carries a\nsecond markdown field reader. `GET /verdicts` shells out to `verdict-report.sh`\nand parses only its machine-readable blocks, and the ICD freshness, ICD compat,\nAPI parity and gate-census lints all exit 0.\n\nTwo defects stand between this and a clean pass. The unit suite is red: the\ndocumentation ticket added `docs/operator-api.md` citations into two documents\nthe installer delivers, without adding `operator-api.md` to\n`team/config/docs-manifest.txt`, so the citation dangles on every installed and\nupgraded root and the guard that exists to catch exactly that fails twice. And\n`why.sh --details` throws away the verdict's exit code — a HALTED lane and a\nhealthy one both come back as exit 0 — which contradicts the exit-code contract\nthis same release documents as \"the whole contract.\" Both are small, isolated\nfixes; neither prevents an operator from using the release. Both are filed via\nPath C (autonomous follow-up filing — non-blocking).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "installed docs cite `docs/operator-api.md`, which the installer does not deliver — unit suite red",
+      "heading": "Finding 1: installed docs cite `docs/operator-api.md`, which the installer does not deliver — unit suite red",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task — one line in a manifest)\n**Systemic Risk:** medium (a real defect that ships and gets fixed next iteration: the gated unit runner is red, which is the signal CM and the next TESTER read, and an installed operator following the pointer finds nothing)\n**Regression:** yes (this RC's documentation commits introduced both citations; neither exists on `ai_main`)\n**Integrity Damage:** no\n**Filed As:** BUG-0227 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`bash team/scripts/run-unit-tests.sh` exits 1 with:\n\n```\nFAILED tests/unit/test_installed_governance_docs_citations_resolve.py::test_every_installed_governance_docs_citation_resolves_under_fresh_install\nFAILED tests/unit/test_installed_governance_docs_citations_resolve.py::test_every_installed_governance_docs_citation_resolves_under_upgraded_root\n```\n\nBoth report the same two dangling citations:\n\n```\n2 citation(s) did NOT resolve:\n  - docs/operator-commands.md cites 'docs/operator-api.md', which is not installed\n  - docs/OPERATIONS.md cites 'docs/operator-api.md', which is not installed\n```\n\nTraced: `docs/operator-commands.md:523` and `docs/OPERATIONS.md:414` both cite\n`docs/operator-api.md`. `git show ai_main:docs/operator-commands.md | grep\noperator-api.md` and the same on `docs/OPERATIONS.md` return nothing, so both\ncitations arrive with this RC (commits `513dcbd`, `1754de0`, `a4b82cf`).\n`team/config/docs-manifest.txt` — the one list `install.sh` and\n`team/scripts/upgrade.sh` both read — does not name `operator-api.md`. The\nmanifest's own header states the rule that was broken: \"A document listed here\nmust never cite a `docs/` path this file omits — that would just move the\ndangling pointer one hop deeper.\"\n\nNote on how this got through rather than who let it through: the ticket that\nadded the citations (`WRITER-20260910-026-diagnostics-operator-docs`) carried the\nacceptance criterion \"No source code, script, test, or configuration file is\ncreated or modified by this ticket,\" which forbade its author from touching the\nmanifest at all. The decomposition, not the authoring, is where the gap sits —\na documentation ticket that adds a `docs/` citation needs the manifest edit\ninside its own scope or a companion ticket that owns it. That observation is\nrecorded in BUG-0227 for whoever picks it up.",
+      "filed_as": "BUG-0227",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task — one line in a manifest)",
+        "systemic_risk": "medium (a real defect that ships and gets fixed next iteration: the gated unit runner is red, which is the signal CM and the next TESTER read, and an installed operator following the pointer finds nothing)",
+        "regression": "yes (this RC's documentation commits introduced both citations; neither exists on `ai_main`)",
+        "filed_as": "BUG-0227 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "`why.sh --details` discards the verdict exit code",
+      "heading": "Finding 2: `why.sh --details` discards the verdict exit code",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (the printed verdict line is correct in every case; only the process exit status is wrong, and the documented cron recipe does not use `--details`)\n**Regression:** yes (the verdict exit-code contract is new in this RC, and the `--details` path never honoured it)\n**Integrity Damage:** no\n**Filed As:** BUG-0228 (Path C-A)\n\n`why.sh` publishes a stable exit-code contract in its own header and in\n`docs/operator-commands.md` under \"Exit codes,\" where the cron section states\n\"Nothing else is needed to automate against this — the codes above are the whole\ncontract.\" Adding `--details` collapses every code to 0. Measured against a\nthrowaway fixture root:\n\n```\nwhy.sh --project beta                       -> exit 4   (BLOCKED)\nwhy.sh --project beta --details             -> exit 0\nwhy.sh --project beta [HALT present]        -> exit 5   (HALTED)\nwhy.sh --project beta --details             -> exit 0\nwhy.sh --project gamma                      -> exit 2   (IDLE)\nwhy.sh --project gamma --details            -> exit 0\nwhy.sh --project alpha [stalled 65m]        -> exit 3   (RUNNING, stalled)\nwhy.sh --project alpha --details            -> exit 0\n```\n\nCause, in `team/scripts/why.sh`: the `--details` branch runs\n`_why_print_details \"${_project}\"; exit $?`. `_why_print_details` resolves the\nverdict (it needs the `line` field) but never reads the `exit_code` field out of\n`verdict_resolve_project`'s block and never sets `_WHY_LAST_EXIT_CODE`, so its\nreturn value is only \"did every section render.\" The verdict-only path\nimmediately below it does read `exit_code` and exits with it. Guard behaviour\nunder `--details` is otherwise intact: a section refusal still exits 1 with\nnothing on stdout, which I verified against a malformed refusal ledger.",
+      "filed_as": "BUG-0228",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (the printed verdict line is correct in every case; only the process exit status is wrong, and the documented cron recipe does not use `--details`)",
+        "regression": "yes (the verdict exit-code contract is new in this RC, and the `--details` path never honoured it)",
+        "filed_as": "BUG-0228 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "acceptance criteria verified — the diagnostics suite itself",
+      "heading": "Finding 3: acceptance criteria verified — the diagnostics suite itself",
+      "level": 3,
+      "body": "**Category:** pass\n\nEvery deliverable in the requirements document, and every per-ticket acceptance\ncriterion I could execute, checks out. Recorded here so the passes are on the\nrecord alongside the two defects.\n\n**Requirement — `why.sh`: no args = all projects in priority order; four verdict\nwords; cause + remedy in the sentence.** Verified behaviourally against a\nfixture kanban root with four projects. `why.sh` (no args) printed one line per\nproject in `projects.cfg` priority order. All four words rendered from their\nseeded conditions: `IDLE` from `enabled=false`, `IDLE` from an empty task tree,\n`HALTED` from a project-scoped `HALT` (line quoted the HALT file's reason),\n`RUNNING` from a `WORKING` task, `BLOCKED` from a `BLOCKED` task with no\n`WORKING` task. Each line carried `cause:` and `remedy:` fragments naming a\nrunnable next step.\n\n**Requirement — RUNNING verdicts carry progress evidence; churn never grades\nhealthy.** A `WORKING` task 0 minutes in state rendered\n`RUNNING — task <id> is WORKING, 0m in that state`. Pinning `VERDICT_NOW_EPOCH`\n65 minutes past the task's `status.md` mtime rendered\n`RUNNING — task <id> has been WORKING for 65m, past the 60m stall threshold;\ncause: no state transition in that window suggests churn or a hang` and exited 3,\nnot 0.\n\n**Requirement — exit codes cron-watchable.** 0/2/3/4/5 confirmed individually\n(above). The no-argument walk over a `RUNNING` (exit 0) and a `BLOCKED` (exit 4)\nproject exited 4 — the numeric maximum, matching the documented aggregation rule.\nBoth pre-flight refusals exited 1 dual-channel with a stable key, a\nplain-language message and a runnable remedy. An unknown flag was rejected.\n(The `--details` exception to this is Finding 2.)\n\n**Requirement — `--details`: locks, queue tails with raw markers, embedded\nshow-queues, posture, most recent discovery skip reason.** All five sections\nrendered. A seeded lock printed its path, a human-readable age and its full\nprovenance record (`holder=… pid=… op=… task=…`) via `lock_provenance.sh`'s own\nreaders. Queue tails printed `[x] <task-id>  status.md: WORKING` for a marker\nthat disagreed with the task's real state — both values visible, neither silently\npreferred. `show-queues.sh --project <name> --details` is invoked as a\nsubprocess (`why.sh:194`), not re-implemented. The posture block printed the\nHALT/HALT-AFTER state, the four deferral lines with their tiers unchanged, the\nActive RC and the pending-bundle list. Every section prints an explicit empty\nstate rather than nothing. Running `--details` twice left the fixture root\nbyte-identical.\n\n**Requirement — every discovery/gate refusal is dual-channel AND its most recent\ninstance is queryable.** Exercised directly: a bash-emitted refusal wrote a\nrecord naming the machine key, message, remedy, timestamp and raising surface; a\nsecond refusal replaced it (record count stayed 1, content was the newer one); a\nPython-emitted refusal produced a record the bash reader parsed identically\n(`surface=pyemit.py:my_refusal_site`, derived automatically from the caller's\nstack frame); with the project directory made unwritable the refusal still\nprinted its three stderr lines unchanged and still propagated its caller's exit\nstatus (verified at 7); a malformed ledger (header present, `Remedy` line\nremoved) made `--details` exit 1, name the ledger by absolute path, say\n`malformed`, name the missing field, print nothing to stdout, and never emit the\nhealthy `no discovery/gate refusal recorded` string. `grep -nE\n\"environ|sys.argv|secrets|getenv|subprocess|shell\"` over\n`team/pgai_agent_kanban/lib/refusal_ledger.py` finds only the documented\n`PGAI_PROJECT_NAME` read — no environment dump, no command line, no secrets path.\nDiscovery's Active-RC-in-flight skip and its four ceiling rejections all now emit\nthrough `pgai_emit_error_contract` with the project as the fourth argument and\neach carries a `CENSUS-ANCHOR` marker; `team/scripts/lint_gate_census_compliance.py`\nreports 0 offenders across 35 files with 139 anchored sites resolved.\n\n**Requirement — `verify-rc-state`: honors `branch_prefix`; shares validators with\nthe release-state loader.** `grep` over `team/scripts/verify-rc-state.sh` finds\nevery RC branch name constructed through `pp_prefix_branch` (lines 774, 817). The\none literal `rc/*` glob (line 793) is the deliberate stray-unprefixed-branch\nprobe and is skipped when `rc_glob` already equals the bare glob, so an\nunprefixed project never double-reports. The hand-rolled `_read_md_field` Python\nheredoc is deleted; the `Active RC` raw read now goes through\n`pp_run_ops pgai_agent_kanban.cm.read_state_field`. The two-topology integration\nfixture passes (3 tests), and the fixture-matrix test proves check (c) produces\nbyte-identical finding text on the prefixed and bare projects.\n\n**Requirement — REST parity endpoint returns the same verdicts as JSON.**\n`GET /verdicts` shells out to `team/scripts/verdict-report.sh` and parses its\n`key=value` blocks — never `why.sh`'s prose. `test_cli_rest_verdict_parity.py`\ndrives both surfaces over one fixture and compares them against each other\nrather than against pinned literals, so a drift in either surface fails it; 3\npassed. `python3 team/scripts/lint_icd_freshness.py`, `lint_api_parity.py` and\n`lint_icd_compat.py` each exit 0 against the committed `docs/api/icd.json`\n(ICD 1.4.0, compatible superset of all five supported baselines). The\nregistered-but-no-directory case returns an \"unresolved\" entry at HTTP 200, and\nan unregistered `?project=` returns 422 — neither is 5xx.\n\n**Acceptance — P8's fixture matrix.** `test_diagnostics_fixture_matrix.py` ships\nall four named shapes (stale-marker, invalid-ledger, churn-progress,\nprefixed-project), each naming its single command in its own docstring, each\nreusing rather than re-implementing the two-project fixture, each pinning time\nthrough `VERDICT_NOW_EPOCH` rather than sleeping, and each repointing\n`PGAI_AGENT_KANBAN_ROOT_PATH` at a `tmp_path` root. 4 passed under\n`run-integration-tests.sh`.\n\n**Documentation.** The four-verdict vocabulary appears in full in exactly one\nplace (`docs/operator-commands.md`), with `docs/OPERATIONS.md` and\n`docs/operator-api.md` referencing it rather than carrying a second copy. The\nexit-code table's numbers match the shipped script's header table. `why.sh` is no\nlonger documented as requiring `--project`. The retired `why.project_required`\nrefusal has no surviving reference anywhere in `docs/` or `team/`. No\nforward-looking \"planned/forthcoming/not yet functional\" language describes any\npart of this release. The WRITER commits touched only the three documents.\n(The one documentation defect is Finding 1.)",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "release-state and prereq graph — no drift",
+      "heading": "Finding 4: release-state and prereq graph — no drift",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_last_released_version` returns `v2.14.3`; `semver_gt v2.15.0 v2.14.3` holds.\n`release-state.md` reads `Active RC: v2.15.0`, `Last Released: v2.14.3` (a\nwell-formed `vX.Y.Z` value, expected by schema, not drift), and the\n`ai_rc/v2.15.0` branch exists in the dev tree. `bash scripts/verify-rc-state.sh\npgai-agent-kanban` reports **0 errors, 14 warnings, 73 ok**; all 14 warnings are\nthe pre-existing \"PRIORITY backlog `[x]` … not found in any active requirements\nfile\" informational lines, unchanged by this RC.\n\nPrerequisite graph for the cycle: acyclic, correctly bookended\n(`CM-20260910-027-open-rc-2-15-0` at the head, `TESTER-20260910-028-verify-2-15-0`\nand `CM-20260910-030-release-2-15-0` at the tail), every referenced task ID\nresolves to an existing task folder, sequence numbers 020–030 consistent and\nnon-colliding.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "pre-flight and hygiene checks",
+      "heading": "Finding 5: pre-flight and hygiene checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Pre-flight merge verification passed: every DONE task in the cycle has its\n  feature branch already deleted post-merge (`git branch --list 'ai_feature/*'`\n  is empty in the dev tree), which the procedure treats as merged. No unmerged\n  branch, no BUG-92 zero-commit anomaly.\n- Worktree `HEAD` (`07e5e7a`) equals `ai_rc/v2.15.0`; `git status --short` empty;\n  `git stash list` empty.\n- Skip-cites-real-bug gate: no placeholder skip IDs in `team/tests/`; every cited\n  `BUG-NNNN` resolves to a file in `bugs/`. The gated runners' own\n  `skip_cites_real_bug` lint reports OK on both suites.\n- Step 6.8 synthetic release simulation: the RC diff touches\n  `team/scripts/verify-rc-state.sh` and `team/scripts/lib/discovery_guards.sh`,\n  so the lane applies. `tests/integration/test_cm_release_synthetic.py` ran\n  inside the integration suite: 15 passed.\n- Coding-standards spot-check: both new operator verbs (`why.sh`,\n  `verdict-report.sh`) ship a `--help` naming every flag; the stall threshold and\n  the exit codes are named constants in one place (`verdict.sh`) and mirrored,\n  not re-derived, in `why.sh`'s header; `why_details.sh` reuses\n  `lock_provenance.sh`, `halt_state.py`, `describe_token`, `discovery_bundle.sh`\n  and `discovery_state.sh` rather than re-implementing them. The one hit is the\n  provenance litter recorded under Lint Findings.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

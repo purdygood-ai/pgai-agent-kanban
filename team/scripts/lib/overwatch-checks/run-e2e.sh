@@ -13,8 +13,8 @@
 #
 # Fixture conditions seeded (one per check):
 #   1. 0-byte file in priority/          -> check-empty-files
-#   2. BLOCKED task, Needs Human=no,
-#      Active RC reason, Active RC=none  -> check-blocked-tasks
+#   2. BLOCKED task with an always-human
+#      Block Record, Needs Human=no      -> check-block-triage (escalates)
 #   3. vX.Y.Z-prefixed file in priority/ -> check-tester-orphan-files
 #   4. [x] cache marker on open file     -> check-cache-marker-drift
 #   5. PM task with README.md input      -> check-readme-bundled
@@ -164,6 +164,9 @@ E2E_DEV_TREE="${E2E_TMPDIR}/dev_tree"
 E2E_ORIGIN_BARE="${E2E_TMPDIR}/origin"
 E2E_PROJECT_NAME="test-project"
 E2E_PROJECT_ROOT="${E2E_KANBAN_ROOT}/projects/${E2E_PROJECT_NAME}"
+# A PM task ID in the shared task-ID shape (task_ids.sh), which the
+# README-bundled check selects PM task folders by.
+E2E_PM_TASK_ID="PM-20260101-002-example-readme-input"
 E2E_LOG="${E2E_PROJECT_ROOT}/overwatch/actions.log"
 
 # ---------------------------------------------------------------------------
@@ -181,12 +184,16 @@ _build_fixture() {
     # Empty actions.log
     : > "${E2E_LOG}"
 
+    # Register the fixture project: the push decision (check-push-lag,
+    # check-orphan-rc-branches) acts only on a project projects.cfg names.
+    cat > "${E2E_KANBAN_ROOT}/projects.cfg" <<EOF
+[project:${E2E_PROJECT_NAME}]
+priority = 1
+EOF
+
     # --- release-state.md: stale Active RC ---
     # Condition for check-stale-active-rc:
     #   Active RC=v0.20.0, tag v0.20.0 exists, no rc/v0.20.0 branch.
-    # Condition for check-blocked-tasks:
-    #   Active RC must be "none" at the time that check runs.
-    #   We run check-stale-active-rc FIRST (resets to none), then blocked-tasks.
     cat > "${E2E_PROJECT_ROOT}/release-state.md" <<'RSEOF'
 # Release State
 
@@ -203,10 +210,10 @@ RSEOF
     # --- Check 1: empty file in priority/ ---
     touch "${E2E_PROJECT_ROOT}/priority/PRIORITY-TEST-EMPTY.md"
 
-    # --- Check 2: BLOCKED task (Needs Human=no, Active RC reason) ---
-    # This check needs Active RC=none when it runs.
-    # Strategy: run check-stale-active-rc first (live), then blocked-tasks.
-    local bt_task_id="CLAUDE-CODER-TEST-001-blocked-task"
+    # --- Check 2: BLOCKED task carrying an always-human Block Record ---
+    # check-block-triage escalates it: Needs Human -> yes and an
+    # OVERWATCH Diagnosis; the task stays BLOCKED.
+    local bt_task_id="CODER-20260101-001-example-blocked-task"
     local bt_task_dir="${E2E_PROJECT_ROOT}/tasks/${bt_task_id}"
     mkdir -p "${bt_task_dir}"
     cat > "${bt_task_dir}/README.md" <<EOF
@@ -234,19 +241,26 @@ ${bt_task_id}
 BLOCKED
 
 ## Summary
-Blocked waiting for Active RC.
+Blocked by the agent without a reason code.
 
 ## Blockers
-none
-
-## Blocked Reason
-Waiting for Active RC to be available.
+The agent needs an operator decision.
 
 ## Needs Human
 no
 
 ## Next Recommended Step
 none
+
+## Block Record
+reason_code: agent_unclassified
+owner_role: CODER
+attempts: 0
+first_blocked_at: 2026-01-01T00:00:00+00:00
+last_blocked_at: 2026-01-01T00:00:00+00:00
+cooldown_until: none
+evidence: none
+resume: fresh
 EOF
     cat > "${E2E_PROJECT_ROOT}/tasks/queues/claude/coder_backlog.md" <<EOF
 # CODER Backlog
@@ -285,7 +299,7 @@ PEOF
 PBEOF
 
     # --- Check 5: PM task with README.md input ---
-    local pm_task_id="CLAUDE-PM-TEST-001-readme-input"
+    local pm_task_id="${E2E_PM_TASK_ID}"
     local pm_task_dir="${E2E_PROJECT_ROOT}/tasks/${pm_task_id}"
     mkdir -p "${pm_task_dir}"
     cat > "${pm_task_dir}/README.md" <<EOF
@@ -361,14 +375,20 @@ EOF
     git -C "${E2E_DEV_TREE}" commit -m "unpushed commit for push-lag test" --quiet
     # v0.20.0 tag is local-only (not pushed to origin) — also triggers push-lag
 
-    # Write project.cfg pointing at our fixture dev tree
+    # Write project.cfg pointing at our fixture dev tree. push_to_remote is
+    # set to true explicitly (check-push-lag pushes only then), and the
+    # empty branch_prefix matches the unprefixed main branch and vX.Y.Z tags
+    # seeded above.
     cat > "${E2E_PROJECT_ROOT}/project.cfg" <<EOF
 # project.cfg — generated for E2E harness
-project_name="${E2E_PROJECT_NAME}"
-dev_tree_path="${E2E_DEV_TREE}"
-git_repo_url="file://${E2E_ORIGIN_BARE}"
-git_remote_name="origin"
-workflow_type="release"
+[project]
+project_name = ${E2E_PROJECT_NAME}
+dev_tree_path = ${E2E_DEV_TREE}
+git_repo_url = file://${E2E_ORIGIN_BARE}
+git_remote_name = origin
+workflow_type = release
+branch_prefix =
+push_to_remote = true
 EOF
 }
 
@@ -402,28 +422,23 @@ PRE_DRY_ENTRIES="$(wc -l < "${E2E_LOG}")"
 
 # 1. check-empty-files
 _out="$(_run_check check-empty-files.sh --dry-run || true)"
-if echo "${_out}" | grep -qiE "dry-run|empty.*detected|would rename" 2>/dev/null; then
+if grep -qiE "dry-run|empty.*detected|would rename" <<< "${_out}" 2>/dev/null; then
     _pass "dry-run/check-empty-files" "detection logged"
 else
     _fail "dry-run/check-empty-files" "output: ${_out}"
 fi
 
-# 2. check-blocked-tasks
-# The task is seeded with Active RC=v0.20.0, but check-blocked-tasks skips
-# when Active RC != none. For dry-run detection, temporarily set RS to none.
-_rs_content="$(cat "${E2E_PROJECT_ROOT}/release-state.md")"
-sed -i 's/^v0\.20\.0$/none/' "${E2E_PROJECT_ROOT}/release-state.md"
-_out="$(_run_check check-blocked-tasks.sh --dry-run || true)"
-printf '%s\n' "${_rs_content}" > "${E2E_PROJECT_ROOT}/release-state.md"
-if echo "${_out}" | grep -qiE "dry-run.*would promote|dry-run-blocked-task-promotable|eligible" 2>/dev/null; then
-    _pass "dry-run/check-blocked-tasks" "detection logged"
+# 2. check-block-triage
+_out="$(_run_check check-block-triage.sh --dry-run || true)"
+if grep -qiE "\[dry-run\].*would escalate" <<< "${_out}" 2>/dev/null; then
+    _pass "dry-run/check-block-triage" "detection narrated"
 else
-    _fail "dry-run/check-blocked-tasks" "output: ${_out}"
+    _fail "dry-run/check-block-triage" "output: ${_out}"
 fi
 
 # 3. check-tester-orphan-files
 _out="$(_run_check check-tester-orphan-files.sh --dry-run || true)"
-if echo "${_out}" | grep -qiE "dry-run|orphan.*detected|would.*orphan" 2>/dev/null; then
+if grep -qiE "dry-run|orphan.*detected|would.*orphan" <<< "${_out}" 2>/dev/null; then
     _pass "dry-run/check-tester-orphan-files" "detection logged"
 else
     _fail "dry-run/check-tester-orphan-files" "output: ${_out}"
@@ -431,7 +446,7 @@ fi
 
 # 4. check-cache-marker-drift
 _out="$(_run_check check-cache-marker-drift.sh --dry-run || true)"
-if echo "${_out}" | grep -qiE "dry-run|drift.*detected|would reset" 2>/dev/null; then
+if grep -qiE "dry-run|drift.*detected|would reset" <<< "${_out}" 2>/dev/null; then
     _pass "dry-run/check-cache-marker-drift" "detection logged"
 else
     _fail "dry-run/check-cache-marker-drift" "output: ${_out}"
@@ -439,7 +454,7 @@ fi
 
 # 5. check-readme-bundled
 _out="$(_run_check check-readme-bundled.sh --dry-run || true)"
-if echo "${_out}" | grep -qiE "dry-run|bad input|README.*input" 2>/dev/null; then
+if grep -qiE "dry-run|bad input|README.*input" <<< "${_out}" 2>/dev/null; then
     _pass "dry-run/check-readme-bundled" "detection logged"
 else
     _fail "dry-run/check-readme-bundled" "output: ${_out}"
@@ -447,7 +462,7 @@ fi
 
 # 6. check-stale-active-rc
 _out="$(_run_check check-stale-active-rc.sh --dry-run || true)"
-if echo "${_out}" | grep -qiE "dry-run|stale.*RC|stale.*confirmed" 2>/dev/null; then
+if grep -qiE "dry-run|stale.*RC|stale.*confirmed" <<< "${_out}" 2>/dev/null; then
     _pass "dry-run/check-stale-active-rc" "detection logged"
 else
     _fail "dry-run/check-stale-active-rc" "output: ${_out}"
@@ -455,7 +470,7 @@ fi
 
 # 7. check-orphan-rc-branches
 _out="$(_run_check check-orphan-rc-branches.sh --dry-run || true)"
-if echo "${_out}" | grep -qiE "dry-run|orphan.*confirmed|would delete" 2>/dev/null; then
+if grep -qiE "dry-run|orphan.*confirmed|would delete" <<< "${_out}" 2>/dev/null; then
     _pass "dry-run/check-orphan-rc-branches" "detection logged"
 else
     _fail "dry-run/check-orphan-rc-branches" "output: ${_out}"
@@ -463,7 +478,7 @@ fi
 
 # 8. check-push-lag
 _out="$(_run_check check-push-lag.sh --dry-run || true)"
-if echo "${_out}" | grep -qiE "dry-run|push lag.*detected|ahead" 2>/dev/null; then
+if grep -qiE "dry-run|push lag.*detected|ahead" <<< "${_out}" 2>/dev/null; then
     _pass "dry-run/check-push-lag" "detection logged"
 else
     _fail "dry-run/check-push-lag" "output: ${_out}"
@@ -496,12 +511,9 @@ echo "=== PHASE 2: Live run — 8 fixes must land ==="
 
 PRE_LIVE_ENTRIES="$(wc -l < "${E2E_LOG}")"
 
-# Run order matters:
-# - check-stale-active-rc resets Active RC to none (fix 6), enabling fix 2
-# - check-blocked-tasks runs after Active RC is none (fix 2)
 _live_1="$(_run_check check-empty-files.sh || true)"
 _live_6="$(_run_check check-stale-active-rc.sh || true)"
-_live_2="$(_run_check check-blocked-tasks.sh || true)"
+_live_2="$(_run_check check-block-triage.sh || true)"
 _live_3="$(_run_check check-tester-orphan-files.sh || true)"
 _live_4="$(_run_check check-cache-marker-drift.sh || true)"
 _live_5="$(_run_check check-readme-bundled.sh || true)"
@@ -519,10 +531,12 @@ _assert_file_contains "live/fix-6/active-rc-reset" \
     "${E2E_PROJECT_ROOT}/release-state.md" \
     "^none$"
 
-# Fix 2: BLOCKED task promoted to BACKLOG
-_assert_file_contains "live/fix-2/task-promoted" \
-    "${E2E_PROJECT_ROOT}/tasks/CLAUDE-CODER-TEST-001-blocked-task/status.md" \
-    "BACKLOG"
+# Fix 2: always-human block escalated with a diagnosis
+_assert_file_contains "live/fix-2/task-diagnosed" \
+    "${E2E_PROJECT_ROOT}/tasks/CODER-20260101-001-example-blocked-task/status.md" \
+    "^## OVERWATCH Diagnosis"
+_assert_log_contains "live/fix-2/triage-logged" "${E2E_LOG}" \
+    "block-triage:agent_unclassified:escalate"
 
 # Fix 3: tester orphan file handled (renamed to .orphan)
 _assert_file_absent "live/fix-3/tester-orphan-gone" \
@@ -535,7 +549,7 @@ _assert_file_contains "live/fix-4/cache-marker-reset" \
 
 # Fix 5: PM task marked WONT-DO
 _assert_file_contains "live/fix-5/pm-task-wont-do" \
-    "${E2E_PROJECT_ROOT}/tasks/CLAUDE-PM-TEST-001-readme-input/status.md" \
+    "${E2E_PROJECT_ROOT}/tasks/${E2E_PM_TASK_ID}/status.md" \
     "WONT-DO"
 
 # Fix 7: orphan rc/v0.19.0 branch deleted
@@ -554,8 +568,9 @@ else
     _fail "live/fix-8/push-lag-cleared" "main still ${_ahead} ahead"
 fi
 
-# Backups present
-_backup_count="$(find "${E2E_PROJECT_ROOT}/overwatch/backups" -mindepth 2 -maxdepth 2 -type f 2>/dev/null | wc -l)"
+# Backups present (overwatch_backup_file keys each backup on its source
+# path, so backups sit at any depth below the firing timestamp)
+_backup_count="$(find "${E2E_PROJECT_ROOT}/overwatch/backups" -mindepth 2 -type f 2>/dev/null | wc -l)"
 if (( _backup_count > 0 )); then
     _pass "live/backups-present" "${_backup_count} backup file(s)"
 else
@@ -593,7 +608,7 @@ else
     _revert_out="$(KANBAN_ROOT="${E2E_KANBAN_ROOT}" OVERWATCH_PROJECT="${E2E_PROJECT_NAME}" \
         bash "${REVERT_SCRIPT}" "${_firing_ts}" 2>&1 || true)"
 
-    if echo "${_revert_out}" | grep -qiE "revert completed|Restored:|files restored" 2>/dev/null; then
+    if grep -qiE "revert completed|Restored:|files restored" <<< "${_revert_out}" 2>/dev/null; then
         _pass "revert/completed" "revert script reported completion"
     else
         _fail "revert/completed" "output: ${_revert_out}"
@@ -609,7 +624,7 @@ else
         _pass "revert/release-state-restored" "Active RC v0.20.0 restored"
     else
         # Acceptable if revert only restored other files (depends on which timestamp)
-        if echo "${_revert_out}" | grep -qiE "Restored:" 2>/dev/null; then
+        if grep -qiE "Restored:" <<< "${_revert_out}" 2>/dev/null; then
             _pass "revert/release-state-restored" "revert restored files"
         else
             _fail "revert/release-state-restored" \

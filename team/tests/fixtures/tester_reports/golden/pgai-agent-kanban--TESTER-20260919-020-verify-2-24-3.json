@@ -1,0 +1,185 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": null,
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0334 — derived stale-lock threshold no longer reaps a live chain",
+      "heading": "Finding 1: BUG-0334 — derived stale-lock threshold no longer reaps a live chain",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pgai_lock_stale_age_threshold_seconds` now resolves to\n`max(configured_periods x 120s, max_runtime_seconds + kill_grace_seconds + 120s)`.\nAgainst the live `kanban.cfg` values (`max_runtime_seconds = 14400`,\n`kill_grace_seconds = 30`) it returns **14550s**, not the 360s the incident\nreaped at.\n\nBehavioral verification in a throwaway sandbox root\n(`env -u PGAI_TASKS_DIR -u PGAI_PROJECT_ROOT KANBAN_ROOT=$S …`), with a real\nsecond process holding the flock:\n\n| scenario | lock mtime age | recorded pid | result | expected |\n|---|---|---|---|---|\n| the filed incident, reproduced | 360s (6m0s) | alive | `lock.provenance.contended`, rc 1, **not reaped** | defer |\n| threshold minus one second | 14549s | alive | `lock.provenance.contended`, rc 1, **not reaped** | defer |\n| past threshold | 14551s | alive | `lock.provenance.stale_reaped.aged_out`, rc 0 | reap |\n| dead recorded pid | 2s | dead | `lock.provenance.stale_reaped.dead_pid`, rc 0 | immediate reap |\n| provenance wiped to zero bytes | 2s | n/a | `lock.provenance.stale_reaped.no_provenance`, rc 0 | immediate reap + violation marker |\n\nThe no-provenance case wrote the violation marker to the sandbox's own\n`projects/pgai-agent-kanban/refusal-ledger.md` (verified by reading it), which\nalso confirms the sandbox isolated correctly — nothing reached the live install.\n\nBUG-0334's second acceptance line (\"derived threshold visible in why.sh lock\ndisplay and the reap narration — names the derivation, not just the number\") is\nmet on both surfaces. The aged-out reap message carries\n`(derivation: max-chain-budget floor enforced at 14550s (max_runtime_seconds\n14400s + kill_grace_seconds 30s + 120s margin), above the configured 3 wake\nperiod(s) x 120s/period = 360s)`, and `why_details_render_locks` prints\n`stale-age threshold: 4h 2m (<same derivation>)`.\n\nThe read-only contract holds: rendering the lock pane wrote **no**\n`refusal-ledger.md` into the sandbox project dir, confirming the `narrate` gate\nkeeps the clamp warning on `pgai_lock_acquire`'s acting path only.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0334 — chain-level lock reverification at mutating phase boundaries",
+      "heading": "Finding 2: BUG-0334 — chain-level lock reverification at mutating phase boundaries",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pgai_lock_still_held`, `pgai_lock_reverify_or_narrate` and `pgai_lock_abandon`\nbehave as specified, driven directly:\n\n- healthy path — `still_held` → yes; `reverify_or_narrate` → rc 0, silent.\n- after a simulated reap (the on-disk record overwritten with a different\n  holder/pid) — `still_held` → no; `reverify_or_narrate` → rc 1 plus a\n  dual-channel `lock.provenance.reverify_lost` naming the new holder's four\n  fields (`holder=chain-B pid=999999 op=wake-chain task=TASK-B`), the phase\n  (`merge`), and stating it is stopping before mutating shared state.\n- `pgai_lock_abandon` → rc 0, and the on-disk record **still reads\n  `holder=chain-B`** afterwards — the new holder's record was not destroyed,\n  which is the whole point of the release-shaped counterpart.\n\nThe three wiring sites read correctly at `wake_driver.sh` (agent dispatch,\nplaced at the top of `run_project_chain`'s per-iteration loop ahead of the four\nhousekeeping calls that themselves write queue-adjacent state), `process_one_task`\n(the post-agent merge boundary, returning 3), and `wake_driver_finalize.sh`\n(the queue-marker write). `_project_lock_lost` correctly selects\n`pgai_lock_abandon` over `pgai_lock_release` at end-of-chain cleanup.\nBUG-0334's acceptance item 4 (a two-process field fixture) ships as\n`team/tests/integration/test_chain_lock_reverification.py` and passes in the\ngated integration run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0335 — provenance hygiene findings cleared",
+      "heading": "Finding 3: BUG-0335 — provenance hygiene findings cleared",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_hygiene.py --classes provenance` reports\n`OK — 0 findings across 8 scan director(y/ies)`, exit 0. The full default-class\nrun (`provenance`, `version-named-test`, `comment-drift`) likewise reports 0\nfindings. The single named instance,\n`team/tests/unit/test_event_band_renderer.py:10`, no longer cites a BUG-ID; the\ndocstring now describes the behavior under test.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0336 — status band renders every roster row",
+      "heading": "Finding 4: BUG-0336 — status band renders every roster row",
+      "level": 3,
+      "body": "**Category:** pass\n\nBuilt a fixture root reproducing the live install's shapes: five agents with\nparseable `done: completed=…` verdict lines, a `cron-cleanup.log` of bare\nuntimestamped `ERROR:` lines, and a `cron-overwatch.log` of timestamped lines\ncarrying no verdict.\n\n- RC tree: **all seven roster rows**, exit **0**. `CLEANUP` reads\n  `no data yet` / `no result yet`; `OVERWATCH` reads its real parsed timestamp\n  `2026-09-19 13:00:01` / `no result yet`. Never blank, never a raw log line.\n- Pre-fix tree (`git archive ai_main`, same fixture, same command): **five rows**,\n  `CLEANUP` and `OVERWATCH` absent, exit **1**, empty stderr — the filed symptom\n  reproduced exactly.\n\nThis satisfies the \"agent ordered *after* the non-distillable one\" regression\ncondition too: `OVERWATCH` follows `CLEANUP` in roster order and both render.\nThe fix is a single explicit `return 0` after the distill loop, with a comment\nstating bash's `while`-loop exit-status rule; the placeholder values were\nalready correct before the loop ended.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0337 — event band read is bounded, but the render still exceeds its refresh budget",
+      "heading": "Finding 5: BUG-0337 — event band read is bounded, but the render still exceeds its refresh budget",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1–2 CODER tasks)\n**Systemic Risk:** medium (the verification shape that missed it — an acceptance\ncriterion checked against a fixture that mocks away the production condition —\nis not specific to this band)\n**Filed As:** BUG-0340-event-band-render-exceeds-refresh-budget (Path C-A —\nfiled as BUG: code defect / regression / test failure)\n\nWhat is delivered, and verified:\n\n- The read is genuinely bounded. `tail -n 20000 | grep -E \"$(dashboard_event_signal_ere)\"`\n  across all five live logs (819.1 MB) costs **0.057 s total**. The 25-minute /\n  `exit=124` symptom in BUG-0337 is gone.\n- Render time does not grow with historical size (acceptance checkbox 2).\n  7.6 MB fixture / 5270 survivors → 7.46 s; 819.1 MB fixture / 7068 survivors →\n  11.60 s. Time tracks survivor count, not bytes.\n- The single-pattern-list constraint (checkbox 3) holds. `event-band.sh` builds\n  its pre-filter from `dashboard_event_signal_ere()`, which joins\n  `EVENT_SIGNAL_PATTERNS` itself; no second list exists. Fidelity checked\n  empirically over 20,000 real log lines: `grep -E` selected 1547 lines, the\n  authoritative `dashboard_event_signal_is_signal` selected 1547, and the two\n  sets are **identical** — the pre-filter narrows nothing the classifier would\n  have kept.\n- Existing behaviour preserved (checkbox 4). `no wake events yet today` still\n  prints for an empty band; chronologic merge, `[<agent> HH:MM:SS]` tags, and\n  boilerplate dropping all still work; big-vs-small fixture output matches\n  except for the interleaving of untimestamped continuation lines, which is a\n  pre-existing consequence of stamping them with `date +%H:%M:%S` and is\n  unchanged by this RC.\n\nWhat is not delivered: acceptance checkbox 1's wall-clock bound. Measured\nagainst symlinks to the five live cron logs, six runs across two system-load\nconditions: **11.21, 11.25, 11.29, 11.48, 11.60, 11.63, 11.92 s** — consistently\nmore than twice the 5 s target. That 5 s is `_DEFAULT_REFRESH` in\n`team/scripts/dashboard/create.sh`, the interval `cadence-loop.sh` hosts the\nband on, so the pane is permanently at least one tick stale.\n\nThe residual cost is entirely downstream of the pre-filter: ~7000 surviving\ntoday-lines at roughly 1.5 ms each, each running the thirteen-pattern\nclassifier a second time, a timestamp `[[ =~ ]]`, and a\n`printf … >> \"$MERGE_FILE\"` that reopens the merge file per line. It scales with\ntoday's signal volume, which grows ~28,000 log lines/day across the fleet.\n\nTest fidelity (concrete, hence a finding rather than a caveat):\n`test_large_pre_today_body_renders_correctly_within_time_bound` asserts a 5 s\nbound over a fixture with 300,000 **pre-today** lines and exactly **two**\ntoday-lines. It measures the half of the fix that works and mocks away the half\nthat does not, which is why a green unit test coexists with a 12 s production\nrender.\n\nRelated but distinct: `PRIORITY-0004-event-band-signal-dedup` (open) reports\nthat ~97 % of the surviving lines are one repeated `sweep-census: … skipped`\nsentence. Fixing that would incidentally shrink this render, but the per-line\nconstant factor is a defect on its own terms.",
+      "filed_as": "BUG-0340",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1–2 CODER tasks)",
+        "systemic_risk": "medium (the verification shape that missed it — an acceptance",
+        "filed_as": "BUG-0340-event-band-render-exceeds-refresh-budget (Path C-A —"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "a unit test's verdict depends on the verifier's scratch directory path",
+      "heading": "Finding 6: a unit test's verdict depends on the verifier's scratch directory path",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1–2 CODER tasks)\n**Systemic Risk:** medium (the environment-coupled-fixture class has now cost\nmore than one release candidate; `PRIORITY-0002-env-coupled-fixture-detector`\nwas filed against exactly this class and this instance was not caught)\n**Filed As:** BUG-0341-env-coupled-debug-log-routing-test (Path C-A — filed as\nBUG: code defect / regression / test failure)\n\n`team/tests/unit/test_debug_log_routing.py::test_project_less_debug_log_routes_to_root_dir`\nline 289 asserts `\"/projects/\" not in resolved_path` against an absolute path\nrooted at `PGAI_AGENT_KANBAN_TEMP_DIR`. The production code routes correctly —\nthe preceding `startswith(kanban_root / \"logs\" / \"debug\")` assertion passes —\nbut the substring check is satisfied by the caller's own scratch prefix.\n\nProven by two runs of the same file at the same commit differing only in that\nvariable: `PGAI_AGENT_KANBAN_TEMP_DIR=/tmp/pgai_kanban_tmp/tester020clean` →\n`12 passed`; `…=/tmp/pgai_kanban_tmp/projects/tester020dirty` →\n`1 failed, 11 passed`.\n\nWhole-suite effect: the first `run-unit-tests.sh --coverage` of this\nverification used the scratch root the TESTER dispatch prompt names\n(`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/…`) and exited **1**\n(`1 failed, 4873 passed, 31 skipped`). Re-run under a temp dir without the\nsubstring it exited **0** (`4874 passed, 31 skipped`). The authoritative\n`UNIT_EXIT` recorded below is the second run's; the first is documented here in\nfull so the discrepancy is not mistaken for a flake.\n\nPre-existing: the file is not in the `ai_main..ai_rc/v2.24.3` diff. BUG-0191 and\nBUG-0314 name the file but are both `done` and describe different defects, so\nthis is filed rather than cited.",
+      "filed_as": "BUG-0341",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1–2 CODER tasks)",
+        "systemic_risk": "medium (the environment-coupled-fixture class has now cost",
+        "filed_as": "BUG-0341-env-coupled-debug-log-routing-test (Path C-A — filed as"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "requirements-doc acceptance criteria",
+      "heading": "Finding 7: requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"Each bundled item is addressed in the implementation\" — BUG-0334 (Findings 1\n  and 2), BUG-0335 (Finding 3), BUG-0336 (Finding 4), BUG-0337 (Finding 5,\n  partially: three of four checkboxes).\n- \"All Python files compile cleanly\" — `python3 -m py_compile` over every `.py`\n  in the tree, exit 0, no output.\n- \"All bash files pass syntax check\" — `bash -n` over every `.sh` in the tree,\n  zero failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "release-state, structural and constraint checks",
+      "heading": "Finding 8: release-state, structural and constraint checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `release-state.md` holds exactly the four canonical fields.\n  `## Active RC` = `v2.24.3`, `## RC Opened At` = `2026-09-19T15:36:24+00:00`,\n  `## RC Opened By Task` = `CM-20260919-019-open-rc-2-24-3`,\n  `## Last Released` = `v2.24.2` (well-formed). `pp_last_released_version` returns\n  `v2.24.2` and `semver_gt v2.24.3 v2.24.2` is true — checked through the shared\n  helper, never compared inline.\n- Pre-flight: `git rev-parse HEAD` == `git rev-parse ai_rc/v2.24.3` (`e4b1966`),\n  `git status --porcelain` empty, `git stash list` empty. No `DONE` task in\n  `tasks/` names a feature branch that still exists locally and is not an\n  ancestor of the RC.\n- Census: both new anchors (`lock-stale-threshold-floor-01`,\n  `lock-provenance-reverify-01`) are present in `docs/blocking-site-census.md`\n  with Locator Index entries. `lint_gate_census_compliance.py` → `0 offenders`,\n  exit 0.\n- Skip-cites-a-real-bug (Step 6.13): `lint_skip_bug_gate.sh` → `0 missing files`,\n  `all skip annotations are compliant`, exit 0. No `BUG-SKIP` placeholder shapes\n  in the test tree.\n- Documentation Discipline: `kanban.cfg_example` (new `[dashboard]\n  event_band_read_bound_lines` and `[locks]` notes), `project.cfg_example`,\n  `docs/DASHBOARD-PANES.md`, `docs/blocking-site-census.md` and\n  `config_loader.sh`'s Key Registry all updated in the same RC as the code.\n- `--help` presence: `event-band.sh --help` exits 0 and documents\n  `PGAI_DASHBOARD_EVENT_BAND_READ_BOUND_LINES`; `status-band.sh --help` exits 0.\n- Constraint negatives: no hardcoded secret, password, API key or token\n  introduced anywhere in the diff. The two changed executables keep\n  `set -euo pipefail`; the six changed library files correctly do not set it.\n- Step 6.8 (synthetic release simulation): **skipped with note** — the diff\n  touches no release-lifecycle file. `cm-release.sh`, `cm-open-rc.sh`,\n  `cm-cancel-rc.sh` and `team/scripts/lib/project_paths.sh` are all unchanged\n  between `ai_main` and `ai_rc/v2.24.3`.\n- Step 6.10 (prereq graph): acyclic, every referenced task ID resolves to a real\n  folder, bookends correct — `CM-20260919-019-open-rc-2-24-3` (DONE) at the\n  start, `TESTER-20260919-020-verify-2-24-3` then\n  `CM-20260919-022-release-2-24-3` (WAITING) at the end. No sequence collisions.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

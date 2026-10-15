@@ -1,0 +1,229 @@
+{
+  "recommendation": "ship-with-serious-concerns",
+  "systemic_risk": "high",
+  "summary": "Verified release candidate `ai_rc/v2.24.14` of pgai-agent-kanban against\n`requirements/v2.24.14-bugfix-bundle-20260926.md` — a six-item BUG bundle\n(BUG-0383 through BUG-0388) implemented by five CODER tickets and one WRITER\nticket. Verification ran in the detached read-only worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260926-009-verify-2-24-14`\n(HEAD `c6376af`, identical to `ai_rc/v2.24.14`). Work covered: RC-intact\npre-flight, release-state sanity, the full `ai_main..ai_rc/v2.24.14` diff\n(19 files, +1273/-86), per-bug acceptance-criteria execution, behavioral\nfailure-mode probes against all three guard-shaped changes, both gated\nrunners, the lint findings files, the deep-verify ledger, and the autonomous\noperation criterion.\n\nFive of the six bundled items are implemented correctly and verified\nbehaviorally. The sixth — BUG-0388's git-boundary-guard noise reduction —\nachieves its stated goal but introduces a regression that lets a whole class\nof non-CM remote git invocations bypass the guard silently, demonstrated\ndirectly against both the RC and the `ai_main` baseline.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0388's unreachable-destination exemption lets a whole class of non-CM remote git invocations bypass the boundary guard",
+      "heading": "Finding 1: BUG-0388's unreachable-destination exemption lets a whole class of non-CM remote git invocations bypass the boundary guard",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** high (the git boundary guard is framework-wide infrastructure every non-CM agent in every project lane runs behind, and the bypass is silent — no refusal, no evidence record)\n**Regression:** yes\n**Integrity:** destructive\n**Filed As:** BUG-0391 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`CODER-20260926-006-guard-evidence-fixture-noise` (commit `494f9d8`, merge\n`522c269`) added `_git_boundary_guard_is_unreachable_destination` to\n`team/scripts/lib/git_boundary_guard.sh` and changed\n`_git_boundary_guard_is_fixture_local` so that a **failed** `git remote get-url\n<destination>` probe returns \"fixture-local, exempt\" whenever the probe output\ncontains `no such remote` or `cannot change to`.\n\nThe destination token the probe is run against comes from\n`_git_boundary_guard_find_destination`, which returns *the first\nnon-option-shaped argument after the subcommand*. For any `fetch`/`pull`/`push`\ninvocation where an option consumes a separate value ahead of the remote name\n— `--depth N`, `--deepen N`, `-o <opt>` / `--server-option <opt>`, `-j N`,\n`--upload-pack <cmd>`, `--receive-pack <cmd>`, `--shallow-since <date>`,\n`--negotiation-tip <ref>` — that value is returned as the destination. It is\nnot a configured remote, so the probe fails with `No such remote`, and the new\ncode now reads that as \"nothing can be reached\" and **exempts the whole\ninvocation** — including the real, configured remote that is actually present\nlater in the same argv.\n\nBefore this RC, exactly that case was the documented safety property. The\nheader of `_git_boundary_guard_find_destination` still says so, verbatim, and\nis now false:\n\n```\n# An option here that happens to consume a value this scan does not\n# know about ... can at worst make this function return that value's own\n# text as a false \"destination\" -- harmless, because a value that does not\n# look like a real path or resolvable remote name simply fails the\n# fixture-local check below and falls through to the ordinary refusal, per\n# this guard's widen-inspection-never-widen-refusal design.\n```\n\n**Reproduction, run directly (not inferred).** A repository at\n`$HOME/.claude/tester-probe-2-24-14/work` (outside\n`$PGAI_AGENT_KANBAN_TEMP_DIR`) with `origin` configured to a bare repo at\n`$HOME/.claude/tester-probe-2-24-14/upstream.git`, invoked through the\nshim as `PGAI_AGENT_ROLE=coder`:\n\n| argv | RC `ai_rc/v2.24.14` shim | `ai_main` shim |\n|---|---|---|\n| `git -C <repo> fetch origin` | refusal, exit 1, 1 record | refusal, exit 1, 1 record |\n| `git -C <repo> fetch --depth 5 origin` | **no refusal, passed to real git, 0 records** | refusal, exit 1, 1 record |\n| `git -C <repo> push -o ci.skip origin main` | **no refusal, real git ran the push** (`fatal: the receiving end does not support push options`), 0 records | refusal, exit 1, 1 record |\n\nThe third row is the decisive one: a non-CM role's `push` actually reached the\ndestination repository and was answered by its receive end. Nothing about that\ninvocation was refused and nothing was recorded, so TESTER Step 6.12\nquestion (5) could not see it either.\n\n**Integrity rationale.** Rated `destructive` rather than `none` because the\nfailed path *is* the guard's ref-mutating-operation refusal path: the defect's\nown failure mode is an unblocked, unrecorded `push` from a role the boundary\nexists to stop. No ref was actually moved during verification (the probe's\nupstream rejected the push option), and `Regression: yes` because `ai_main`\nrefuses both shapes. A reader who judges `none` more apt should note that the\n`Severity: high` rating and the reproduction above are unchanged either way.\n\n**Why the suites stay green.** The ticket's own new coverage,\n`team/tests/unit/test_git_boundary_guard.py::test_fetch_from_repo_with_configured_remote_outside_root_still_refused`,\nexercises only `fetch origin --tags --quiet` — options *after* the remote name,\nwhich the destination scan handles correctly. No test exercises an option that\nconsumes a separate value ahead of the remote name, which is precisely the\ncondition the change broke. This is a test-fidelity gap on the same defect, not\na separate finding.\n\n**Suggested shape of the fix** (for CODER, not applied here): scope the\nexemption to destinations whose *repository* is under the temp root, and/or\nnarrow `_git_boundary_guard_find_destination` to skip the known value-consuming\noptions so a false destination can no longer be produced; then restore the\nheader's stated invariant and cover both option shapes.",
+      "filed_as": "BUG-0391",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "destructive",
+      "fix_effort": "small",
+      "systemic_risk": "high",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "high (the git boundary guard is framework-wide infrastructure every non-CM agent in every project lane runs behind, and the bypass is silent — no refusal, no evidence record)",
+        "regression": "yes",
+        "integrity": "destructive",
+        "filed_as": "BUG-0391 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0383 acceptance criterion 2 is unmet — the guard test module is still not self-sufficient",
+      "heading": "Finding 2: BUG-0383 acceptance criterion 2 is unmet — the guard test module is still not self-sufficient",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one test module; the authoritative gated runner is green)\n**Filed As:** BUG-0392 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nBUG-0383 lists four acceptance criteria. Three are met and verified:\n\n- `bash team/scripts/run-unit-tests.sh --coverage`, invoked from inside this\n  agent wake session with `GIT_GUARD_REAL_GIT=/usr/bin/git` exported and the\n  guard shim first on `PATH`, **exits 0** (4981 passed, 31 skipped). Met.\n- A test pins the invariant: `team/tests/unit/test_gated_runner_guard_env_scrub.py`\n  adds four tests, including one that actually executes each runner's scrub\n  statement and asserts both variables are clear, and one asserting both\n  runners scrub the identical set. Met.\n- `bash team/scripts/run-integration-tests.sh --coverage` — see the integration\n  result below. Met.\n\nCriterion 2 — \"`python3 -m pytest tests/unit/test_git_boundary_guard.py`\npasses 36/36 both with **and without** those two variables set in the ambient\nenvironment\" — is **not** met. Measured in the RC worktree:\n\n```\nenv GIT_GUARD_REAL_GIT=/usr/bin/git PGAI_GIT_GUARD_DEPTH=1 \\\n    python3 -m pytest tests/unit/test_git_boundary_guard.py -q -p no:cacheprovider -p no:randomly\n  -> 25 failed, 14 passed\n\nenv -u GIT_GUARD_REAL_GIT -u PGAI_GIT_GUARD_DEPTH \\\n    python3 -m pytest tests/unit/test_git_boundary_guard.py -q -p no:cacheprovider -p no:randomly\n  -> 39 passed\n```\n\nThe remedy chosen was the runner-level scrub only; the bug's \"Files Involved\"\nalso named per-test fixture clearing inside the module (\"alternatively (or\nadditionally) ... makes the module self-sufficient rather than dependent on the\nrunner\"), and that half was not done.\n\n**Not a regression.** The same module on `ai_main` (archived to\n`/tmp/pgai_kanban_tmp/tester/maintree-2414`) reports `25 failed, 11 passed`\nwith the two variables set — the identical failure count. The RC did not make\ndirect-pytest behaviour worse; it left this criterion unaddressed. Without the\nvariables the RC is strictly better: `39 passed` versus `ai_main`'s\n`1 failed, 35 passed`.\n\nImpact is confined to ad-hoc debugging: an agent or operator who runs that one\nmodule directly inside a guarded session sees failures that say nothing about\nthe code. The workaround is in the runner's own replay line, which now prints\n`-u GIT_GUARD_REAL_GIT -u PGAI_GIT_GUARD_DEPTH` explicitly.",
+      "filed_as": "BUG-0392",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one test module; the authoritative gated runner is green)",
+        "filed_as": "BUG-0392 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0384 — dashboard switch-storm pane death, fixed and verified",
+      "heading": "Finding 3: BUG-0384 — dashboard switch-storm pane death, fixed and verified",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CODER-20260926-003-dashboard-pane-race` (commit `9507ec4`, merge `19752dd`)\nidentified and closed a real ordering defect. The operator-shell pane and the\nterminal window's interactive pane each end their first command in a bare\n`exec bash` / `exec bash -l`, which this codebase already knew (from its own\n`/proc/<pid>/status` `SigIgn` finding) drops the ignore trap the wrapped\npreamble installed. The armed marker, however, was touched by the pre-`exec`\ncommand, so `create.sh`'s all-armed handshake and every later\nsession-window-changed hook firing could observe \"armed\" while the process that\nactually stays resident was unprotected.\n\nThe fix adds `dashboard_pane_wrap_cmd_no_marker` (trap install only, no marker\ntouch) in `team/scripts/dashboard/lib/pane_readiness.sh`, a `--defer-marker`\nmode on `dashboard_send_armed_keys`, and folds the marker touch into the SAME\ntyped re-arm line as the trap reinstall at both call sites — so the marker's\nexistence can never outrun the resident process's own trap.\n\nAcceptance criteria, each checked:\n\n- 25 consecutive isolated runs — exceeded. `tasks/CODER-20260926-003-dashboard-pane-race/logs/switch-storm-25-consecutive-runs.log`\n  records 30/30 `=== run N/30 ===` / `run N passed` pairs, zero failures,\n  ending `ALL 30 RUNS PASSED`. Counted independently: 30 run markers, 30\n  `passed` lines, 0 `failed`.\n- Pane-id set unchanged, no new ids — the existing assertion in\n  `test_thirty_immediate_window_switches_leave_every_pane_alive` is untouched\n  (switch count, absent warm-up sleep, and set comparison all preserved, as the\n  bug required).\n- Per-pane work idempotent under overlap, covered by a test rather than prose —\n  `team/tests/integration/test_dashboard_activation_hook_lifecycle.py::test_signaling_the_same_pane_twice_in_overlap_leaves_it_alive`\n  added; it fires real overlapping `activation-hook-sender.sh` invocations\n  against one window.\n- No load generator, no multi-session spawn — `grep -nE 'yes|dd |stress|while\n  true'` over the diff finds none; the new test works within one session in a\n  private socket.\n- `run-integration-tests.sh --coverage` exit 0 — see the suite result.\n\nI did not independently replay the 30-run storm loop. BUG-0384's reproduction\ncontract explicitly bounds host load (a prior attempt at this fix pinned every\ncore and triggered a provider throttle), the defect is non-deterministic, and\nthe named test runs once inside the gated integration suite that is the\nauthoritative signal. CODER's log is the evidence for the 25-run clause; that\nis recorded here as the basis rather than presented as my own measurement.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0385 — bundle close no longer promotes unfixed items, verified behaviorally",
+      "heading": "Finding 4: BUG-0385 — bundle close no longer promotes unfixed items, verified behaviorally",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CODER-20260926-004-bundle-close-carry-unfixed` (commit `747b37a`, merge\n`356b334`) gates the `## Bundled Items` enumeration path in\n`team/scripts/cm/promote_bundled_items.py` on a DONE task README reference, the\nsame safe bound the task-scanning derivation path already used, and extends the\nidentifier vocabulary to `PRIORITY-NNNN` alongside `BUG-NNNN`.\n\nExercised directly with a synthetic mixed bundle under\n`/tmp/pgai_kanban_tmp/tester/promoprobe-2414` — two items at `## Status:\nrunning`, one referenced by a `DONE` task README, one referenced only by a\n`WONT-DO` task README:\n\n```\n  promoted (running -> done): BUG-9001-fixed-item.md\n  carried (no DONE task references it): BUG-9002-withdrawn-item.md\n  Bundled items: 1 promoted, 0 skipped (not running), 0 missing, 1 carried (unfixed)\n--- Step 16b post-ship report: bugs still at 'running' for v9.9.9 ---\n  Carried (not closed): 1 item(s)\n    - BUG-9002-withdrawn-item.md\n  promoted (running -> done): v9.9.9-bugfix-bundle-probe.md\nexit=0\n```\n\nResulting on-disk statuses: fixed item `done`, withdrawn item `running`\n(unchanged from its prior value), bundle requirements file `done`. All five of\nBUG-0385's acceptance criteria met, including the mixed-bundle unit test\n(`team/tests/unit/test_promote_bundled_items_carries_unfixed.py`, five tests\ncovering mixed bundle, unchanged-fixed-item behaviour, the PRIORITY path,\na missing `tasks_dir` carrying everything rather than promoting blind, and\nre-run idempotence).\n\n**State-drift check on this very RC.** Because the gate is new, I confirmed\nv2.24.14's own bundle will still close: every one of the six enumerated items is\nnamed in a task README whose `status.md` reads `DONE` — BUG-0383 by\n`CODER-20260926-002`, BUG-0384 by `-003`, BUG-0385 by `-004`, BUG-0387 by\n`WRITER-20260926-005`, BUG-0388 by `-006`, BUG-0386 by `-007`. Nothing in this\nbundle will be carried by accident.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0386 — the hygiene lint is now held to its own rule, verified behaviorally",
+      "heading": "Finding 5: BUG-0386 — the hygiene lint is now held to its own rule, verified behaviorally",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CODER-20260926-007-lint-self-provenance-sweep` (commits `aeb1aac`, `29e602a`,\nmerge `c6376af`) removes `lint_hygiene.py` from its own `_FILE_WHITELIST`,\nretains its three documented worked-example tokens as individual sidecar\nallowlist entries with justifications, and reworded the offending docstring line\nto drop the real ledger identifier.\n\n- `git grep -nE 'BUG-[0-9]{4}' -- team/scripts/lint_hygiene.py` on the RC\n  returns three hits, all worked examples: `BUG-9999` (line 140), `BUG-9001`\n  (line 170), and `assert bug_id == \"BUG-0001\"` (line 905, a usage example of a\n  test assertion). No real ledger citation remains.\n- The behavioural statement is preserved: lines 183-184 now read \"(a separate\n  bug-backlog item already tracks them by name for a follow-on ticket to reword\n  or allowlist)\".\n- The whole-file exclusion is narrowed to nothing, with a new \"Self-scanning\"\n  note beside `_FILE_WHITELIST` explaining why the basename is deliberately\n  absent, plus a matching module-docstring update.\n- `python3 scripts/lint_hygiene.py --classes provenance` reports `OK — 0\n  findings across 9 scan director(y/ies)` tree-wide.\n- `team/scripts/hygiene-lint-allowlist.json` parses (88 entries, up from 85).\n\n**Guard fired when triggered.** BUG-0386's reproduction step 3 was the \"probe\ncomment is invisible\" proof. Replayed against a copy of the RC tree at\n`/tmp/pgai_kanban_tmp/tester/hygprobe-2414`: appending\n`# BUG-0377 probe citation of a real ledger identifier` to\n`team/scripts/lint_hygiene.py` now produces\n\n```\n  - team/scripts/lint_hygiene.py:2155: [BUG-ID] provenance reference 'BUG-0377' in code\n```\n\nwith a runnable remedy. The self-blindness the bug describes is gone.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0387 — the halt-trigger count claim is gone from the troubleshooting doc",
+      "heading": "Finding 6: BUG-0387 — the halt-trigger count claim is gone from the troubleshooting doc",
+      "level": 3,
+      "body": "**Category:** pass\n\n`WRITER-20260926-005-halt-trigger-count-docs` (commit `f55eed7`, merge\n`2dd0c90`) replaced `docs/operator-troubleshooting.md` line 206's \"one of the\neight enumerated in `docs/OPERATIONS.md`\" with \"one of those enumerated in\n`docs/OPERATIONS.md`\", and line 448's \"the eighth HALT trigger\" with \"one of\nCM's autonomous HALT triggers\". Both edits take the bug's own advice — point at\nthe enumerated list without restating its length, so the sentence cannot go\nstale again.\n\n- `grep -rn 'eight' docs/` surfaces no remaining claim about the number of HALT\n  triggers (the remaining hits are the dashboard's eight board columns, the\n  workflow engine's eight hook stubs, and a tmux window-index example).\n- `docs/OPERATIONS.md` still says nine in all three places; the sentence still\n  routes the reader to that enumerated list.\n- Unit suite exit 0, including the doc-truth and citation checks.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0388 — the fixture-noise reduction itself works as specified",
+      "heading": "Finding 7: BUG-0388 — the fixture-noise reduction itself works as specified",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe mechanism BUG-0388 asked for behaves correctly. Probed directly against both\nthe RC shim and an `ai_main` copy, with a fixture repository under\n`$PGAI_AGENT_KANBAN_TEMP_DIR`:\n\n| case | RC shim | `ai_main` shim |\n|---|---|---|\n| no `origin` configured, `fetch origin --tags --quiet` | pass-through, 0 records | refusal, 1 record |\n| `-C <dir>` already torn down | pass-through, 0 records | refusal, 1 record |\n| `origin` resolving under the temp root (BUG-0388 criterion 3) | pass-through, 0 records | pass-through, 0 records |\n\nThe exit code on the first two changes from 1 (guard refusal) to 128 (real git's\nown diagnostic), which is exactly the stated premise — real git fails\nidentically without touching a network — and production call sites for these are\nbest-effort (`2>/dev/null || true`).\n\n**Caveat 1 — criterion 1 is not verifiable from this environment.** \"A full\n`run-unit-tests.sh` and `run-integration-tests.sh` under a non-CM role leave\nzero records in the task's `logs/git-boundary-guard.jsonl`\" cannot be checked\nhere: the shim on `PATH` during a wake session is the *live install's*\n(`$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/git-guard/git`), which still carries\n`ai_main`'s guard until this release is installed. This cycle's task folders\nshow the pre-fix shape accordingly — 11 records for `CODER-20260926-002`, 3 for\n`-003`, 19 for `-004`, 8 for `WRITER-20260926-005`, 8 for `-007` — all naming\nfixture repositories under the temp root. Notably `CODER-20260926-006`, the\nfixing ticket, has no evidence file at all. The mechanism probe above is the\nsubstitute evidence; the criterion should be re-checked on the first cycle after\nv2.24.14 is installed.\n\n**Caveat 2 — one record class survives the fix by design.** My own task folder\nand `PM-20260926-001`'s each hold one record of the shape\n`git -C $HOME/develop/pgai-agent-kanban fetch origin --tags --quiet` —\nproduction best-effort code running against the *real* dev tree, where `origin`\nresolves to a genuine remote outside the temp root. That is a correct refusal\nand will keep being recorded after v2.24.14 ships, so Step 6.12 question (5)\nwill continue to answer YES on cycles where any non-CM role calls\n`pp_last_released_version` and friends. BUG-0388's framing (\"a healthy cycle is\nsupposed to leave none\") is therefore only partly achieved. Recorded as a\ncaveat, not a separate finding: the records are correct behaviour, and the\nresidual signal problem is a smaller version of the one BUG-0388 already\ndescribes.\n\nThe regression this ticket introduced is Finding 1, filed separately.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Requirements-doc acceptance criteria",
+      "heading": "Finding 8: Requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe bundle's own three criteria:\n\n- *Each bundled item is addressed in the implementation* — all six are addressed\n  (Findings 2-7). Five are fully met; BUG-0383 is met on three of four criteria\n  (Finding 2).\n- *All Python files compile cleanly* — `python3 -m py_compile` on every changed\n  `.py` file (`promote_bundled_items.py`, `lint_hygiene.py`, and the five test\n  modules) succeeds. The gated runners' own breakage-class pre-flight is green.\n- *All bash files pass syntax check* — `bash -n` passes on all seven changed\n  shell files (`dashboard/create.sh`, `dashboard/lib/pane_readiness.sh`,\n  `lib/gated_runner_lint.sh`, `lib/git_boundary_guard.sh`,\n  `lib/wake_guard_wiring.sh`, `run-unit-tests.sh`, `run-integration-tests.sh`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Constraint and standards spot-checks (Steps 6.9, 6.10, 6.13, 6.14)",
+      "heading": "Finding 9: Constraint and standards spot-checks (Steps 6.9, 6.10, 6.13, 6.14)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **6.9 negative checks** — `set -euo pipefail` still present in every changed\n  runner and in `dashboard/create.sh`; no hardcoded secret, token or credential\n  in the diff; `hygiene-lint-allowlist.json` parses; every added `BUG-`/task-ID\n  token in the diff is in the fictitious example range (`BUG-9001`..`BUG-9107`,\n  `PRIORITY-9104`/`-9105`, `CODER-20260926-10x`) or a documented pattern\n  example, consistent with the naming rule's usage-example exception, and\n  `lint_hygiene` confirms 0 provenance findings tree-wide.\n- **6.10 prerequisite graph** — acyclic; `CM-20260926-008-open-rc-2-24-14` is the\n  sole root for all five implementation tickets; `-007` correctly depends on the\n  five preceding tickets; `TESTER-...-009` depends on all six; `CM-...-011`\n  depends on all six plus TESTER. Every referenced task ID resolves to an\n  existing folder. Sequence numbers 001-011, no collisions.\n- **6.13 skip-cites-a-real-bug** — `lint_skip_bug_gate` green in the runner\n  pre-flight (\"0 missing files\", \"all skip annotations are compliant\"). Manual\n  confirmation: the only `BUG-NNNN`-in-skip-annotation hits in the test tree are\n  inside `team/tests/unit/test_skip_bug_citation_scan.py`'s own synthetic\n  corpus, which is the gate's fixture data. No placeholder shape\n  (`BUG-SKIP`, `BUG-<letters>`) appears in a real skip.\n- **6.14 coding standards** — no new script under `team/scripts/` (so no\n  missing `--help`); no new comment, docstring, help line or log line citing a\n  real bug, task or version identifier; no new operational value hardcoded where\n  an operator would want it configurable (the two scrubbed variable names are\n  part of the guard's own contract, documented in both runners and in\n  `GATED_RUNNER_REPLAY_ENV_NAMES`). One borderline observation, not a finding:\n  `dashboard_pane_wrap_cmd_no_marker` duplicates `dashboard_pane_wrap_cmd`'s\n  `printf` of the trap preamble rather than factoring it out; at two lines with\n  a long header explaining why the two must stay distinguishable, that is a\n  defensible call.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Synthetic release simulation (Step 6.8)",
+      "heading": "Finding 10: Synthetic release simulation (Step 6.8)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe diff touches a release-lifecycle file (`team/scripts/cm/promote_bundled_items.py`,\nthe cm-release Step 16b helper), so the step applies.\n`team/tests/integration/test_cm_release_synthetic.py` ran green inside the gated\nintegration suite (8 tests passed), and the neighbouring release-mechanics\nintegration modules — `test_cm_release_known_issue_carry_forward.py`,\n`test_cm_release_operator_force_override.py` — also passed. No real branch was\ntouched: the whole worktree remained clean throughout verification\n(`git status --porcelain` empty at the end).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-SERIOUS-CONCERNS",
+    "systemic_risk": "high"
+  }
+}

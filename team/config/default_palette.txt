@@ -4,9 +4,8 @@
 # bash stack (team/scripts/lib/projects_cfg.sh, PGAI_DEFAULT_PALETTE) and
 # the Python stack (team/pgai_agent_kanban/api/routers/board.py and
 # projects.py, _DEFAULT_PALETTE) read this file instead of hand-
-# maintaining their own copy of the array/list. See
-# projects/pgai-agent-kanban/priority/PRIORITY-0004-palette-single-source.md
-# for the drift this file exists to eliminate.
+# maintaining their own copy of the array/list, so the two stacks can never
+# drift apart on a project's default color.
 #
 # Format: one entry per data line, order is significant.
 #   #RRGGBB<whitespace>name<whitespace>hue-comment
@@ -45,3 +44,58 @@
 #BA7517  amber   ~40 degrees
 #D4537E  pink    ~340 degrees
 #888780  gray    last resort
+
+# ---------------------------------------------------------------------------
+# Semantic dashboard color keys
+# ---------------------------------------------------------------------------
+#
+# The eight entries above are an ORDERED list (no name field; position is
+# the key) used for per-project tag colors. Below this point the SAME file
+# also declares NAMED semantic keys: the color MEANING every dashboard
+# renderer under team/scripts/dashboard/ and team/scripts/lib/dashboard/
+# paints (halt state, deferral/approval markers, task-lifecycle status,
+# and pane-framing emphasis) instead of each renderer hand-deciding "halt
+# is red" or hand-transcribing its own copy of the color-name table.
+#
+# Parse rule for THIS section: a line is a semantic-key DATA line only
+# when its first whitespace-delimited token starts with '%' -- a sigil
+# that can never match the PROJECT-palette parse rule's ^#[0-9A-Fa-f]{6}$
+# token, so every reader of the ordered list above safely skips this
+# entire section as ordinary comment text, and the two sections coexist
+# in one file without ambiguity.
+#
+#   %<key><whitespace><color-name><whitespace><meaning-comment>
+#
+# <key> is the semantic key a renderer looks up. <color-name> is one of
+# the eleven names both color primitives recognize -- bash's ansi_code()
+# (team/scripts/lib/script_common.sh) and Python's ansi_code()
+# (pgai_agent_kanban.lib.palette) -- black, red, green, yellow, blue,
+# magenta, cyan, white, bold, dim, reset. Everything after the second
+# token is a free-form comment, exactly like the hue-comment column
+# above.
+#
+# Readers:
+#   bash:   team/scripts/lib/dashboard_palette.sh, dashboard_semantic_color()
+#   python: pgai_agent_kanban.lib.palette.load_semantic_palette() /
+#           resolve_semantic_color()
+#
+# A lookup of a key not declared below is a fail-loud error naming the key
+# and this file -- see dashboard_semantic_color() / resolve_semantic_color()
+# for the dual-channel refusal. Do not add a renderer-local fallback color
+# for an undeclared key; declare the key here instead.
+#
+# key                    color-name   meaning
+%halt_active            red          HALT sentinel active (full stop)
+%halt_draining          yellow       HALT-AFTER sentinel draining
+%approval_pending       yellow       Pending HUMAN-APPROVE gate marker
+%defer_warning          yellow       Deferral posture unreadable/malformed
+%status_open            white        Task/entry lifecycle: open (default)
+%status_running         yellow       Task/entry lifecycle: running (amber)
+%status_done            green        Task/entry lifecycle: done / wont-do
+%status_blocked         red          Task/entry lifecycle: blocked
+%status_waiting         yellow       Queue lifecycle: waiting
+%status_backlog         dim          Queue lifecycle: backlog
+%frame_label            cyan         Column/pane header label text
+%frame_dim              dim          Secondary/faint framing text
+%frame_bold             bold         Emphasized framing text
+%frame_warn             yellow       Framing warning marker

@@ -40,6 +40,27 @@ hierarchy.  This file adds only what is specific to the unit scope:
                         and stops it in a finally block, asserting the port is
                         free before returning.  Never binds port 8300.
 
+  Re-exported helpers (plain functions/dataclass, not pytest fixtures --
+  imported here so test modules can pull them from this conftest's module
+  namespace the same way they already reach the fixtures above, without a
+  second import line from tests.fixtures.binary_guard):
+
+  - require_binary, try_resolve_binary, BinaryGuard — the shared external-
+                        binary availability guard; from
+                        tests/fixtures/binary_guard.py.  Resolves a named
+                        binary (e.g. "tmux") to an absolute path or performs
+                        a narrated pytest.skip naming the binary and the
+                        reason.  BinaryGuard.teardown() gates a fixture's
+                        teardown step on whether setup actually resolved the
+                        binary, so a finally block is safe to run
+                        unconditionally even when setup skipped first.
+
+  - require_docker_daemon — the docker-specific extension of the same
+                        guard; resolves "docker" (or a named engine) AND
+                        confirms its daemon answers, skipping with a
+                        reason that names whichever of the two facts
+                        (binary absent vs. daemon unreachable) is false.
+
   Unit-specific fixtures:
 
   - minimal_kanban_root — a leaner kanban tree than tmp_kanban_root, suitable
@@ -50,7 +71,7 @@ hierarchy.  This file adds only what is specific to the unit scope:
 
 Unit test naming contract:
   - Test function and file names describe behavior under test, never bug IDs,
-    version numbers, or scaffolding labels (SOP.md Anti-pattern 6).
+    version numbers, or scaffolding labels (roles/TESTER.md Anti-pattern 6).
   - All temp paths use pytest's tmp_path fixture (propagated from the parent
     conftest's PYTEST_DEBUG_TEMPROOT redirect).
   - No bare /tmp paths anywhere in test or fixture code.
@@ -74,6 +95,10 @@ from tests.fixtures.two_project import two_project_root  # noqa: F401
 from tests.fixtures.log_stub import log_stub_fragment  # noqa: F401
 from tests.fixtures.log_stub import log_stub_capture  # noqa: F401
 from tests.fixtures.api_server import api_server  # noqa: F401
+from tests.fixtures.binary_guard import BinaryGuard  # noqa: F401
+from tests.fixtures.binary_guard import require_binary  # noqa: F401
+from tests.fixtures.binary_guard import require_docker_daemon  # noqa: F401
+from tests.fixtures.binary_guard import try_resolve_binary  # noqa: F401
 
 
 # ---------------------------------------------------------------------------

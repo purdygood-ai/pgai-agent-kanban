@@ -16,7 +16,7 @@ These tests cover the acceptance fixtures required by an earlier defect:
    The BLOCKED (blocked) row must appear in the rendered set.
 
 3. Under-cap fast path:
-   Output must be byte-identical to items[:cap] (the pre-fix naive slice).
+   Output must be byte-identical to items[:cap] (the naive slice).
 
 4. slots_after_pin < 0 branch (pinned rows exceed cap):
    The function returns more than cap items when running rows alone exceed cap
@@ -212,11 +212,11 @@ def test_multiple_blocked_rows_filled_to_cap() -> None:
     ids=["basic-under-cap", "exact-boundary", "mixed-statuses", "all-running"],
 )
 def test_under_cap_output_byte_identical_to_naive_slice(items: list, cap: int) -> None:
-    """Under-cap boards return output byte-identical to the pre-fix items[:cap] slice.
+    """Under-cap boards return output byte-identical to the naive items[:cap] slice.
 
     an earlier defect acceptance criterion #2:
     When len(items) <= cap, status_priority_cap must return a copy that is
-    structurally identical to items[:cap], preserving the pre-fix behavior
+    structurally identical to items[:cap], preserving plain-slice behavior
     for boards that do not require truncation — across a plain under-cap
     board, the exact len(items) == cap boundary, mixed running/blocked/open
     statuses, and an all-running board.

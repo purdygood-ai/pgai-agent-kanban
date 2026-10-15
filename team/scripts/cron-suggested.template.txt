@@ -1,17 +1,24 @@
 # pgai-agent-kanban: Suggested crontab entries
 #
-# This is a TEMPLATE file. Before installing, substitute __KANBAN_ROOT__
-# with the absolute path to your kanban root directory.
+# This is a TEMPLATE file with two placeholders to substitute before
+# installing:
+#   __KANBAN_ROOT__  — the absolute path to your kanban root directory
+#   __CLAUDE_PATH__  — the directory holding the claude CLI
 #
-# install.sh performs this substitution automatically when you run it.
+# install.sh performs both substitutions automatically, writing
+# scripts/cron-suggested.txt. For a managed install prefer
+# scripts/install-crontab.sh --wake-tier=small --yes, which installs a tier
+# schedule (and keeps your own cron jobs); this file's schedule is a
+# lighter, hand-tuned alternative to the tier templates.
 #
 # To install manually:
-#   1. Replace all __KANBAN_ROOT__ with your actual kanban root path, e.g.:
-#        sed 's|__KANBAN_ROOT__|/home/youruser/pgai_agent_kanban|g' \
-#            cron-suggested.template.txt > /tmp/pgai-crontab.txt
+#   1. Replace both placeholders, e.g.:
+#        sed -e 's|__KANBAN_ROOT__|/home/youruser/pgai_agent_kanban|g' \
+#            -e 's|__CLAUDE_PATH__|/usr/local/bin|g' \
+#            cron-suggested.template.txt > ~/pgai-crontab.txt
 #   2. Edit your crontab:
 #        crontab -e
-#      and paste the contents of /tmp/pgai-crontab.txt (excluding this header)
+#      and paste the contents of ~/pgai-crontab.txt (excluding this header)
 #
 # Cron job logs are written to (kanban-root scope, shared across all projects):
 #   __KANBAN_ROOT__/logs/cron-<agent>.log
@@ -24,43 +31,60 @@
 #   WRITER:              :13 :21 :34     (every hour)
 #   TESTER:              :21 :34 :55     (every hour)
 #   CM:                  :34 :55         (every hour)
+#   OVERWATCH sweep:     :30             (every hour)
+#   OVERWATCH wake:      Daily at 3:30 AM
 #   Cleanup (full):      Sundays at 4:00 AM (weekly)
 #   Log Cleanup:         Daily at 4:30 AM
 #   Trivial-log purge:   Daily at 4:15 AM (cleanup.sh --trivial-only; commented out, opt-in)
 
 # --- Environment ---
+# PGAI_AGENT_KANBAN_ROOT_PATH — the kanban root every job below acts on,
+#   exported to each job. No default: the substitution above writes it.
+#   Because it is exported, entry points other than the wake
+#   (overwatch-sweep.sh, cleanup.sh) do not source shell-env or claude-env:
+#   anything they need must be on the PATH line below.
+# PATH — cron's own PATH is minimal. This one must reach the claude CLI, a
+#   python3 of version 3.12+, and the codex CLI when that provider is
+#   active. Default: the claude directory install.sh finds (/usr/local/bin
+#   when claude is not on its PATH), followed by /usr/local/bin:/usr/bin:/bin.
 PGAI_AGENT_KANBAN_ROOT_PATH=__KANBAN_ROOT__
 PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
 
 # --- PM Agent (Project Manager) ---
 # Runs at :03, :08, :13, :55 every hour
-3  * * * * __KANBAN_ROOT__/scripts/wake-batch.sh pm  >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
-8  * * * * __KANBAN_ROOT__/scripts/wake-batch.sh pm  >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
-13 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh pm  >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
-55 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh pm  >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+3  * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+8  * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+13 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
+55 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
 
 # --- Coder Agent ---
 # Runs at :13, :21, :34 every hour
-13 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh coder  >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
-21 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh coder  >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
-34 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh coder  >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+13 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+21 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
+34 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
 
 # --- Writer Agent ---
 # Runs at :13, :21, :34 every hour
-13 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh writer  >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
-21 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh writer  >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
-34 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh writer  >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+13 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+21 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+34 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
 
 # --- Tester Agent ---
 # Runs at :21, :34, :55 every hour
-21 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh tester  >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
-34 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh tester  >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
-55 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh tester  >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+21 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+34 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+55 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
 
 # --- CM Agent (Configuration Manager / Release) ---
 # Runs at :34, :55 every hour
-34 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh cm  >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
-55 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh cm  >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+34 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+55 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
+
+# --- OVERWATCH Tier-1 sweep (hourly at :30) ---
+30 * * * * __KANBAN_ROOT__/scripts/overwatch-sweep.sh >> __KANBAN_ROOT__/logs/cron-overwatch-sweep.log 2>&1
+
+# --- OVERWATCH daily wake (03:30) ---
+30 3 * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=overwatch --sleep=0 --max-tasks=1 >> __KANBAN_ROOT__/logs/cron-overwatch.log 2>&1
 
 # --- Cleanup Script (weekly, Sundays at 4:00 AM) ---
 0 4 * * 0 __KANBAN_ROOT__/scripts/cleanup/cleanup.sh >> __KANBAN_ROOT__/logs/cron-cleanup.log 2>&1

@@ -57,8 +57,15 @@ def _make_tokens_json(
     timestamp: str | None = "2026-05-17T12:00:00",
     rc_version: str | None = "v0.24.7",
     role: str = "coder",
+    elapsed_seconds: Any = "__unset__",
 ) -> pathlib.Path:
-    """Create a minimal task directory with tokens.json and README.md."""
+    """Create a minimal task directory with tokens.json and README.md.
+
+    elapsed_seconds is omitted from tokens.json entirely when left at its
+    "__unset__" sentinel (matching the many pre-existing tokens.json files
+    that predate the field); pass None explicitly to write a JSON null, or
+    any other value (numeric or not) to write it as-is.
+    """
     task_dir = tmp_path / "tasks" / task_name
     (task_dir / "artifacts").mkdir(parents=True, exist_ok=True)
 
@@ -72,6 +79,8 @@ def _make_tokens_json(
     }
     if timestamp:
         tokens["timestamp"] = timestamp
+    if elapsed_seconds != "__unset__":
+        tokens["elapsed_seconds"] = elapsed_seconds
 
     (task_dir / "artifacts" / "tokens.json").write_text(
         json.dumps(tokens), encoding="utf-8"
@@ -236,6 +245,42 @@ def test_extract_token_counts_handles_new_schema_with_model_usage() -> None:
     assert cr == 30
     assert cw == 7
     assert inv == 1
+
+
+# ---------------------------------------------------------------------------
+# _extract_elapsed_seconds
+# ---------------------------------------------------------------------------
+
+
+def test_extract_elapsed_seconds_returns_int_value() -> None:
+    """A well-formed integer elapsed_seconds is returned as-is."""
+    assert ma._extract_elapsed_seconds({"elapsed_seconds": 245}) == 245
+
+
+def test_extract_elapsed_seconds_returns_float_value() -> None:
+    """A well-formed float elapsed_seconds is returned as-is."""
+    assert ma._extract_elapsed_seconds({"elapsed_seconds": 12.5}) == 12.5
+
+
+def test_extract_elapsed_seconds_returns_none_when_absent() -> None:
+    """A tokens.json with no elapsed_seconds field yields None, not zero."""
+    assert ma._extract_elapsed_seconds({}) is None
+
+
+def test_extract_elapsed_seconds_returns_none_for_non_numeric_string() -> None:
+    """A non-numeric elapsed_seconds (e.g. a stray string) yields None."""
+    assert ma._extract_elapsed_seconds({"elapsed_seconds": "unknown"}) is None
+
+
+def test_extract_elapsed_seconds_returns_none_for_null() -> None:
+    """A JSON null elapsed_seconds yields None."""
+    assert ma._extract_elapsed_seconds({"elapsed_seconds": None}) is None
+
+
+def test_extract_elapsed_seconds_returns_none_for_bool() -> None:
+    """A bool elapsed_seconds is rejected even though bool is an int subclass."""
+    assert ma._extract_elapsed_seconds({"elapsed_seconds": True}) is None
+    assert ma._extract_elapsed_seconds({"elapsed_seconds": False}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +549,168 @@ def test_aggregate_rc_is_idempotent(tmp_path: pathlib.Path) -> None:
     path2 = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
     content2 = path2.read_text(encoding="utf-8")
     assert content1 == content2
+
+
+def _seed_one_rc_task(tmp_path: pathlib.Path) -> None:
+    proj = _make_project_dir(tmp_path, "proj")
+    task = proj / "tasks" / "CODER-001"
+    (task / "artifacts").mkdir(parents=True)
+    (task / "artifacts" / "tokens.json").write_text(
+        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 50, "output_tokens": 25,
+                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+                    "invocations": 1, "timestamp": "2026-05-17T10:00:00"}),
+        encoding="utf-8",
+    )
+    (task / "README.md").write_text("## Release Version\nv0.24.7\n## Role\ncoder\n", encoding="utf-8")
+
+
+def test_aggregate_rc_output_is_sorted_two_space_json_with_one_trailing_newline(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The rollup's on-disk form is exactly json.dumps(indent=2, sort_keys=True) plus a newline."""
+    _seed_one_rc_task(tmp_path)
+    out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
+    text = out_path.read_text(encoding="utf-8")
+    assert text == json.dumps(json.loads(text), indent=2, sort_keys=True) + "\n"
+
+
+def test_failed_rollup_write_keeps_the_previous_rollup_and_leaves_no_scratch_file(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails at the rename leaves the previous rollup byte-for-byte and no temp file."""
+    from pgai_agent_kanban.lib import atomic_write as shared_writer
+
+    _seed_one_rc_task(tmp_path)
+    out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
+    previous = out_path.read_bytes()
+
+    def _refuse_rename(src: str, dst: str) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(shared_writer.os, "replace", _refuse_rename)
+    with pytest.raises(OSError):
+        ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
+
+    assert out_path.read_bytes() == previous
+    leftovers = [p.name for p in out_path.parent.iterdir() if p.name != out_path.name]
+    assert leftovers == [], f"scratch file(s) left behind: {leftovers}"
+
+
+# ---------------------------------------------------------------------------
+# aggregate_rc — per-agent wall time (wall.by_agent)
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_rc_computes_per_agent_wall_seconds_and_task_count(
+    tmp_path: pathlib.Path,
+) -> None:
+    """wall.by_agent sums elapsed_seconds and counts tasks, per agent.
+
+    Two coder tasks (200s, 400s) and one tester task (90s) -- hand-computed:
+      coder:  seconds=600, task_count=2
+      tester: seconds=90,  task_count=1
+    The two agents' figures must differ (no shared RC-level number).
+    """
+    proj = _make_project_dir(tmp_path, "proj")
+    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder",
+                       elapsed_seconds=200)
+    _make_tokens_json(tmp_path, "CODER-002", rc_version="v0.24.7", role="coder",
+                       elapsed_seconds=400)
+    _make_tokens_json(tmp_path, "TESTER-001", rc_version="v0.24.7", role="tester",
+                       elapsed_seconds=90)
+    (proj / "tasks").symlink_to(tmp_path / "tasks")
+
+    out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+
+    wall_by_agent = payload["wall"]["by_agent"]
+    assert wall_by_agent["coder"] == {"seconds": 600, "task_count": 2}
+    assert wall_by_agent["tester"] == {"seconds": 90, "task_count": 1}
+    assert wall_by_agent["coder"] != wall_by_agent["tester"]
+
+
+def test_aggregate_rc_skips_tasks_with_missing_or_non_numeric_elapsed_seconds(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A task with no/non-numeric elapsed_seconds contributes to neither the
+    sum nor the task_count -- no exception, no zero entry for that task."""
+    proj = _make_project_dir(tmp_path, "proj")
+    # Valid: contributes 300s.
+    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder",
+                       elapsed_seconds=300)
+    # Missing elapsed_seconds entirely.
+    _make_tokens_json(tmp_path, "CODER-002", rc_version="v0.24.7", role="coder")
+    # Non-numeric elapsed_seconds.
+    _make_tokens_json(tmp_path, "CODER-003", rc_version="v0.24.7", role="coder",
+                       elapsed_seconds="not-a-number")
+    # Agent with ONLY a missing/non-numeric value -- must not appear at all.
+    _make_tokens_json(tmp_path, "PM-001", rc_version="v0.24.7", role="pm",
+                       elapsed_seconds=None)
+    (proj / "tasks").symlink_to(tmp_path / "tasks")
+
+    out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+
+    wall_by_agent = payload["wall"]["by_agent"]
+    assert wall_by_agent["coder"] == {"seconds": 300, "task_count": 1}
+    assert "pm" not in wall_by_agent  # zero usable tasks -> absent, not a zero entry
+    # All four tasks still counted normally elsewhere -- wall aggregation is
+    # the only thing skipping the malformed/absent records.
+    assert payload["tasks"]["by_agent"]["coder"] == 3
+    assert payload["tasks"]["by_agent"]["pm"] == 1
+
+
+def test_aggregate_rc_wall_field_does_not_change_existing_fields(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Adding wall.by_agent leaves wall_time_minutes, tasks.by_agent, and
+    tokens.by_agent exactly as they were computed before this field existed."""
+    proj = _make_project_dir(tmp_path, "proj")
+    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder",
+                       input_tokens=111, output_tokens=22, elapsed_seconds=500)
+    (proj / "tasks").symlink_to(tmp_path / "tasks")
+
+    out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+
+    assert payload["wall_time_minutes"] is None  # no release-state.json -> unchanged behavior
+    assert payload["tasks"]["by_agent"] == {"coder": 1}
+    assert payload["tasks"]["total"] == 1
+    assert payload["tokens"]["by_agent"]["coder"]["input"] == 111
+    assert payload["tokens"]["by_agent"]["coder"]["output"] == 22
+
+
+def test_aggregate_rc_overwrites_pre_existing_rollup_missing_wall_field(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A rollup file written before this change (no 'wall' key) is safely
+    overwritten by a fresh aggregate_rc() call -- it is not read or merged,
+    only replaced, since aggregate_rc always recomputes from source."""
+    proj = _make_project_dir(tmp_path, "proj")
+    out_dir = proj / "metrics" / "rc"
+    out_dir.mkdir(parents=True)
+    old_payload = {
+        "rc": "v0.24.7", "project": "proj", "workflow_type": "release",
+        "opened_at": None, "closed_at": None, "wall_time_minutes": None,
+        "outcome": "unknown", "tasks": {"total": 0, "by_agent": {}},
+        "tokens": {"total": ma._zero_token_entry(), "by_model": {}, "by_agent": {}},
+        "bugs_filed_during_verification": [], "operator_interventions": [], "input_files": {},
+    }
+    old_path = out_dir / "v0.24.7.json"
+    old_path.write_text(json.dumps(old_payload), encoding="utf-8")
+
+    # This file, lacking 'wall' entirely, must still be loadable by any
+    # reader before aggregate_rc runs again.
+    reloaded = json.loads(old_path.read_text(encoding="utf-8"))
+    assert "wall" not in reloaded
+
+    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder",
+                       elapsed_seconds=42)
+    (proj / "tasks").symlink_to(tmp_path / "tasks")
+
+    out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["wall"]["by_agent"]["coder"] == {"seconds": 42, "task_count": 1}
 
 
 # ---------------------------------------------------------------------------

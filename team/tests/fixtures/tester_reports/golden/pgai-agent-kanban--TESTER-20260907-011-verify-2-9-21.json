@@ -1,0 +1,219 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "RC v2.9.21 bundles five bug items. Three of them (BUG-0162, BUG-0163,\nBUG-0164) are test-fidelity defects that made the unit suite depend on state\noutside the tree and let a unit test silently edit a tracked file; one\n(BUG-0165) is a provenance violation in shipped release notes; and one\n(BUG-0166) restores the DEEP-VERIFY tier — the cold-build lane, its three\noperator verbs, the per-project ledger, the classifier, the bug filer, the\nscheduler, and the governance and operator documentation that describe them —\ninto a lineage that had lost them.\n\nAll five bundled items are addressed, and each was verified behaviourally\nrather than structurally: the changelog render guard was made to fail by\nmutating a fixture disclosure; the provenance remedy-block confinement was\nconfirmed by running the full unit suite against a clean worktree and checking\nthat `release-notes/v2.9.20.md` was byte-identical afterwards; the restored\nlane's three verbs were exercised against the live ledger, including the\npromotion gate's refusal path, the scheduled self-gate, and the\nunregistered-project refusal, with the ledger confirmed unmutated. Both gated\nrunners exit 0 with zero quality-class lint findings. The 8-task prerequisite\nchain merged cleanly with no pre-flight anomalies, and the build ran without\nmanual intervention.\n\nTwo defects were found, both minor, both filed via Path C (autonomous\nfollow-up filing — non-blocking): the restored lane's failure-detail string\nrepeats each failing image once per log occurrence instead of once per pair\n(BUG-0168), and a pre-existing doc-lint suite demands documentation for a\ncontainer flavour the tree does not ship (BUG-0169). Neither affects the\nrelease's usability.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Cold-build failure detail repeats each failing pair once per log occurrence",
+      "heading": "Finding 1: Cold-build failure detail repeats each failing pair once per log occurrence",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (human-readable output only; verdict, ledger-record count and cross-run duplicate detection are all correct)\n**Regression:** no — the affected files are byte-identical to their `bba1238` originals (verified with `git show bba1238:<path> | diff -`), the defect is inherent to that upstream code, and nothing in this lineage behaved differently before: there was no lane at all on `ai_main`. Shipping this RC does not make any previously-working behaviour worse.\n**Integrity Damage:** no\n**Filed As:** BUG-0168-deep-verify-detail-repeats-pairs (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`pgai_agent_kanban.deep_verify.classify.extract_failing_pairs()` returns one\n`FailingPair` per regex match over the lane's whole captured output, with no\nde-duplication. pytest echoes a failure message several times per failing test\n(traceback body, captured-stdout section, short summary), so one failing pair\nyields several matches.\n\nThe real run recorded on this project's ledger (2026-09-07T06:52:06+00:00,\nv2.9.20 @ d37bb68) found three distinct failing pairs and recorded eighteen\nentries — each pair exactly six times, six being the number of\n`(engine, flavor)` pairs the sweep evaluated. The same duplicated string is\nreused in three operator-facing places: the ledger `- Detail:` field (one\n~2.5 KB line), the auto-filed `BUG-0167` (eighteen-flavour `Filed By` sentence,\neighteen `## Symptom` bullets, eighteen `## Deep-Verify Pairs` lines), and the\npromotion gate's dual-channel refusal, whose ~2.3 KB `message:` pushes its\n`remedy:` line off the first screen — the specific thing the dual-channel\ncontract exists to prevent.\n\nReproduced deterministically without a container engine:\n\n```\nclassify_cold_build_result(1, msg * 3).detail.count(\"docker/rocky9\")  ->  3\n```\n\nExpected 1. `_extract_built_pairs()` and `_extract_skip_reasons()` share the\nshape, so green and all-skipped sweeps will duplicate the same way.\n`bug_filer._render_bug_content()` consumes the same un-deduplicated list;\n`file_or_cite_bug()`'s `frozenset` normalisation is already correct, which is\nwhy cross-run duplicate-bug detection still works.",
+      "filed_as": "BUG-0168",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (human-readable output only; verdict, ledger-record count and cross-run duplicate detection are all correct)",
+        "regression": "no — the affected files are byte-identical to their `bba1238` originals (verified with `git show bba1238:<path> | diff -`), the defect is inherent to that upstream code, and nothing in this lineage behaved differently before: there was no lane at all on `ai_main`. Shipping this RC does not make any previously-working behaviour worse.",
+        "filed_as": "BUG-0168-deep-verify-detail-repeats-pairs (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "doc-lint `feature-greps` demands documentation for an image flavour the tree does not ship",
+      "heading": "Finding 2: doc-lint `feature-greps` demands documentation for an image flavour the tree does not ship",
+      "level": 3,
+      "body": "**Category:** pre-existing-bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (a lint suite outside both gated runners; costs signal, not correctness)\n**Regression:** no — `team/scripts/harness/doc-lint.sh` is untouched by this RC (`git diff --name-only ai_main..ai_rc/v2.9.21 -- team/scripts/harness/` is empty) and the `ubi9` token is already present on `ai_main` at line 167.\n**Integrity Damage:** no\n**Filed As:** BUG-0169-doc-lint-ubi9-token-undocumented (Path C-A)\n\n`bash team/scripts/harness/doc-lint.sh --suite feature-greps` reports\n`fail=1`: no audited doc contains `ubi9`. The tree ships\n`docker/claude-abliterated`, `docker/debian` and `docker/rocky9` — there is no\n`ubi9` flavour anywhere in the tree, so the demand cannot be honestly\nsatisfied. The other three doc-lint suites are clean. Not collected by either\ngated runner, so the suite verdict is unaffected.",
+      "filed_as": "BUG-0169",
+      "filed_by": null,
+      "severity": null,
+      "category": "pre-existing-bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "pre-existing-bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (a lint suite outside both gated runners; costs signal, not correctness)",
+        "regression": "no — `team/scripts/harness/doc-lint.sh` is untouched by this RC (`git diff --name-only ai_main..ai_rc/v2.9.21 -- team/scripts/harness/` is empty) and the `ubi9` token is already present on `ai_main` at line 167.",
+        "filed_as": "BUG-0169-doc-lint-ubi9-token-undocumented (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0162 — unit tests no longer read the operator's live bug ledger",
+      "heading": "Finding 3: BUG-0162 — unit tests no longer read the operator's live bug ledger",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe five previously-red tests are green. A committed fixture ledger exists at\n`team/tests/fixtures/bug_ledger/` (BUG-0023..BUG-0027, the records behind\nKI-1.0.0.1..5). A tree-wide scan for tests resolving a path into\n`$PGAI_AGENT_KANBAN_ROOT_PATH/projects/*/bugs/` returns nothing. The gated\nunit runner exits 0 against a live kanban root whose `bugs/` directory does not\ncontain those records — which is precisely the condition that made the suite\nred on every release.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0163 — CHANGELOG.md is a faithful render of the real ledger, and a guard now enforces it",
+      "heading": "Finding 4: BUG-0163 — CHANGELOG.md is a faithful render of the real ledger, and a guard now enforces it",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `python3 team/scripts/lint_changelog_freshness.py --changelog CHANGELOG.md`\n  exits 0 with no `--bugs-dir` override — i.e. against the project's real\n  ledger. The `changelog_freshness` pre-flight is `OK` on both gated runners\n  and both findings files are empty.\n- `git diff --stat ai_main..ai_rc/v2.9.21 -- CHANGELOG.md` is empty. The\n  inverted fix that BUG-0163 was filed against (committing a changelog rendered\n  from fixtures) has not recurred.\n- The render-level guard was verified by triggering it, not by reading it. In a\n  scratch copy outside the worktree, changing one sentence in\n  `team/tests/fixtures/bug_ledger/BUG-0023-*.md` made\n  `TestWriterRenderReproducesPublishedDisclosures::test_render_reproduces_published_ki_1_0_0_disclosures`\n  and `TestFixtureDisclosureProvenance::test_fixture_disclosure_text_matches_published_render`\n  fail, naming `KI-1.0.0.1` and printing the rendered-vs-published diff. Both\n  are green on the unmutated tree.\n- `team/tests/fixtures/published_ki_1_0_0_disclosures.json` reproduces the\n  five disclosure sentences from `c2d8056:CHANGELOG.md` byte-for-byte\n  (compared directly).\n\nCaveat on one acceptance criterion — see Caveats, item 1.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0164 — the unit suite no longer edits a tracked file",
+      "heading": "Finding 5: BUG-0164 — the unit suite no longer edits a tracked file",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/unit/test_lint_comment_provenance.py` now pins `--prose-dirs` to a\nscratch directory alongside `--code-dirs` at every capture site, and a new\nregression guard `test_remedy_block_confines_repair_to_the_fixture` plants a\nsynthetic violation in a tracked file inside a throwaway repo tree and asserts\nits bytes are unchanged after the capture-and-execute path runs.\n\nVerified by running the real thing: `git status --short` was empty after a full\n`run-unit-tests.sh --coverage`, and `release-notes/v2.9.20.md` held md5\n`109066b29caf44fa96e0e0e97b6fd400` before and after. The cross-runner verdict\ndrift described in the bug is also gone — `comment_provenance` reports `OK` on\nboth runners on the same tree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0165 — shipped release notes carry no internal identifier",
+      "heading": "Finding 6: BUG-0165 — shipped release notes carry no internal identifier",
+      "level": 3,
+      "body": "**Category:** pass\n\n`release-notes/v2.9.20.md:33` now reads *\"The individual issues found during\nthis release's verification are tracked on the project's internal bug ledger.\"*\n`grep -nE '(TESTER|CODER|WRITER|PM|CM)-[0-9]{8}' release-notes/*.md` returns\nnothing, no allowlist marker was used, and `comment_provenance` reports `OK`\nwith zero findings on both gated runners. The one-line diff touches nothing\nelse in the historical notes.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0166 — the DEEP-VERIFY tier is restored and works",
+      "heading": "Finding 7: BUG-0166 — the DEEP-VERIFY tier is restored and works",
+      "level": 3,
+      "body": "**Category:** pass\n\nPorted code fidelity: all six `team/pgai_agent_kanban/deep_verify/*.py` modules,\nboth shell readers, and three of the four lane verbs are **byte-identical** to\ntheir `bba1238` originals (`git show bba1238:<path> | diff -`).\n`run-cold-build-tests.sh` and `team/tests/cold/test_docker_cold_build.py` differ\nonly by the deliberate removal of the pinned-CLI-version pre-flight and its two\ndependent fixtures — `docker/cli-versions.env` and the matching Dockerfile\n`ARG` guards do not exist on this lineage, and the omission is documented in\nboth files and in the census. All six scripts are mode 755, pass `bash -n`, and\nall Python compiles.\n\nEach acceptance criterion from BUG-0166, exercised:\n\n- `deep-verify.sh --help`, `cold-build-now.sh --help`,\n  `deep-verify-freshness-check.sh --help` and `run-cold-build-tests.sh --help`\n  all exit 0 and name every flag they accept, with exit-code contracts stated.\n- A real `deep-verify.sh --project pgai-agent-kanban` run (performed by\n  CODER-20260907-006 against live docker and podman) appended exactly one\n  ledger record carrying timestamp, version, commit, verdict and per-pair\n  detail.\n- `deep_verify_ledger_read_latest \"pgai-agent-kanban\"` returns 0 with\n  `found=true` and a parseable record, so this report writes Form A rather than\n  Form B.\n\nGuard logic triggered rather than assumed (Step 6.5):\n\n| Guard | Trigger | Result |\n|---|---|---|\n| Promotion gate refuses a non-green lane | `deep-verify-freshness-check.sh --project pgai-agent-kanban --version v2.9.21` | exit 1, `error: freshness_gate.failed_to_build`, plain message, runnable remedy |\n| Promotion gate refuses on the recorded version too | same, `--version v2.9.20` | exit 1, same refusal — greenness is checked before version |\n| Unregistered project refused, nothing written | `deep-verify.sh --project no-such-project-xyz` | exit 1, `error: deep_verify.unregistered_project`, remedy names `add-project.sh`; ledger md5 unchanged |\n| Scheduled self-gate costs nothing when not due | `deep-verify.sh --scheduled --project pgai-agent-kanban` | exit 0, one narration line naming the off-hours window and the clock; no lane, no engine, no ledger write |\n| Per-project switch honours `off` | sandbox kanban root, `[release] deep_verify = off` | `pp_deep_verify_mode` -> `off`; window override `05:00-05:30` honoured; absent -> `weekly` / `03:00-03:59`; `bogus` -> exit 1, nothing on stdout, stderr names the accepted vocabulary |\n\nThe ledger was byte-identical (md5 `0a9f07d70d684602da14ddf39566ad9c`) before\nand after all of the above.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0166 documentation half — governance and operator docs restored",
+      "heading": "Finding 8: BUG-0166 documentation half — governance and operator docs restored",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `team/SOP.md` carries \"The DEEP-VERIFY tier\", \"The three triggers\", \"The\n  per-project switch\", \"A stale green is a weaker claim than a fresh one\", \"No\n  silent skips\", and the sibling \"Unusable build blocks; an unavailable build\n  environment does not\".\n- `team/roles/TESTER.md` carries Step 5d with the Form A/B/C schemas and the\n  matching `## Deep-Verify Freshness` entry in the Step 9 field list and report\n  template. (This report is written against those forms.)\n- `docs/operator-commands.md` documents all three verbs, every flag, exit\n  codes, ledger destination and the per-project switch. Every documented flag\n  was checked against the shipped `--help`.\n- `docs/promotion-playbook.md` carries step 0 and the per-refusal walkthrough.\n- `docs/blocking-site-census.md` carries 11 Locator Index entries. Seven were\n  spot-checked: every one points at the exact refusal line, with its\n  `# CENSUS-ANCHOR:` marker on the line immediately above. The census lint\n  passes with 0 offenders. The line-number index form (rather than token form)\n  is the form this tree's `_CENSUS_LOCATOR_LINE_RE` actually parses, is\n  documented as such in the census, and follows the existing\n  `lint_engine_size_dupe.py` precedent. The count is 11 rather than\n  `bba1238`'s 13 because the two pinned-CLI-version anchors were deliberately\n  not carried — consistent with the code.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Pre-flight, structural and constraint checks",
+      "heading": "Finding 9: Pre-flight, structural and constraint checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Pre-flight merge verification:** every task directory scanned; all 26 DONE\n  tasks with a named feature branch have had that branch deleted post-merge\n  (normal lifecycle), so both checks are skipped for them per the role file. No\n  UNMERGED and no BUG-92 zero-commit anomalies. Worktree HEAD `443bdd6` equals\n  `ai_rc/v2.9.21`, `git status --short` empty, `git stash list` empty.\n- **release-state.md (Step 6.1):** `Active RC: v2.9.21` with a matching\n  `ai_rc/v2.9.21` branch; `RC Opened By Task: CM-20260907-010-open-rc-2-9-21`;\n  `Last Released: v2.9.20`, well-formed. `pp_last_released_version` returns\n  `v2.9.20` and `semver_gt v2.9.21 v2.9.20` holds. No drift.\n- **Prereq graph (Step 6.10):** all 11 referenced task IDs resolve to real task\n  folders; no cycles; the CM-open bookend at 010 and the CM-release bookend at\n  013 depend on TESTER-011, which depends on the eight implementation tasks;\n  sequence numbers non-colliding.\n- **Skip-cites-real-bug (Step 6.13):** zero placeholder skip IDs and zero cited\n  bug IDs anywhere under `team/tests/` (the only `BUG-NNNN` literal hits are\n  inside archived coverage logs under `team/tests/artifacts/`). The gated\n  runners' own `skip_cites_real_bug` pre-flight is `OK` on both.\n- **Constraint negatives (Step 6.9):** all four new scripts carry\n  `set -euo pipefail`; no hardcoded credentials in the diff; no bare `/tmp/`\n  literal added by the diff.\n- **Coding-standards spot-check (Step 6.14):** all four new scripts ship a\n  `--help` that names every flag and states exit codes; the freshness window is\n  operator-overridable via `PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS` rather than\n  hardcoded; the scheduled trigger's two knobs are read through new\n  `pp_*` helpers in the existing `project_paths.sh` rather than reimplemented.\n  Two nits recorded under Caveats.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "pre_flight_merge_verification": "every task directory scanned; all 26 DONE",
+        "release_state_md_step_6_1": "`Active RC: v2.9.21` with a matching",
+        "prereq_graph_step_6_10": "all 11 referenced task IDs resolve to real task",
+        "skip_cites_real_bug_step_6_13": "zero placeholder skip IDs and zero cited",
+        "constraint_negatives_step_6_9": "all four new scripts carry",
+        "coding_standards_spot_check_step_6_14": "all four new scripts ship a"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

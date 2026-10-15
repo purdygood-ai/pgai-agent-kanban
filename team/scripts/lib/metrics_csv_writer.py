@@ -3,21 +3,64 @@
 metrics_csv_writer.py -- Append-only CSV writer for cumulative RC metrics history.
 
 Implements the append-only, cumulative CSV rollup format for RC metrics
-history: one fixed-column row per RC, appended in place, never rewritten.
+history: one fixed-column row per RC, appended in place. Rows are never
+rewritten; the header alone is rewritten once when it predates a column
+(see HEADER MIGRATION).
 
 OUTPUT FORMAT
 =============
 
 File location: projects/<name>/metrics/history.csv
 
-Columns (in order):
+Columns (in order) -- HISTORY_COLUMNS, declared once in
+pgai_agent_kanban.lib.metrics.history (the shared history.csv reader) and
+imported here:
   rc, project, workflow_type, opened_at, closed_at, wall_time_minutes,
   outcome, tasks_total, tasks_pm, tasks_coder, tasks_writer, tasks_tester,
   tasks_cm, input_tokens, output_tokens, cache_read_tokens,
-  cache_write_tokens, cache_hit_rate_pct, bugs_filed_during, operator_waivers
+  cache_write_tokens, cache_hit_rate_pct, bugs_filed_during,
+  operator_waivers, blocked_minutes
+
+blocked_minutes is the RC's blocked-interval total from the rollup's own
+"blocked_minutes" field (team/scripts/lib/metrics_aggregator.py -- see
+that module's "BLOCKED MINUTES" docstring section for how it is computed;
+this writer never reads the ledger itself). It sits LAST, added after the
+other columns were already a public contract, so every existing
+positional reader keeps reading the same fields at the same offsets. A
+rollup with a real zero (no ledger, or an empty one) writes 0; a rollup
+whose ledger could not be read, or whose value is otherwise unknown
+(rollup["blocked_minutes"] is None or the key is missing), writes an
+empty cell and prints a warning to stderr -- the write itself still
+succeeds and the call still returns normally.
 
 The file is created with the header row on first call.  Subsequent calls
-append one data row without re-writing the header.
+append one data row in HISTORY_COLUMNS order.
+
+HEADER MIGRATION
+================
+
+Columns are only ever added at the end of HISTORY_COLUMNS, so a file
+created before a column existed has a header that is a strict prefix of
+HISTORY_COLUMNS while the rows appended since carry the newer fields.
+Before appending, the writer compares the file's header with
+HISTORY_COLUMNS:
+
+  * Equal -- the row is appended.
+  * A strict prefix -- the header line is replaced by the full
+    HISTORY_COLUMNS header and the new row is added, in one atomic rewrite
+    (pgai_agent_kanban.lib.atomic_write: same-directory temp file, fsync,
+    os.replace) that keeps the file's permission bits. Every existing row
+    is kept byte for byte: a row written before a column existed stays
+    short and reads that column as missing, never as 0. One stderr line
+    names the columns added.
+  * Anything else (reordered, renamed, empty, or longer than
+    HISTORY_COLUMNS) -- a warning on stderr names the header found and the
+    header expected, and the row is still appended in HISTORY_COLUMNS
+    order. A header mismatch never fails the append or the release.
+
+Until a file is migrated, the shared reader
+(pgai_agent_kanban.lib.metrics.history.read_history_csv) already reads its
+surplus trailing fields under their HISTORY_COLUMNS names.
 
 ATOMIC WRITE / CONCURRENCY
 ===========================
@@ -27,6 +70,10 @@ call append_rc_row().  To prevent torn or interleaved rows:
 
   1. The history.csv file is opened with ``open(..., 'a')``.
   2. ``fcntl.flock(fd, LOCK_EX)`` acquires an exclusive advisory lock.
+     A header migration replaces the file with a new one, so after taking
+     the lock the writer checks that its descriptor still names the file
+     at csv_path; if not, it reopens and locks again. A caller that waited
+     on the replaced file therefore appends to the migrated one.
   3. We re-read the file inside the lock to check for duplicate RC rows
      (TOCTOU-safe: the check and append are performed while holding the lock).
   4. The row is written and flushed before the lock is released.
@@ -66,6 +113,7 @@ USAGE (as module)
           "opened_at":        "2026-05-17T21:04:37Z",   # or None
           "closed_at":        "2026-05-17T22:30:15Z",   # or None
           "wall_time_minutes": 86,                       # or None
+          "blocked_minutes":  0,                         # real 0, or None if unreadable
           "outcome":          "SHIPPED",
           "tasks": {
               "total": 8,
@@ -103,38 +151,35 @@ from __future__ import annotations
 import argparse
 import csv
 import fcntl
+import io
 import json
 import os
 import pathlib
 import sys
-from typing import Any
+from typing import IO, Any
+
+# The column contract and the atomic file writer live in the
+# pgai_agent_kanban package. This module runs from within the full kanban
+# tree (dev tree or live install), where pgai_agent_kanban/ is always a
+# sibling of scripts/, so it locates the package from its own path.
+_TEAM_DIR = pathlib.Path(__file__).resolve().parent.parent.parent  # lib/ -> scripts/ -> team/
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
+from pgai_agent_kanban.lib.metrics.history import (  # noqa: E402
+    HISTORY_COLUMNS as _HISTORY_COLUMNS,
+    is_short_history_header,
+)
 
 # ---------------------------------------------------------------------------
-# Column specification — public contract.
-# Do NOT change column order or names without a migration plan.
+# Column specification — public contract, declared once in
+# pgai_agent_kanban.lib.metrics.history and re-exported here as a list.
 # ---------------------------------------------------------------------------
-HISTORY_COLUMNS: list[str] = [
-    "rc",
-    "project",
-    "workflow_type",
-    "opened_at",
-    "closed_at",
-    "wall_time_minutes",
-    "outcome",
-    "tasks_total",
-    "tasks_pm",
-    "tasks_coder",
-    "tasks_writer",
-    "tasks_tester",
-    "tasks_cm",
-    "input_tokens",
-    "output_tokens",
-    "cache_read_tokens",
-    "cache_write_tokens",
-    "cache_hit_rate_pct",
-    "bugs_filed_during",
-    "operator_waivers",
-]
+HISTORY_COLUMNS: list[str] = list(_HISTORY_COLUMNS)
+
+#: Scratch-file prefix for a header migration's atomic rewrite, so a file
+#: left by a killed process names its writer.
+_MIGRATION_TMP_PREFIX = ".metrics_csv_writer_tmp_"
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +233,23 @@ def _rollup_to_row(rollup: dict[str, Any]) -> dict[str, Any]:
     if wall_time is None:
         wall_time = ""
 
+    # blocked_minutes: written LAST (see HISTORY_COLUMNS). A present
+    # numeric value -- including a real 0 for "no ledger" -- is written
+    # as-is. A rollup that never got one (a key missing entirely, e.g. an
+    # older rollup) or that recorded an explicit None (the ledger existed
+    # but could not be read -- see metrics_aggregator.py's "BLOCKED
+    # MINUTES" section) both degrade to an empty cell with a warning:
+    # this writer never fabricates a number it was not given.
+    blocked_minutes = rollup.get("blocked_minutes")
+    if blocked_minutes is None:
+        print(
+            f"[metrics_csv_writer] WARNING: RC {rollup.get('rc', '')!r} has no "
+            "usable blocked_minutes value (ledger unreadable or not yet "
+            "computed); leaving the blocked_minutes cell empty.",
+            file=sys.stderr,
+        )
+        blocked_minutes = ""
+
     return {
         "rc":                 rollup.get("rc", ""),
         "project":            rollup.get("project", ""),
@@ -209,7 +271,103 @@ def _rollup_to_row(rollup: dict[str, Any]) -> dict[str, Any]:
         "cache_hit_rate_pct": cache_hit_rate,
         "bugs_filed_during":  bugs_filed_during,
         "operator_waivers":   operator_waivers,
+        "blocked_minutes":    blocked_minutes,
     }
+
+
+# ---------------------------------------------------------------------------
+# Locking and header handling
+# ---------------------------------------------------------------------------
+
+
+def _open_locked_for_append(csv_path: pathlib.Path) -> IO[str]:
+    """Open *csv_path* for append and hold an exclusive flock on it.
+
+    A header migration replaces the file (os.replace), so a lock taken on
+    the descriptor of the replaced file guards nothing. After the lock is
+    granted the descriptor is compared with the file now at *csv_path*;
+    on a mismatch it is closed and the open-and-lock is retried.
+    """
+    while True:
+        fh = open(csv_path, "a", newline="", encoding="utf-8")
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            held = os.fstat(fh.fileno())
+            try:
+                current = os.stat(csv_path)
+            except FileNotFoundError:
+                current = None
+            if current is not None and (held.st_dev, held.st_ino) == (current.st_dev, current.st_ino):
+                return fh
+        except BaseException:
+            fh.close()
+            raise
+        fh.close()
+
+
+def _split_header(text: str) -> tuple[str, list[str], str]:
+    """Split history.csv *text* into (header line, header names, body).
+
+    The header line keeps its own line ending; the body is everything
+    after it, unchanged.
+    """
+    newline = text.find("\n")
+    header_line = text if newline < 0 else text[: newline + 1]
+    body = "" if newline < 0 else text[newline + 1:]
+    names = next(csv.reader(io.StringIO(header_line)), [])
+    return header_line, names, body
+
+
+def _render_line(fieldnames: list[str], row: dict[str, Any] | None = None) -> str:
+    """One CSV line: the header for *fieldnames*, or *row* in that order."""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, lineterminator="\n", extrasaction="ignore")
+    if row is None:
+        writer.writeheader()
+    else:
+        writer.writerow(row)
+    return buf.getvalue()
+
+
+def _migrate_header_and_append(
+    csv_path: pathlib.Path, header_names: list[str], body: str, row_dict: dict[str, Any]
+) -> None:
+    """Rewrite a short header to the full HISTORY_COLUMNS and add *row_dict*.
+
+    One atomic rewrite (module docstring, HEADER MIGRATION): the new header,
+    every existing row byte for byte, then the new row. The file keeps its
+    permission bits. The caller holds the append lock.
+    """
+    if body and not body.endswith("\n"):
+        body += "\n"
+    content = _render_line(HISTORY_COLUMNS) + body + _render_line(HISTORY_COLUMNS, row_dict)
+    atomic_write(csv_path, content, prefix=_MIGRATION_TMP_PREFIX, preserve_mode=True)
+    added = HISTORY_COLUMNS[len(header_names):]
+    print(
+        f"[metrics_csv_writer] Header of {csv_path} predated {len(added)} "
+        f"column(s); rewrote it with the full column list (added: "
+        f"{', '.join(added)}). Existing rows are unchanged.",
+        file=sys.stderr,
+    )
+
+
+def _warn_unmigratable_header(csv_path: pathlib.Path, header_names: list[str]) -> None:
+    """Narrate a header that is neither HISTORY_COLUMNS nor a prefix of it.
+
+    CONVERT: an unexpected header is a quality finding, never a refusal --
+    the caller still appends the row and the release is never failed.
+    """
+    found = ",".join(header_names) if header_names else "(empty)"
+    print(
+        f"[metrics_csv_writer] WARNING: the header of {csv_path} is not the "
+        f"history.csv column list or a prefix of it, so it was left as is; "
+        f"the row is appended in the standard column order and readers keyed "
+        f"by this header may misread it. Found: {found}. Expected: "
+        f"{','.join(HISTORY_COLUMNS)}. To repair, back up the file and replace "
+        f"its first line with the expected header, reordering existing rows "
+        f"to match if their columns differ.",
+        file=sys.stderr,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +381,12 @@ def append_rc_row(
 ) -> bool:
     """Append one row to the cumulative history CSV for an RC close.
 
-    Creates the file (with header) on first call.  All subsequent calls
-    append a data row without re-writing the header.
+    Creates the file (with header) on first call.  Subsequent calls append
+    a data row; when the existing header is a strict prefix of
+    HISTORY_COLUMNS it is first widened to the full column list in the same
+    atomic rewrite that adds the row, keeping the file's mode. Any other
+    header mismatch prints a warning and the row is still appended (module
+    docstring, HEADER MIGRATION).
 
     The call is atomic under concurrent writers: an exclusive advisory file
     lock (fcntl.flock LOCK_EX) is held for the duration of the check-and-
@@ -250,45 +412,53 @@ def append_rc_row(
     rc: str = rollup["rc"]  # KeyError if absent; caller must supply it
     row_dict = _rollup_to_row(rollup)
 
-    # Open in append mode (creates the file if it does not exist).
-    with open(csv_path, "a", newline="", encoding="utf-8") as fh:
-        # Acquire exclusive lock — blocks until any concurrent holder releases.
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    # Open in append mode (creates the file if it does not exist) and take
+    # the exclusive lock -- blocks until any concurrent holder releases.
+    fh = _open_locked_for_append(csv_path)
+    with fh:
         try:
             # Re-read the current file size to decide if it is empty.
             fh.flush()
             file_size = fh.seek(0, os.SEEK_END)
 
-            # --------------- Duplicate detection (TOCTOU-safe) ---------------
-            # Read the file from the beginning to check for an existing row
-            # for this RC.  We do this inside the lock so no other process can
-            # have appended between our open() and now.
+            header_names: list[str] = []
+            body = ""
             if file_size > 0:
                 with open(csv_path, "r", newline="", encoding="utf-8") as rfh:
-                    reader = csv.DictReader(rfh)
-                    for existing in reader:
-                        if existing.get("rc") == rc:
-                            print(
-                                f"[metrics_csv_writer] WARNING: RC '{rc}' already "
-                                f"present in {csv_path}; skipping duplicate append.",
-                                file=sys.stderr,
-                            )
-                            return False
+                    existing_text = rfh.read()
+                _header_line, header_names, body = _split_header(existing_text)
 
-            # --------------- Write header if file is empty -------------------
-            writer = csv.DictWriter(
-                fh,
-                fieldnames=HISTORY_COLUMNS,
-                lineterminator="\n",
-                extrasaction="ignore",
-            )
-            if file_size == 0:
-                writer.writeheader()
+                # ------------- Duplicate detection (TOCTOU-safe) -------------
+                # Read inside the lock so no other process can have appended
+                # between our open() and now.
+                for existing in csv.DictReader(io.StringIO(existing_text)):
+                    if existing.get("rc") == rc:
+                        print(
+                            f"[metrics_csv_writer] WARNING: RC '{rc}' already "
+                            f"present in {csv_path}; skipping duplicate append.",
+                            file=sys.stderr,
+                        )
+                        return False
 
-            # --------------- Append data row ---------------------------------
-            writer.writerow(row_dict)
-            fh.flush()
-            os.fsync(fh.fileno())
+            # --------------- Header: write, migrate, or narrate --------------
+            if file_size > 0 and is_short_history_header(header_names):
+                _migrate_header_and_append(csv_path, header_names, body, row_dict)
+            else:
+                if file_size > 0 and [n.strip() for n in header_names] != HISTORY_COLUMNS:
+                    _warn_unmigratable_header(csv_path, header_names)
+                writer = csv.DictWriter(
+                    fh,
+                    fieldnames=HISTORY_COLUMNS,
+                    lineterminator="\n",
+                    extrasaction="ignore",
+                )
+                if file_size == 0:
+                    writer.writeheader()
+
+                # ------------- Append data row -------------------------------
+                writer.writerow(row_dict)
+                fh.flush()
+                os.fsync(fh.fileno())
 
         finally:
             # Lock is released when fh is closed (end of 'with' block), but
@@ -308,10 +478,19 @@ def append_rc_row(
 
 
 def main() -> None:
+    """Run the history CSV writer: append one RC row from a roll-up JSON.
+
+    ``--csv-path PATH --rollup-json PATH``. Exit codes: 0 the row was appended
+    or skipped as a duplicate; 1 missing input or an unrecoverable I/O
+    failure; 2 usage error (argparse).
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Append one RC row to the cumulative metrics history CSV.\n"
-            "Rows are appended in place and never rewritten."
+            "Rows are appended in place and never rewritten. A header that\n"
+            "predates newer columns is widened to the full column list in\n"
+            "the same atomic rewrite (file mode kept); any other header\n"
+            "mismatch prints a warning and the row is still appended."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

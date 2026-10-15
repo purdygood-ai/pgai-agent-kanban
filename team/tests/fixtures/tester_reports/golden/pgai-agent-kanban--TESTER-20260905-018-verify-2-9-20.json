@@ -1,0 +1,281 @@
+{
+  "recommendation": "ship-with-serious-concerns",
+  "systemic_risk": "high",
+  "summary": "v2.9.20 is a behavior-preserving decomposition of five engine monoliths into\nthin drivers over single-concern lib stages, plus a new engine-size/duplication\nlint. Judged against its own requirements document, the work is good: every\nnamed engine file is now a driver under 300 lines, every extracted stage is\nunder the 800-line ceiling, `wake/codex.sh` is a 297-line shim over a shared\nwake driver with per-provider libs behind a four-function interface, the\nboilerplate collapse onto `lib/script_common.sh` leaves exactly one definition\nof `cleanup_on_exit`, `ansi_code`, and the usage helper, the new lint is wired\nquality-class into both gated runners and fires correctly on both seeded\nfixtures while staying quiet on the clean tree, and the behavior-baseline\nharness reports all three captured operator surfaces byte-identical to goldens\nthat were captured before the decomposition began.\n\nVerification nonetheless found a defect that sits above the requirements\ndocument. `ai_rc/v2.9.20` was branched from an `ai_main` that had been\nre-created at the v2.4.0 commit, so the RC does not contain the last shipped\nrelease: `ai_v2.9.19` is not an ancestor of the RC, and the RC tree is 228\nfiles and ~97.7k lines behind the tag the operator is actually running.\nTagging v2.9.20 from this RC would publish a tree missing everything shipped\nin v2.4.1 ... v2.9.19 -- including `team/scripts/deep-verify.sh`,\n`team/scripts/lib/deep_verify_ledger.sh`, and `team/scripts/task-status.sh`,\nall of which the live SOP and role files require. The decomposition itself was\ntherefore applied to files 400-900 lines smaller than the ones the requirements\ndocument sizes, which is independent confirmation that the base was wrong.\n\nSeparately, the gated unit runner exits 1 on five pre-existing test failures\nwhose fixtures read the operator's live kanban bug ledger rather than committed\nfixture data. Those five fail identically on the base branch and are not this\nRC's doing.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "RC is branched from a stale `ai_main` and would ship a five-release rollback",
+      "heading": "Finding 1: RC is branched from a stale `ai_main` and would ship a five-release rollback",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** large (the RC must be re-based onto the real lane tip and the decomposition re-applied against the v2.9.19-sized files; plus a new RC-open guard)\n**Systemic Risk:** high (shipping this RC makes the product materially worse and orphans the lane's real history -- see the Systemic-Risk Rubric in SOP.md)\n**Regression:** yes (functionality present in the last shipped version, v2.9.19, is absent from this RC's tree)\n**Integrity Damage:** yes (squashing this RC onto `ai_main` and tagging makes the v2.4.1 ... v2.9.19 lineage unreachable from the release lane, and an operator upgrading to v2.9.20 loses the running system's scripts)\n**Filed As:** BUG-0161 (Path C-A -- filed as BUG -- code defect / regression / test failure)\n\nEvidence, all from `$HOME/develop/pgai-agent-kanban`:\n\n- `git merge-base --is-ancestor ai_v2.9.19 ai_rc/v2.9.20` exits **1** -- the\n  last shipped tag is not in the RC.\n- `git reflog show ai_main` shows two entries only:\n  `92dae1b ... commit: Regenerate CHANGELOG.md (drift detected by OVERWATCH sweep)`\n  and `3515d93 ... branch: Created from HEAD`, where `3515d93` is the\n  `pgai-agent-kanban v2.4.0` commit dated 2026-08-09. `ai_main` was created at\n  v2.4.0, not at the lane tip.\n- `git branch --contains ai_v2.9.19` prints `last_run_ai_main` only. That\n  branch (`228f078`, \"Polish release notes for ai_v2.9.19\") is the real tip.\n- `git diff --shortstat ai_v2.9.19 ai_rc/v2.9.20` ->\n  `529 files changed, 20402 insertions(+), 97744 deletions(-)`.\n  Tree sizes: `ai_main` 696 files, `ai_v2.9.19` 924, RC 733.\n- The live install is running the branch the RC does not descend from:\n  `$HOME/pgai_agent_kanban/VERSION` is `v2.9.19` and `VERSION_DETAIL` is\n  `ai_v2.9.19-1-g228f078  deposit-sha=228f0780...`.\n- Files present at `ai_v2.9.19` and in the live install but absent from the RC\n  include `team/scripts/deep-verify.sh`,\n  `team/scripts/lib/deep_verify_ledger.sh`, and `team/scripts/task-status.sh`\n  -- the DEEP-VERIFY umbrella verb, its ledger reader, and the canonical\n  status-writer tool that `SOP.md` and every role file name as the taught path.\n- The requirements document independently confirms the mismatch. It sizes the\n  monoliths at `cm/release.sh ~3.9k`, `discovery.sh ~3.2k`,\n  `wake_common.sh ~3.1k`, `column-render.sh ~2.5k`, wake providers `~2k each`.\n  Measured on the RC's actual base:\n\n  | file | `ai_main` (RC base) | `ai_v2.9.19` | requirements |\n  |---|---|---|---|\n  | `team/scripts/cm/release.sh` | 3010 | 3903 | ~3.9k |\n  | `team/scripts/lib/discovery.sh` | 2524 | 3224 | ~3.2k |\n  | `team/scripts/lib/wake_common.sh` | 2573 | 3097 | ~3.1k |\n  | `team/scripts/dashboard/column-render.sh` | 2102 | 2536 | ~2.5k |\n  | `team/scripts/wake/claude.sh` | 2029 | 2010 | ~2k |\n  | `team/scripts/wake/codex.sh` | 1942 | 1923 | ~2k |\n\n  The requirements were written against `ai_v2.9.19`; the work was done against\n  a tree five releases older.\n\nThe defect's *cause* predates this RC -- `ai_main` was already at v2.4.0 before\n`CM-20260905-017-open-rc-2-9-20` opened the RC at 05:48:17Z, and the only other\ncommit on `ai_main` (an OVERWATCH CHANGELOG regeneration at 05:30:02Z) also\npredates it. `Regression` is nevertheless `yes`, per the Step 7 rule: the\nrelease this RC would produce lacks behavior that works in v2.9.19.\n\nNothing in the RC's own diff caused this and no CODER or WRITER task in the\ncycle did anything wrong; the base branch was wrong before any of them started.",
+      "filed_as": "BUG-0161",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "large",
+      "systemic_risk": "high",
+      "extra": {
+        "integrity_damage": "yes (squashing this RC onto `ai_main` and tagging makes the v2.4.1 ... v2.9.19 lineage unreachable from the release lane, and an operator upgrading to v2.9.20 loses the running system's scripts)"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "large (the RC must be re-based onto the real lane tip and the decomposition re-applied against the v2.9.19-sized files; plus a new RC-open guard)",
+        "systemic_risk": "high (shipping this RC makes the product materially worse and orphans the lane's real history -- see the Systemic-Risk Rubric in SOP.md)",
+        "regression": "yes (functionality present in the last shipped version, v2.9.19, is absent from this RC's tree)",
+        "filed_as": "BUG-0161 (Path C-A -- filed as BUG -- code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "tree ships Dockerfiles but carries no `team/scripts/deep-verify.sh`",
+      "heading": "Finding 2: tree ships Dockerfiles but carries no `team/scripts/deep-verify.sh`",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (the file exists at `ai_v2.9.19`; it returns as soon as Finding 1's re-base lands)\n**Systemic Risk:** medium (container images would ship with no cold-build gate anywhere in front of them, and the pre-release freshness check has no verb to point an operator at)\n**Regression:** yes (`team/scripts/deep-verify.sh` and `team/scripts/lib/deep_verify_ledger.sh` both exist at `ai_v2.9.19`)\n**Integrity Damage:** no\n**Filed As:** BUG-0161 (Path C-A) -- same defect, same root cause; deliberately not filed twice\n\n`ls docker/*/Dockerfile` in the RC lists three flavors\n(`docker/claude-abliterated`, `docker/debian`, `docker/rocky9`), so the\ndeep-verify step applies to this tree. `test -f team/scripts/deep-verify.sh`\nfails. Per `roles/TESTER.md` Step 5d (\"The one case that does produce a Step-7\nfinding\"), that is a `gap` finding. It is recorded here rather than filed as a\nseparate bug because it is one symptom of Finding 1, not an independent defect:\nthe runner is not missing from the codebase, it is missing from this branch.",
+      "filed_as": "BUG-0161",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (the file exists at `ai_v2.9.19`; it returns as soon as Finding 1's re-base lands)",
+        "systemic_risk": "medium (container images would ship with no cold-build gate anywhere in front of them, and the pre-release freshness check has no verb to point an operator at)",
+        "regression": "yes (`team/scripts/deep-verify.sh` and `team/scripts/lib/deep_verify_ledger.sh` both exist at `ai_v2.9.19`)",
+        "filed_as": "BUG-0161 (Path C-A) -- same defect, same root cause; deliberately not filed twice"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "five unit tests read the operator's live bug ledger (gated unit runner exits 1)",
+      "heading": "Finding 3: five unit tests read the operator's live bug ledger (gated unit runner exits 1)",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing -- fails identically on the base branch)\n**Fix Effort:** small (move the required bug files into `team/tests/fixtures/` and repoint `_REAL_BUGS_DIR`)\n**Systemic Risk:** low (test-only; no production code path is implicated)\n**Regression:** no -- established: `git diff ai_main..ai_rc/v2.9.20` touches neither test file nor `CHANGELOG.md` nor `team/pgai_agent_kanban/`, and a `git archive ai_main` export of the base branch reproduces exactly the same five failures (`5 failed, 26 passed, 1 skipped`)\n**Integrity Damage:** no\n**Filed As:** BUG-0162 (Path C-A)\n\nFailing tests:\n\n```\ntests/unit/test_changelog_writer_real_data.py::TestRealDataChangelog::test_bug_0023_file_carries_public_id_ki_1_0_0_1\ntests/unit/test_changelog_writer_real_data.py::TestRealDataChangelog::test_v1_0_0_entry_carries_ki_1_0_0_1_with_tmux_symptom\ntests/unit/test_changelog_writer_real_data.py::TestRealDataChangelog::test_v1_0_0_entry_carries_correct_affects_fixed_in_disclosure\ntests/unit/test_lint_changelog_freshness.py::TestChangelogContentGates::test_ki_1_0_0_1_renders_under_v1_0_0\ntests/unit/test_lint_changelog_freshness.py::TestRCModeTolerance::test_rc_mode_tolerates_post_rc_bug_entry\n```\n\nRoot assertion: `Expected exactly one BUG-0023-*.md in\n$HOME/pgai_agent_kanban/projects/pgai-agent-kanban/bugs, found 0: []`.\n`_REAL_BUGS_DIR` points at the operator's live kanban ledger, which currently\nholds only `README.md` and `templates/`, so `changelog_writer` regenerates a\nv1.0.0 entry whose Known Issues reads `None` and every `KI-1.0.0.1` assertion\nfails. This is SOP Anti-pattern 2 (environment-coupled fixtures): the suite's\nverdict depends on state outside the tree under test.\n\nClassified `bug`, not `stale-assertion`: the asserted literal was not changed\nby this RC's CODER work -- no production code in the RC produces the mismatch,\nand the trace runs to an absent external file rather than to a changed source\nline.",
+      "filed_as": "BUG-0162",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug (pre-existing -- fails identically on the base branch)",
+        "fix_effort": "small (move the required bug files into `team/tests/fixtures/` and repoint `_REAL_BUGS_DIR`)",
+        "systemic_risk": "low (test-only; no production code path is implicated)",
+        "regression": "no -- established: `git diff ai_main..ai_rc/v2.9.20` touches neither test file nor `CHANGELOG.md` nor `team/pgai_agent_kanban/`, and a `git archive ai_main` export of the base branch reproduces exactly the same five failures (`5 failed, 26 passed, 1 skipped`)",
+        "filed_as": "BUG-0162 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "five engine monoliths are now thin drivers over sized stages",
+      "heading": "Finding 4: five engine monoliths are now thin drivers over sized stages",
+      "level": 3,
+      "body": "**Category:** pass\n\nMeasured with `wc -l` in the RC worktree. Drivers, all under the 300-line\ndeliverable: `cm/release.sh` 299, `dashboard/column-render.sh` 299,\n`wake/claude.sh` 297, `wake/codex.sh` 297, `lib/discovery.sh` 233,\n`lib/wake_common.sh` 218. All 26 extracted stages are under the 800-line\nceiling; the largest is `lib/dashboard/column_render_data.sh` at 799,\nthen `lib/wake_task_state.sh` 787 and `lib/cm/release_finalize.sh` 771.\n\nAcceptance criterion \"`wake/codex.sh` deleted or <300-line shim\" -- met at 297\nlines, composing the shared `lib/wake_driver*.sh` pipeline.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "one wake driver with a four-function provider interface",
+      "heading": "Finding 5: one wake driver with a four-function provider interface",
+      "level": 3,
+      "body": "**Category:** pass\n\n`lib/wake_driver.sh` (565) plus `_prep` (263), `_worktree` (391), `_invoke`\n(550), `_finalize` (433) form the shared pipeline; `lib/provider_claude.sh`\n(230) and `lib/provider_codex.sh` (498) each define exactly the four interface\nfunctions `provider_dispatch`, `provider_env_preflight`,\n`provider_model_preflight`, `provider_parse_output`. Both `wake/claude.sh` and\n`wake/codex.sh` compose the same driver. The deliberate same-name pairing is\nthe documented allow-list entry in the new lint, not an accident.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "boilerplate exists exactly once",
+      "heading": "Finding 6: boilerplate exists exactly once",
+      "level": 3,
+      "body": "**Category:** pass\n\n`grep -rnE '^\\s*(function\\s+)?(cleanup_on_exit|ansi_code|usage|_usage|print_usage_and_exit)\\s*\\(\\)' team/scripts --include='*.sh'`\nreturns three lines, all in `team/scripts/lib/script_common.sh`\n(`ansi_code` 60, `cleanup_on_exit` 79, `print_usage_and_exit` 86). No other\ndefinition survives anywhere under `team/scripts`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "duplicate-function check returns zero, and the result survives a widened scan",
+      "heading": "Finding 7: duplicate-function check returns zero, and the result survives a widened scan",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_engine_size_dupe.py` reports\n`no cross-file function-name collisions found` across the tree. The check is\nreachability-aware: it builds the `source` graph and reports a collision only\nwhen two definitions can land in one bash process, which is why the many\nsame-named local helpers in never-co-sourced scripts (`fail`, `warn`,\n`get_val`, `section_header`) are correctly not reported.\n\nIndependently re-run with the lint's `_FUNC_DEF_RE` widened from\n`^([a-z][a-z0-9_]*)\\(\\)` to `^([A-Za-z_][A-Za-z0-9_]*)\\(\\)`, so\nunderscore-prefixed and capitalised definitions are also scanned: still zero\ncollisions. The near-misses were checked by hand and are all sound --\n`log()` in `lib/discovery.sh` is guarded by `if ! declare -F log`, and\n`_run_release_hook` in `ship-rc.sh` versus `lib/cm/release_finalize.sh` never\nshare a process because `ship-rc.sh` does not source `cm/release.sh`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "the new lint fires on both seeded fixtures and is quiet on the clean tree",
+      "heading": "Finding 8: the new lint fires on both seeded fixtures and is quiet on the clean tree",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehavioral verification, Step 6.5:\n\n- `--scripts-dir team/tests/fixtures/engine_size_dupe/oversized_engine` (a\n  900-line `lib/discovery.sh`) -> exit 1,\n  `FAIL -- 1 engine file(s) exceed the 800-line ceiling`.\n- `--scripts-dir team/tests/fixtures/engine_size_dupe/duplicate_function` ->\n  exit 1, `seeded_shared_helper() -- defined in: lib/stage_a.sh, lib/stage_b.sh`.\n- Clean tree -> exit 0, `ok -- 32 engine file(s) within the 800-line ceiling`.\n\nBoth refusals emit the full dual-channel contract (`error:` / `message:` /\n`remedy:`), the site carries `# CENSUS-ANCHOR: engine-size-dupe-01`, and the\ncensus-compliance lint reports 0 offenders -- the `SOP.md` new-gate rule is\nsatisfied. The lint is wired into both gated runners through\n`gated_runner_run_quality_lint \"engine_size_dupe\"`, i.e. quality-class and\nnon-fatal, as the deliverable requires.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "the three captured operator surfaces are byte-identical to pre-decomposition goldens",
+      "heading": "Finding 9: the three captured operator surfaces are byte-identical to pre-decomposition goldens",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/harness/engine-behavior-baseline.sh --compare <fresh-dir>`\n-> exit 0, `compare OK -- 3 surfaces match goldens`. The goldens\n(`team/tests/fixtures/engine-baseline/{board-render,ship-summary,wake-log}.txt`)\nwere committed once, by the cycle's first ticket\n(`436f8f6`, CODER-20260905-002), before any decomposition landed, and no later\ncommit on the RC touches them -- so the comparison is a real\nbefore-versus-after, not a snapshot of the new behavior.\n\nThe guard was exercised: appending one line to the captured\n`board-render.txt` and re-running `--compare` produces exit 1 and a unified\ndiff naming the seeded line. The harness does not re-capture over existing\noutput, so a seeded drift genuinely survives to the diff.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "the release-lifecycle synthetic simulation passes",
+      "heading": "Finding 10: the release-lifecycle synthetic simulation passes",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe RC's diff touches `cm/release.sh` and the CM lib stages, so Step 6.8\napplies. `python3 -m pytest tests/integration/test_cm_release_synthetic.py -q`\n-> `15 passed in 27.55s`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "syntax and compile clean across the diff",
+      "heading": "Finding 11: syntax and compile clean across the diff",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash -n` over every changed `*.sh` (0 failures) and `python3 -m py_compile`\nover every changed `*.py` (0 failures).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "board-render golden is a thin surface for a 2.1k-line decomposition",
+      "heading": "Finding 12: board-render golden is a thin surface for a 2.1k-line decomposition",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`team/tests/fixtures/engine-baseline/board-render.txt` is three lines (one\ncolumn header, two queue rows). `dashboard/column-render.sh` was 2102 lines\nbefore the split and is now three stages totalling 1948 lines\n(`column_render_data.sh` 799, `column_render_cells.sh` 704,\n`column_render_frame.sh` 445), so the byte-identical claim for the board-render\nsurface rests on a very narrow capture -- no wide frame, no priority cap, no\nstatus-window path, no rich cell states. The `ship-summary` (25 lines, real\n`cm/release.sh` ceremony through a synthetic repo) and `wake-log` (14 lines,\nreal wake substrate with the LLM stubbed) surfaces are substantially stronger.\nThe dashboard stages retain their own unit coverage\n(`test_dashboard_column_render_priority_cap.py` and siblings pass), which is\nwhy this is a caveat and not a gap. Worth deepening the board-render golden\nwhen the harness is next touched.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-SERIOUS-CONCERNS",
+    "systemic_risk": "high"
+  }
+}

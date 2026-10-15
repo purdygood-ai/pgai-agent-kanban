@@ -48,6 +48,11 @@ import pytest
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _SCRIPTS_LIB = _TEAM_DIR / "scripts" / "lib"
 _DISCOVERY_SH = _SCRIPTS_LIB / "discovery.sh"
+# _disc_find_unhandled_items lives in this lib stage file and runs its scan
+# in the discovery items module; the structural import check below reads
+# both.
+_DISCOVERY_ITEMS_SH = _SCRIPTS_LIB / "discovery_items.sh"
+_DISCOVERY_ITEMS_PY = _TEAM_DIR / "pgai_agent_kanban" / "discovery" / "items.py"
 _LEDGER_CONTRACT_PY = (
     _TEAM_DIR / "pgai_agent_kanban" / "lib" / "ledger_filename_contract.py"
 )
@@ -206,10 +211,10 @@ class TestLedgerFilenameContractModule:
         (d / "PRIORITY-0036-existing.md").write_text("x", encoding="utf-8")
         remedy = mod.build_remedy("PRIORITY-036-bad.md", "PRIORITY", d)
         assert "PRIORITY-0036" in remedy, (
-            f"Expected the padded guess PRIORITY-0036 in remedy text: {remedy!r}"
+            f"Expected the padded guess in remedy text: {remedy!r}"
         )
         assert "PRIORITY-0037" in remedy, (
-            f"Expected the next free number PRIORITY-0037 in remedy text: {remedy!r}"
+            f"Expected the next free number in remedy text: {remedy!r}"
         )
 
     def test_build_remedy_never_suggests_auto_rename(
@@ -225,12 +230,17 @@ class TestLedgerFilenameContractModule:
 
 
 class TestSingleSourceStructural:
-    """discovery.sh's scan-and-select layer imports the shared contract."""
+    """discovery's scan-and-select layer imports the shared contract."""
 
     def test_discovery_sh_imports_ledger_filename_contract(self) -> None:
-        text = _DISCOVERY_SH.read_text(encoding="utf-8")
-        assert "pgai_agent_kanban.lib.ledger_filename_contract" in text, (
-            "discovery.sh's _disc_find_unhandled_items must import from "
+        shell_text = _DISCOVERY_ITEMS_SH.read_text(encoding="utf-8")
+        assert "pgai_agent_kanban.discovery.items scan" in shell_text, (
+            "discovery_items.sh's _disc_find_unhandled_items must run its scan "
+            "through pgai_agent_kanban.discovery.items."
+        )
+        module_text = _DISCOVERY_ITEMS_PY.read_text(encoding="utf-8")
+        assert "pgai_agent_kanban.lib.ledger_filename_contract" in module_text, (
+            "pgai_agent_kanban.discovery.items must import from "
             "pgai_agent_kanban.lib.ledger_filename_contract."
         )
 
@@ -288,11 +298,11 @@ class TestFilingTimeGateRealPath:
 
         assert "under-padded.md" in result.stderr
         assert "PRIORITY-0036" in result.stderr, (
-            f"Expected the padded guess PRIORITY-0036 in the remedy.\n"
+            f"Expected the padded guess in the remedy.\n"
             f"stderr: {result.stderr}"
         )
         assert "PRIORITY-0037" in result.stderr, (
-            f"Expected the next free number PRIORITY-0037 in the remedy.\n"
+            f"Expected the next free number in the remedy.\n"
             f"stderr: {result.stderr}"
         )
         assert "under-padded.md" not in result.stdout

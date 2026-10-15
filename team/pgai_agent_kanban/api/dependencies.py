@@ -1,8 +1,20 @@
 """
 dependencies.py — Shared FastAPI dependencies for the pgai-agent-kanban operator API.
 
-Provides reusable Depends() callables that are wired into read (GET) route handlers.
-Currently exports one dependency:
+Provides reusable Depends() callables that are wired into read (GET) route
+handlers, and the two per-request path resolvers every route shares:
+
+  route_kanban_root(request)
+    The kanban root the server resolved at startup (``app.state.api_cfg``):
+    the one root every route reads and writes under -- metrics, costs,
+    approvals and verdicts included -- rather than each route re-reading
+    the environment.
+
+  route_temp_root(request)
+    The framework temp root for that kanban root
+    (:func:`pgai_agent_kanban.api.config.kanban_temp_root`).
+
+Dependency:
 
   warn_unknown_query_params(request)
     Inspects the incoming request's query parameters against the set of parameter
@@ -36,9 +48,22 @@ Design constraints:
 
 from __future__ import annotations
 
+import pathlib
 from typing import Any
 
 from fastapi import Request
+
+from .config import kanban_temp_root
+
+
+def route_kanban_root(request: Request) -> pathlib.Path:
+    """Return the kanban root this server answers for (its ``ApiConfig.kanban_root``)."""
+    return pathlib.Path(request.app.state.api_cfg.kanban_root)
+
+
+def route_temp_root(request: Request) -> pathlib.Path:
+    """Return the framework temp root for this server's kanban root."""
+    return kanban_temp_root(route_kanban_root(request))
 
 
 def warn_unknown_query_params(request: Request) -> list[str]:

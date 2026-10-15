@@ -28,8 +28,8 @@
 #
 # PROTECTED DIRECTORIES (never purged by any function in this file)
 # -----------------------------------------------------------------------
-# projects/<proj>/artifacts/  — the versioned document library (v0.44.0+).
-#   This directory is written by cm-finalize.sh when PGAI_TARGET_VERSION is set.
+# projects/<proj>/artifacts/  — the versioned document library.
+#   This directory is written by cm/finalize.sh when PGAI_TARGET_VERSION is set.
 #   Published artifacts (v<ver>-<name>.md) are permanent library entries and must
 #   NOT be swept by any periodic cleanup.  None of the purge_* functions scan
 #   artifacts/ — the protection is structural (they only scan tasks/, logs/,
@@ -52,11 +52,31 @@
 #   apply          — "true" to actually delete; "false" (or anything else) for dry-run
 #   include_blocked— "true" to also purge BLOCKED tasks (purge_tasks only)
 #
+# Closed states
+# -------------
+#   purge_closed_bugs and purge_closed_priorities treat a file as closed only
+#   when its "## Status" is in the shared closed-state list
+#   (pgai_agent_kanban.lib.terminal_states: CLOSED_STATES plus
+#   LEGACY_STATE_ALIASES), loaded once per call through
+#   _purge_load_closed_states.  A legacy alias reads as the closed state it
+#   stands for: "superseded" is purged as wont-do and its log line reads
+#   "(status=wont-do; recorded as superseded)".  When the list cannot be
+#   loaded, nothing reads as closed and both functions purge nothing.
+#
 # Output conventions
 # ------------------
 #   Per-item lines are emitted to stdout so callers can tee them to the run log.
 #   The final stdout line of every purge_* function is "<count> <bytes>" for
 #   summary accounting.  All stderr output is for diagnostic messages only.
+
+# release_state_value reads Active RC through the one release-state reader.
+# shellcheck source=cm/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/cm/common.sh"
+# Task folders and the task IDs a bundle names are recognised by the shared
+# task-ID shape (kanban_task_id_is_canonical, kanban_task_ids_in_files), with
+# or without the legacy CLAUDE- prefix.
+# shellcheck source=task_ids.sh
+source "$(dirname "${BASH_SOURCE[0]}")/task_ids.sh"
 
 # ---------------------------------------------------------------------------
 # Internal helper: _purge_read_field <file> <field_name>
@@ -77,24 +97,50 @@ _purge_read_field() {
 }
 
 # ---------------------------------------------------------------------------
+# Internal helper: _purge_load_closed_states <map_name>
+# Fill the caller's associative array <map_name> (declared with local -A)
+# from the shared closed-state list: each closed state maps to itself and
+# each legacy alias to the closed state it reads as.  Costs one python start.
+# Returns 1, leaving the map empty and printing a diagnostic on stderr, when
+# the list cannot be loaded -- callers then treat no status as closed.
+# ---------------------------------------------------------------------------
+_purge_load_closed_states() {
+    local -n _purge_closed_map="$1"
+    local state reads_as
+    while read -r state reads_as; do
+        [[ -n "${state}" && -n "${reads_as}" ]] || continue
+        _purge_closed_map["${state}"]="${reads_as}"
+    done < <(pp_run_ops pgai_agent_kanban.lib.terminal_states closed-map 2>/dev/null)
+    if (( ${#_purge_closed_map[@]} == 0 )); then
+        echo "purge-helpers: could not load the closed-state list from pgai_agent_kanban.lib.terminal_states; no file will be purged as closed" >&2
+        return 1
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Internal helper: _purge_status_note <recorded_status> <closed_status>
+# Print the "status=..." text for a closed item's log line: the closed state,
+# plus the recorded value when a legacy alias was read as that state.
+# ---------------------------------------------------------------------------
+_purge_status_note() {
+    local recorded="$1"
+    local closed="$2"
+    if [[ "${recorded}" == "${closed}" ]]; then
+        echo "status=${closed}"
+    else
+        echo "status=${closed}; recorded as ${recorded}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Internal helper: _purge_read_active_rc <project_root>
-# Echo the Active RC value from release-state.md, or "none" if absent.
+# Echo the Active RC value from release-state.md as written, or "none" when
+# the file, the heading or a value is missing.
 # ---------------------------------------------------------------------------
 _purge_read_active_rc() {
     local project_root="$1"
-    local rs_file="${project_root}/release-state.md"
-    if [[ ! -f "${rs_file}" ]]; then
-        echo "none"
-        return 0
-    fi
-    local val
-    val="$(awk '/^## Active RC$/{found=1; next} found && /^[[:space:]]*$/{next} found{print; exit}' "${rs_file}" \
-        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-    if [[ -z "${val}" ]]; then
-        echo "none"
-    else
-        echo "${val}"
-    fi
+    release_state_value "${project_root}/release-state.md" "Active RC"
 }
 
 # ---------------------------------------------------------------------------
@@ -136,7 +182,7 @@ _purge_collect_active_rc_tasks() {
     for bundle_file in ${bundle_pattern}; do
         [[ -f "${bundle_file}" ]] || continue
         local ids
-        ids="$(grep -oE 'CLAUDE-[A-Z]+-[0-9]{8}-[0-9]+-[a-z0-9-]+' "${bundle_file}" 2>/dev/null || true)"
+        ids="$(kanban_task_ids_in_files "${bundle_file}")"
         if [[ -n "${ids}" ]]; then
             if [[ -n "${referenced}" ]]; then
                 referenced="${referenced}"$'\n'"${ids}"
@@ -154,11 +200,12 @@ _purge_collect_active_rc_tasks() {
 # requirements files for the given RC version.  Returns empty string when no
 # bundle files are found or rc_version is empty / "none".
 #
-# Task IDs match the pattern: CLAUDE-[A-Z]+-[0-9]+-[0-9]+-[a-z0-9-]+
+# A task ID is any text matching the shared task-ID shape
+# (kanban_task_ids_in_files), with or without the legacy CLAUDE- prefix.
 #
 # Usage:
 #   task_list=$(get_rc_referenced_tasks "$project_dir" "$rc_version")
-#   if echo "$task_list" | grep -qxF "$task_id"; then ... fi
+#   if grep -qxF "$task_id" <<< "$task_list"; then ... fi
 # ---------------------------------------------------------------------------
 get_rc_referenced_tasks() {
     local project_dir="$1"
@@ -174,7 +221,7 @@ _purge_task_in_list() {
     local task_id="$1"
     local list="$2"
     [[ -z "${list}" ]] && return 1
-    echo "${list}" | grep -qxF "${task_id}"
+    grep -qxF "${task_id}" <<< "${list}"
 }
 
 # ---------------------------------------------------------------------------
@@ -211,7 +258,9 @@ _purge_do_delete() {
 
 # ---------------------------------------------------------------------------
 # purge_tasks
-# Scan <project_root>/tasks/CLAUDE-*/ for terminal-state task folders
+# Scan <project_root>/tasks/ for terminal-state task folders -- every folder
+# whose name is a task ID (kanban_task_id_is_canonical; the legacy CLAUDE-
+# prefix is optional) --
 # (DONE or WONT-DO, and optionally BLOCKED) whose status.md mtime is older
 # than <days> days.  Respects active-RC defense: tasks referenced by the
 # current RC's bundle requirements are never purged.
@@ -248,12 +297,14 @@ purge_tasks() {
         rc_task_list="$(_purge_collect_active_rc_tasks "${project_root}" "${active_rc}")"
     fi
 
-    # Find candidate task folders: named CLAUDE-* and older than <days> days.
-    # We use -maxdepth 1 on the tasks dir so we only look at immediate children.
+    # Find candidate task folders: named as a task ID and older than <days>
+    # days. We use -maxdepth 1 on the tasks dir so we only look at immediate
+    # children; anything else there (queues/, scratch) is not a task folder.
     while IFS= read -r -d '' task_dir; do
         [[ -d "${task_dir}" ]] || continue
         local task_id
         task_id="$(basename "${task_dir}")"
+        kanban_task_id_is_canonical "${task_id}" || continue
 
         # Active-RC defense: never purge tasks referenced by the current bundle.
         if _purge_task_in_list "${task_id}" "${rc_task_list}"; then
@@ -306,7 +357,7 @@ purge_tasks() {
         count=$(( count + 1 ))
         total_bytes=$(( total_bytes + item_bytes ))
 
-    done < <(find "${tasks_dir}" -maxdepth 1 -mindepth 1 -type d -name 'CLAUDE-*' -mtime "+${days}" -print0 2>/dev/null)
+    done < <(find "${tasks_dir}" -maxdepth 1 -mindepth 1 -type d -mtime "+${days}" -print0 2>/dev/null)
 
     echo "${count} ${total_bytes}"
 }
@@ -388,6 +439,13 @@ purge_log_archives() {
 # Detection logic: extract the version prefix (vX.Y.Z) from the filename and
 # check whether <project_root>/release-notes/vX.Y.Z.md exists.
 #
+# Carried items: a shipped bundle that lists an item whose own "## Status"
+# is still "running" (pgai_agent_kanban.lib.bundle_items running-items) is
+# kept, logged "[SKIP] <path> (lists running item(s) <names> ...)": it is the
+# only live record of that item, and removing it would leave the item
+# running with nothing to re-offer it. When the listed items cannot be read
+# the bundle is kept too.
+#
 # Args:
 #   $1  project_root — absolute path to the project root directory
 #   $2  days         — retention threshold in days (integer)
@@ -439,6 +497,17 @@ purge_shipped_bundles() {
             continue
         fi
 
+        # Hold a bundle that is still the only record of a running item.
+        local running_items=""
+        if ! running_items="$(pp_run_ops pgai_agent_kanban.lib.bundle_items running-items "${bundle_file}")"; then
+            echo "[SKIP] ${bundle_file} (could not read the status of its bundled items — kept)"
+            continue
+        fi
+        if [[ -n "${running_items}" ]]; then
+            echo "[SKIP] ${bundle_file} (lists running item(s) ${running_items//$'\n'/, } — kept until they close)"
+            continue
+        fi
+
         local item_bytes
         item_bytes="$(_purge_item_size_bytes "${bundle_file}")"
 
@@ -460,10 +529,11 @@ purge_shipped_bundles() {
 
 # ---------------------------------------------------------------------------
 # purge_closed_bugs
-# Scan <project_root>/bugs/ for bug files whose "## Status" field is
-# "done" or "wont-do" and whose mtime is older than <days> days.
+# Scan <project_root>/bugs/ for bug files whose "## Status" field is a
+# closed state (see "Closed states" above; superseded reads as wont-do) and
+# whose mtime is older than <days> days.
 #
-# Skips README.md and any file whose Status is not done/wont-do.
+# Skips README.md and any file whose Status is not a closed state.
 #
 # Args:
 #   $1  project_root — absolute path to the project root directory
@@ -487,6 +557,9 @@ purge_closed_bugs() {
         return 0
     fi
 
+    local -A closed_as=()
+    _purge_load_closed_states closed_as || true
+
     # Find .md files in bugs/ older than <days>.
     while IFS= read -r -d '' bug_file; do
         [[ -f "${bug_file}" ]] || continue
@@ -504,24 +577,23 @@ purge_closed_bugs() {
         # Normalize to lowercase for comparison.
         file_status="${file_status,,}"
 
-        case "${file_status}" in
-            done|wont-do)
-                # Eligible for purge.
-                ;;
-            *)
-                echo "[SKIP] ${bug_file} (status=${file_status}; not closed)"
-                continue
-                ;;
-        esac
+        # Closed only when the shared list names the status (alias included).
+        local closed_status=""
+        [[ -n "${file_status}" ]] && closed_status="${closed_as[${file_status}]:-}"
+        if [[ -z "${closed_status}" ]]; then
+            echo "[SKIP] ${bug_file} (status=${file_status}; not closed)"
+            continue
+        fi
 
-        local item_bytes
+        local item_bytes status_note
         item_bytes="$(_purge_item_size_bytes "${bug_file}")"
+        status_note="$(_purge_status_note "${file_status}" "${closed_status}")"
 
         if [[ "${apply}" == "true" ]]; then
             _purge_do_delete "${bug_file}" "true"
-            echo "[PURGED] ${bug_file} (status=${file_status})"
+            echo "[PURGED] ${bug_file} (${status_note})"
         else
-            echo "[WOULD PURGE] ${bug_file} (status=${file_status})"
+            echo "[WOULD PURGE] ${bug_file} (${status_note})"
         fi
         count=$(( count + 1 ))
         total_bytes=$(( total_bytes + item_bytes ))
@@ -534,7 +606,8 @@ purge_closed_bugs() {
 # ---------------------------------------------------------------------------
 # purge_closed_priorities
 # Scan <project_root>/priority/ for priority files whose "## Status" field
-# is "done" or "wont-do" and whose mtime is older than <days> days.
+# is a closed state (superseded reads as wont-do) and whose mtime is older
+# than <days> days.
 # Uses the same detection logic as purge_closed_bugs.
 #
 # Args:
@@ -559,6 +632,9 @@ purge_closed_priorities() {
         return 0
     fi
 
+    local -A closed_as=()
+    _purge_load_closed_states closed_as || true
+
     # Find .md files in priority/ older than <days>.
     while IFS= read -r -d '' pri_file; do
         [[ -f "${pri_file}" ]] || continue
@@ -576,24 +652,23 @@ purge_closed_priorities() {
         # Normalize to lowercase for comparison.
         file_status="${file_status,,}"
 
-        case "${file_status}" in
-            done|wont-do)
-                # Eligible for purge.
-                ;;
-            *)
-                echo "[SKIP] ${pri_file} (status=${file_status}; not closed)"
-                continue
-                ;;
-        esac
+        # Closed only when the shared list names the status (alias included).
+        local closed_status=""
+        [[ -n "${file_status}" ]] && closed_status="${closed_as[${file_status}]:-}"
+        if [[ -z "${closed_status}" ]]; then
+            echo "[SKIP] ${pri_file} (status=${file_status}; not closed)"
+            continue
+        fi
 
-        local item_bytes
+        local item_bytes status_note
         item_bytes="$(_purge_item_size_bytes "${pri_file}")"
+        status_note="$(_purge_status_note "${file_status}" "${closed_status}")"
 
         if [[ "${apply}" == "true" ]]; then
             _purge_do_delete "${pri_file}" "true"
-            echo "[PURGED] ${pri_file} (status=${file_status})"
+            echo "[PURGED] ${pri_file} (${status_note})"
         else
-            echo "[WOULD PURGE] ${pri_file} (status=${file_status})"
+            echo "[WOULD PURGE] ${pri_file} (${status_note})"
         fi
         count=$(( count + 1 ))
         total_bytes=$(( total_bytes + item_bytes ))

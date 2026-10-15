@@ -1,0 +1,363 @@
+{
+ "_about": "Pre-port CLI behaviour of release-locks.sh on sandbox roots; see team/tests/unit/test_ops_locks.py.",
+ "scenarios": {
+  "help": {
+   "locks": {},
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Usage: release-locks.sh [OPTIONS]\n\nList every advisory lock under the kanban root's locks/ directory with its provenance, or release one named lock.\n\nOptions:\n  --force            Override safety guards\n  --help, -h         Show this help and exit\n\n         value: a lock's name (its lock-file basename with the\n                trailing .lock stripped), or an unambiguous prefix of\n                one. Ambiguous or unmatched names refuse rather than\n                guessing.\n  (--force overrides the refusal to release a lock whose recorded\n   holder pid is still alive: the holder is sent SIGTERM so its own\n   exit path releases the lock, and this script waits up to twice\n   kill_grace_seconds plus 10 seconds for it to; a lock that changed\n   hands since it was read is reported let go and nobody is\n   signalled. The live holder's file is never replaced or removed.\n   Ignored when --release is not given.)\n\nBehavior:\n  No flags:        list every lock file with how long it has been\n                   held (from its recorded acquired_at), its\n                   provenance, and a held/stale/unparseable verdict\n                   (read-only).\n  --release NAME:  release the named lock. A dead holder's file is\n                   swapped for an empty one once its flock is free.\n                   Refuses if the recorded holder pid is alive, or\n                   if it is dead but another process still holds the\n                   flock, unless --force is given, in which case the\n                   holder (or the processes holding the flock) is\n                   signalled (see above).\n\nExit codes:\n  0  listing printed, or release succeeded (a re-release of an\n     already-released lock also exits 0)\n  1  usage error\n  2  --release name matches more than one lock (candidates named)\n  3  --release name matches no lock\n  4  --release target's holder pid is alive (or dead while another\n     process holds its flock) and --force was not given\n  5  --release --force signalled the live holder, but the lock is still\n     held after twice kill_grace_seconds plus 10 seconds (by the holder,\n     or by a process that inherited its lock descriptor), or it could\n     not be signalled\n"
+  },
+  "help-short": {
+   "locks": {},
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Usage: release-locks.sh [OPTIONS]\n\nList every advisory lock under the kanban root's locks/ directory with its provenance, or release one named lock.\n\nOptions:\n  --force            Override safety guards\n  --help, -h         Show this help and exit\n\n         value: a lock's name (its lock-file basename with the\n                trailing .lock stripped), or an unambiguous prefix of\n                one. Ambiguous or unmatched names refuse rather than\n                guessing.\n  (--force overrides the refusal to release a lock whose recorded\n   holder pid is still alive: the holder is sent SIGTERM so its own\n   exit path releases the lock, and this script waits up to twice\n   kill_grace_seconds plus 10 seconds for it to; a lock that changed\n   hands since it was read is reported let go and nobody is\n   signalled. The live holder's file is never replaced or removed.\n   Ignored when --release is not given.)\n\nBehavior:\n  No flags:        list every lock file with how long it has been\n                   held (from its recorded acquired_at), its\n                   provenance, and a held/stale/unparseable verdict\n                   (read-only).\n  --release NAME:  release the named lock. A dead holder's file is\n                   swapped for an empty one once its flock is free.\n                   Refuses if the recorded holder pid is alive, or\n                   if it is dead but another process still holds the\n                   flock, unless --force is given, in which case the\n                   holder (or the processes holding the flock) is\n                   signalled (see above).\n\nExit codes:\n  0  listing printed, or release succeeded (a re-release of an\n     already-released lock also exits 0)\n  1  usage error\n  2  --release name matches more than one lock (candidates named)\n  3  --release name matches no lock\n  4  --release target's holder pid is alive (or dead while another\n     process holds its flock) and --force was not given\n  5  --release --force signalled the live holder, but the lock is still\n     held after twice kill_grace_seconds plus 10 seconds (by the holder,\n     or by a process that inherited its lock descriptor), or it could\n     not be signalled\n"
+  },
+  "list-dead-holder": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "lock: <ROOT>/locks/repo-wake-alpha.lock\n  held: 0s (since 2099-01-01T00:00:00Z) by wake-coder pid 999999999 — CODER-1\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=wake-coder pid=999999999 op=wake task=CODER-1\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\n"
+  },
+  "list-default-budget": {
+   "locks": {
+    "locks/repo-wake-delta.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-cm\npid=<LIVE>\nop=ship\ntask=CM-2\nacquired_at=<AGO>\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "lock: <ROOT>/locks/repo-wake-delta.lock\n  held: 16m (since <AGO>) by wake-cm pid <LIVE> — CM-2\n  held verdict: live\n  provenance: holder=wake-cm pid=<LIVE> op=ship task=CM-2\n  verdict: held\n"
+  },
+  "list-empty-dir": {
+   "locks": {},
+   "rc": 0,
+   "stderr": "",
+   "stdout": "no lock files found under <ROOT>/locks\n"
+  },
+  "list-force-alone": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "lock: <ROOT>/locks/repo-wake-alpha.lock\n  held: 0s (since 2099-01-01T00:00:00Z) by wake-coder pid 999999999 — CODER-1\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=wake-coder pid=999999999 op=wake task=CODER-1\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\n"
+  },
+  "list-long-held-cfg-budget": {
+   "locks": {
+    "locks/repo-wake-delta.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-cm\npid=<LIVE>\nop=ship\ntask=CM-2\nacquired_at=<AGO>\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "lock: <ROOT>/locks/repo-wake-delta.lock\n  held: 16m (since <AGO>) by wake-cm pid <LIVE> — CM-2\n  held verdict: long (11m past floor)\n  provenance: holder=wake-cm pid=<LIVE> op=ship task=CM-2\n  verdict: held\n"
+  },
+  "list-long-held-env-budget": {
+   "locks": {
+    "locks/repo-wake-delta.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-cm\npid=<LIVE>\nop=ship\ntask=CM-2\nacquired_at=<AGO>\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "lock: <ROOT>/locks/repo-wake-delta.lock\n  held: 16m (since <AGO>) by wake-cm pid <LIVE> — CM-2\n  held verdict: long (11m past floor)\n  provenance: holder=wake-cm pid=<LIVE> op=ship task=CM-2\n  verdict: held\n"
+  },
+  "list-mixed": {
+   "locks": {
+    "locks/.hidden.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    },
+    "locks/crlf.lock": {
+     "mode": "0o644",
+     "text": "holder=h\r\npid=999999999\r\nop=o\r\ntask=t\r\n"
+    },
+    "locks/dir.lock/": null,
+    "locks/dup.lock": {
+     "mode": "0o644",
+     "text": "holder=first\nholder=second\npid=999999999\nop=o\ntask=t\nacquired_at=2099-01-01T00:00:00Z\n"
+    },
+    "locks/empty.lock": {
+     "mode": "0o644",
+     "text": ""
+    },
+    "locks/garbage.lock": {
+     "mode": "0o644",
+     "text": "not a provenance record\n"
+    },
+    "locks/no-pid.lock": {
+     "mode": "0o644",
+     "text": "holder=x\nop=y\ntask=z\n"
+    },
+    "locks/notes.txt": {
+     "mode": "0o644",
+     "text": "ignored\n"
+    },
+    "locks/overwatch-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=overwatch\npid=999999998\nop=sweep\ntask=none\n"
+    },
+    "locks/partial.lock": {
+     "mode": "0o644",
+     "text": "pid=999999997\n"
+    },
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    },
+    "locks/repo-wake-beta.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-pm\npid=<LIVE>\nop=wake\ntask=none\nacquired_at=2099-01-01T00:00:00Z\n"
+    },
+    "locks/repo-wake-gamma.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-tester\npid=999999999\nop=wake\ntask=TESTER-3\nacquired_at=<AGO>\n"
+    },
+    "locks/spaced.lock": {
+     "mode": "0o644",
+     "text": "holder=h\npid=999999999\nop=o\ntask=\nacquired_at= 2099-01-01 00:00:00.5+05:30 \n"
+    },
+    "locks/torn.lock": {
+     "mode": "0o644",
+     "text": "holder=h\npid=999999999\nop=o\ntask=t\nacquired_at=2026-13-45T99:00:00Z\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "lock: <ROOT>/locks/.hidden.lock\n  held: 0s (since 2099-01-01T00:00:00Z) by wake-coder pid 999999999 — CODER-1\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=wake-coder pid=999999999 op=wake task=CODER-1\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\nlock: <ROOT>/locks/crlf.lock\n  held: acquired_at not recorded (pre-upgrade lock) by h\r pid 999999999\r — t\r\n  provenance: holder=h\r pid=999999999\r op=o\r task=t\r\n  verdict: stale\n  note: recorded pid 999999999\r does not correspond to a live process\nlock: <ROOT>/locks/dir.lock\n  held: acquired_at not recorded (pre-upgrade lock) by <unknown> pid <unknown> — chain, no task yet\n  provenance: (no provenance recorded)\n  verdict: unparseable\nlock: <ROOT>/locks/dup.lock\n  held: 0s (since 2099-01-01T00:00:00Z) by first pid 999999999 — t\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=first pid=999999999 op=o task=t\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\nlock: <ROOT>/locks/empty.lock\n  held: acquired_at not recorded (pre-upgrade lock) by <unknown> pid <unknown> — chain, no task yet\n  provenance: (no provenance recorded)\n  verdict: unparseable\nlock: <ROOT>/locks/garbage.lock\n  held: acquired_at not recorded (pre-upgrade lock) by <unknown> pid <unknown> — chain, no task yet\n  provenance: (no provenance recorded)\n  verdict: unparseable\nlock: <ROOT>/locks/no-pid.lock\n  held: acquired_at not recorded (pre-upgrade lock) by x pid <unknown> — z\n  provenance: holder=x pid=<unknown> op=y task=z\n  verdict: unparseable\nlock: <ROOT>/locks/overwatch-alpha.lock\n  held: acquired_at not recorded (pre-upgrade lock) by overwatch pid 999999998 — chain, no task yet\n  provenance: holder=overwatch pid=999999998 op=sweep task=none\n  verdict: stale\n  note: recorded pid 999999998 does not correspond to a live process\nlock: <ROOT>/locks/partial.lock\n  held: acquired_at not recorded (pre-upgrade lock) by <unknown> pid 999999997 — chain, no task yet\n  provenance: holder=<unknown> pid=999999997 op=<unknown> task=<unknown>\n  verdict: stale\n  note: recorded pid 999999997 does not correspond to a live process\nlock: <ROOT>/locks/repo-wake-alpha.lock\n  held: 0s (since 2099-01-01T00:00:00Z) by wake-coder pid 999999999 — CODER-1\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=wake-coder pid=999999999 op=wake task=CODER-1\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\nlock: <ROOT>/locks/repo-wake-beta.lock\n  held: 0s (since 2099-01-01T00:00:00Z) by wake-pm pid <LIVE> — chain, no task yet\n  held verdict: live\n  provenance: holder=wake-pm pid=<LIVE> op=wake task=none\n  verdict: held\nlock: <ROOT>/locks/repo-wake-gamma.lock\n  held: 16m (since <AGO>) by wake-tester pid 999999999 — TESTER-3\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=wake-tester pid=999999999 op=wake task=TESTER-3\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\nlock: <ROOT>/locks/spaced.lock\n  held: 0s (since  2099-01-01 00:00:00.5+05:30 ) by h pid 999999999 — chain, no task yet\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=h pid=999999999 op=o task=<unknown>\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\nlock: <ROOT>/locks/torn.lock\n  held: acquired_at not recorded (pre-upgrade lock) by h pid 999999999 — t\n  provenance: holder=h pid=999999999 op=o task=t\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\n"
+  },
+  "list-no-dir": {
+   "locks": {},
+   "rc": 0,
+   "stderr": "",
+   "stdout": "no lock files found under <ROOT>/locks\n"
+  },
+  "list-only-non-lock-files": {
+   "locks": {
+    "locks/a.lock.tmp.12": {
+     "mode": "0o644",
+     "text": "x\n"
+    },
+    "locks/readme.txt": {
+     "mode": "0o644",
+     "text": "x\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "no lock files found under <ROOT>/locks\n"
+  },
+  "list-positional-ignored": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "lock: <ROOT>/locks/repo-wake-alpha.lock\n  held: 0s (since 2099-01-01T00:00:00Z) by wake-coder pid 999999999 — CODER-1\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=wake-coder pid=999999999 op=wake task=CODER-1\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\n"
+  },
+  "release-already-gone": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o644",
+     "text": ""
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: lock repo-wake-alpha is already gone (no provenance recorded); nothing to release.\n"
+  },
+  "release-ambiguous": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    },
+    "locks/repo-wake-beta.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    }
+   },
+   "rc": 2,
+   "stderr": "error:   release_locks.ambiguous\nmessage: release-locks.sh: 'repo-wake' matches multiple locks: repo-wake-alpha, repo-wake-beta.\nremedy:  Re-run with a longer, unambiguous prefix or the full name, e.g. --release repo-wake-alpha.\n",
+   "stdout": ""
+  },
+  "release-dead-equals-form": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o600",
+     "text": ""
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: released stale lock repo-wake-alpha (<ROOT>/locks/repo-wake-alpha.lock)\n"
+  },
+  "release-dead-exact": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o600",
+     "text": ""
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: lock repo-wake-alpha is already gone (no provenance recorded); nothing to release.\n"
+  },
+  "release-dead-force": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o600",
+     "text": ""
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: released stale lock repo-wake-alpha (<ROOT>/locks/repo-wake-alpha.lock)\n"
+  },
+  "release-dead-pre-upgrade": {
+   "locks": {
+    "locks/overwatch-alpha.lock": {
+     "mode": "0o600",
+     "text": ""
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: released stale lock overwatch-alpha (<ROOT>/locks/overwatch-alpha.lock)\n"
+  },
+  "release-dead-prefix": {
+   "locks": {
+    "locks/overwatch-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=overwatch\npid=999999998\nop=sweep\ntask=none\n"
+    },
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o600",
+     "text": ""
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: released stale lock repo-wake-alpha (<ROOT>/locks/repo-wake-alpha.lock)\n"
+  },
+  "release-dead-suffix": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o600",
+     "text": ""
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: released stale lock repo-wake-alpha (<ROOT>/locks/repo-wake-alpha.lock)\n"
+  },
+  "release-empty-value": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "lock: <ROOT>/locks/repo-wake-alpha.lock\n  held: 0s (since 2099-01-01T00:00:00Z) by wake-coder pid 999999999 — CODER-1\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=wake-coder pid=999999999 op=wake task=CODER-1\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\n"
+  },
+  "release-exact-beats-prefix": {
+   "locks": {
+    "locks/a-b.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    },
+    "locks/a.lock": {
+     "mode": "0o600",
+     "text": ""
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: released stale lock a (<ROOT>/locks/a.lock)\n"
+  },
+  "release-garbage-record": {
+   "locks": {
+    "locks/garbage.lock": {
+     "mode": "0o644",
+     "text": "not a provenance record\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: lock garbage is already gone (no provenance recorded); nothing to release.\n"
+  },
+  "release-missing-value": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "lock: <ROOT>/locks/repo-wake-alpha.lock\n  held: 0s (since 2099-01-01T00:00:00Z) by wake-coder pid 999999999 — CODER-1\n  held verdict: dead (pid 999999999 not running)\n  provenance: holder=wake-coder pid=999999999 op=wake task=CODER-1\n  verdict: stale\n  note: recorded pid 999999999 does not correspond to a live process\n"
+  },
+  "release-no-pid-record": {
+   "locks": {
+    "locks/no-pid.lock": {
+     "mode": "0o644",
+     "text": "holder=x\nop=y\ntask=z\n"
+    }
+   },
+   "rc": 0,
+   "stderr": "",
+   "stdout": "release-locks: lock no-pid is already gone (no provenance recorded); nothing to release.\n"
+  },
+  "release-not-found": {
+   "locks": {
+    "locks/repo-wake-alpha.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    }
+   },
+   "rc": 3,
+   "stderr": "error:   release_locks.not_found\nmessage: release-locks.sh: no lock matches 'nope' under <ROOT>/locks (known locks: repo-wake-alpha).\nremedy:  Run team/scripts/release-locks.sh with no flags to list every lock by name, then re-run with the full name or an unambiguous prefix.\n",
+   "stdout": ""
+  },
+  "release-not-found-no-locks": {
+   "locks": {},
+   "rc": 3,
+   "stderr": "error:   release_locks.not_found\nmessage: release-locks.sh: no lock matches 'nope' under <ROOT>/locks (no lock files exist under <ROOT>/locks).\nremedy:  Run team/scripts/release-locks.sh with no flags to list every lock by name, then re-run with the full name or an unambiguous prefix.\n",
+   "stdout": ""
+  },
+  "release-prefix-boundary": {
+   "locks": {
+    "locks/repo-wake-alphabet.lock": {
+     "mode": "0o644",
+     "text": "holder=wake-coder\npid=999999999\nop=wake\ntask=CODER-1\nacquired_at=2099-01-01T00:00:00Z\n"
+    }
+   },
+   "rc": 3,
+   "stderr": "error:   release_locks.not_found\nmessage: release-locks.sh: no lock matches 'repo-wake-alpha' under <ROOT>/locks (known locks: repo-wake-alphabet).\nremedy:  Run team/scripts/release-locks.sh with no flags to list every lock by name, then re-run with the full name or an unambiguous prefix.\n",
+   "stdout": ""
+  },
+  "unknown-flag": {
+   "locks": {},
+   "rc": 1,
+   "stderr": "release-locks.sh: unknown argument: --bogus\n",
+   "stdout": ""
+  }
+ }
+}

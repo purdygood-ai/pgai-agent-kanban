@@ -1,0 +1,65 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "I verified ai_rc/v2.26.8 (commit b006be1e) against `requirements/v2.26.8-bugfix-bundle-20260930.md`. The bundle covers BUG-0475, BUG-0476, BUG-0477 and BUG-0478. All four concern markdown section readers and writers that used the old regex shape `(^## H\\s*\\n)(.*?)(\\n+##|\\Z)` with `re.S`, which lets an empty section body swallow the next section. For each bundled bug I replayed its reproduction on ai_main (c76f4a60, v2.26.7), where the failure must appear, and on the RC, where it must not. I ran each bug's acceptance greps, checked that populated values still come out right, and ran a mutation test to prove the census test now covers the code that ships. Both gated runners exited 0. All four bundled items are fixed on the RC. I filed two pre-existing test/verifier defects via Path C (autonomous follow-up filing — non-blocking). Both are outside the bundle's named sites and neither was introduced by this RC.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "verify-blocked-task-guard.sh always fails its AC-3/AC-4 checks (pre-existing)",
+      "heading": "Finding 1: verify-blocked-task-guard.sh always fails its AC-3/AC-4 checks (pre-existing)",
+      "level": 4,
+      "body": "**Category:** bug (pre-existing-bug)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated verification script; not wired into the gated suites)\n**Filed As:** BUG-0479-blocked-guard-verifier-stale-checks (Path C-A — filed as BUG: code defect / regression / test failure)\n**Regression:** no\n**Integrity:** none\n**Filed By:** TESTER (autonomous Path C) — the blocked-task guard verifier script always reports 8 failed checks, because it still searches the two provider wake scripts for guard code that has since moved into the shared wake driver library.\n\nI ran the script in a sandbox root. It exits 1 with `RESULTS: 7 passed, 8 failed`. All eight failures are AC-3/AC-4 greps of `team/scripts/wake/claude.sh` and `codex.sh` for guard code that now lives in `team/scripts/lib/wake_driver.sh`. A fresh clone of ai_main produces the same eight failures, so this RC did not introduce them. CODER-20260930-043 recorded it as out of scope and handed it to TESTER to file. It touches a file this RC modified, but the failing checks are not the lines the RC changed. Severity is medium under SOP \"Rating a Finding\": the defect is real in a shipped artefact but nothing exercises it.",
+      "filed_as": "BUG-0479",
+      "filed_by": "TESTER (autonomous Path C) — the blocked-task guard verifier script always reports 8 failed checks, because it still searches the two provider wake scripts for guard code that has since moved into the shared wake driver library.",
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing-bug)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated verification script; not wired into the gated suites)",
+        "filed_as": "BUG-0479-blocked-guard-verifier-stale-checks (Path C-A — filed as BUG: code defect / regression / test failure)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_by": "TESTER (autonomous Path C) — the blocked-task guard verifier script always reports 8 failed checks, because it still searches the two provider wake scripts for guard code that has since moved into the shared wake driver library."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "test_wake_model_stamp.py tests a stale hand-kept copy of stamp_model_field (pre-existing)",
+      "heading": "Finding 2: test_wake_model_stamp.py tests a stale hand-kept copy of stamp_model_field (pre-existing)",
+      "level": 4,
+      "body": "**Category:** bug (pre-existing-bug; Step 6.11 spot-check — same class as a prior gap)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (the shipped writer has direct coverage in test_wake_task_state_section_separator.py)\n**Filed As:** BUG-0480-model-stamp-test-mirror-stale (Path C-A)\n**Regression:** no\n**Integrity:** none\n**Filed By:** TESTER (autonomous Path C) — the model-stamp unit test checks its own hand-copied version of the status-file model writer, and that copy still uses the old section boundary that deletes the next section, so it no longer matches the shipped writer.\n\n`_stamp_model_field` in the test (about lines 72-110) uses the old `(^## Model\\s*\\n)(.*?)(\\n+##|\\Z)` shape. The shipped writer at `wake_task_state.sh:278` uses the section-body boundary. On `## Role|TESTER||## Model||## State|WORKING`, the test copy deletes `## State` and the shipped regex keeps it. This is the same test-fidelity gap BUG-0478 fixed for the census, and the RC's sweep did not reach this file. It predates the RC. Severity is low.",
+      "filed_as": "BUG-0480",
+      "filed_by": "TESTER (autonomous Path C) — the model-stamp unit test checks its own hand-copied version of the status-file model writer, and that copy still uses the old section boundary that deletes the next section, so it no longer matches the shipped writer.",
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing-bug; Step 6.11 spot-check — same class as a prior gap)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (the shipped writer has direct coverage in test_wake_task_state_section_separator.py)",
+        "filed_as": "BUG-0480-model-stamp-test-mirror-stale (Path C-A)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_by": "TESTER (autonomous Path C) — the model-stamp unit test checks its own hand-copied version of the status-file model writer, and that copy still uses the old section boundary that deletes the next section, so it no longer matches the shipped writer."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# dashboard-attach.sh
+# attach.sh
 # Attach to an existing pgai-kanban tmux dashboard session.
 #
 # Usage:
-#   dashboard-attach.sh [--kanban-root <path>] [--session <name>] [-h|--help]
+#   attach.sh [--kanban-root <path>] [--session <name>] [-h|--help]
 #
 # Flags:
 #   --kanban-root     Override the kanban root path (used to read kanban.cfg)
@@ -45,7 +45,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -20
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:13}"
       exit 0
       ;;
     *)

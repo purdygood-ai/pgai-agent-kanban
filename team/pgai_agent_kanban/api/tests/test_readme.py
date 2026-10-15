@@ -8,7 +8,7 @@ Acceptance criteria verified:
   AC2. Prefix-key resolution matches show.sh/show-readme.sh behavior (an
        agent+date+seq prefix resolves unambiguously to the full task key).
   AC3. A path-traversal fixture on the ``key`` or ``project`` path parameter
-       returns 4xx (422) before any subprocess is spawned.
+       returns 4xx (422) before any path is built or subprocess spawned.
   AC4. An unknown task key returns 404.
   AC5. A ledger key (bug/priority/requirement, not a task) returns 404 —
        READMEs are task artifacts only, matching show-readme.sh's refusal.
@@ -21,11 +21,11 @@ Test structure:
   - ``TestReadmeOpenApiSurface``  — AC6: route appears in /openapi.json.
 
 Fixtures materialise a synthetic kanban root under pytest's tmp_path with a
-real task (README.md + status.md) and a real bug intake file.  The API
-config's kanban_root is pointed at the real dev-tree team/ directory so that
-show-readme.sh (and its lib/ dependencies) resolve exactly as they do for a
-live install; PGAI_AGENT_KANBAN_ROOT_PATH is pointed at the sandbox so the
-script operates on fixture data, never the live kanban state.
+real task (README.md + status.md) and a real bug intake file. The API
+config's kanban_root is that sandbox root -- the route reads the README
+in-process through ``ops.read.get_task_readme`` from the server's own root --
+and PGAI_AGENT_KANBAN_ROOT_PATH points at it too, so nothing reads the live
+kanban state.
 """
 
 from __future__ import annotations
@@ -36,14 +36,6 @@ from typing import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-
-# ---------------------------------------------------------------------------
-# Resolve the dev-tree root so show-readme.sh's real lib/ dependencies
-# resolve.  This file lives at team/pgai_agent_kanban/api/tests/test_readme.py.
-# Going up four levels: api/tests -> api -> pgai_agent_kanban -> team
-# ---------------------------------------------------------------------------
-_THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent.parent  # team/
 
 # ---------------------------------------------------------------------------
 # Fixture constants
@@ -80,8 +72,8 @@ def _materialise_readme_fixture(root: pathlib.Path) -> None:
       projects.cfg
       projects/readme-test-project/
           project.cfg
-          tasks/CODER-20260101-001-alpha/{README.md, status.md}
-          bugs/BUG-0001.md
+          tasks/<fixture-task-id>/{README.md, status.md}
+          bugs/<fixture-bug-id>.md
     """
     _write(
         root / "projects.cfg",
@@ -127,15 +119,12 @@ def readme_client(
     readme_fixture_root: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[TestClient, None, None]:
-    """TestClient wired to the real show-readme.sh script against the sandbox.
+    """TestClient whose API is rooted at the sandbox kanban root.
 
-    ApiConfig.kanban_root is the real dev-tree team/ directory so that
-    ``kanban_root / "scripts"`` resolves show-readme.sh and its lib/
-    dependencies exactly as a live install would.  PGAI_AGENT_KANBAN_ROOT_PATH
-    is pointed at the sandbox root so the script reads/writes fixture data,
-    never live kanban state (the script performs no writes; this is
-    read-only, but the env separation is the same discipline every other
-    fidelity-style fixture in this suite uses).
+    ApiConfig.kanban_root is the sandbox root, where the route's in-process
+    read finds the fixture project; PGAI_AGENT_KANBAN_ROOT_PATH and
+    KANBAN_ROOT point at it as well, the same env separation every other
+    fidelity-style fixture in this suite uses.
     """
     root = readme_fixture_root
 
@@ -145,7 +134,7 @@ def readme_client(
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(root))
     monkeypatch.setenv("KANBAN_ROOT", str(root))
 
-    cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=_TEAM_DIR)
+    cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=root)
     app = create_app(cfg=cfg)
     with TestClient(app, raise_server_exceptions=True) as client:
         yield client
@@ -198,7 +187,7 @@ class TestReadmeHappyPath:
 
 
 class TestReadmeTraversalSecurity:
-    """Traversal-shaped path parameters return 4xx before any subprocess spawns.
+    """Traversal-shaped path parameters return 4xx before any path is built.
 
     Two distinct confinement layers are exercised here, both landing on a
     4xx status with no subprocess ever spawned:
@@ -210,8 +199,7 @@ class TestReadmeTraversalSecurity:
        ``TestTracesOpaqueIdSecurity`` documents for ``GET /traces/{id}``.
     2. A traversal-shaped value with NO slash (e.g. a bare ``..``) does
        reach the handler and is caught by this endpoint's own
-       ``_has_readme_path_traversal`` gate, which returns 422 before
-       show-readme.sh is ever invoked.
+       ``has_traversal`` gate, which returns 422 before the read runs.
     """
 
     def _assert_4xx_no_subprocess(
@@ -232,7 +220,7 @@ class TestReadmeTraversalSecurity:
     def test_key_dotdot_slash_traversal_blocked_at_routing_layer(
         self, readme_client: TestClient
     ) -> None:
-        """key=../../etc/passwd (URL-encoded slash) → 4xx; show-readme.sh never spawned.
+        """key=../../etc/passwd (URL-encoded slash) → 4xx; no subprocess spawned.
 
         The slash breaks Starlette's single-segment {key} match, so this
         404s at the routing layer before the handler (and its own traversal
@@ -267,7 +255,7 @@ class TestReadmeTraversalSecurity:
         self, readme_client: TestClient
     ) -> None:
         """key with a literal '..' but no slash reaches the handler and is
-        rejected by _has_readme_path_traversal with 422."""
+        rejected by has_traversal with 422."""
         with unittest.mock.patch(
             "pgai_agent_kanban.api.adapter.subprocess.run"
         ) as run_mock:
@@ -285,7 +273,7 @@ class TestReadmeTraversalSecurity:
     def test_project_dotdot_slash_traversal_blocked_at_routing_layer(
         self, readme_client: TestClient
     ) -> None:
-        """project=../../etc (URL-encoded slash) → 4xx; show-readme.sh never spawned."""
+        """project=../../etc (URL-encoded slash) → 4xx; no subprocess spawned."""
         with unittest.mock.patch(
             "pgai_agent_kanban.api.adapter.subprocess.run"
         ) as run_mock:
@@ -299,7 +287,7 @@ class TestReadmeTraversalSecurity:
         self, readme_client: TestClient
     ) -> None:
         """project with a literal '..' but no slash reaches the handler and is
-        rejected by _has_readme_path_traversal with 422."""
+        rejected by has_traversal with 422."""
         with unittest.mock.patch(
             "pgai_agent_kanban.api.adapter.subprocess.run"
         ) as run_mock:

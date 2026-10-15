@@ -1,0 +1,323 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "I verified `ai_rc/v2.29.1` at `6130794d466dd89494c449be4562e69d8c577842` against `requirements/v2.29.1-bugfix-bundle-20261005.md`, a discovery bundle of ten bugs (BUG-0542 to BUG-0551). The checklist combined each bundled bug's own `## Acceptance` with the bundle's three generic criteria.\n\nPre-flight passed. Both gated suites ran through the RC's new entry point `run-gated-suites.sh`, which ran the two runners concurrently in a 3-worker budget and finished in 18m53s:\n\n- **Unit:** `UNIT_EXIT=1`. One deterministic failure, a regression this RC introduced (Finding 1).\n- **Integration:** `INTEGRATION_EXIT=0`, 650 passed, 1 skipped.\n\nResults across the ten bundled items:\n\n- **Eight pass**, with behavioral checks: original failure modes reproduced on `ai_main`, differential and mutation tests, and production-shape renders.\n- **BUG-0545 passes with a caveat** (Finding 4).\n- **BUG-0550 was not addressed at all.** PM deliberately left it unticketed (Finding 2).\n\nA spot-check also found a pre-existing pipe hazard in the dashboard's bugs-column renderer, which this RC's new serial marker hides (Finding 3). I filed three follow-ups via Path C (autonomous follow-up filing — non-blocking).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Gated unit suite is red — a new comment trips the package-wide pp_run_ops sweep test",
+      "heading": "Finding 1: Gated unit suite is red — a new comment trips the package-wide pp_run_ops sweep test",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task — reword one comment line)\n**Systemic Risk:** medium (the same class recurs: a whole-tree invariant test that CODER's targeted `--files` runs never exercise; the unit suite was also red on v2.27.0, v2.27.3, v2.28.0 and v2.29.0)\n**Regression:** yes\n**Integrity:** breakage\n**Filed As:** BUG-0552 (Path C-A (filed as BUG — code defect / regression / test failure))\n**Filed By:** TESTER (autonomous Path C) — a comment added for the new status-line loop quotes the forbidden bare package-invocation form, so a package-wide test that scans every line fails and the unit suite is red.\n\n`run-unit-tests.sh` (via `run-gated-suites.sh`, `--workers 2`) ran two lanes:\n\n- **Parallel lane:** `1 failed, 8729 passed, 43 skipped` in 1016 s.\n- **Serial lane:** `5 passed`.\n- **Combined:** `Lane exit codes: 1 0 -> combined exit code 1`.\n\n```\nFAILED tests/unit/test_pp_run_ops_sweep.py::test_no_bare_python3_module_invocations_outside_exemptions\nE   ... 1 bare 'python3 -m pgai_agent_kanban' invocation(s) found outside the exemption list:\nE       team/scripts/dashboard/status-bottom.sh:153:# cwd-independent \"python3 -m pgai_agent_kanban.*\" runner used below.\n```\n\n- **Origin of the line.** Commit `a20e9f36` (CODER-20261005-007, the BUG-0544 work) added it. The test file is unchanged by this RC.\n- **Deterministic.** It is a static scan. Re-running the test directly (debugging aid only) gives `1 failed, 3 passed` on the RC and `4 passed` on an `ai_main` extract (`a3b988b4`).\n- **Not a stale assertion.** The test's invariant did not change; new production text violates it.\n- **Runtime impact.** None, because the line is a comment. The defect is a red certification suite.\n- **Why `medium`, not `high`.** Each recurrence of this class is a distinct small fix rather than one fix failing repeatedly. The class itself recurs because CODER's targeted runs never execute package-wide invariant tests. That process gap is worth an operator look, but I have no evidence the loop cannot heal it.",
+      "filed_as": "BUG-0552",
+      "filed_by": "TESTER (autonomous Path C) — a comment added for the new status-line loop quotes the forbidden bare package-invocation form, so a package-wide test that scans every line fails and the unit suite is red.",
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "breakage",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "parallel_lane": "`1 failed, 8729 passed, 43 skipped` in 1016 s.",
+        "serial_lane": "`5 passed`.",
+        "combined": "`Lane exit codes: 1 0 -> combined exit code 1`."
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task — reword one comment line)",
+        "systemic_risk": "medium (the same class recurs: a whole-tree invariant test that CODER's targeted `--files` runs never exercise; the unit suite was also red on v2.27.0, v2.27.3, v2.28.0 and v2.29.0)",
+        "regression": "yes",
+        "integrity": "breakage",
+        "filed_as": "BUG-0552 (Path C-A (filed as BUG — code defect / regression / test failure))",
+        "filed_by": "TESTER (autonomous Path C) — a comment added for the new status-line loop quotes the forbidden bare package-invocation form, so a package-wide test that scans every line fails and the unit suite is red."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0550 (reason code untaught to agents) was bundled but not addressed",
+      "heading": "Finding 2: BUG-0550 (reason code untaught to agents) was bundled but not addressed",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (a governance-text edit; under the operator's policy this is a manual hand-patch, not a CODER task)\n**Systemic Risk:** medium (will recur: PM skips governance-only items by policy, and cm-release Step 16b marks every bundled item `done`)\n**Filed As:** BUG-0553 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the bundle promised to document the status tool's block reason code for agents, but no change landed, so agents still cannot request the operator-data triage action.\n\n- **Criterion.** Bundle criterion \"Each bundled item is addressed in the implementation\", plus BUG-0550's Acceptance: SOP-core names `## Block Record` and `--reason-code`/`--action-args`, and every self-blocking role's read-order documents explain them.\n- **Actual on the RC.**\n  - `team/SOP-core.md:61` still reads \"**It manages four fields and no others.**\"\n  - `grep -rln -- \"--reason-code\\|agent_operator_data_action\" team/roles team/SOP-core.md subagents team/read-order` returns nothing (exit 1).\n  - No commit on the RC touches SOP-core, roles or read-order.\n- **Cause.** PM-20261005-001 deliberately did not ticket BUG-0550, following the operator's standing instruction that governance text is hand-patched. PM recorded the conflict and predicted this report.\n- **Why a new bug.** BUG-0550 is still `running` and will be auto-closed at release without a fix. BUG-0553 carries it forward so it is not silently lost. It notes that the operator must hand-apply it or exempt it from auto-close.",
+      "filed_as": "BUG-0553",
+      "filed_by": "TESTER (autonomous Path C) — the bundle promised to document the status tool's block reason code for agents, but no change landed, so agents still cannot request the operator-data triage action.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (a governance-text edit; under the operator's policy this is a manual hand-patch, not a CODER task)",
+        "systemic_risk": "medium (will recur: PM skips governance-only items by policy, and cm-release Step 16b marks every bundled item `done`)",
+        "filed_as": "BUG-0553 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the bundle promised to document the status tool's block reason code for agents, but no change landed, so agents still cannot request the operator-data triage action."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Dashboard bugs-column renderer can exit 141 (SIGPIPE under pipefail); the new serial marker hides the symptom",
+      "heading": "Finding 3: Dashboard bugs-column renderer can exit 141 (SIGPIPE under pipefail); the new serial marker hides the symptom",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing — not introduced by this RC)\n**Fix Effort:** small\n**Systemic Risk:** low\n**Filed As:** BUG-0554 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the bugs-column renderer pipes into `head -n1` under `pipefail` and can die with exit 141; this RC moved the one test that caught it into the serial lane instead of fixing the cause.\n\n- **What CODER-006 saw.** In its parallel-safety sweep (BUG-0545 #3), `test_defer_card_glyph_placement.py::...::test_no_color_mode_renders_the_id_alone_with_no_glyph_at_all` failed once. The `column-render.sh` subprocess exited 141 beside xdist workers. CODER marked the test `serial`, as BUG-0545 instructs, and flagged a suspected production cause.\n- **The cause I confirmed.**\n  - `team/scripts/lib/dashboard/column_render_defer.sh` (unchanged since v2.13.0) runs four `printf '%s\\n' \"$out\" | head -n1 | cut ...` pipelines under `column-render.sh`'s `set -euo pipefail`.\n  - The same pipeline over an output larger than the pipe buffer exits **141** deterministically (pure bash, no load).\n  - 2,000 small-output iterations on an idle host did not fail, so the realistic case is a load-dependent race.\n  - The tree already documents this exact hazard in `column-render.sh`'s `--help` handler.\n- **Why it matters.** A transient dashboard pane render failure only, rated low. But the serial marker removes the test's ability to catch it, so it is worth fixing at the source.",
+      "filed_as": "BUG-0554",
+      "filed_by": "TESTER (autonomous Path C) — the bugs-column renderer pipes into `head -n1` under `pipefail` and can die with exit 141; this RC moved the one test that caught it into the serial lane instead of fixing the cause.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing — not introduced by this RC)",
+        "fix_effort": "small",
+        "systemic_risk": "low",
+        "filed_as": "BUG-0554 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the bugs-column renderer pipes into `head -n1` under `pipefail` and can die with exit 141; this RC moved the one test that caught it into the serial lane instead of fixing the cause."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0545 (gated suites run serial with coverage) — met",
+      "heading": "Finding 4: BUG-0545 (gated suites run serial with coverage) — met",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n| Acceptance item | Result |\n|---|---|\n| `requirements-test.txt` contains `pytest-xdist>=3.8` | pass |\n| Both Dockerfiles install via `-r requirements-test.txt` and name no pytest package (grep), parse cleanly | pass. Nothing after the new `WORKDIR /opt/requirements` depends on a relative path. The unquoted `pytest>=7` redirection in rocky9 is gone. |\n| `workers=1` -> argv has no `-n` | pass (planner: workers 0 and 1 give one lane, no `-n`) |\n| Total workers never exceed `workers` | pass. Planner: `-n W` equals the budget. `--requested-workers 9` with budget 3 gives `-n 3`, and 2 gives `-n 2`. Entry point: unit `--workers 2` plus integration `--workers 1` makes 3. |\n| xdist absent -> narrated serial line, never a failure | pass (\"Parallel workers: none -- ... pytest-xdist is not importable ...; running serially in one process.\") |\n| Same tests collected | pass. The lanes partition the suite: serial lane `5 passed, 8773 deselected` plus parallel lane 8,773 gives 8,778 (= durations `test_count`). |\n| `run-gated-suites.sh` writes `unit.exit`, `integration.exit`, both findings files | pass (observed this run). The failing-integration-fixture case is covered by `test_one_failing_integration_test_gives_integration_one_unit_zero_and_a_nonzero_run`, which runs the real runners. |\n| `--coverage` gate | pass, in all 12 config x env x wake cases. `coverage=false` alone gives the narrated \"coverage disabled by config\" line. `PGAI_TESTING_COVERAGE=1` collects only when `PGAI_AGENT_WAKE_ACTIVE` is not `1`. `coverage=true` collects. Malformed `workers` / `coverage` values are refused dual-channel. The wake bootstrap unsets the variable. |\n| `serial` marker registered; crontab weekly coverage line | pass (`team/pyproject.toml`, all four crontab templates) |\n| Wall time (not a gate) | Both suites concurrently: **18m53s** wall (unit 1070 s of test time at 2 workers; integration 1099 s at 1 worker). Previously about 46 min sequentially. My own ad-hoc probes overlapped the first ~10 minutes and added CPU contention. |\n\nSerial-marked tests from the one-time parallel-safety sweep, recorded here as BUG-0545 #3 asks:\n\n- `tests/integration/test_defer_card_glyph_placement.py::TestDeferredCardGlyphIsATrailingSuffix::test_no_color_mode_renders_the_id_alone_with_no_glyph_at_all`: exit 141 beside xdist workers, passes alone. See Finding 3.\n- The remaining `serial` markers (`test_run_gated_suites.py` x2, `test_runner_parallel_lanes.py` x2) are tests that start xdist workers of their own; they were written serial, not found by the sweep.\n\nCaveat: the target of \"about 15 min\" is approached but not met at the default budget. The integration suite, on 1 worker, is now the long pole at about 18 min.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0548 (sweep test pushes live tags) — fixed",
+      "heading": "Finding 5: BUG-0548 (sweep test pushes live tags) — fixed",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n- **Original failure reproduced on `ai_main`.** Using the network stub and a throwaway dev tree with a local-only tag, `test_sweep_runner_discovers_and_runs_block_triage` logged `git -C <tmp>/dev ls-remote --tags origin` and then `push origin refs/tags/ai_v9.0.0`.\n- **Same setup on the RC.** No network call.\n- **Guard exercised directly.** `check-push-lag.sh` with a project config naming no `dev_tree_path` and an inherited `PGAI_DEV_TREE_PATH` prints `... names no dev_tree_path; ... skipping`, exits 0 and makes no network call.\n- **Isolation.** `conftest.py` now removes `PGAI_DEV_TREE_PATH`. The new `test_overwatch_sweep_stays_off_remotes.py` asserts the full sweep makes no push or ls-remote through the stub.\n- **Guard log.** This task's `logs/git-boundary-guard.jsonl` holds no record from either gated runner. Its one record is my own probe (Autonomous criterion, question 5).\n\nCaveat: the wake guard records only `fetch`/`pull`/`push`, so \"no ls-remote record\" in the guard log is vacuously true. The `ls-remote` half is proven only by the stub-based regression test, which does assert it.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0551 (block_stage_deferral by-path guard) — fixed",
+      "heading": "Finding 6: BUG-0551 (block_stage_deferral by-path guard) — fixed",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Change.** Package imports moved to module level below the self-location guard.\n- **Result.** `test_package_modules_run_by_path.py -k block_stage_deferral`: RC `3 passed`; `ai_main` `1 failed, 2 passed` (KeyError reproduced).\n- **Full run.** The full file passed inside the gated unit run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0542 (REST image split diverges from harness) — fixed",
+      "heading": "Finding 7: BUG-0542 (REST image split diverges from harness) — fixed",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Differential test.** I compared `split_image_entry` against real bash `IFS=$', \\t' read -r -a` over 1,715 distinct inputs (the bug's list plus 3,000 random strings over `a b , space tab`): 0 mismatches.\n- **Route probe** (both `/operations/deep-verify` and `/operations/cold-build-now`, dry-run and real, `subprocess.Popen` patched):\n  - `\"debian,,rocky9\"`, `[\",debian\"]` and `\"\"` give 422 `container_tier.unknown_image` with a remedy; Popen is not called.\n  - `\"debian\"`, `\"debian,\"` and `\"all\"` give 200.\n  - A whitespace-only entry now gives 200, aligned with the harness (which lists the images and builds nothing). The module docstring states this.\n- **Parity test.** The shipped test drives the harness's own `container_tier_select_images`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0543 (package CLI help exits non-zero) — fixed",
+      "heading": "Finding 8: BUG-0543 (package CLI help exits non-zero) — fixed",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll five modules (`deep_verify/{bug_filer,freshness,schedule}.py`, `lint/bug_filer.py`, `ops/resolve.py`), run from `/` with `PYTHONPATH` unset:\n\n- `--help` and `-h` exit 0, print full usage naming every positional argument, and print no traceback.\n- `python3 -m ... --help` exits 0.\n- No-argument exits are unchanged (2/2/2/2/1).\n- `_HELP_USAGE_ERROR_EXIT` is removed.\n- `ai_main` reproduces `--help` exits of 2/2/2/2/1.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "BUG-0544 (status line reruns every second) — fixed",
+      "heading": "Finding 9: BUG-0544 (status line reruns every second) — fixed",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n- **Status format.** `status-format[2]` is now `#{@pgai_status_bottom}`, filled by `status-bottom-loop.sh`. Nothing in the format forks.\n- **Cadence test.** `test_two_attached_clients_cost_one_render_per_interval` (private `tmux -L`, two pty clients, 60 s, at most 13 renders counted by process start) ran and passed in the integration suite (66 s). tmux is present, so it was not skipped.\n- **Byte-identical renders.** RC and `ai_main` renders matched (both with the helper resolvable) for HALT GLOBAL, project HALT, HALT-AFTER `coder` / `rc:vX.Y.Z` / invalid token, and global HALT plus project HALT-AFTER, in NO_COLOR and rich modes, global and drill bars.\n- **Lint.** `lint_tmux_format_jobs.py` exits 0 on the shipped tree, and exits 1 with a dual-channel message on a seeded `#(echo hi)` in status-right, `pane-border-format` and `window-status-format`.\n\nCaveat (not filed — quality lint precision): the lint also flags `##(`, which tmux renders as a literal `#(` and is not a job. No shipped code uses it. The same commit introduced Finding 1's comment.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "BUG-0546 (runners do not record slowest tests) — fixed",
+      "heading": "Finding 10: BUG-0546 (runners do not record slowest tests) — fixed",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **This run.** It wrote `lint/durations-unit.json` (25 tests, `total_seconds` 1070.188, `test_count` 8778) and `lint/durations-integration.json` (`total_seconds` 1098.979, `test_count` 651). Copies are in this task's `artifacts/`.\n- **Shipped end-to-end tests** cover the 1.2 s fixture test being named, a `--files` run writing no file, and exit-code neutrality.\n- **Template.** `REPORT-TEMPLATE.md` gains \"Slowest tests\".",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "BUG-0547 (taskbar omits project deferral) — fixed",
+      "heading": "Finding 11: BUG-0547 (taskbar omits project deferral) — fixed",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Fixture** (A with `DEFER-LOW-BUGS until=v2.33.0` and two open low bugs; B with none):\n  - `DEFER A <=low until v2.33.0 (2 waiting)`, nothing for B.\n  - With zero bugs: `(0 waiting)`.\n  - Malformed campaign file: `DEFER CONFIG UNREADABLE: <path>`.\n  - kanban.cfg deferral: `DEFER GLOBAL <=low (0 waiting)`.\n- **Production shape** (RC script, live root, read-only): `v2.28.4 | PM:auto | DEFER pgai-agent-kanban <=low until v2.33.0 (0 waiting) | ...`. Zero open low bugs confirmed by counting `bugs/`.\n- **HALT/HALT-AFTER** segments are identical to `ai_main` (Finding 9).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "BUG-0549 (nudge skips pre-dispatch blocks) — fixed",
+      "heading": "Finding 12: BUG-0549 (nudge skips pre-dispatch blocks) — fixed",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Flag coverage.** All 13 `LAST_TASK_FINAL_STATE=\"BLOCKED\"` sites in `wake_driver{,_prep,_worktree}.sh` now set `_chain_blocked_a_task=true`. The one remaining `mark_backlog ... \"B\"` without that state is the stuck-in-WORKING marker, which is not a BLOCKED transition.\n- **Tests.** `test_on_block_overwatch_trigger.py`: 10 passed.\n- **Mutation check.** Removing the flag at the two `worktree_create_failed` sites in a scratch copy makes `test_pre_dispatch_block_nudges_once_after_the_lock_release` fail, so the test catches the regression.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Bundle generic criteria — Python compiles, bash syntax",
+      "heading": "Finding 13: Bundle generic criteria — Python compiles, bash syntax",
+      "level": 3,
+      "body": "**Category:** pass\n\n712 `.py` files `py_compile` cleanly; 321 `.sh` files pass `bash -n`. 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Methodology checks (6.1, 6.3, 6.8-6.10, 6.13, 6.14)",
+      "heading": "Finding 14: Methodology checks (6.1, 6.3, 6.8-6.10, 6.13, 6.14)",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n- **6.1.** `pp_last_released_version` = `v2.29.0`; `semver_gt v2.29.1 v2.29.0` is true. `release-state.md` is well-formed. Its mtime equals the RC-open time (03:55:43), so it has not been edited since.\n- **6.3.** WRITER docs (`tester-verification-reference.md`, `test-authoring-guidelines.md`, `dashboard.md`, `DASHBOARD-PANES.md`, `REPORT-TEMPLATE.md`) match the observed behavior. Caveat: the reference tells TESTER to write `not collected` for config-disabled coverage, while the live role file's Step 5b fallback word is `coverage unavailable`. The live role file's Step 5a still names the two runners separately. The bug notes the operator updates the role file separately, so this is not filed.\n- **6.8.** No release-lifecycle file (`cm/*`, `project_paths.sh`) changed. `test_cm_release_synthetic.py` nonetheless passed inside the green integration run.\n- **6.9.** No secret-shaped strings in the diff. New entry scripts use `set -euo pipefail`. `status-bottom-loop.sh` uses `set -uo pipefail` (a long-lived loop; observation only).\n- **6.10.** The prerequisite graph is acyclic and every ID exists. CM-009 (open RC) is first; TESTER-010 then CM-012 (release) are last.\n- **6.13.** No placeholder skips. Every `BUG-NNNN` in a skip context is a synthetic fixture string inside the skip-gate lint's own tests.\n- **6.14.** Every new entry point answers `--help` with exit 0 (`run-gated-suites.sh`, `status-bottom-loop.sh`, `gated_suites.py`, `gated_runner_lanes.py`, `gated_runner_durations.py`, `status_line`). Bug-shaped IDs in added code are fixture values only.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

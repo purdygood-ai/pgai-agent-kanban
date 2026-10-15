@@ -1,0 +1,362 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": null,
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "requirements acceptance criterion 1 — each bundled item addressed",
+      "heading": "Finding 1: requirements acceptance criterion 1 — each bundled item addressed",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nAll five bundled items are accounted for in the RC.\n\n| Item | Disposition | Evidence |\n|---|---|---|\n| `BUG-0398` guard temp-root strip unbounded | fixed, partially | `77fcc16`; see Findings 6 and 7 for the residual |\n| `BUG-0401` filer gates fail open without repo | fixed | `b0bad07`; behaviourally verified, Finding 4 |\n| `BUG-0397` hygiene-lint provenance (ride-along) | nothing to fix | `CODER-20260927-005` status; lint reports 0 findings tree-wide |\n| `BUG-0399` guard tests name internal bug id (ride-along) | fixed | `b019f3b`; Finding 2 |\n| `BUG-0400` filer gate narration stream mismatch (ride-along) | fixed | `b019f3b`; Finding 3 |\n\nThe caveat is `BUG-0397`. Its disposition is correct and reasoned — the three\nsites it cites (`git_boundary_guard.sh:543`, `project_paths.sh:662` and `:856`)\ncarry no `BUG-0396` citation at the RC tip, `python3 team/scripts/lint_hygiene.py`\nreports `OK — 0 findings across 9 scan director(y/ies)` with all three classes\nenabled, and a tree-wide grep for `BUG-0396` outside the two sanctioned\nsurfaces returns nothing. But the rationale lives only in\n`CODER-20260927-005-provenance-sweep`'s `status.md`; the bug file itself will\nbe flipped to `## Status: done` by `cm-release.sh` step 16b with no note of\nwhy nothing changed. A future reader of `bugs/BUG-0397-hygiene-lint-provenance.md`\nsees a closed bug whose three findings were never reworded and no record of\nthe reason. Not filed — the disposition IS on the record, just not in the\nplace a reader of the bug would look.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "`BUG-0399` — provenance-named guard test sites renamed",
+      "heading": "Finding 2: `BUG-0399` — provenance-named guard test sites renamed",
+      "level": 3,
+      "body": "**Category:** pass\n\nAcceptance bullet 1: `grep -n \"bug_0393\\|_BUG_0393_\" team/tests/unit/test_git_boundary_guard.py`\nreturns no hit (exit 1). All five sites are renamed:\n`_BUG_0393_REPRO_INVOCATIONS` -> `_OPTION_VALUE_AHEAD_OF_REMOTE_INVOCATIONS`,\nboth `@pytest.mark.parametrize` references, and both test function names to\n`test_option_value_ahead_of_remote_invocation_{outside_root_is_refused_and_ref_unchanged,inside_root_is_still_exempt}`.\n\nAcceptance bullet 3: the renamed tests still cover the same four argv tuples\n(`push --push-option`, `fetch --filter`, `pull -s`, `push -X`) — the\nparametrize list is unchanged in content, only renamed. Both docstrings and\nthe preceding comment block now state what must hold rather than narrating\n\"before this fix\".\n\nAcceptance bullet 2 (no test name, constant name, or docstring in\n`team/tests/` cites an internal `BUG-NNNN`, task ID, or RC version outside the\nthree sanctioned exceptions) holds for this ticket's scope. A tree-wide grep\nfinds remaining `BUG-NNNN` tokens only as synthetic sample values fed to\nrenderers and scanners (`BUG-0001`, `BUG-9999`, `BUG-1234`) — the sanctioned\n\"usage EXAMPLE where a bug-shaped VALUE illustrates an interface\" — plus one\npre-existing test name, `test_bug_0023_file_carries_public_id_ki_1_0_0_1` in\n`test_changelog_writer_real_data.py`, already dispositioned in\n`team/tests/artifacts/protected-fixture-disposition-v2.3.0.md`. CODER scoped\nthe criterion to its own diff plus the five named sites and documented that\nreading in `status.md`; the reading is defensible and the task's own Notes\nruled out an equivalent tree-wide pass.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "`BUG-0400` — filer stream-mismatch docstrings corrected",
+      "heading": "Finding 3: `BUG-0400` — filer stream-mismatch docstrings corrected",
+      "level": 3,
+      "body": "**Category:** pass\n\nAcceptance bullet 1: the module docstring's \"Commit-content proof gate\"\nsection and `file_or_cite_hygiene_bugs`'s own docstring both now read\n\"stderr\", matching `_note_unprovable_findings`'s `file=sys.stderr`. All three\nsites agree.\n\nAcceptance bullet 2: `grep -n \"stdout\" team/pgai_agent_kanban/lint/bug_filer.py`\nreturns exactly three hits — lines 402, 435 and 476 — every one a\nsubprocess's own captured `result.stdout`. No hit refers to this module's\nnarration. Criterion met exactly as written.\n\nThe new `_note_unresolvable_commit` added by `BUG-0401`'s fix also writes to\n`sys.stderr`, so the correction was not undone by the sibling ticket.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "`BUG-0401` — filer refuses to file when no commit resolves",
+      "heading": "Finding 4: `BUG-0401` — filer refuses to file when no commit resolves",
+      "level": 3,
+      "body": "**Category:** pass\n\nExercised behaviourally per Step 6.5, against both the original failure mode\nand the new normal case.\n\nOriginal failure mode (`repo_root` is a plain directory, not a git\nrepository), the exact shape from `BUG-0401`'s reproduction:\n\n```\n[bug_filer] cannot resolve a commit for '<sandbox>/notarepo' -- it is not a\ngit repository, has no commits yet, or git is not on PATH. Filing nothing this\nrun: ...\nRESULT: []\nfiles filed: 0\n```\n\nNew normal case (real git repository, cited token present at HEAD): one bug\nfiled, `## Observed At Commit` carrying the real 40-character SHA\n`248f0a53e8558a166ade680938509aa48d31b0c1`, not the literal `unknown`.\n\nThird case, the one `BUG-0401`'s acceptance also names (a real repository with\nno commits yet): nothing filed, same narration. Acceptance bullets 1 and 2 met.\n\nAcceptance bullet 5: `python3 team/scripts/lint_hygiene.py --classes provenance`\nreports `OK — 0 findings` on the RC tree.\n\nThe fix's `_resolve_repo_root` precedence — explicit argument, then\n`PGAI_DEV_TREE_PATH`, then the self-located guess — rests on a documented\nclaim that the gated runners export `PGAI_DEV_TREE_PATH` to their own scan\nroot. Verified rather than taken on trust: `run-unit-tests.sh:88`,\n`run-integration-tests.sh:104` and `deep-verify.sh:345` all `export` it. The\nclaim is true.\n\n`CODER-20260927-003`'s `## Instruction Conflicts` section records a genuine\ncontradiction inside `BUG-0401`'s own acceptance text — one of the three\nv2.24.16 tests it said must \"pass unchanged\" asserted the very fail-open\nbehaviour another of its bullets bans. The conflict was resolved in favour of\nthe specific, unambiguous bullets and documented on the record. That is the\ncorrect handling and is noted here so the resolution is visible in the\nverification trail as well.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "`BUG-0398` — the demonstrated failure mode is closed and the new test discriminates",
+      "heading": "Finding 5: `BUG-0398` — the demonstrated failure mode is closed and the new test discriminates",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe depth instance `BUG-0398` demonstrated is refused on the RC. Behavioural\nmatrix through the shipped shim `team/scripts/wake/git-guard/git` under\n`PGAI_AGENT_ROLE=coder`, pushing to a local bare repository outside the\nconfigured root:\n\n| Configured `PGAI_AGENT_KANBAN_TEMP_DIR` | exit | records | dest refs |\n|---|---|---|---|\n| `$HOME/projects/pgai/tmp` (the bug's own repro root) | **1** | **1** | **unchanged** |\n| `<sandbox>$HOME/pgai`, dest outside widened parent | **1** | **1** | **unchanged** |\n\nThe refusal is dual-channel as required — `error: git-boundary-guard.non-cm-remote-verb`,\na plain-language `message`, and a runnable `remedy`.\n\nAcceptance bullet 5 asked that the new unit test fail against the current\n(pre-fix) implementation. Confirmed independently of CODER's claim, by\nsourcing `ai_main`'s copy of the helper and the RC's copy side by side against\nthe new test's own fixture shape:\n\n```\nPRE-FIX(ai_main)  root=/sandbox/projects/myproj/scratch probe=/sandbox/outside/work -> EXEMPT\nRC(v2.24.17)      root=/sandbox/projects/myproj/scratch probe=/sandbox/outside/work -> guarded\n```\n\nThe test is a real regression test, not a tautology.\n\nAcceptance bullet 2 (the fixture-noise reduction survives) also holds: with\nthe per-project root `/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban`, a\ndestination under `/tmp/pgai_kanban_tmp/pytest/x` is still exempt.\n\nAcceptance bullet 4: `docs/blocking-site-census.md` row 62 was rewritten to\ndescribe the new bound, and `python3 team/scripts/check_docs_citations.py`\nreports `ok — 24 governance file(s) scanned, 17 docs/ citation(s) checked`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "a configured temp root of `/projects/<name>` exempts every path on the host",
+      "heading": "Finding 6: a configured temp root of `/projects/<name>` exempts every path on the host",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the fifth residual in a five-RC sequence on the same exemption boundary — the class recurs, though each RC narrows it)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0402 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`BUG-0398` acceptance bullet 1 requires that with `PGAI_AGENT_KANBAN_TEMP_DIR`\nset to a path containing a `projects` component **at any depth**, a non-CM\nremote verb against a repository outside that root is refused, records exactly\none evidence record, and leaves the destination's refs unchanged. It is not met\nat one input.\n\nWhen the configured root is `/projects/<name>`,\n`${canon_temp_root%/projects/*}` evaluates to the **empty string**, and the\ncomparison's fourth clause `[[ \"$canon\" == \"$canon_framework_root\"/* ]]`\ndegenerates to `[[ \"$canon\" == /* ]]` — true of every absolute path. Probed\ndirectly against the shipped helper:\n\n```\nPGAI_AGENT_KANBAN_TEMP_DIR=/projects/name\n  _git_boundary_guard_path_under_temp_root $HOME/develop/pgai-agent-kanban -> EXEMPT\n  _git_boundary_guard_path_under_temp_root /etc                                   -> EXEMPT\n```\n\nExercised end to end through the shim under `PGAI_AGENT_ROLE=coder` against a\nrepository whose `origin` is a real local bare repository:\n\n| Invocation | verdict | records | dest refs |\n|---|---|---|---|\n| `push --push-option ci.skip origin main` | **not refused, exit 0** | **0** | **`refs/heads/main` created** |\n\n`BUG-0398` bullet 3 is unmet at the same input: the function header says the\ncomparison \"normalises UP exactly one level\", and one level up from\n`/projects/name` is `/`, but the code produces `\"\"` and the glob built from it\nmatches the whole filesystem.\n\nPre-existing, not a regression: `ai_main`'s copy of the helper returns EXEMPT\nfor the same input, so the empty-root hole predates v2.24.16's normalisation\nbeing narrowed. Unreachable under the shipped default\n(`/tmp/pgai_kanban_tmp` has no `projects` component); the exposure is an\noperator-configured root of the shape `/projects/<name>`, which\n`kanban.cfg_example` and `shell-env_example` document as settable and which is\nan ordinary layout on a single-purpose build host. `_git_boundary_guard_looks_like_real_remote`\nstill catches `https://` and `ssh://` destinations ahead of this helper, so the\nexposure is specifically a destination resolving to a local filesystem path —\nwhich is what every dev tree and local bare mirror on the host is.\n\nRated medium per `SOP-core.md` (\"Rating a Finding\") calibration: a real but\nunexercised defect in a shipped artefact is medium, not high, and it predates\nthe RC.",
+      "filed_as": "BUG-0402",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the fifth residual in a five-RC sequence on the same exemption boundary — the class recurs, though each RC narrows it)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0402 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "the normalisation anchor trusts any `<X>/projects/<name>`, not only the framework's own",
+      "heading": "Finding 7: the normalisation anchor trusts any `<X>/projects/<name>`, not only the framework's own",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (same recurring class as Finding 6)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0403 (Path C-A)\n\n`BUG-0398`'s own remediation text specified the bound the fix should land on:\n\"only when the root is exactly `<pgai_temp_dir>/projects/<single-component>`\n— so a root that merely contains the word cannot widen anything.\"\n`<pgai_temp_dir>` is the framework's own resolved temp root. The shipped\nanchor is `<anything>/projects/<single-component>` — a test on the shape of the\nstring, which accepts any path on the filesystem of that shape:\n\n```\nPGAI_AGENT_KANBAN_TEMP_DIR=$HOME/projects/pgai\n  _git_boundary_guard_path_under_temp_root $HOME/develop/pgai-agent-kanban -> EXEMPT\n  _git_boundary_guard_path_under_temp_root $HOME                            -> EXEMPT\n```\n\n`BUG-0398` acceptance bullet 1 reads on this shape too:\n`$HOME/projects/pgai` contains a `projects` component and\n`$HOME/develop/anything` is outside that root, yet it is exempt.\n\n`CODER-20260927-002`'s `status.md` records the design choice explicitly: it\nweighed deriving the framework root from `team/scripts/lib/temp.sh`'s\n`pgai_temp_dir` and rejected it because that function echoes\n`PGAI_AGENT_KANBAN_TEMP_DIR` verbatim when the variable is set, so it cannot\ndistinguish an intentional per-project root from an accidental one. That\nreasoning is correct about `pgai_temp_dir`; what the filing points at is that\nother provenance sources exist (`kanban.cfg [paths]` `tmp_root`/`tmp_subdir`,\nwhich is what `pgai_temp_dir` computes when the override is absent; or having\nthe dispatcher that generates the per-project root export the framework root\nbeside it).\n\nNarrower in practical blast radius than Finding 6: the widening only grants an\nexemption where the destination or `repo_path` actually resolves under the\nwidened parent, whereas Finding 6 is universal. Pre-existing on `ai_main` for\nthe same reason. Unreachable under the shipped default.",
+      "filed_as": "BUG-0403",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (same recurring class as Finding 6)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0403 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "the gated integration suite writes a boundary-guard evidence record on every run",
+      "heading": "Finding 8: the gated integration suite writes a boundary-guard evidence record on every run",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one test module; nothing published, no ref moved)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0404 (Path C-A)\n\nA regression of a prior gap (Step 6.11). `BUG-0396` (`## Status: done`,\n`## Fixed In: v2.24.16`) required that \"a full `bash team/scripts/run-unit-tests.sh`\nand `bash team/scripts/run-integration-tests.sh` run from a non-CM wake\nsession adds zero records to that task's `logs/git-boundary-guard.jsonl`.\"\nThis RC's integration run added one:\n\n```json\n{\"timestamp\":\"2026-09-27T05:23:19Z\",\"role\":\"tester\",\n \"task\":\"TESTER-20260927-007-verify-2-24-17\",\n \"argv\":[\"git\",\"-C\",\".../test_nothing_resolves_until_th0/dev_repo\",\"fetch\",\"origin\"]}\n```\n\nIsolated and reproduced deterministically —\n`tests/integration/test_overwatch_scaffolding_gates_resolution.py` writes\nexactly one record per run while both its tests pass. The `fetch origin`\nspelling (no `--tags --quiet`) matches `cm/open-rc.sh:365` and\n`cm/cancel-rc.sh:329`, not the `pp_last_released_version` call `BUG-0396`\naddressed; the test copies the CM operator verbs into a throwaway kanban root\nand drives them in a subprocess that inherits `PGAI_AGENT_ROLE` from the wake\nsession, so a non-CM role refuses and records them.\n\nWorth noting for whoever fixes it: the guard's fixture-local exemption ought\nto have covered this invocation. Both halves of the failed-probe exemption\nhold in isolation on the RC tip — the throwaway `dev_repo` has no `origin`, so\n`_git_boundary_guard_is_unreachable_destination` returns true on\n`error: No such remote 'origin'`, and `_git_boundary_guard_path_under_temp_root`\nreturns true for the `dev_repo` path under `/tmp/pgai_kanban_tmp`. The record\ntherefore implies the guard subprocess resolved a different temp root than the\none the fixture sits under, most likely because the test repoints\n`PGAI_AGENT_KANBAN_ROOT_PATH` at its throwaway kanban root whose `kanban.cfg`\ncarries an empty `[paths]` section.\n\nRated low: the command was refused, nothing was published, no ref moved. The\ncost is that Step 6.12 question (5) now answers YES on every cycle, which\nspends the check's discriminating power.",
+      "filed_as": "BUG-0404",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one test module; nothing published, no ref moved)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0404 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "requirements acceptance criteria 2 and 3 — compile and syntax",
+      "heading": "Finding 9: requirements acceptance criteria 2 and 3 — compile and syntax",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll Python files compile: `find . -name '*.py' -not -path './.git/*' | xargs python3 -m py_compile`\nexits 0 with no output. All bash files pass syntax check: `bash -n` over every\n`*.sh` in the tree — 294 files checked, 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "`release-state.md` schema and version ordering",
+      "heading": "Finding 10: `release-state.md` schema and version ordering",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll four fields present and well-formed: `## Active RC` = `v2.24.17`,\n`## RC Opened At` = `2026-09-27T03:22:14+00:00`, `## RC Opened By Task` =\n`CM-20260927-006-open-rc-2-24-17`, `## Last Released` = `v2.24.16` (a\nwell-formed `vX.Y.Z`). `pp_last_released_version \"pgai-agent-kanban\"` returns\n`v2.24.16`, and `semver_gt \"v2.24.17\" \"v2.24.16\"` is true — the RC under test\nis strictly greater than the last release. Comparison made through\n`team/scripts/lib/semver.sh`, never inline.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "structural checks",
+      "heading": "Finding 11: structural checks",
+      "level": 3,
+      "body": "**Category:** pass\n\nEvery file in the diff exists at its expected path with sane permissions:\n`docs/blocking-site-census.md` 644, `team/pgai_agent_kanban/lint/bug_filer.py`\n644, `team/scripts/lib/git_boundary_guard.sh` 755 (a sourced-and-executable\nlib, unchanged from its pre-RC mode),\n`team/tests/unit/test_git_boundary_guard.py` 644,\n`team/tests/unit/test_lint_bug_filer.py` 644. No migrations, renames or\ndeletions in this RC, so no old-path/new-path sweep was owed. Nothing the\nrequirements doc names is missing from the diff.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "constraint negative checks",
+      "heading": "Finding 12: constraint negative checks",
+      "level": 3,
+      "body": "**Category:** pass\n\nA grep of the full `ai_main..ai_rc/v2.24.17` diff for added lines matching\n`password`, `api_key`, or a quoted `token =` / `secret =` returns nothing — no\nhardcoded credentials introduced. `set -euo pipefail` is intact in both gated\nrunners (`run-unit-tests.sh:97`, `run-integration-tests.sh:113`). `bash -n`\nclean on the modified guard lib.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "skip-cites-a-real-bug gate",
+      "heading": "Finding 13: skip-cites-a-real-bug gate",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/lint_skip_bug_gate.sh` exits 0: \"all skip annotations are\ncompliant\", with \"BUG-NNNN file-existence check: 0 missing files\". The manual\ndouble-grep confirms it — no placeholder shapes (`BUG-SKIP`, `skip` near a\n`BUG-` followed by letters) outside archived run logs and one test fixture\nwhose own comment explains the synthetic `reason=BUG-NNNN` string, and every\n`BUG-NNNN` token in `team/tests/` is synthetic renderer/scanner sample data\nrather than a skip citation.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "prerequisite dependency graph",
+      "heading": "Finding 14: prerequisite dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo cycles; every referenced task ID resolves to an existing folder. Lifecycle\nbookends correctly linked: `CM-20260927-006-open-rc-2-24-17` (DONE) is the\nprerequisite of all four CODER tickets; `CM-20260927-009-release-2-24-17`\n(WAITING) depends on all four CODER tickets plus this verification task.\nSequence numbers are non-colliding. `008` is unallocated and `006` (CM-open)\nis numbered after `002`-`005` (the CODER tickets that depend on it) — both are\nthe normal shape of this pipeline's per-materialization numbering, matching the\nthree prior cycles on `20260926`, so neither is a finding. Queue markers are\ncorrect and derived: `[x]` for the DONE/WONT-DO tasks, `[W]` for\n`CM-20260927-009`, `[A]` for this task.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "synthetic release simulation",
+      "heading": "Finding 15: synthetic release simulation",
+      "level": 3,
+      "body": "**Category:** pass\n\nSkipped with a note, per Step 6.8. The diff touches no release-lifecycle file:\n`docs/blocking-site-census.md`, `team/pgai_agent_kanban/lint/bug_filer.py`,\n`team/scripts/lib/git_boundary_guard.sh` and two unit-test modules — none of\n`cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`,\n`team/scripts/lib/project_paths.sh`, nor anything in the open/close cycle.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "coding-standards spot-check",
+      "heading": "Finding 16: coding-standards spot-check",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nNo new script under `team/scripts/` (so no `--help` shortfall). No new\ncomment, docstring, help line or log line cites a bug, task, or version\nidentifier: the added lines of the diff yield zero `BUG-NNNN`,\n`CODER-YYYYMMDD` or `vX.Y.Z` tokens, and\n`python3 team/scripts/lint_hygiene.py` reports 0 findings across all three\nclasses. No operational value hardcoded where an operator would want it\nconfigurable — the `projects` literal in the guard's anchor is structural, not\na tunable.\n\nThe caveat is duplication. `_resolve_repo_root` in `bug_filer.py` is the\nfourth place in the tree that resolves a dev-tree root from\n`PGAI_DEV_TREE_PATH` with fallbacks, beside `team/scripts/lib/resolve_item_shim.py`,\n`team/pm-agent/pm_materialize.py`, and `team/scripts/lib/dev_tree.sh`'s\n`resolve_global_dev_tree`. Borderline rather than a violation: each has\ndifferent fallback semantics and none of the Python ones lives in a shared\nlib, so there was no existing helper to call. Recorded as a caveat, not filed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

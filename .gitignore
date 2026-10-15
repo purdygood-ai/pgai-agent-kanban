@@ -1,13 +1,24 @@
 # Personal configuration — should never be committed
-# v0.28.0 layout: shell-env (non-secret) and secrets (sensitive credentials)
+# shell-env (non-secret settings) and secrets (sensitive credentials)
 shell-env
 secrets
-# Legacy v0.27.x files (still ignored if present from old installs)
+# claude-env (Claude CLI runtime tuning). See claude-env_example.
+claude-env
+# Real kanban and project configuration; the *_example files are the templates
+kanban.cfg
+project.cfg
+projects.cfg
+pseudocron.cfg
+pseudocron.env
+# Private keys and certificates
+*.pem
+*.key
+# Older environment file names, still ignored if present from old installs
 bashrc
 env
 .env
 .env.local
-# Legacy v0.27.x runtime state file (v0.28.0: replaced by kanban.cfg [providers] active)
+# Older runtime provider-state file; the active provider is kanban.cfg [providers] active
 active-provider
 
 # Python
@@ -68,6 +79,27 @@ projects/
 artifacts/
 tester-reports/
 
-# Exception: team/tests/artifacts/ is part of the test suite (verification
-# logs and test data) and IS tracked in version control.
+# Exception: team/tests/artifacts/ holds hand-written archived snapshots
+# (reports, notes, the scripts that produced them) and IS tracked in version
+# control. Generated files there -- logs, coverage JSON -- are still ignored
+# by the generated-files block below.
 !team/tests/artifacts/
+
+# Generated files: logs, locks, coverage output, merge leftovers, rotated
+# task artifacts, and the kanban runtime directories at the tree root. Kept
+# last so they also apply inside the re-included directories above.
+# team/scripts/lint_tracked_ignored.py reports any tracked file an ignore
+# rule matches, and any tracked file of these generated kinds.
+*.log
+*.lock
+.coverage
+.coverage.*
+coverage*.json
+*-coverage.json
+htmlcov/
+*.orig
+nohup.out
+*.previous-RUN-*
+/logs/
+/locks/
+/run/

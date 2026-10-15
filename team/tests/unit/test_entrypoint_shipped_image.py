@@ -3,8 +3,10 @@ test_entrypoint_shipped_image.py
 =================================
 Docker-gated end-to-end tests: the shipped image's baked ENTRYPOINT under the
 workspace model — a container supplies the right tools, the right env, and a
-shell in the right place. No mount enforcement beyond the single kanban root,
-no startup-mode dispatch.
+shell in the right place. The entrypoint enforces the launcher's mount
+contract (kanban root mounted, HOME mounted, kanban root is an
+install.sh-populated install rather than a raw checkout) before cd'ing in;
+there is still no startup-mode dispatch.
 
 These tests run the image exactly as an operator would via
 team/scripts/container-shell.sh: no --entrypoint override, the kanban root
@@ -24,11 +26,13 @@ Test naming describes behavior, never bug IDs or scaffolding labels.
 from __future__ import annotations
 
 import pathlib
-import shutil
 import subprocess
 from typing import NamedTuple
 
 import pytest
+
+from tests.fixtures.binary_guard import require_docker_daemon
+from tests.fixtures.docker_cli_pins import cli_pins_build_args
 
 # ---------------------------------------------------------------------------
 # Path resolution — anchored to the test file location.
@@ -77,18 +81,6 @@ _FLAVOR_IDS = [f.name for f in _FLAVORS]
 # ---------------------------------------------------------------------------
 
 
-def _docker_available() -> bool:
-    """Return True when docker binary is present AND the daemon is reachable."""
-    if shutil.which("docker") is None:
-        return False
-    result = subprocess.run(
-        ["docker", "info"],
-        capture_output=True,
-        timeout=10,
-    )
-    return result.returncode == 0
-
-
 def _narrate_skip(reason: str) -> None:
     """Print a visible skip notice to stdout before calling pytest.skip.
 
@@ -114,11 +106,7 @@ def shipped_image_tag(request: pytest.FixtureRequest) -> str:
     """
     flavor: _FlavorConfig = request.param
 
-    if not _docker_available():
-        _narrate_skip(
-            "docker binary not found or Docker daemon unreachable; "
-            "entrypoint shipped-image tests require a running Docker environment"
-        )
+    require_docker_daemon(label="entrypoint-shipped-image")
 
     if not flavor.dockerfile.exists():
         pytest.fail(
@@ -136,6 +124,7 @@ def shipped_image_tag(request: pytest.FixtureRequest) -> str:
             "docker", "build",
             "--tag", flavor.image_tag,
             "--file", str(flavor.dockerfile),
+            *cli_pins_build_args(),
             str(flavor.build_context),
         ],
         capture_output=True,
@@ -315,9 +304,16 @@ def test_mounted_root_lands_shell_in_that_directory(
     container paths match, so no translation is needed. The shell reads `pwd`
     from stdin (bash -l is non-interactive when stdin is not a tty) and the
     printed cwd must equal the mounted path.
+
+    The mounted directory is shaped like an install.sh-populated install
+    (scripts/pseudocron.py present) so the entrypoint's install-vs-checkout
+    condition is satisfied and this test can focus on the cd + exec behavior.
+    The container's baked non-root user has its own $HOME (created by
+    --create-home in both Dockerfiles), so no HOME override is needed here.
     """
     kanban_root = tmp_path / "kanban_root"
-    kanban_root.mkdir()
+    (kanban_root / "scripts").mkdir(parents=True)
+    (kanban_root / "scripts" / "pseudocron.py").write_text("# stub\n", encoding="utf-8")
 
     result = subprocess.run(
         [

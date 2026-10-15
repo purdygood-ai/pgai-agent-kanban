@@ -1,21 +1,26 @@
 """
 test_dashboard.py
 =================
-Behavioral unit tests for team/pgai_agent_kanban/dashboard/:
+Behavioral unit tests for team/pgai_agent_kanban/dashboard/ and the Costs
+pane's renderer:
   - dashboard/cron_firings.py
   - dashboard/halt_state.py
-  - dashboard/render_costs.py
+  - lib/metrics/costs_pane.py (the Costs pane's cost blocks)
   - dashboard/scan_attention.py
   - dashboard/_rejected.py
 
 All filesystem operations use tmp_path; clocks and external modules are
-mocked where needed.  No live kanban root or subprocess calls.
+mocked where needed.  No live kanban root.  The one subprocess runs the
+quarantine alerts' printed Recover: command against recover-rejected.sh in a
+two_project_root sandbox, with every kanban root pointed into it.
 """
 
 from __future__ import annotations
 
 import json
 import pathlib
+import shlex
+import subprocess
 import sys
 import textwrap
 import time
@@ -29,6 +34,10 @@ import pytest
 # ---------------------------------------------------------------------------
 
 from pgai_agent_kanban.dashboard._rejected import (
+    UNKNOWN_ORIGIN,
+    find_quarantined,
+    quarantine_origin,
+    quarantined_files,
     read_reason_sidecar,
     sidecar_path_for,
     SIDECAR_KEYS,
@@ -41,10 +50,10 @@ from pgai_agent_kanban.dashboard._rejected import (
 from pgai_agent_kanban.dashboard.halt_state import compute_halt_state
 
 # ---------------------------------------------------------------------------
-# render_costs imports
+# costs_pane imports
 # ---------------------------------------------------------------------------
 
-from pgai_agent_kanban.dashboard.render_costs import (
+from pgai_agent_kanban.lib.metrics.costs_pane import (
     load_pricing,
     get_model_rates,
     model_cost_parts,
@@ -65,7 +74,6 @@ from pgai_agent_kanban.dashboard.scan_attention import (
     _format_elapsed,
     _is_transient_blocked,
     _scan_state_file,
-    _scan_rejected_dir,
     _iter_projects,
     _parse_overwatch_action_log,
     scan_blocked_tasks,
@@ -83,6 +91,10 @@ from pgai_agent_kanban.dashboard.cron_firings import (
     _seconds_to_label,
     cron_firings,
 )
+
+from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+
+_TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 
 
 # ===========================================================================
@@ -172,6 +184,84 @@ def test_sidecar_path_for_appends_reason_extension(tmp_path: pathlib.Path) -> No
 
 
 # ===========================================================================
+# _rejected — quarantine_origin / quarantined_files / find_quarantined
+# ===========================================================================
+
+
+def _sidecar(**fields: str) -> dict:
+    info = {key: None for key in SIDECAR_KEYS}
+    info.update(fields)
+    return info
+
+
+@pytest.mark.parametrize(
+    "name, fields, expected_origin",
+    [
+        # original_dir naming an intake directory wins over original_type.
+        ("x.md", {"original_dir": "{root}/bugs", "original_type": "priority"}, "bugs"),
+        # original_dir outside the project's intake directories is ignored.
+        ("x.md", {"original_dir": "/etc", "original_type": "requirements"}, "requirements"),
+        ("x.md", {"original_dir": "{root}/tasks"}, UNKNOWN_ORIGIN),
+        # no usable sidecar: the name prefix decides.
+        ("BUG-12-bad.md", {"original_type": "nonsense"}, "bugs"),
+        ("PRIORITY-7-bad.md", {}, "priority"),
+        ("notes.md", {}, UNKNOWN_ORIGIN),
+    ],
+)
+def test_quarantine_origin_reads_sidecar_then_name_prefix(
+    tmp_path: pathlib.Path, name: str, fields: dict, expected_origin: str
+) -> None:
+    """The sidecar's original_dir, then original_type, then the name prefix decide the origin."""
+    root = tmp_path / "proj"
+    for directory in ("bugs", "priority", "requirements", "tasks"):
+        (root / directory).mkdir(parents=True)
+    sidecar = _sidecar(**{key: value.format(root=root) for key, value in fields.items()})
+    origin, restore_dir = quarantine_origin(root, name, sidecar)
+    assert origin == expected_origin
+    assert restore_dir == (None if origin == UNKNOWN_ORIGIN else root / origin)
+
+
+def test_quarantined_files_reads_rejected_dir_then_legacy_dirs(tmp_path: pathlib.Path) -> None:
+    """Project-level rejected/ first, then <intake>/.rejected/; sidecars, hidden files and symlinks skipped."""
+    root = tmp_path / "proj"
+    rejected = root / "rejected"
+    rejected.mkdir(parents=True)
+    (rejected / "BUG-12-bad.md").write_text("x", encoding="utf-8")
+    (rejected / "BUG-12-bad.md.reason").write_text(
+        f"original_type=bugs\noriginal_dir={root / 'bugs'}\n", encoding="utf-8")
+    (rejected / ".hidden.md").write_text("x", encoding="utf-8")
+    (rejected / "link.md").symlink_to(rejected / "BUG-12-bad.md")
+    legacy = root / "priority" / ".rejected"
+    legacy.mkdir(parents=True)
+    (legacy / "PRIORITY-3-old.md").write_text("x", encoding="utf-8")
+
+    found = quarantined_files(root, rejected)
+
+    assert [(q.path, q.origin, q.restore_dir) for q in found] == [
+        (rejected / "BUG-12-bad.md", "bugs", root / "bugs"),
+        (legacy / "PRIORITY-3-old.md", "priority", root / "priority"),
+    ]
+    assert quarantined_files(root, tmp_path / "missing") == found[1:]
+
+
+def test_find_quarantined_matches_base_names_only(tmp_path: pathlib.Path) -> None:
+    """A name is matched against the files present, so a path-shaped name finds nothing."""
+    root = tmp_path / "proj"
+    rejected = root / "rejected"
+    rejected.mkdir(parents=True)
+    (rejected / "BUG-12-bad.md").write_text("x", encoding="utf-8")
+    (root / "bugs" / ".rejected").mkdir(parents=True)
+    (root / "bugs" / ".rejected" / "BUG-12-bad.md").write_text("legacy", encoding="utf-8")
+
+    hit = find_quarantined(root, rejected, "BUG-12-bad.md")
+
+    assert hit is not None and hit.path == rejected / "BUG-12-bad.md"
+    assert find_quarantined(root, rejected, "../rejected/BUG-12-bad.md") is None
+    assert find_quarantined(root, rejected, "BUG-12-bad.md.reason") is None
+    assert find_quarantined(root, rejected, "absent.md") is None
+
+
+# ===========================================================================
 # halt_state — compute_halt_state
 # ===========================================================================
 
@@ -222,7 +312,7 @@ def test_compute_halt_state(
 
 
 # ===========================================================================
-# render_costs — load_pricing
+# costs_pane — load_pricing
 # ===========================================================================
 
 
@@ -259,7 +349,7 @@ def test_load_pricing_returns_empty_dict_for_invalid_input(
 
 
 # ===========================================================================
-# render_costs — get_model_rates
+# costs_pane — get_model_rates
 # ===========================================================================
 
 
@@ -289,7 +379,7 @@ def test_get_model_rates_returns_none_for_unknown_model() -> None:
 
 
 # ===========================================================================
-# render_costs — model_cost_parts
+# costs_pane — model_cost_parts
 # ===========================================================================
 
 
@@ -328,7 +418,7 @@ def test_model_cost_parts_returns_zeros_for_unknown_model() -> None:
 
 
 # ===========================================================================
-# render_costs — load_rollup
+# costs_pane — load_rollup
 # ===========================================================================
 
 
@@ -357,7 +447,7 @@ def test_load_rollup_returns_none_for_invalid_input(
 
 
 # ===========================================================================
-# render_costs — extract_by_model
+# costs_pane — extract_by_model
 # ===========================================================================
 
 
@@ -410,7 +500,7 @@ def test_extract_by_model_returns_empty_for_unknown_structure() -> None:
 
 
 # ===========================================================================
-# render_costs — fmt_tokens and fmt_usd
+# costs_pane — fmt_tokens and fmt_usd
 # ===========================================================================
 
 
@@ -436,7 +526,7 @@ def test_fmt_usd_formats_large_amounts_without_decimal_places() -> None:
 
 
 # ===========================================================================
-# render_costs — render_costs (main render function)
+# costs_pane — render_costs (main render function)
 # ===========================================================================
 
 
@@ -663,25 +753,122 @@ def test_scan_state_file_uses_reason_from_4th_column(tmp_path: pathlib.Path) -> 
 
 
 # ===========================================================================
-# scan_attention — _scan_rejected_dir
+# scan_attention — scan_quarantine terminal entries and Recover: hint
 # ===========================================================================
 
 
-def test_scan_rejected_dir_returns_sorted_filenames(tmp_path: pathlib.Path) -> None:
-    """_scan_rejected_dir returns a sorted list of non-hidden filenames."""
-    rejected_dir = tmp_path / ".rejected"
-    rejected_dir.mkdir()
-    (rejected_dir / "BUG-0002.md").write_text("data", encoding="utf-8")
-    (rejected_dir / "BUG-0001.md").write_text("data", encoding="utf-8")
-    (rejected_dir / ".hidden").write_text("data", encoding="utf-8")
-    result = _scan_rejected_dir(rejected_dir)
-    assert result == ["BUG-0001.md", "BUG-0002.md"]
+def _quarantine_blocks(output: str) -> dict[str, list[str]]:
+    """Map each terminal block's ``<project> [<dir>]`` label to its indented lines."""
+    blocks: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in output.splitlines():
+        if line.startswith("  X ") and line.endswith("quarantined"):
+            label = line[len("  X "):].split(":", 1)[0]
+            current = blocks.setdefault(label, [])
+        elif current is not None and line.startswith("      "):
+            current.append(line.strip())
+        else:
+            current = None
+    return blocks
 
 
-def test_scan_rejected_dir_returns_empty_for_nonexistent_dir(tmp_path: pathlib.Path) -> None:
-    """_scan_rejected_dir returns [] when the directory does not exist."""
-    result = _scan_rejected_dir(tmp_path / "nonexistent")
-    assert result == []
+def test_scan_quarantine_lists_project_rejected_dir_files(tmp_path: pathlib.Path, capsys) -> None:
+    """A file in projects/<name>/rejected/ is a terminal entry under the intake dir it came from."""
+    project = tmp_path / "projects" / "demo-app"
+    (project / "rejected").mkdir(parents=True)
+    (project / "rejected" / "BUG-5-new.md").write_text("x", encoding="utf-8")
+    (project / "rejected" / "BUG-5-new.md.reason").write_text("original_type=bugs\n", encoding="utf-8")
+    (project / "rejected" / "REQ-notes.md").write_text("x", encoding="utf-8")
+    (project / "rejected" / "REQ-notes.md.reason").write_text(
+        "original_type=requirements\n", encoding="utf-8")
+    (project / "rejected" / "notes.md").write_text("x", encoding="utf-8")
+
+    scan_quarantine(kanban_root=str(tmp_path), use_color=False, threshold=3)
+
+    hint = "Recover: scripts/recover-rejected.sh --project demo-app --file <filename> [--rename NEW]"
+    assert _quarantine_blocks(capsys.readouterr().out) == {
+        "demo-app [bugs]": ["BUG-5-new.md", hint],
+        "demo-app [requirements]": ["REQ-notes.md", hint],
+        "demo-app [rejected]": ["notes.md", hint],
+    }
+
+
+def test_scan_quarantine_still_lists_legacy_intake_rejected_files(tmp_path: pathlib.Path, capsys) -> None:
+    """A file in a legacy <intake>/.rejected/ dir is still a terminal entry, beside rejected/ files."""
+    project = tmp_path / "projects" / "demo-app"
+    (project / "bugs" / ".rejected").mkdir(parents=True)
+    (project / "bugs" / ".rejected" / "BUG-6-legacy.md").write_text("x", encoding="utf-8")
+    (project / "bugs" / ".rejected" / ".hidden.md").write_text("x", encoding="utf-8")
+    (project / "rejected").mkdir()
+    (project / "rejected" / "BUG-5-new.md").write_text("x", encoding="utf-8")
+
+    scan_quarantine(kanban_root=str(tmp_path), use_color=False, threshold=3)
+
+    out = capsys.readouterr().out
+    assert "  X demo-app [bugs]: 2 file(s) quarantined\n" in out
+    assert _quarantine_blocks(out)["demo-app [bugs]"][:2] == ["BUG-5-new.md", "BUG-6-legacy.md"]
+
+
+def test_scan_quarantine_warning_and_terminal_blocks_share_a_group(tmp_path: pathlib.Path, capsys) -> None:
+    """A pending rejection still prints its warning block ahead of the group's terminal block."""
+    project = tmp_path / "projects" / "demo-app"
+    (project / ".discovery-state").mkdir(parents=True)
+    (project / ".discovery-state" / "rejected-counts.tsv").write_text(
+        "PRIORITY-9-bad.md\t2\t2026-06-01T00:00:00Z\tmalformed filename\n", encoding="utf-8")
+    (project / "priority" / ".rejected").mkdir(parents=True)
+    (project / "priority" / ".rejected" / "PRIORITY-3-old.md").write_text("x", encoding="utf-8")
+
+    scan_quarantine(kanban_root=str(tmp_path), use_color=False, threshold=3)
+
+    out = capsys.readouterr().out
+    warning = "  ! demo-app [priority]: 1 file(s) approaching quarantine\n      PRIORITY-9-bad.md  (2/3)  malformed filename\n"
+    terminal = "  X demo-app [priority]: 1 file(s) quarantined\n      PRIORITY-3-old.md\n"
+    assert warning in out and terminal in out
+    assert out.index(warning) < out.index(terminal)
+
+
+def test_scan_quarantine_prints_nothing_quarantined_line_when_empty(tmp_path: pathlib.Path, capsys) -> None:
+    """With no pending or quarantined file the section says so."""
+    (tmp_path / "projects" / "demo-app").mkdir(parents=True)
+    scan_quarantine(kanban_root=str(tmp_path), use_color=False, threshold=3)
+    assert capsys.readouterr().out == "\n  (no quarantine alerts)\n\n"
+
+
+def test_scan_quarantine_recover_hint_runs_as_printed(two_project_root: pathlib.Path, capsys, tmp_path) -> None:
+    """Each terminal block's Recover: command, with the file named, restores that file and exits 0."""
+    root = two_project_root
+    project = root / "projects" / "project_a"
+    for directory in ("bugs", "priority", "rejected", "priority/.rejected"):
+        (project / directory).mkdir(parents=True, exist_ok=True)
+    (project / "rejected" / "BUG-12-bad.md").write_text("new\n", encoding="utf-8")
+    (project / "priority" / ".rejected" / "PRIORITY-3-old.md").write_text("legacy\n", encoding="utf-8")
+
+    scan_quarantine(kanban_root=str(root), use_color=False, threshold=3)
+    blocks = _quarantine_blocks(capsys.readouterr().out)
+
+    (root / "tmp").mkdir(exist_ok=True)
+    env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={
+        "KANBAN_ROOT": str(root),
+        "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+        "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
+        "TERM": "dumb",
+    })
+    for label, filename, intake in (
+        ("project_a [bugs]", "BUG-12-bad.md", "bugs"),
+        ("project_a [priority]", "PRIORITY-3-old.md", "priority"),
+    ):
+        assert blocks[label][0] == filename
+        printed = blocks[label][-1]
+        assert printed.startswith("Recover: ")
+        # The printed path is the installed layout's; the repo keeps it under team/.
+        # The optional [--rename NEW] part is not passed.
+        argv = [token for token in shlex.split(printed[len("Recover: "):])
+                if token not in ("[--rename", "NEW]")]
+        argv = [str(_TEAM_DIR / argv[0])] + [filename if token == "<filename>" else token for token in argv[1:]]
+        result = subprocess.run(argv, capture_output=True, text=True, env=env, cwd=str(root),
+                                timeout=120, stdin=subprocess.DEVNULL)
+        assert result.returncode == 0, f"{argv}\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert (project / intake / filename).is_file()
 
 
 # ===========================================================================
@@ -957,7 +1144,7 @@ def test_parse_overwatch_action_log_returns_newest_first(
     )
     entries = _parse_overwatch_action_log(log_path, max_entries=10)
     assert len(entries) == 2
-    # Newest (CODER-002) first
+    # Newest log entry's target first
     assert entries[0]["target"] == "CODER-002"
     assert entries[1]["target"] == "CODER-001"
 

@@ -1,0 +1,126 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.15.2 is a single-bug bundle closing BUG-0231: a helper that scrubs internal\nkanban identifiers out of the release notes' \"Bugs Skipped\" table existed, was\nwell tested, and had no production caller. The RC delivers three things — the\nthree duplicate copies of the scrub collapsed into one shared module\n(`team/scripts/lib/cm/internal_id_scrub.py`), the helper wired into the release\npipeline through `cm_build_bugs_skipped_ship_block`, and the already-shipped\nleaked identifier in `release-notes/v2.15.0.md:64` rewritten to describe the\ndefect without naming the identifier. Both gated runners exit 0 (unit 3749\npassed / 3 skipped; integration 436 passed / 1 skipped). Every item on\nBUG-0231's own `## Acceptance` list is met, and I verified each one\nindividually, including a negative control that proves the new wiring is load\nbearing rather than decorative.\n\nOne gap remains, and it is a coverage gap rather than a broken fix. The render\nis reachable from exactly one call site, guarded by the existence of a\nWRITER-authored `release-notes/<version>.md` carrying a `PENDING-RELEASE`\nplaceholder. This project has not produced such a file in any of its last five\nreleases — all five read `Released By: cm-release.sh (automated)` — and the\nidentifier BUG-0231 cites leaked on that auto-generated path, through CM's\npost-tag hand augmentation, which this RC leaves untouched. The RC also ships\nno `release-notes/v2.15.2.md`, so the next release takes the unprotected path\nagain. Filed as BUG-0232.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0231 acceptance list — all six items met",
+      "heading": "Finding 1: BUG-0231 acceptance list — all six items met",
+      "level": 3,
+      "body": "**Category:** pass\n\nVerified item by item against the RC.\n\n1. **A caller exists outside `release_known_issue.sh`.**\n   `team/scripts/lib/cm/release_ship_policy.sh:528` calls\n   `cm_build_bugs_skipped_ship_block \"${_TESTER_REPORT_PATH}\" \"${_CM_PROJECT_ROOT}/bugs\" \"${_KNOWN_ISSUE_BUG_FILES[@]}\"`,\n   which composes `read_ship_policy_skipped_bug_pairs` and\n   `build_bugs_skipped_notes_block` and sets `_BUGS_SKIPPED_NOTES_BLOCK` for\n   the stamp at line 620. PASS.\n2. **An integration test drives the path end to end over all six agent prefixes.**\n   `team/tests/integration/test_cm_release_known_issue_carry_forward.py::test_bugs_skipped_section_is_rendered_through_the_scrub_not_hand_typed`\n   builds a synthetic project under the framework temp root, runs the real\n   `cm/open-rc.sh` and `cm/release.sh`, seeds a WRITER notes file whose\n   hand-typed Bugs-Skipped table already leaks an identifier, and asserts\n   against the file the pipeline wrote — one finding per prefix in\n   `[\"PM\",\"CODER\",\"WRITER\",\"TESTER\",\"CM\",\"PO\"]`, each rationale carrying a\n   `<PREFIX>-20260910-777-some-task` identifier, all six asserted absent from\n   the output. It also asserts the hand-authored placeholder row did not\n   survive. Passes standalone in 2.50 s. PASS.\n3. **`grep -rEn '(CODER|WRITER|TESTER|CM|PM|PO)-[0-9]{8}-[0-9]+' release-notes/` returns nothing.**\n   Run on the RC: exit 1, no output. PASS.\n4. **`lint_comment_provenance.py` reports no finding under `release-notes/`.**\n   Run standalone: 10 findings, all in `team/scripts/why.sh` and three test\n   files, all citing `BUG-0228`. Zero under `release-notes/`. The eleventh\n   finding that existed on v2.15.1 (`release-notes/v2.15.0.md:64`) is gone.\n   PASS.\n5. **The scrub exists in one place.** `_INTERNAL_ID_RE` and\n   `_strip_internal_ids` now live only in\n   `team/scripts/lib/cm/internal_id_scrub.py`; all three heredocs\n   (`release_notes.sh`'s `RELNOTES_PY`, and `release_known_issue.sh`'s\n   `build_known_issue_notes_block` and `build_bugs_skipped_notes_block`)\n   import it, locating the directory via `dirname \"${BASH_SOURCE[0]}\"` and\n   passing it through `PGAI_CM_INTERNAL_ID_SCRUB_DIR`. The one remaining\n   independent implementation (`team/pgai_agent_kanban/cm/changelog_writer.py:939`,\n   untouched since v2.4.0 and untouched by this RC) is deliberately re-affirmed\n   in `internal_id_scrub.py`'s docstring, naming why it was left alone —\n   which is the second half of the acceptance item's own \"or\" clause. PASS.\n6. **Both gated runners exit 0.** `UNIT_EXIT=0`, `INTEGRATION_EXIT=0`. PASS.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "behavioral verification of the wiring — negative control",
+      "heading": "Finding 2: behavioral verification of the wiring — negative control",
+      "level": 3,
+      "body": "**Category:** pass\n\nPrinciple 4 / Step 6.5. I did not take the passing test as proof the guard is\nload bearing. I replaced the wiring call at `release_ship_policy.sh:528` with\n`_SKIPPED_BUG_PAIRS=(); _BUGS_SKIPPED_NOTES_BLOCK=\"\"` and re-ran the\nintegration test:\n\n```\nFAILED ...::test_bugs_skipped_section_is_rendered_through_the_scrub_not_hand_typed\nassert 'placeholder' not in '# Release N...ues\\nNone.\\n'\n```\n\nThe hand-authored placeholder row survived into the written notes, which is\nexactly the BUG-0231 failure mode. Wiring restored via `git checkout --`;\n`git status --short` empty afterwards.\n\nI also drove `cm_build_bugs_skipped_ship_block` directly against a synthetic\nreport and bugs directory (under `$PGAI_AGENT_KANBAN_TEMP_DIR`, never the live\nroot) to exercise three guards independently of the test suite:\n\n- a rationale reading `Deferred because CODER-20260910-041-bugs-skipped-scrub-wired already covers the area.`\n  rendered as `Deferred because already covers the area.` — identifier and its\n  full kebab slug both consumed;\n- a `Category: pass` finding produced no row;\n- a bug passed as an exclusion (the Known-Issues path's own bug file) produced\n  no row, so the same bug cannot appear under both sections.\n\nPair count 1 of 3 findings, as expected.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "WRITER-043 documentation and the repaired shipped text",
+      "heading": "Finding 3: WRITER-043 documentation and the repaired shipped text",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `release-notes/v2.15.0.md:64` now reads \"quote an internal work-item\n  identifier a reader cannot look up\" in place of the identifier. No\n  `provenance-allowlist` marker added, per BUG-0231's instruction.\n- `docs/cm-release-reference.md` gains \"Bugs Skipped is rendered, not\n  authored\", which describes the render accurately **and states its limits\n  honestly** — that an empty render leaves authored text unscrubbed, that a\n  re-run over already-stamped notes does not re-render, and that\n  `## Bugs Resolved` has no equivalent. That candour is what let me locate\n  Finding 4 quickly; it is good documentation, not a defect.\n- `RELEASE-NOTES-TEMPLATE.md` gains an HTML comment telling the author the\n  section is rendered and that their text is a fallback for the\n  no-qualifying-finding case only.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "the render is unreachable on the notes path this project ships on",
+      "heading": "Finding 4: the render is unreachable on the notes path this project ships on",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (prose-only; no runtime failure, no data or chain state at risk)\n**Regression:** no (the auto-generated notes path and CM's post-tag augmentation step are untouched by this RC's diff, which names neither `team/roles/CM.md` nor `scripts/cm/finalize-release.sh`; the defect predates this RC — the leak this bundle was chartered to close occurred on that path in v2.14.1, v2.14.2, and v2.15.0)\n**Integrity Damage:** no\n**Filed As:** BUG-0232 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`cm_stamp_release_notes_status` — the only thing that renders the Bugs-Skipped\ntable — is called from one place, `release_ship_policy.sh:620`, inside a branch\nguarded by two conditions (`release-notes/<version>.md` exists on the RC branch\nAND contains `PENDING-RELEASE`). When no such file exists, Step 4e logs\n`No WRITER-authored release notes found ... skipping stamp (Step 11a will\nauto-generate)` and returns.\n\nStep 11a's generator (`cm_release_generate_notes`) emits `Status`, `Breaking\nChanges`, `Upgrade Notes`, `Features`, `Bug Fixes`, `Deprecations`,\n`Documentation`, `Other Changes`, `Known Issues` — and no `## Bugs Skipped`\nsection at all (`grep -n \"Bugs Skipped\" team/scripts/lib/cm/release_notes.sh`\nreturns nothing).\n\nYet three recent shipped notes files carry that section:\n\n| File | Released By | Has `## Bugs Skipped` |\n|---|---|---|\n| `release-notes/v2.14.1.md` | cm-release.sh (automated) | no |\n| `release-notes/v2.14.2.md` | cm-release.sh (automated) | yes |\n| `release-notes/v2.14.3.md` | cm-release.sh (automated) | no |\n| `release-notes/v2.15.0.md` | cm-release.sh (automated) | yes |\n| `release-notes/v2.15.1.md` | cm-release.sh (automated) | yes |\n\nSince the generator never writes the heading, those three sections arrived from\nCM's post-tag augmentation (`team/roles/CM.md`, \"Augmenting the auto-generated\nnotes\"), which remains hand-authoring with a non-enforcing reminder as its only\nprotection: \"run `team/scripts/lint_comment_provenance.py --prose-dirs\nrelease-notes` and read it clean before committing the polish\"\n(`team/roles/CM.md:159`). The identifier BUG-0231 cites,\n`release-notes/v2.15.0.md:64`, sits inside that block on that path.\n\nThe RC ships no `release-notes/v2.15.2.md`, so v2.15.2's own notes will be\nauto-generated and its Bugs-Skipped block, if CM writes one, will not pass\nthrough the scrub.\n\nThe honest framing: BUG-0231's `## Acceptance` list is fully satisfied\n(Finding 1). The gap is against BUG-0231's `## Expected` sentence — \"the\nrelease pipeline renders it through the scrubbing helper rather than trusting\nthe author\" — which the acceptance list under-specified by naming only the\nexistence of a caller and not the reachability of that caller on the project's\nown release path.\n\nFix options, both in BUG-0232: render the section on the auto-generated path\ntoo (`_BUGS_SKIPPED_NOTES_BLOCK` is already computed on every release at line\n528, before Step 11a, and simply discarded when no WRITER draft exists), or\ngate the augmentation commit in `scripts/cm/finalize-release.sh` with a\ndual-channel refusal. `team/roles/CM.md` also needs to catch up with\n`docs/cm-release-reference.md`, which already documents the split correctly.",
+      "filed_as": "BUG-0232",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (prose-only; no runtime failure, no data or chain state at risk)",
+        "regression": "no (the auto-generated notes path and CM's post-tag augmentation step are untouched by this RC's diff, which names neither `team/roles/CM.md` nor `scripts/cm/finalize-release.sh`; the defect predates this RC — the leak this bundle was chartered to close occurred on that path in v2.14.1, v2.14.2, and v2.15.0)",
+        "filed_as": "BUG-0232 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "suites, structure, and the standing checks",
+      "heading": "Finding 5: suites, structure, and the standing checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Pre-flight merge verification** (Step 2a): scanned every DONE task with a\n  `## Feature Branch` value; all feature branches were deleted post-merge\n  (normal lifecycle), so no UNMERGED and no BUG-92 anomalies.\n- **Worktree** (Step 3/3a): HEAD `285f99e` matches `ai_rc/v2.15.2`,\n  `git status --short` empty, `git stash list` empty.\n- **release-state.md drift** (Step 6.1): `pp_last_released_version` returns\n  `v2.15.1`; `semver_gt v2.15.2 v2.15.1` true; `## Last Released` reads\n  `v2.15.1`, well-formed; `ai_rc/v2.15.2` branch exists and matches\n  `## Active RC`. No drift.\n- **Compile / syntax** (requirements AC 2 and 3): `python3 -m py_compile` clean\n  on `internal_id_scrub.py` and both changed test files; `bash -n` clean on all\n  three changed shell libraries.\n- **Synthetic release simulation** (Step 6.8, triggered — the diff touches\n  `release_ship_policy.sh`, `release_notes.sh`, `release_known_issue.sh`):\n  `tests/integration/test_cm_release_synthetic.py` — 15 passed in 32.78 s.\n- **Skip-cites-real-bug** (Step 6.13): no placeholder skip IDs in live test\n  code (the only `BUG-SKIP`-shaped hits are inside archived coverage logs under\n  `team/tests/artifacts/`, which document the gate itself); every cited\n  `BUG-NNNN` in a skip annotation resolves to a file in `bugs/`.\n- **Census lint**: `lint_gate_census_compliance.py` — OK, 35 files checked, 0\n  offenders, 139 anchored sites reconciled.\n- **Engine size / duplication lint**: OK, 35 engine files within the 800-line\n  ceiling, no cross-file function-name collisions — relevant because\n  `cm_build_bugs_skipped_ship_block` was deliberately factored into\n  `release_known_issue.sh` rather than inlined at the call site to stay under\n  that ceiling, and the lint confirms the decomposition held.\n- **Coding-standards spot-check** (Step 6.14): no new `--help`-bearing script;\n  no new hardcoded operational value; no newly duplicated `lib/` operation (the\n  RC removes duplication rather than adding it); one directive-8-adjacent hit,\n  `internal_id_scrub.py:46`'s illustrative `\"...see BUG-0011 for the earlier\n  attempt\"`, which is a documented example string the provenance lint exempts\n  by design and which does not trip it.\n- **Prereq dependency graph** (Step 6.10): acyclic, correctly bookended\n  (CM-044 open -> CODER-040 -> CODER-041 -> {CODER-042, WRITER-043} ->\n  TESTER-045 -> CM-047 release), every referenced task ID resolves to a real\n  task folder, no sequence collisions. The unused `046` slot is the\n  HUMAN-APPROVE position left unmaterialized because the bundle's\n  `## Human Approval Required` is `auto` — the same shape as the prior RC\n  (036/037/039).\n- **Installed-layout reachability of the new module**: `install.sh:734` copies\n  the whole `scripts` tree via the `cp -r \"$src/.\"` merge at line 673, so\n  `internal_id_scrub.py` ships beside the `.sh` files that read it in the\n  flattened installed layout. The heredocs locate it via `BASH_SOURCE`, never a\n  guessed path.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "census_lint": "`lint_gate_census_compliance.py` — OK, 35 files checked, 0",
+        "engine_size_duplication_lint": "OK, 35 engine files within the 800-line",
+        "installed_layout_reachability_of_the_new_module": "`install.sh:734` copies"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

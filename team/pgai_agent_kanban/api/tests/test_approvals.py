@@ -19,8 +19,9 @@ Design notes
 -----------
 - All tests use the FastAPI TestClient (no real network socket).
 - Fixture sandboxes are built under tmp_path (no bare /tmp paths).
-- PGAI_AGENT_KANBAN_ROOT_PATH is monkeypatched to point at the sandbox so the
-  endpoint's _live_kanban_root() reads from the fixture, not the live install.
+- The app's ApiConfig kanban_root is the sandbox (and PGAI_AGENT_KANBAN_ROOT_PATH
+  is monkeypatched to it too), so the endpoint reads the fixture, not the live
+  install.
 - The JSON-vs-window-14 equality test parses the rendered text output of
   scan_pending_approvals to extract task_id/project/rc values and asserts
   bidirectional set equality with the endpoint JSON.
@@ -124,10 +125,8 @@ def _make_client(
 ) -> TestClient:
     """Create a TestClient with PGAI_AGENT_KANBAN_ROOT_PATH set to sandbox_root.
 
-    The ApiConfig kanban_root is set to _TEAM_DIR so that
-    ``kanban_root / "scripts"`` resolves to real scripts (needed for other
-    endpoints in the same app; /approvals does not shell out but other
-    read-layer routes do).
+    The ApiConfig kanban_root is the sandbox root: /approvals reads its data
+    from the server's own configured root, as every route does.
 
     Args:
         sandbox_root: Kanban root the endpoint should scan for approvals data.
@@ -145,7 +144,7 @@ def _make_client(
     cfg = ApiConfig(
         host="127.0.0.1",
         port=0,
-        kanban_root=_TEAM_DIR,
+        kanban_root=sandbox_root,
     )
     return TestClient(create_app(cfg=cfg), raise_server_exceptions=True)
 

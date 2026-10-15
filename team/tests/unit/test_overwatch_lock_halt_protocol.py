@@ -1,17 +1,19 @@
 """
 test_overwatch_lock_halt_protocol.py
 =====================================
-Behavioral unit tests for BUG-0105: OVERWATCH inspects wrong lock and can
-clobber operator HALT.
+Behavioral unit tests: OVERWATCH must inspect the resolved per-project lock
+(not a hardcoded fleet-wide lock path) and must never clobber an
+operator-placed HALT.
 
-Fixtures exercised (mirrors the BUG-0105 acceptance criteria):
+Fixtures exercised:
 
   (A) A project named other-than-"pgai-kanban": OVERWATCH's
       overwatch_halt_first_fix resolves the SAME lock path
       (pp_repo_lock_path) that wake dispatch would hold for that project.
-  (B) A pre-existing HALT plus an OVERWATCH repair (overwatch_halt_first_fix)
-      leaves the HALT present afterward, byte-for-byte unchanged — an
-      operator-placed HALT is never touched or removed by OVERWATCH.
+  (B) A pre-existing HALT defers an OVERWATCH repair (overwatch_halt_first_fix
+      returns sentinel 5 without running it) and is left present afterward,
+      byte-for-byte unchanged — an operator-placed HALT is never touched,
+      removed or worked through by OVERWATCH.
   (C) The wrapped mutation function runs while the resolved project lock is
       held: a concurrent non-blocking flock attempt on the same lock file
       from inside the wrapped function is contended, and the lock is fully
@@ -33,6 +35,18 @@ import textwrap
 import pytest
 
 from tests.unit.shell_harness import run_bash
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="overwatch-lock-halt-protocol")
 
 # ---------------------------------------------------------------------------
 # Paths to the libraries under test.
@@ -42,6 +56,7 @@ from tests.unit.shell_harness import run_bash
 _PROJECT_PATHS_SH = "scripts/lib/project_paths.sh"
 _OVERWATCH_LIB_SH = "scripts/lib/overwatch_lib.sh"
 _PROTOCOL_SH = "scripts/lib/overwatch_protocol.sh"
+_LOCK_PROVENANCE_SH = "scripts/lib/lock_provenance.sh"
 
 
 def _repo_root() -> pathlib.Path:
@@ -75,7 +90,7 @@ def test_repo_lock_path_matches_for_project_other_than_pgai_kanban(
 ) -> None:
     """pp_repo_lock_path resolves the SAME path OVERWATCH inspects.
 
-    Regression coverage for BUG-0105: overwatch_protocol.sh used to hardcode
+    Regression coverage: overwatch_protocol.sh used to hardcode
     "repo-wake-pgai-kanban.lock", which only matched a wake-held lock by
     coincidence for a project literally named "pgai-kanban". This test uses
     a project name that is deliberately NOT "pgai-kanban" and asserts that
@@ -105,21 +120,27 @@ def test_repo_lock_path_matches_for_project_other_than_pgai_kanban(
         f"(string-compare-equal to what wake dispatch would hold)."
     )
 
-    # Now hold a flock on the resolved path and confirm overwatch_protocol's
+    # Now hold the resolved lock through a live, well-provenanced holder --
+    # the same shape every production acquisition site uses (pgai_lock_acquire,
+    # never a bare flock) -- and confirm overwatch_protocol's
     # overwatch_halt_first_fix reports contention against THAT SAME path —
-    # not a different hardcoded name.
+    # not a different hardcoded name. A bare flock with no provenance record
+    # is exactly the shape the stale-lock reaper (lock_provenance.sh) is
+    # correct to reap on sight, which would make this fixture race its own
+    # reaper instead of exercising genuine contention.
     lock_file = pathlib.Path(resolved)
     holder_script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
+        source {_LOCK_PROVENANCE_SH}
         READY_FILE="{kanban_root}/locks/holder-ready"
         DONE_FILE="{kanban_root}/locks/holder-done"
-        exec 9>"{lock_file}"
-        flock -x 9
+        fd=""
+        pgai_lock_acquire "{lock_file}" writer "$$" "some-op" TASK-9 fd
         touch "$READY_FILE"
         while [[ ! -f "$DONE_FILE" ]]; do sleep 0.05; done
-        exec 9>&-
+        pgai_lock_release "{lock_file}" "$fd"
     """)
-    holder = subprocess.Popen(["bash", "-c", holder_script])
+    holder = subprocess.Popen(["bash", "-c", holder_script], cwd=str(_repo_root() / "team"))
     try:
         import time
 
@@ -151,26 +172,30 @@ def test_repo_lock_path_matches_for_project_other_than_pgai_kanban(
 
 
 # ---------------------------------------------------------------------------
-# (B) Pre-existing HALT + OVERWATCH repair → HALT still present afterward.
+# (B) Pre-existing HALT + OVERWATCH repair → repair deferred, HALT untouched.
 # ---------------------------------------------------------------------------
 
 
-def test_pre_existing_halt_survives_an_overwatch_repair(tmp_path: pathlib.Path) -> None:
-    """A HALT that existed before the call is never touched or removed.
+def test_pre_existing_halt_defers_an_overwatch_repair_and_survives_it(tmp_path: pathlib.Path) -> None:
+    """A HALT that existed before the call defers the repair and is never touched.
 
-    Regression coverage for BUG-0105 symptom 2: the halt-first wrapper used
-    to touch-HALT -> fix -> rm-HALT without recording whether HALT
-    pre-existed, so an OVERWATCH repair could remove an operator-placed
-    HALT and restart a deliberately frozen board. This test places a HALT
-    with distinctive content before calling overwatch_halt_first_fix and
-    asserts the file is untouched (same content, same mtime-independent
-    presence) after the wrapped function runs and returns successfully.
+    The halt-first wrapper must never remove an operator-placed HALT (which
+    would restart a deliberately frozen board), and it must not work through
+    one either: a present HALT means keep observing read-only and skip the
+    fix. This test places a HALT with distinctive content before calling
+    overwatch_halt_first_fix and asserts the wrapped function never ran, the
+    wrapper returned the deferral sentinel 5, and the file is untouched.
+
+    The HALT lives at the project-scoped path
+    (projects/<name>/HALT) — overwatch_halt_first_fix repairs exactly one
+    project and touches only that project's own sentinel, never the
+    fleet-wide $KANBAN_ROOT/HALT.
     """
     kanban_root = tmp_path / "kanban"
     project_name = "project-with-operator-halt"
     _build_kanban(kanban_root, project_name)
 
-    halt_flag = kanban_root / "HALT"
+    halt_flag = kanban_root / "projects" / project_name / "HALT"
     sentinel_content = "operator halt: governance review in progress\n"
     halt_flag.write_text(sentinel_content, encoding="utf-8")
 
@@ -187,13 +212,13 @@ def test_pre_existing_halt_survives_an_overwatch_repair(tmp_path: pathlib.Path) 
     """)
     result = run_bash(tmp_path, script)
 
-    assert "EXIT_CODE=0" in result.stdout, (
-        f"Expected overwatch_halt_first_fix to succeed (exit 0) with an "
-        f"unheld lock and a pre-existing HALT.\n"
+    assert "EXIT_CODE=5" in result.stdout, (
+        f"Expected overwatch_halt_first_fix to defer (sentinel 5) under a "
+        f"pre-existing HALT.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert "repair ran" in result.stdout, (
-        f"Expected the wrapped function to actually run.\nstdout: {result.stdout}"
+    assert "repair ran" not in result.stdout, (
+        f"The wrapped repair ran under a pre-existing HALT.\nstdout: {result.stdout}"
     )
     assert halt_flag.exists(), (
         "Pre-existing HALT was removed by overwatch_halt_first_fix — an "
@@ -211,13 +236,14 @@ def test_halt_created_by_this_invocation_is_removed_after_repair(
 
     Complements the pre-existing-HALT test above: confirms the baseline
     HALT-first behavior (stop chain agents during the mutation, restore
-    after) still works when OVERWATCH is the one creating the HALT.
+    after) still works when OVERWATCH is the one creating the HALT — at
+    the project-scoped path, not the fleet-wide $KANBAN_ROOT/HALT.
     """
     kanban_root = tmp_path / "kanban"
     project_name = "project-without-halt"
     _build_kanban(kanban_root, project_name)
 
-    halt_flag = kanban_root / "HALT"
+    halt_flag = kanban_root / "projects" / project_name / "HALT"
     assert not halt_flag.exists()
 
     script = textwrap.dedent(f"""\
@@ -259,7 +285,7 @@ def test_mutation_runs_while_project_lock_is_held_and_lock_releases_after(
 ) -> None:
     """The wrapped function executes under the held project lock; lock frees after.
 
-    Regression coverage for BUG-0105 symptom 3: the contention lock used to
+    Regression coverage: the contention lock used to
     be released BEFORE the mutation (TOCTOU) rather than held across it.
     This test has the wrapped function itself attempt a non-blocking flock
     on the SAME resolved project lock file from a fresh subprocess — if the
@@ -322,8 +348,8 @@ def test_mutation_runs_while_project_lock_is_held_and_lock_releases_after(
     )
     assert contention_probe.read_text(encoding="utf-8").strip() == "CONTENDED", (
         "The lock was NOT held while the wrapped mutation function ran — "
-        "this is the TOCTOU BUG-0105 describes: a wake could start "
-        "processing the project between OVERWATCH's contention check and "
+        "this is the TOCTOU a wake could hit: starting to "
+        "process the project between OVERWATCH's contention check and "
         "its first state write."
     )
     assert "POST_RELEASE=ACQUIRED" in result.stdout, (
@@ -346,6 +372,17 @@ def _find_hardcoded_lock_literal_violations() -> list[str]:
     line is considered a comment (and therefore allowed) when its stripped
     form starts with '#'.  Any other occurrence is an executable hardcode of
     the old, buggy lock name and is a violation.
+
+    IDENTIFIER-BY-NECESSITY: this gate is keyed on the retired literal string
+    itself, not a content-independent behavior shape. The invariant it
+    guards ("nobody hand-typed the old fleet-wide lock name back in") is
+    inherently about that one string reappearing verbatim; there is no
+    behavior pattern to generalize to, because the defect this gate closes
+    was a specific hardcoded name, not a class of constructs. A future
+    reintroduction under a *different* literal (a new hardcoded lock name
+    that also bypasses pp_repo_lock_path) would need its own gate, or a
+    broader behavior-pattern gate on "any literal lock path outside
+    pp_repo_lock_path" -- out of scope for this gate.
     """
     root = _repo_root()
     scripts_dir = root / "team" / "scripts"
@@ -376,7 +413,7 @@ def _find_hardcoded_lock_literal_violations() -> list[str]:
 def test_no_hardcoded_repo_wake_pgai_kanban_lock_name_outside_comments() -> None:
     """No executable occurrence of the old hardcoded lock literal remains.
 
-    BUG-0105 required removing the hardcoded "repo-wake-pgai-kanban.lock"
+    The hardcoded "repo-wake-pgai-kanban.lock" was removed
     from overwatch_protocol.sh in favor of pp_repo_lock_path. This is the
     mechanical completeness signal: any future reintroduction of the literal
     outside a comment (documentation/history) fails here.
@@ -422,8 +459,11 @@ def test_grep_zero_pattern_detects_synthetic_violation(tmp_path: pathlib.Path) -
 @pytest.mark.parametrize(
     "relative_path",
     [
-        "scripts/wake/claude.sh",
-        "scripts/wake/codex.sh",
+        # Both claude.sh's and codex.sh's own repo-lock resolution moved
+        # into the shared run_project_chain in lib/wake_driver.sh --
+        # both wake scripts now source this one file instead of carrying
+        # their own inline copy.
+        "scripts/lib/wake_driver.sh",
         "scripts/wake/harness.sh",
         "scripts/lib/overwatch_protocol.sh",
     ],
@@ -431,12 +471,13 @@ def test_grep_zero_pattern_detects_synthetic_violation(tmp_path: pathlib.Path) -
 def test_repo_lock_resolution_goes_through_shared_helper(relative_path: str) -> None:
     """Every per-project repo lock resolution site calls pp_repo_lock_path.
 
-    Single-source-of-truth check: wake dispatch (claude.sh, codex.sh,
-    harness.sh) and OVERWATCH (overwatch_protocol.sh) must all resolve the
-    per-project repo lock path through pp_repo_lock_path rather than
-    re-deriving the "repo-wake-<id>.lock" naming/sanitization formula
-    independently — a second implementation is exactly how BUG-0105
-    happened (the two silently diverged).
+    Single-source-of-truth check: wake dispatch (the shared wake driver
+    both claude.sh and codex.sh source, and harness.sh) and OVERWATCH
+    (overwatch_protocol.sh) must all resolve the per-project repo lock path
+    through pp_repo_lock_path rather than re-deriving the
+    "repo-wake-<id>.lock" naming/sanitization formula independently — a
+    second implementation is exactly how the two previously diverged
+    silently.
     """
     root = _repo_root()
     target = root / "team" / relative_path
@@ -446,7 +487,8 @@ def test_repo_lock_resolution_goes_through_shared_helper(relative_path: str) -> 
     assert "pp_repo_lock_path" in content, (
         f"{relative_path} does not call pp_repo_lock_path — it may be "
         f"re-deriving the per-project repo lock path independently, which "
-        f"is exactly the single-source-of-truth violation BUG-0105 fixed."
+        f"is exactly the single-source-of-truth violation this helper exists "
+        f"to prevent."
     )
 
     # No file should still hand-roll the sanitization formula

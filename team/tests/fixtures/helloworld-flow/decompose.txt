@@ -1,0 +1,7 @@
+stage: decompose
+result: PASS
+ticket_count: 4
+ticket 1: role=CM slug=open-rc-0-1-0
+ticket 2: role=CODER slug=hello-world-script
+ticket 3: role=TESTER slug=verify-0-1-0
+ticket 4: role=CM slug=release-0-1-0

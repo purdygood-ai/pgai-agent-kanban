@@ -1,0 +1,296 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.9.23 is a single-bug RC closing BUG-0171 in both of its parts. Part 1 is an\nedit to live kanban process state, deliberately outside the RC diff:\n`projects/pgai-agent-kanban/project.cfg`'s `deep_verify = off` key was\nrelocated from a trailing headerless line (which INI section-assignment put\nunder `[training]`, where nothing reads it) to under `[release]`, so the\noperator's recorded opt-out is now actually in force. Part 2 is a dev-tree\nchange making the same mistake loud next time: both `[release]`-scoped\ndeep-verify readers in `team/scripts/lib/project_paths.sh` now scan the rest\nof the config file before falling back to their documented default, and emit\nan advisory stderr warning naming the section the key landed in, `[release]`,\nthe default applied, and the remedy. The RC also carries a correctness fix the\nnew warning would otherwise have caused — `deep-verify.sh`'s `--scheduled`\npath captured the resolver with `2>&1`, which would have folded warning text\ninto the resolved mode string — plus seven new unit tests and matching\ndocumentation in `team/SOP.md` and `docs/operator-commands.md`.\n\nEvery acceptance criterion in BUG-0171 and in the CODER ticket passes, verified\nby execution rather than inspection: the resolver returns `off` on the live\nconfig, the misplaced-key warning fires on a synthetic misplaced key for both\nkeys and stays silent in all four negative cases, the two acceptance tests fail\nwhen the change is neutralised and pass when restored, the scheduled deep-verify\ninvocation narrates its skip and appends no ledger record, and both gated\nrunners exit 0. Two hygiene findings were raised outside the RC's criteria and\nfiled via Path C (autonomous follow-up filing — non-blocking): internal ticket\nIDs left in three new test docstrings (this RC's own regression), and a\nrecurrence of the release-notes provenance class that BUG-0165 closed one\nrelease ago. Neither affects behavior.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0171 part 1 — `deep_verify = off` relocated into `[release]` and now in force",
+      "heading": "Finding 1: BUG-0171 part 1 — `deep_verify = off` relocated into `[release]` and now in force",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe live config's key is at `project.cfg:62`, between the `[release]` header\n(line 60) and the next section header `[debug]` (line 67), beside\n`max_rc_retries = 1`. No `deep_verify` occurrence survives after the last\n`[training]` key. Resolver output:\n\n```\n$ bash -c 'source team/scripts/lib/project_paths.sh; pp_deep_verify_mode pgai-agent-kanban'\noff       (exit 0, stderr empty)\n```\n\nThe intent recorded in the file and the value in force now agree, which is the\nwhole of what BUG-0171 asked for. The constraint \"relocate only\" holds: every\nkey under `[project]`, `[versioning]`, `[release]`, `[debug]` and `[training]`\nkeeps its section and value, and the file is otherwise unreformatted.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0171 part 2 — misplaced-key warning fires correctly for both keys",
+      "heading": "Finding 2: BUG-0171 part 2 — misplaced-key warning fires correctly for both keys",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehavioral verification against synthetic configs under a scratch `KANBAN_ROOT`\n(`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/tester-scratch/kroot`), one\ncase per branch. The positive case, both keys under `[training]` and neither\nunder `[release]`:\n\n```\npp_deep_verify_mode fixtureproj              -> stdout \"weekly\", exit 0\n  stderr: project_paths.sh: pp_deep_verify_mode: 'deep_verify' found in\n          [training], not [release], for project 'fixtureproj' in <path> —\n          only [release] deep_verify is honored; defaulting to 'weekly'.\n          Move the key under [release] to activate it.\npp_deep_verify_offhours_window fixtureproj   -> stdout \"03:00-03:59\", exit 0\n  stderr: (the same warning, naming deep_verify_offhours_window and its section)\n```\n\nThe warning names the section found, `[release]`, the default applied, and the\nremedy. stdout carries the default alone, and the exit code is 0 — a warning,\nnot a refusal, exactly as the bug required and as the census constraint\ndemands.\n\nNegative cases, all verified to emit **no** warning (this is the constraint\n\"warn only for a key genuinely absent from `[release]`\"):\n\n| Fixture | Config shape | stdout | stderr |\n|---|---|---|---|\n| `both` | key under `[release]` **and** `[training]` | `off` | empty |\n| `absent` | key in no section at all | `weekly` | empty |\n| `commented` | `# deep_verify = weekly` / `; deep_verify = off` under `[training]` | `weekly` | empty |\n| live project | key correctly under `[release]` | `off` | empty |\n\nTwo further cases warn, and both are correct: `eoftrail` reproduces the\noriginal bug's exact shape (a headerless `deep_verify = off` after two blank\nlines at EOF) and warns; `blankrelease` (`deep_verify =` blank under\n`[release]`, real value under `[training]`) warns, which is right — the blank\nmeans the operator's value is still not in force.\n\nThe `_pp_find_key_section` helper is advisory only and never changes which\nsection a value resolves from; `read_ini`'s `[release]`-only read stays\nauthoritative, and `team/scripts/lib/ini_parser.sh` is untouched.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "scheduled deep-verify now skips this project at no cost",
+      "heading": "Finding 3: scheduled deep-verify now skips this project at no cost",
+      "level": 3,
+      "body": "**Category:** pass\n\n```\n$ bash team/scripts/deep-verify.sh --scheduled\ndeep-verify: project=pgai-agent-kanban scheduled run skipped (deep_verify=off)\nexit 0\n```\n\nThe ledger `projects/pgai-agent-kanban/deep-verify-ledger.md` is byte-identical\nbefore and after (md5 `0a9f07d7…` both sides), and no container build process\nwas started. This is the observable payoff of part 1: the ~13-minute weekly\nsweep is no longer being paid against the operator's recorded intent.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "`deep-verify.sh` stdout/stderr split preserves both the warning and the refusal",
+      "heading": "Finding 4: `deep-verify.sh` stdout/stderr split preserves both the warning and the refusal",
+      "level": 3,
+      "body": "**Category:** pass\n\nThis is the guard the RC added alongside the warning, and it is the one most\nworth triggering rather than reading. The `--scheduled` path previously\ncaptured `pp_deep_verify_mode` with `2>&1`; with the new warning that would\nfold warning prose into `_dv_mode` for any project with a misplaced key.\nVerified end to end against a synthetic registered project:\n\n- **Misplaced key, success path.** stdout carried only the narration\n  (`deep-verify: project=synthproj scheduled run not due (outside off-hours\n  window …)`) — proving `_dv_mode` resolved cleanly to `weekly` and was not\n  corrupted — while the resolver's warning was relayed verbatim on stderr.\n  Exit 0.\n- **Invalid value (`deep_verify = maybe`), failure path.** The dual-channel\n  refusal survived the refactor intact, with the resolver's full diagnostic\n  text preserved in the `message` field:\n  ```\n  error:   deep_verify.invalid_schedule_mode\n  message: project 'synthproj' has an unrecognized project.cfg [release]\n           deep_verify value: … (expected 'weekly' or 'off'; blank/absent\n           defaults to 'weekly')\n  remedy:  Set project.cfg [release] deep_verify to 'weekly' or 'off' …\n  ```\n  Exit 1.\n- **No temp-file leak.** `find /tmp/pgai_kanban_tmp -name '*deep_verify_mode_stderr*'`\n  returns nothing after both runs; the `pgai_mktemp` file is removed on both\n  branches.\n\n`team/scripts/lib/temp.sh` is sourced at `deep-verify.sh:150`, well before the\n`--scheduled` block, so `pgai_mktemp` is always in scope — and the live\n`--scheduled` run in Finding 3 exercised that path for real.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "the new unit tests fail when the change is reverted",
+      "heading": "Finding 5: the new unit tests fail when the change is reverted",
+      "level": 3,
+      "body": "**Category:** pass\n\nSeven tests were added to `team/tests/unit/test_project_paths_bash.py`\ncovering present-in-`[release]`, absent-everywhere, misplaced-elsewhere and\nrelease-wins-even-if-duplicated, for both keys. To confirm they are not\nvacuous, `_pp_find_key_section` was neutralised in a scratch copy of the\nresolver (early `return 0`) and the acceptance tests re-run:\n\n```\nFAILED …::test_deep_verify_offhours_window_misplaced_section_warns_and_defaults\nFAILED …::test_deep_verify_mode_misplaced_section_warns_and_defaults_weekly\n2 failed, 38 deselected\n```\n\nThe worktree was restored immediately (`git status --short` clean) and the same\nselection re-run green: `7 passed, 33 deselected`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "documentation matches the shipped code",
+      "heading": "Finding 6: documentation matches the shipped code",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/SOP.md` (\"The per-project switch\") and `docs/operator-commands.md` (\"The\nscheduled trigger's per-project switch\") were read in full against the code.\nBoth state that the two keys are read from `[release]` and no other section,\nthat an INI key belongs to the nearest header above it, that the resolver warns\non stderr naming the found section / `[release]` / the default / the remedy,\nand that the signal is advisory — nothing refuses, nothing exits non-zero, no\nnew blocking site. Every one of those claims is true of the code as merged.\nNeither document claims a Python-side warning, which is correct: `resolve_mode()`\nin `team/pgai_agent_kanban/deep_verify/schedule.py` receives an\nalready-extracted string and cannot see sections. PM anticipated this in the\nticket notes and CODER recorded the decision, so it is a documented scope\nchoice, not a parity gap.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "constraint negative checks",
+      "heading": "Finding 7: constraint negative checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- No new refusal site: the diff adds no `CENSUS-ANCHOR` marker and no Locator\n  Index entry, matching the \"warning, not refusal\" constraint.\n- `python3 team/scripts/lint_gate_census_compliance.py` → exit 0, 32 files\n  checked, 0 offenders, 85 anchored sites reconciled.\n- `bash -n` clean on `project_paths.sh` and `deep-verify.sh`; `py_compile`\n  clean on the new test module. `set -euo pipefail` preserved at\n  `deep-verify.sh:111`.\n- `team/scripts/lib/ini_parser.sh` untouched, as required.\n- Skip-cites-real-bug grep-gate (Step 6.13): no `BUG-SKIP` or non-numeric\n  placeholder skip IDs anywhere under `team/tests/`; the only textual matches\n  are archived runner logs under `team/tests/artifacts/`, not skip annotations.\n  No `MISSING:` bug file.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "release-state drift check",
+      "heading": "Finding 8: release-state drift check",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_last_released_version pgai-agent-kanban` → `v2.9.22`; `semver_gt v2.9.23\nv2.9.22` holds. `release-state.md` reads `Active RC: v2.9.23`, opened\n2026-09-07T09:41:17+00:00 by `CM-20260907-022-open-rc-2-9-23`, `Last Released:\nv2.9.22` (well-formed `vX.Y.Z`). The `ai_rc/v2.9.23` branch exists and matches\nthe worktree HEAD. No drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "release-lifecycle simulation",
+      "heading": "Finding 9: release-lifecycle simulation",
+      "level": 3,
+      "body": "**Category:** pass\n\nTrigger condition met — the diff touches `team/scripts/lib/project_paths.sh`\nand `team/scripts/deep-verify.sh`.\n`python3 -m pytest tests/integration/test_cm_release_synthetic.py` → 15 passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "prerequisite dependency graph",
+      "heading": "Finding 10: prerequisite dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CM-022-open-rc → CODER-020 → WRITER-021 → TESTER-023 → CM-025-release`.\nAcyclic, every referenced task ID exists, lifecycle bookends correct (CM-open\nfirst, TESTER then CM-release last), sequence numbers non-colliding. The gap at\n`024` is the absent HUMAN-APPROVE slot for an `auto`-approval bundle, not a\ndangling reference. All prerequisites are DONE.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "internal ticket IDs left in the new test docstrings",
+      "heading": "Finding 11: internal ticket IDs left in the new test docstrings",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (hygiene only — no behavior wrong, no test weakened, no workflow impaired)\n**Regression:** yes (introduced by this RC, commit `c19e84a`)\n**Integrity Damage:** no\n**Filed As:** BUG-0172 (Path C-A — filed as BUG — code defect / regression / test failure)\n\nThree `BUG-0171` citations ship in `team/tests/unit/test_project_paths_bash.py`\n— line 354 (section comment) and lines 394 and 462 (the two\nacceptance-criterion docstrings). `team/SOP.md` \"Test Authoring Guidelines\"\n(anti-pattern 2, \"When acceptable\") forbids this without qualification:\n\"Never — in names, docstrings, OR comments.\" The one carve-out is a skip\nannotation citing an open follow-up bug; these are not skip annotations.\n\nThe RC's author did make a provenance cleanup pass — commit `0fc2d3c`,\n\"Reword provenance references out of comments\" — and the production files it\ncovered are clean at HEAD (a grep for bug- and task-shaped IDs returns nothing\nin `project_paths.sh` or `deep-verify.sh`). The pass simply did not reach the\ntest module, and nothing in the gate chain would have told it to:\n`lint_comment_provenance.py` scans `team/scripts`, `team/scripts/lib`,\n`team/scripts/cm`, `team/pgai_agent_kanban` and `release-notes`, but not\n`team/tests`; and `lint_test_anti_patterns.py`'s anti-pattern 6 matches test\nfunction *names* only, never docstrings or comments. Both runners therefore\nexit 0 with the violation present. The bug asks for the reword and offers the\ndetection widening as optional, scope-flagged hardening.",
+      "filed_as": "BUG-0172",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (hygiene only — no behavior wrong, no test weakened, no workflow impaired)",
+        "regression": "yes (introduced by this RC, commit `c19e84a`)",
+        "filed_as": "BUG-0172 (Path C-A — filed as BUG — code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "shipped v2.9.22 release notes carry a garbled duplicated change list",
+      "heading": "Finding 12: shipped v2.9.22 release notes carry a garbled duplicated change list",
+      "level": 3,
+      "body": "**Category:** pre-existing-bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (human-readable output only; verdicts, ledger records and duplicate detection are all correct)\n**Regression:** no — predates this RC. `release-notes/v2.9.22.md` was written on `ai_main` during the v2.9.22 release (commits `15a8471` / `d87eb1a`) and is untouched by this RC's five-file diff.\n**Integrity Damage:** no\n**Filed As:** cites existing **BUG-0168** (open) — not re-filed\n\nSpot-check (Step 6.11, \"regressions of prior gaps\"). `release-notes/v2.9.22.md`\nline 27 ships a single `## Other Changes` bullet repeating\n`docker/claude-abliterated/Dockerfile` twelve times and\n`docker/rocky9/Dockerfile` six times, with a stray leading `- -`.\n\nTraced to source: the release-notes generator reads a bundled bug's substance\nthrough `get_bug_substance` in `team/scripts/lib/cm/release_notes.sh`, and\nBUG-0167's `## Files Involved` (lines 82-99) is itself 18 duplicated lines —\nsix repetitions per distinct engine/flavor pair. That 18-fold duplication is\nprecisely the defect BUG-0168 describes and is still open for. BUG-0168\nenumerates three operator-facing surfaces the duplicated string reaches; the\nshipped release notes are a fourth it does not name. Cited rather than\nre-filed: a second bug would split one fix across two tickets and misstate how\nmany defects exist.",
+      "filed_as": "BUG-0168",
+      "filed_by": null,
+      "severity": null,
+      "category": "pre-existing-bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "pre-existing-bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (human-readable output only; verdicts, ledger records and duplicate detection are all correct)",
+        "regression": "no — predates this RC. `release-notes/v2.9.22.md` was written on `ai_main` during the v2.9.22 release (commits `15a8471` / `d87eb1a`) and is untouched by this RC's five-file diff.",
+        "filed_as": "cites existing **BUG-0168** (open) — not re-filed"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "autonomous operation criterion",
+      "heading": "Finding 13: autonomous operation criterion",
+      "level": 3,
+      "body": "**Category:** pass\n\nSee the dedicated section below. All four checks answer NO.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

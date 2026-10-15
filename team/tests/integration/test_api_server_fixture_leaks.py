@@ -37,7 +37,7 @@ Constraints honoured
 - All temp paths route through pytest's tmp_path (which conftest.py redirects
   to $PGAI_AGENT_KANBAN_TEMP_DIR/tests on framework-managed runs).
 
-Test-name policy (SOP.md Anti-pattern 6):
+Test-name policy (roles/TESTER.md Anti-pattern 6):
   Names describe behavior, not bug IDs or scaffolding labels.
 """
 

@@ -1,0 +1,184 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified release candidate `ai_rc/v2.10.3` (commit `174cc59`) against\n`projects/pgai-agent-kanban/requirements/v2.10.3-bugfix-bundle-20260907.md`,\nwhose single bundled item is `BUG-0178-docs-references-not-installed.md`, and\nagainst the two decomposed tickets\n`CODER-20260907-060-install-cited-reference-docs` and\n`CODER-20260907-061-docs-reachability-guard`. The RC is small and purely\nadditive: `install.sh` gains a second copy loop (+42 lines) that delivers ten\n`docs/` reference documents into the kanban root, and\n`team/tests/unit/test_installed_governance_docs_citations_resolve.py` (381\nlines, new) asserts mechanically that every `docs/...` citation reachable from\nthe installed governance files resolves under a freshly installed root.\nVerification ran the pre-flight merge checks, both gated runners with\ncoverage, every stated acceptance criterion as a command, and a behavioral\ntrigger of the new guard's failure mode. Both gated runners exited 0. All\ntwelve ticket-level acceptance criteria pass. Three findings sit outside the\nletter of those criteria but inside the bundled bug's own `## Expected`\nstatement and the project's coding standards — the most material being that\nthe sanctioned upgrade path never delivers the documents, so the defect\nBUG-0178 describes persists on every install that already exists, including\nthe operator's own.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "The sanctioned upgrade path never delivers the documents, so the fix reaches only fresh installs",
+      "heading": "Finding 1: The sanctioned upgrade path never delivers the documents, so the fix reaches only fresh installs",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a real defect that ships and is fixed next iteration; shipping worsens nothing — the upgrade path delivered no documents before this RC either)\n**Regression:** no (`team/scripts/upgrade.sh` is untouched by this RC — `git log ai_main..ai_rc/v2.10.3 -- team/scripts/upgrade.sh` returns zero commits; the shortfall predates the RC and is simply not closed by it)\n**Integrity Damage:** no\n**Filed As:** BUG-0185 (Path C-A — filed as BUG)\n\n`install.sh` now delivers the ten cited documents on a fresh install, and that\nis exactly what both tickets' acceptance criteria ask for. But `install.sh` is\nnot the route an existing install takes. Evidence gathered in the worktree and\non the live root:\n\n- `grep -c docs team/scripts/upgrade.sh` -> `0`. The string does not occur in\n  the file.\n- `team/scripts/upgrade.sh:1078` carries its own independent deposit loop over\n  the same `team/` word list, and the file has exactly three `deposit_item`\n  call sites (lines 1081, 1088, 1274 — team items, example configs, provider\n  subagents). None copies `docs/`.\n- `upgrade.sh` never invokes `install.sh`: `INSTALL_SH` (line 835) is used only\n  by the `[[ ! -f ]]` existence probe on the next line.\n- The install-side route is explicitly closed. Running\n  `bash install.sh --upgrade` over an existing throwaway root exits 1 with\n  `--upgrade is not supported by install.sh. To upgrade an existing\n  installation, use upgrade.sh instead.`\n- On the live install, `$HOME/pgai_agent_kanban/docs` is still absent,\n  and nothing in the upgrade path will create it.\n\nThe bundled bug's own `## Expected` is the criterion this traces to:\n\"Content a shipped role file names by path is openable by an agent reading the\ninstalled kanban root, on any project, without a checkout of this repository.\"\nFor every already-existing install that holds after this RC ships only if the\noperator reinstalls from scratch.\n\nThe RC's new guard cannot see this: it drives the real `install.sh` only, so\nthe suite stays green while the upgrade path delivers nothing. BUG-0185 asks\nfor the upgrade-side copy, a single shared manifest both scripts read instead\nof two hand-maintained lists, and guard coverage for the upgraded root.",
+      "filed_as": "BUG-0185",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a real defect that ships and is fixed next iteration; shipping worsens nothing — the upgrade path delivered no documents before this RC either)",
+        "regression": "no (`team/scripts/upgrade.sh` is untouched by this RC — `git log ai_main..ai_rc/v2.10.3 -- team/scripts/upgrade.sh` returns zero commits; the shortfall predates the RC and is simply not closed by it)",
+        "filed_as": "BUG-0185 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Both files added or changed by this RC cite the motivating ticket in shipped comments, and the provenance lint does not scan either of them",
+      "heading": "Finding 2: Both files added or changed by this RC cite the motivating ticket in shipped comments, and the provenance lint does not scan either of them",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (hygiene — process residue in shipped prose; nobody is steered into a wrong action, with the one exception noted below)\n**Regression:** yes (both instances are introduced by this RC's own diff)\n**Integrity Damage:** no\n**Filed As:** BUG-0186 (Path C-A)\n\nDirective 8 of `docs/coding-standards.md` forbids citing bug IDs, ticket IDs\nor requirement versions in comments and docstrings. Eleven instances ship in\nthis RC: `install.sh:728`, `:742`, `:743`, and\n`team/tests/unit/test_installed_governance_docs_citations_resolve.py:4`, `:23`,\n`:34`, `:43`, `:46`, `:63`, `:165`, `:285`.\n\nTwo of them are worse than untidy. `install.sh:742-743` describes the\nmechanical guard as \"a separate ticket ... follow-on\" — that guard shipped in\nthis same RC, so the comment misdescribes the tree it ships in. And the test\ndocstring at line 63 points the reader at \"this ticket's status.md\" for the\nmeasured runtime, a file no reader of the shipped tree can open.\n\nThe reason this got past the gate is a scan-scope gap, verified rather than\ninferred: `team/scripts/lint_comment_provenance.py` defaults `--code-dirs` to\n`team/scripts/`, `team/scripts/lib/`, `team/scripts/cm/` and\n`team/pgai_agent_kanban/` (line 755), and the gated runners pass no override.\nThe repository-root `install.sh` and the whole of `team/tests/` are outside\nthat set, so the lint never opened either file — its findings on this run name\nonly pre-existing `release-notes/` lines. This is the third consecutive\nrelease in which new test prose carries the motivating ticket ID (BUG-0172 and\nBUG-0179, both `running`, name older files and do not cover these two), which\nis why BUG-0186 asks for the scan-scope widening alongside the text fix.",
+      "filed_as": "BUG-0186",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (hygiene — process residue in shipped prose; nobody is steered into a wrong action, with the one exception noted below)",
+        "regression": "yes (both instances are introduced by this RC's own diff)",
+        "filed_as": "BUG-0186 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Five runnable `source` lines in the installed role files load helpers from a `team/` directory that does not exist on an installed root",
+      "heading": "Finding 3: Five runnable `source` lines in the installed role files load helpers from a `team/` directory that does not exist on an installed root",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks; the prose half is WRITER work)\n**Systemic Risk:** medium (a real defect an agent hits at run time; long-standing, so shipping this RC worsens nothing)\n**Regression:** no (all five lines predate this RC — the RC's diff touches only `install.sh` and one new test file, and no role file is modified)\n**Integrity Damage:** no\n**Filed As:** BUG-0187 (Path C-A)\n\nHit live during this run, not reasoned about. Following `roles/TESTER.md:470`\nverbatim, as Step 5d instructs, on the live install:\n\n```\n$ source \"$PGAI_AGENT_KANBAN_ROOT_PATH/team/scripts/lib/deep_verify_ledger.sh\"\n$ deep_verify_ledger_read_latest \"pgai-agent-kanban\"\n/bin/bash: line 3: deep_verify_ledger_read_latest: command not found   # rc=127\n```\n\nThe installer flattens `team/` onto the root, so there is no `team/` directory\non an installed kanban; the working path is\n`$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/lib/deep_verify_ledger.sh`, which returns\nthe ledger record cleanly. Five sites carry the broken form:\n`roles/PM.md:88`, `roles/TESTER.md:470`, `roles/TESTER.md:646`,\n`roles/TESTER.md:1493`, `roles/CODER.md:568`.\n\nThis is the same defect class BUG-0178 is about — installed governance naming\na path that does not resolve on an installed root — one dimension over from\nthe `docs/` citations the RC fixed. The new guard walks `docs/...` citations\nonly, so it is green while these five dangle. The `source` failure is silent;\nit surfaces only as a missing function two lines later, which is what makes it\nworth more than hygiene.",
+      "filed_as": "BUG-0187",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks; the prose half is WRITER work)",
+        "systemic_risk": "medium (a real defect an agent hits at run time; long-standing, so shipping this RC worsens nothing)",
+        "regression": "no (all five lines predate this RC — the RC's diff touches only `install.sh` and one new test file, and no role file is modified)",
+        "filed_as": "BUG-0187 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Ticket 1 acceptance criteria — all six pass",
+      "heading": "Finding 4: Ticket 1 acceptance criteria — all six pass",
+      "level": 3,
+      "body": "**Category:** pass\n\nCommands run in the worktree, against throwaway roots under\n`$PGAI_AGENT_KANBAN_TEMP_DIR/projects/pgai-agent-kanban/tester-scratch-063`:\n\n| Criterion | Result |\n|---|---|\n| Ten cited paths resolve after a fresh install | PASS — all ten present, including the nested `docs/audits/v1.27.2-gate-remedy-census.md` |\n| Second run over the same root succeeds non-interactively, documents present and current | PASS with caveat — see below |\n| `--dry-run` creates no docs content | PASS — target root never created; 10 `would copy: docs/...` lines, no files |\n| Live install unchanged by anything this ticket runs | PASS — `$HOME/pgai_agent_kanban/docs` still absent; no file outside kanban task/process state modified |\n| `git diff --stat` shows no changes under `team/roles/`, `team/SOP-core.md`, `team/README.md`, `docs/README.md` | PASS — empty diff for those paths |\n| `bash -n install.sh` passes and `install.sh --help` exits 0 | PASS — both |\n\nThe caveat on the re-run criterion: a second `install.sh` run over an existing\nroot **without** `--force` exits 1 by design — the fresh-install path refuses\nto overwrite operator state and directs the operator to `upgrade.sh`. That\nguard predates this RC and is not a defect. With `--force` (which is the form\nthe ticket's own verification and the new test use) the re-run exits 0, and a\ndocument deliberately staled in the target root is refreshed to match the\nsource. The criterion is met on the reading the ticket's own tests use.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Ticket 2 acceptance criteria — all six pass",
+      "heading": "Finding 5: Ticket 2 acceptance criteria — all six pass",
+      "level": 3,
+      "body": "**Category:** pass\n\n| Criterion | Result |\n|---|---|\n| New check passes against the tree and names what it verified | PASS — the module builds a `_ReachabilityReport` and prints \"Scanned 21 installed governance file(s) ... Checked 10 distinct docs/ citation(s) ... Every citation resolved\", not a bare exit code |\n| A citation to an undelivered document makes the check fail, demonstrated in committed test | PASS — `test_citation_to_undelivered_document_is_reported_as_unreachable` copies the source tree, appends a dangling citation to the copied `team/roles/TESTER.md`, installs from the copy, and asserts both the citation and its attribution to `roles/TESTER.md` |\n| `run-unit-tests.sh` exits 0 and includes the new check | PASS — exit 0; `tests/unit/test_installed_governance_docs_citations_resolve.py ..` in the run |\n| `run-integration-tests.sh` exits 0 | PASS |\n| `lint_governance_byte_budgets.sh --kanban-cfg kanban.cfg_example` prints `under` for all seven roles | PASS — po/pm/coder/writer/tester/cm/overwatch all `under`, exit 0 |\n| Python compiles, `bash -n` passes on changed shell | PASS — `python3 -m py_compile` on the new module OK; `bash -n install.sh` OK |",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Behavioral verification — the guard fires on the regression it exists to catch",
+      "heading": "Finding 6: Behavioral verification — the guard fires on the regression it exists to catch",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe committed red case proves the check reacts to a *new citation*. The\nregression the guard actually has to catch is the opposite direction: the\ninstaller quietly stopping delivery of a document that is still cited. I\nexercised that directly rather than assuming symmetry.\n\nProcedure: copied the worktree to a throwaway tree, deleted the single line\n`    coding-standards.md \\` from `install.sh`'s new docs loop, installed from\nthat copy into a throwaway root, and ran the module's own\n`_find_unreachable_docs_citations` against both roots.\n\n- Regressed installer: **5 unreachable citations** reported —\n  `roles/WRITER.md`, `roles/TESTER.md`, `roles/PM.md`, `roles/CODER.md` and\n  `docs/audits/v1.27.2-gate-remedy-census.md` each citing\n  `docs/coding-standards.md`. The transitive hop is visible in that list, which\n  also confirms the closure walk works as documented.\n- Healthy install: 0 unreachable, 21 files scanned, 10 citations checked.\n\nThe guard distinguishes a broken installer from a healthy one, not merely a\nbroken citation from a healthy one.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Pre-flight, drift, dependency and skip checks — pass",
+      "heading": "Finding 7: Pre-flight, drift, dependency and skip checks — pass",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Pre-flight merge verification:** no anomalies. No DONE task in the project\n  has a live feature branch that is unmerged or zero-commits-ahead; both CODER\n  branches were deleted after merge, which is the normal post-merge shape.\n- **Worktree identity:** `HEAD` = `174cc59` = `ai_rc/v2.10.3`; `git status\n  --short` empty; `git stash list` empty.\n- **RC shape:** four commits off `ai_main` — two feature commits and two\n  `--no-ff` merges. No stray empty commit (the pattern BUG-0183 records from a\n  prior RC did not recur).\n- **release-state.md (Step 6.1):** `Active RC: v2.10.3`, `RC Opened At\n  2026-09-07T20:47:14+00:00`, `RC Opened By Task\n  CM-20260907-062-open-rc-2-10-3`, `Last Released: v2.10.2` — well-formed\n  `vX.Y.Z`, and `v2.10.3` is strictly greater than the `ai_v2.10.2` tag on the\n  dev tree. No drift.\n- **Step 6.8 synthetic release simulation:** skipped with note — the RC's diff\n  touches no release-lifecycle file (`install.sh` and one new unit test only).\n- **Step 6.10 prereq graph:** `CM-062-open-rc` -> `CODER-060` -> `CODER-061` ->\n  `TESTER-063`; all referenced task IDs exist, no cycles, sequence numbers\n  non-colliding, bookends correct.\n- **Step 6.13 skip-cites-real-bug:** no placeholder `BUG-SKIP` forms and no\n  cited `BUG-NNNN` in any skip annotation across `team/tests/` (the only\n  matches are archived runner logs under `team/tests/artifacts/` describing\n  the lint itself). The gated runners' `lint_skip_bug_gate` passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "pre_flight_merge_verification": "no anomalies. No DONE task in the project",
+        "worktree_identity": "`HEAD` = `174cc59` = `ai_rc/v2.10.3`; `git status",
+        "rc_shape": "four commits off `ai_main` — two feature commits and two",
+        "release_state_md_step_6_1": "`Active RC: v2.10.3`, `RC Opened At",
+        "step_6_8_synthetic_release_simulation": "skipped with note — the RC's diff",
+        "step_6_10_prereq_graph": "`CM-062-open-rc` -> `CODER-060` -> `CODER-061` ->",
+        "step_6_13_skip_cites_real_bug": "no placeholder `BUG-SKIP` forms and no"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

@@ -1,0 +1,242 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate v2.19.1 (worktree detached at `d7a9e15`, byte-identical to\n`ai_rc/v2.19.1`) against `projects/pgai-agent-kanban/requirements/v2.19.1-bugfix-bundle-20260911.md`.\nThe bundle carries exactly one item, BUG-0244: `docs/OPERATIONS.md` cites `docs/dashboard.md`\nthree times, but the document was absent from `team/config/docs-manifest.txt`, so neither\n`install.sh` nor `team/scripts/upgrade.sh` delivered it — the pointer resolved in a repository\ncheckout and dangled on every installed or upgraded root, and the two docs-reachability unit\ntests failed accordingly. The RC's entire diff against `ai_main` is one inserted line adding\n`dashboard.md` to the manifest. Verification exercised the fix behaviorally rather than\nstructurally: a fresh `install.sh` into a throwaway root now delivers `docs/dashboard.md`, an\n`upgrade.sh` run over a root installed from the pre-fix `ai_main` tree delivers it too, and the\nsame pre-fix tree installed on its own does **not** deliver it — so the manifest line is\ndemonstrably the thing doing the work. The manifest's transitive-closure rule was re-checked\nindependently with the test's own regex (zero outbound `docs/` citations from `docs/dashboard.md`),\nand an independent BFS over the freshly installed root resolved all 26 `docs/` citations reachable\nfrom the installed governance files. Both gated runners exited 0. No `bug`, `gap`, or\n`stale-assertion` findings were recorded.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight — worktree identity, cleanliness, stashes, merge state",
+      "heading": "Finding 1: Pre-flight — worktree identity, cleanliness, stashes, merge state",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` = `d7a9e152b4e348384b846491afbdccd7b0bdba78` = `git rev-parse ai_rc/v2.19.1`.\n`git status --short` empty; `git stash list` empty. Pre-flight merge verification scanned every\nDONE task under `projects/pgai-agent-kanban/tasks/`: no DONE task retains a live feature branch\n(CODER deleted `ai_feature/CODER-20260911-056-docs-manifest-dashboard-doc` after merging), so\nCheck 1 and Check 2 had no live branch to evaluate and reported zero anomalies. The RC's only\ntwo commits are `d32c190` (the manifest line) and `d7a9e15` (the `--no-ff` merge).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0244 acceptance item 1 — gated unit runner exits 0 and the module reports 6 passed",
+      "heading": "Finding 2: BUG-0244 acceptance item 1 — gated unit runner exits 0 and the module reports 6 passed",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/run-unit-tests.sh --coverage` → **exit 0**, `4020 passed, 3 skipped in 607.21s`.\nEvery lint pre-flight reported OK (`test_anti_patterns`, `skip_cites_real_bug`, `orphan_tests`,\n`api_parity`, `icd_freshness`, `icd_compat`, `changelog_freshness`, `help_presence`,\n`python_import_completeness`, `dual_channel_pair`, `gate_census_compliance`, `bare_tmp_cleanliness`,\n`listener_cleanliness`, and the rest). The module named in the bug appears in the run as\n`tests/unit/test_installed_governance_docs_citations_resolve.py ......  [ 71%]` — six dots, six\npassed, zero failed, which is the bug's acceptance criterion met inside the authoritative runner\nrather than under a bare pytest invocation.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0244 acceptance item 2 — both delivery routes produce the file, and the fix is load-bearing",
+      "heading": "Finding 3: BUG-0244 acceptance item 2 — both delivery routes produce the file, and the fix is load-bearing",
+      "level": 3,
+      "body": "**Category:** pass\n\nRun against throwaway roots under `/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/tester-058/`,\nwith `PGAI_AGENT_KANBAN_ROOT_PATH` repointed per the live-install safety rule; the operator's live\nroot was never a target of any of the three runs.\n\n1. **Fresh install (RC tree).** `env PGAI_AGENT_KANBAN_ROOT_PATH=<fresh-root> bash install.sh --force\n   --no-system-cron --stamp-version v2.19.1-tester` → exit 0. `<fresh-root>/docs/` contains 11 files\n   plus `audits/`, including `dashboard.md` (8171 bytes).\n2. **Failure mode reproduced (pre-fix tree).** `git archive ai_main | tar -x` into a scratch tree\n   (confirmed: no `dashboard.md` line in its manifest), then installed into `<old-root>` → exit 0,\n   and `<old-root>/docs/dashboard.md` is **absent**. This is the guard-triggering half of Step 6.5:\n   the same installer, the same command, one manifest line different, and the document does not\n   arrive. The fix is the cause of the delivery, not a coincidence of it.\n3. **Upgrade over the pre-fix root.** `env PGAI_AGENT_KANBAN_ROOT_PATH=<old-root> bash\n   team/scripts/upgrade.sh --force --no-backup --dev-tree <rc-worktree> --stamp-version v2.19.1-tester`\n   → exit 0, log line `[upgrade] Upgraded: docs/dashboard.md`, and the file is present afterwards.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0244 acceptance item 3 — the manifest's transitive-closure rule holds",
+      "heading": "Finding 4: BUG-0244 acceptance item 3 — the manifest's transitive-closure rule holds",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe manifest header's second rule is that a listed document must not itself cite a `docs/` path the\nmanifest omits. Checked with the test module's own pattern, read out of the source rather than\nrecalled (`_DOCS_CITATION_RE = re.compile(r\"docs/[A-Za-z0-9._/-]+\\.md\")`):\n`grep -oE 'docs/[A-Za-z0-9._/-]+\\.md' docs/dashboard.md` returns nothing, so `dashboard.md` adds no\nnew closure edges and one manifest line was the complete change.\n\nTwo independent confirmations beyond the criterion, both against the freshly installed root rather\nthan the checkout:\n\n- A BFS from the installed seed set (`README.md`, `DIRECTIVES.md`, `OVERVIEW.md`, `SOP-core.md`,\n  `roles/*.md`) re-scanning every document it resolves: 23 files scanned, 26 citations checked,\n  **zero unresolved**.\n- The non-transitive root-variable dimension applied by hand to the newly delivered document: all\n  three command paths it names (`scripts/dashboard/cadence-loop.sh`, `scripts/dashboard/metrics.sh`,\n  `scripts/dashboard/show-metrics.sh`) exist under the fresh root. The delivered document is usable,\n  not merely present.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0244 acceptance item 4 and the fix-direction constraint",
+      "heading": "Finding 5: BUG-0244 acceptance item 4 and the fix-direction constraint",
+      "level": 3,
+      "body": "**Category:** pass\n\n`grep -n 'dashboard.md' team/config/docs-manifest.txt` → `32:dashboard.md`.\n`grep -c 'docs/dashboard.md' docs/OPERATIONS.md` → `3`. The repair took the sanctioned direction —\ndeliver the cited document — and did not remove the cross-reference. The new line matches the\nmanifest's conventions exactly: path relative to `docs/`, one per line, no inline comment, no prose,\nplaced directly beneath `OPERATIONS.md`, the document that cites it.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Requirements-doc acceptance criteria",
+      "heading": "Finding 6: Requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- *Each bundled item is addressed in the implementation* — the bundle names one item, BUG-0244; all\n  four of its own acceptance items are verified above.\n- *All Python files compile cleanly* — `py_compile` over all 423 `.py` files in the tree: exit 0, no\n  output.\n- *All bash files pass syntax check* — `bash -n` over all 269 `.sh` files: zero failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Integration suite",
+      "heading": "Finding 7: Integration suite",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/run-integration-tests.sh --coverage` → **exit 0**, `449 passed, 1 skipped in\n431.69s`. All lint pre-flights OK, including `bare_tmp_cleanliness` and `listener_cleanliness`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Release-state drift check (Step 6.1)",
+      "heading": "Finding 8: Release-state drift check (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_last_released_version pgai-agent-kanban` → `v2.19.0`; `semver_gt v2.19.1 v2.19.0` is true.\n`release-state.md` holds `Active RC: v2.19.1`, `RC Opened At: 2026-09-11T21:25:11+00:00`,\n`RC Opened By Task: CM-20260911-057-open-rc-2-19-1`, `Last Released: v2.19.0` — well-formed\n`vX.Y.Z`, and the named RC branch `ai_rc/v2.19.1` exists. No drift. No HALT flag at either scope.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Skip-cites-real-bug gate (Step 6.13)",
+      "heading": "Finding 9: Skip-cites-real-bug gate (Step 6.13)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe gated runners' own `skip_cites_real_bug` lint reported OK in both suites. Confirmed\nindependently: no skip annotation anywhere under `team/tests/` cites a `BUG-NNNN` ID, and the only\ngrep hits for the placeholder pattern are inside archived runner logs under\n`team/tests/artifacts/coverage-*/` — captured output describing the lint itself, not skip\nannotations in test code.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Prerequisite dependency graph (Step 6.10)",
+      "heading": "Finding 10: Prerequisite dependency graph (Step 6.10)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CM-20260911-057-open-rc-2-19-1` (DONE, no prereqs) → `CODER-20260911-056-docs-manifest-dashboard-doc`\n(DONE) → `TESTER-20260911-058-verify-2-19-1` (WORKING) → `CM-20260911-060-release-2-19-1` (WAITING,\nprereqs: the CODER and TESTER tasks). Acyclic, every referenced task directory exists, lifecycle\nbookends correctly linked.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Coding-standards spot-check (Step 6.14)",
+      "heading": "Finding 11: Coding-standards spot-check (Step 6.14)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe RC's whole diff is a single data line in a configuration manifest: no new script (so directive 6\n`--help` does not apply), no new production string, no hardcoded operational value, no duplicated\n`lib/` implementation. Directive 8 holds — the added line names no bug, task, or version identifier.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

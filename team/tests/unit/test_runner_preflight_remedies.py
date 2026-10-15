@@ -1,16 +1,16 @@
 """
 test_runner_preflight_remedies.py
 ==================================
-Retrofit (CODER-20260727-020): the three gated test runners
+Retrofit: the three gated test runners
 (run-unit-tests.sh, run-integration-tests.sh, run-gated-tests.sh) print full
 remedy blocks for deterministic pre-flight aborts and name the next
 diagnostic step for non-deterministic failures, per
-docs/coding-standards.md "Gates prescribe, not just diagnose" and classified
-in docs/audits/v1.27.2-gate-remedy-census.md, Segment E (rows 29-35):
+docs/coding-standards.md "Gates prescribe, not just diagnose", classified
+as follows:
 
-  - unknown-argument abort          (partial, row 32)
-  - pytest-not-installed abort      (full-remedy, row 31)
-  - pytest test-suite failure       (non-deterministic exempt, row 33)
+  - unknown-argument abort          (partial)
+  - pytest-not-installed abort      (full-remedy)
+  - pytest test-suite failure       (non-deterministic exempt)
   - bare-/tmp cleanliness assertion (CONVERT-class, warn+file+continue —
                                       see below)
   - TCP listener cleanliness check  (CONVERT-class, warn+file+continue —
@@ -197,7 +197,7 @@ def _run_extracted_block(block: str, env_setup: str) -> subprocess.CompletedProc
 
 
 # ===========================================================================
-# Unknown-argument abort — partial (row 32)
+# Unknown-argument abort — partial
 # ===========================================================================
 
 
@@ -224,7 +224,7 @@ def test_unknown_argument_remedys_help_command_actually_clears_the_gate(
 ) -> None:
     """The remedy's first prescribed command (--help) succeeds when run.
 
-    Per PRIORITY-0001 acceptance #1: executing the printed command verbatim
+    Per the gates-prescribe-remedies pattern: executing the printed command verbatim
     must clear the gate — here, '--help' is a real accepted flag, not the
     rejected one, so it exits 0 with the runner's usage text.
     """
@@ -238,7 +238,7 @@ def test_unknown_argument_remedys_help_command_actually_clears_the_gate(
 
 
 # ===========================================================================
-# pytest-not-installed abort — full-remedy (row 31)
+# pytest-not-installed abort — full-remedy
 # ===========================================================================
 
 

@@ -1,11 +1,13 @@
 # Roadmap
 
-**Current public release: v2.4.0** — the resilient-autonomy era: the
-Loop doctrine and blocking-site census, quality findings as tickets
-instead of stops, dual-channel errors, autonomous block resolution,
-the REST control plane (ICD 1.3.0) with the browser operator surface,
-pluggable workflow types, and version-targeted forward-only
-deployment.
+**Current public release: v2.41.0** — a generic software shop in a
+box: six pipeline agents plus the OVERWATCH self-monitor, the Loop
+doctrine and blocking-site census, quality findings filed as bugs
+instead of stops, dual-channel errors, autonomous resolution of known
+block shapes, pluggable workflow types, version-targeted install and
+forward-only upgrade, and four runnable demos. The loopback-only REST
+API ships experimental, with a published, versioned interface contract
+that the separate browser UI repository consumes.
 
 ## Next — field-driven
 

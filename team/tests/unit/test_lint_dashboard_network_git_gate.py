@@ -1,7 +1,7 @@
 """
 test_lint_dashboard_network_git_gate.py
 ========================================
-Tests for team/scripts/lint_dashboard_network_git_gate.py — the BUG-0112
+Tests for team/scripts/lint_dashboard_network_git_gate.py — the
 "teeth" lint that fails when any network-capable git invocation
 (ls-remote|fetch|pull|push|clone) appears under team/scripts/dashboard/*.
 
@@ -14,7 +14,7 @@ Test coverage:
      confirming the gate actually fires for each.
   7. No-exceptions-for-the-git-window — a planted ls-remote in a file named
      git-status.sh (the same filename as the real 4:git window script) is
-     still flagged; BUG-0112 explicitly forbids exempting that window.
+     still flagged; the gate explicitly forbids exempting that window.
   8. Comment-only mention is exempt — a line whose first non-whitespace
      character is '#' does not trigger a violation even though it names a
      forbidden verb (several real dashboard scripts document their own
@@ -26,7 +26,7 @@ Test coverage:
  13. main() returns 2 when the dashboard/ subdirectory does not exist.
  14. --help exits 0 (argparse integration smoke test).
  15. Violation message is actionable — names the file, line, and verb.
- 16. Remedy block (PRIORITY-0001-gates-prescribe-remedies): forcing a
+ 16. Remedy block (the gates-prescribe-remedies pattern): forcing a
      network-git violation prints the full three-part remedy block — cause(s)
      naming the offending file/line/verb, a numbered fix block of verbatim-
      runnable commands with no angle-bracket placeholders ending with the
@@ -102,8 +102,11 @@ def test_real_dashboard_tree_has_zero_violations() -> None:
 
     If this test fails, a network-capable git invocation was reintroduced
     somewhere under team/scripts/dashboard/ — exactly the regression class
-    BUG-0112's gate exists to catch.
+    this gate exists to catch.
     """
+    # Deliberately exercises the real team/scripts/dashboard/ tree (not a
+    # fixture): this is a live regression guard, not an isolated behavior a
+    # fixture could stand in for.
     violations = _lint.scan_dashboard_dir(_REAL_DASHBOARD_DIR, verbose=False)
     assert violations == [], (
         "Unexpected violations on the real dashboard tree:\n"
@@ -159,7 +162,7 @@ def test_planted_verb_is_flagged(tmp_path: Path, verb: str, invocation: str) -> 
 def test_git_window_filename_is_not_exempt(tmp_path: Path) -> None:
     """A planted ls-remote inside a file named git-status.sh is still flagged.
 
-    BUG-0112's design law is explicit: "the ENTIRE dashboard is local-only —
+    The gate's design law is explicit: "the ENTIRE dashboard is local-only —
     including the 4:git window."  This test proves the gate applies the same
     rule regardless of filename — there is no special-cased exemption for
     the two real git-window scripts (git-status.sh / git-recent-tags.sh).
@@ -354,7 +357,7 @@ def test_violation_message_names_file_line_and_verb(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Remedy-block tests (PRIORITY-0001-gates-prescribe-remedies)
+# Remedy-block tests (the gates-prescribe-remedies pattern)
 # ---------------------------------------------------------------------------
 
 # A numbered fix-command line, e.g. "  1. sed -i '3s/^/# /' \"...\"".
@@ -370,7 +373,7 @@ _ANGLE_BRACKET_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][\w -]*>")
 class TestDashboardNetworkGitGateRemedyBlock:
     """The remedy block: cause(s), numbered verbatim commands, re-lint, rule.
 
-    Exercises PRIORITY-0001-gates-prescribe-remedies' second lint target end
+    Exercises the gates-prescribe-remedies pattern's second lint target end
     to end: force a network-git violation, assert the remedy block contains
     every required part, assert the printed commands carry no angle-bracket
     placeholders, and then actually execute the printed commands verbatim to

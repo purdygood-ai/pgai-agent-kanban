@@ -1,0 +1,504 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `ai_rc/v2.24.0` (commit `6b49a96`) of pgai-agent-kanban\nagainst its requirements document\n`requirements/v2.24.0-rc-metrics-blocked-column.md` — the \"Blocked\" column for\nrc-metrics. Verification ran in the detached read-only worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260918-047-verify-2-24-0`,\nwhose `HEAD` matches `ai_rc/v2.24.0` exactly, with a clean `git status` and an\nempty stash list.\n\nAll seven prerequisite tasks (CODER-039 through CODER-045) are `DONE`, each\nmerged into the RC with a `--no-ff` merge commit; every feature branch was\ndeleted after merging, which passes both pre-flight checks trivially. Both\ngated runners exited 0. All four deliverables of the requirements doc are\npresent and were exercised behaviourally end to end: the blocked-interval\nledger and its single reader, the Blocked column across window 7 / the\nrc-metrics CLI / the REST twin, the no-backfill dash-plus-footer rendering for\npre-era rows, and the docs plus doc-truth lint registration. Every named\nacceptance criterion was executed and passed, including the 40-minute HALT +\n20-minute BLOCKED-task interval overlapping by 10 minutes merging to\n`Blocked=50` with Wall unchanged, and grep-zero of the ledger writer inside\n`team/scripts/cm/release.sh`.\n\nTwo defects were found, neither affecting the feature's measured output: the\nwake-path ledger adapter writes a misleading \"did not apply\" line to the\noperator wake log on every normal unhalted cycle, and a shipped docstring\ncarries an off-by-one column count. Both are filed via Path C (autonomous\nfollow-up filing — non-blocking).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight — RC integrity",
+      "heading": "Finding 1: Pre-flight — RC integrity",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll task folders under `projects/pgai-agent-kanban/tasks/` reading\n`## State: DONE` with a `## Feature Branch` other than `none` were scanned. No\nfeature branch from this cycle survives locally (CODER and WRITER delete after\nmerging), so Check 1 (ancestor of the RC) and Check 2 (unique commits) pass\ntrivially. The RC carries 15 commits over `ai_main`, containing all seven\nexpected `--no-ff` merge commits:\n\n```\nd5d4a57 Merge ai_feature/CODER-20260918-039-blocked-interval-ledger\n33d6dbc Merge ai_feature/CODER-20260918-040-blocked-ledger-writers\n761fe49 Merge ai_feature/CODER-20260918-041-blocked-minutes-rollup\n0781b27 Merge ai_feature/CODER-20260918-042-blocked-column-dashboard\nb0e93d4 Merge ai_feature/CODER-20260918-043-blocked-field-rest\n6de9c90 Merge ai_feature/WRITER-20260918-044-blocked-column-docs\n6b49a96 Merge ai_feature/CODER-20260918-045-blocked-metrics-verification\n```",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Working tree identity",
+      "heading": "Finding 2: Working tree identity",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` = `git rev-parse ai_rc/v2.24.0` = `6b49a96ae28b0f5c0ea9902473a0c19bbbd98934`.\n`git status --porcelain` empty. `git stash list` empty.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Gated unit suite",
+      "heading": "Finding 3: Gated unit suite",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/run-unit-tests.sh --coverage` → **UNIT_EXIT=0**.\n`4806 passed, 31 skipped in 793.38s`. Lint pre-flight passed;\n`bare_tmp_cleanliness: OK`, `listener_cleanliness: OK`. Output captured at\n`/tmp/pgai_kanban_tmp/tester/unit.log`.\n\nAll five new/changed test modules ran green:\n`test_blocked_ledger.py` (18), `test_blocked_column_dashboard.py` (10),\n`test_task_status_blocked_ledger.py` (8), `test_wake_blocked_ledger.py` (7),\n`test_grep_zero_gate.py` (10), `test_metrics_csv_writer.py`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Gated integration suite",
+      "heading": "Finding 4: Gated integration suite",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/run-integration-tests.sh --coverage` → **INTEGRATION_EXIT=0**.\n`518 passed, 1 skipped in 537.70s`. Output captured at\n`/tmp/pgai_kanban_tmp/tester/integration.log`.\n`test_blocked_column_metrics_pipeline.py` (3) and\n`test_cm_release_synthetic.py` (17) both green.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Coverage (informational only)",
+      "heading": "Finding 5: Coverage (informational only)",
+      "level": 3,
+      "body": "**Category:** pass\n\nRead from the runners' own JSON `totals` objects (field names verified against\nthe generated files, not assumed):\n\n| Suite | Statement coverage | Branch coverage | Blended |\n|---|---|---|---|\n| unit | 77 % | 63 % | 74 % |\n| integration | 11 % | 9 % | 11 % |\n\nCoverage does not enter the verdict.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Deliverable 1 — blocked-interval ledger",
+      "heading": "Finding 6: Deliverable 1 — blocked-interval ledger",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/pgai_agent_kanban/metrics/blocked_ledger.py` (new, 563 lines) read top to\nbottom. Records `{version, kind, source, timestamp}` as JSON Lines at\n`<kanban_root>/projects/<name>/metrics/blocked-intervals.jsonl` — a metrics\nsidecar, not `release-state.md`, correctly justified in the module docstring\n(release-state's four fixed fields cannot carry a lifecycle where absence is a\nvalid state). Atomic writes via temp-file + `os.replace`. Boundaries pair per\n`(version, source)`, so a HALT and a BLOCKED task never close each other's\nintervals. Both writers exist and are wired:\n`team/scripts/lib/wake_blocked_ledger.sh` (HALT-skip firings, both scopes, both\nthe first pass and the contention retry pass) and\n`team/pgai_agent_kanban/task_status.py` (BLOCKED transitions via the\nstatus-writer — the single-truth path the requirements doc demanded). No second\nbookkeeping path exists.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Acceptance — 40-min HALT + 20-min BLOCKED overlapping 10 min → Blocked=50",
+      "heading": "Finding 7: Acceptance — 40-min HALT + 20-min BLOCKED overlapping 10 min → Blocked=50",
+      "level": 3,
+      "body": "**Category:** pass\n\nExecuted against the production reader in a throwaway sandbox:\n\n```\nstart v2.24.0 halt:project            2026-09-18T09:00:00+00:00\nend   v2.24.0 halt:project            2026-09-18T09:40:00+00:00\nstart v2.24.0 task:CODER-20260918-039 2026-09-18T09:30:00+00:00\nend   v2.24.0 task:CODER-20260918-039 2026-09-18T09:50:00+00:00\nread  v2.24.0 window 08:00 → 12:00  ->  {\"blocked_minutes\": 50.0}\n```\n\nExpected 50, actual 50.0. Wall is never touched by this path — the aggregator\ncomputes `wall_time_minutes` from `opened_at`/`closed_at` independently and the\nnew field is additive. The gated integration test\n`test_blocked_column_metrics_pipeline.py` proves the same number through the\nfull production chain (ledger → `aggregate_rc` → `append_rc_row` →\n`show-metrics.sh`) with `Wall=120.0` unchanged, with no mocks anywhere in the\nmodule.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Acceptance — clean RC → Blocked=0; pre-era row → `-` plus footer",
+      "heading": "Finding 8: Acceptance — clean RC → Blocked=0; pre-era row → `-` plus footer",
+      "level": 3,
+      "body": "**Category:** pass\n\nReader: a version with no recorded boundaries returns `0.0`; an absent ledger\nfile returns `0.0`. Renderer, exercised against a three-row fixture CSV through\nthe real `show-metrics.sh`:\n\n```\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv2.23.16     534               -  1,234,567    234,567    9,876,543       345,678     12\nv2.24.0      120           1,234      1,000        200          300           400      8\nv2.24.1      60                0         10          2            3             4      3\nBlocked tracked from v2.24.0\n```\n\nPre-era row renders a single `-` (deliberately not Wall's `--`); a clean RC\nrenders a real `0`; the footer prints exactly once. Removing the pre-era row\nsuppresses the footer entirely, as specified. A legacy CSV whose header lacks\nthe `blocked_minutes` column altogether — which is what today's live\n`history.csv` is, 20 columns — renders every row as `-` with the footer, and\ndoes not crash.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Acceptance — window 7, CLI, and REST agree; shared formatter; column at END of row",
+      "heading": "Finding 9: Acceptance — window 7, CLI, and REST agree; shared formatter; column at END of row",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Window 7 current-RC pane** (`team/scripts/dashboard/metrics.sh`): renders\n  `Blocked:  1,234` beside `Elapsed`. With `blocked_minutes` absent from the\n  rollup it renders `0`; with no rollup at all it renders `0`. Never blank,\n  never `--`.\n- **rc-metrics CLI history table** (`show-metrics.sh`): `Blocked` sits\n  immediately right of `Wall`; no other column moved. Formatting goes through\n  the shared `number_format` helper — `1,234` with commas, matching neighbours.\n- **REST twin** (`team/pgai_agent_kanban/api/metrics_data.py`): emits\n  `blocked_seconds` beside the existing `wall_seconds`, in seconds, following\n  that module's established unit convention. Verified numerically: 1,234 minutes\n  → `\"blocked_seconds\": 74040.0`. A real `0` comes through as `0.0`; an empty\n  cell or absent column omits the key, matching the module's absent-key\n  discipline.\n- **history.csv**: `HISTORY_COLUMNS` has 21 entries with `blocked_minutes` at\n  index 20 — LAST, so every existing positional consumer keeps its offsets.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "history_csv": "`HISTORY_COLUMNS` has 21 entries with `blocked_minutes` at"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Acceptance — HALT spanning the open→ship edges clamps to the RC's own interval",
+      "heading": "Finding 10: Acceptance — HALT spanning the open→ship edges clamps to the RC's own interval",
+      "level": 3,
+      "body": "**Category:** pass\n\nSame ledger, re-read with a window of 09:20 → 09:45 (both edges cutting through\nthe recorded intervals): returns `25.0`, exactly the in-window span. An interval\nfalling entirely outside the window contributes nothing, and a source still open\nwhen the file is read is clamped to `window_closed_at`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Step 6.5 — guard logic exercised by triggering its failure modes",
+      "heading": "Finding 11: Step 6.5 — guard logic exercised by triggering its failure modes",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Double `block-start` for the same `(version, source)` → refused, nothing\n  written, dual-channel error (`blocked-ledger.malformed` / message / remedy),\n  exit 1.\n- `block-end` with no matching open start → refused identically.\n- Status-writer, BLOCKED with `--needs-human yes` → ledger gains a\n  `block-start` for `task:<key>`; the subsequent transition out of BLOCKED\n  appends the matching `block-end`. Verified end to end through\n  `team/scripts/task-status.sh` against a synthetic kanban root.\n- Status-writer, BLOCKED **without** `--needs-human yes` → nothing written, as\n  documented.\n- `Active RC` = `none` → nothing written by either writer.\n- Metrics directory made unwritable (`chmod 0500`), then a BLOCKED transition →\n  `task-status.sh` still exits 0 and `status.md` is still correctly written. The\n  CONVERT-class \"never gates the operation it rides beside\" claim holds.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Acceptance — no ship-path behaviour change (grep-zero)",
+      "heading": "Finding 12: Acceptance — no ship-path behaviour change (grep-zero)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`grep -nE \"append_block_start|append_block_end|blocked_ledger\" team/scripts/cm/release.sh`\nreturns zero hits, and the same grep across all of `team/scripts/cm/` returns\nzero hits. No file under `team/scripts/cm/` changed in this RC at all. The gate\nis also enforced mechanically by\n`test_grep_zero_gate.py::test_blocked_ledger_writer_absent_from_release_decision_logic`,\nwhich ships with the required negative proof (a synthetic release.sh-shaped\nscript carrying an injected call is confirmed to match, and a clean script with\nunrelated \"blocked\" mentions is confirmed not to).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Deliverable 4 — docs and doc-truth lint registration",
+      "heading": "Finding 13: Deliverable 4 — docs and doc-truth lint registration",
+      "level": 3,
+      "body": "**Category:** pass\n\n`docs/dashboard.md` gains a `blocked`/`blocked_minutes` table row beside\n`wall_time` and a full `### Blocked` subsection covering the two interval\nsources, clamping and merging, the Wall-is-unchanged rule, the zero-versus-dash\ndistinction, and the explicit no-backfill rationale. `docs/OPERATIONS.md` gains\n`blocked_minutes` last in the history.csv schema with the positional-consumer\nrationale. `HOW_TO.md` gains the operator-facing paragraph.\n`docs/blocking-site-census.md` gains the Locator Index entry\n`team/pgai_agent_kanban/metrics/blocked_ledger.py:blocked-ledger-01 CONVERT`,\nmatching the in-code `CENSUS-ANCHOR`. `blocked_minutes` is registered in\n`doc-lint.sh` `FEATURE_PATTERNS`; `doc-lint.sh --suite feature-greps` reports\n`fail=0`, exit 0.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Enforcement class — quality class throughout",
+      "heading": "Finding 14: Enforcement class — quality class throughout",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe requirements doc forbids any of this gating, blocking, or altering ship\nbehaviour. Confirmed: the ledger CLI's refusal is annotated `CENSUS CLASS:\nCONVERT` with a matching census entry; the aggregator degrades\n`blocked_minutes` to `None` with a stderr warning on an unreadable ledger rather\nthan failing; the CSV writer writes an empty cell plus a warning rather than\nfabricating a number; both writers swallow every failure. No new hard gate was\nintroduced.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Wake-path ledger adapter logs a \"did not apply\" line every normal cycle",
+      "heading": "Finding 15: Wake-path ledger adapter logs a \"did not apply\" line every normal cycle",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one adapter function)\n**Filed As:** BUG-0331 (Path C-A — filed as BUG (code defect / regression / test failure))\n**Regression:** yes\n**Integrity:** none\n\n`team/scripts/lib/wake_common.sh` attempts a `block-end` stamp on every wake\ncycle in which no HALT is present — once fleet-scoped per registered project,\nand once per project inside the iteration loop. When nothing was ever opened\n(the overwhelmingly common case), the ledger module correctly refuses the\norphaned close and exits 1, and `pgai_stamp_halt_boundary` then emits through\nthe wake `log()`:\n\n```\nproject pgai-agent-kanban: blocked-ledger end stamp for source halt:global did not apply (best-effort, ignored)\nproject pgai-agent-kanban: blocked-ledger end stamp for source halt:project did not apply (best-effort, ignored)\n```\n\nReproduced directly by sourcing the real adapter with a real (non-stubbed)\n`log()` against a synthetic kanban root with `Active RC: v1.2.3`: two lines on\ncycle 1, two more on cycle 2, and a third line when a still-present HALT\nre-attempts `start`. The ledger contents remain correct throughout — this is\npurely output.\n\nImpact: with five non-OVERWATCH agents firing every two minutes, an open RC\nproduces roughly 300 such lines per hour (~7,000 per day) in\n`logs/cron-*.log`, each phrased as a failure (\"did not apply\") for what is the\ndesigned steady state. The wake log is the operator's primary diagnostic\nsurface and is already in the 130 MB range per agent.\n\nWhy it shipped: `team/tests/unit/test_wake_blocked_ledger.py` stubs\n`log() { :; }` in its shell preamble, then asserts the repeat attempts are a\n\"silent no-op\". With the log silenced the tests cannot observe the one\nobservable effect the production code actually has — a test-fidelity gap in the\nsense of `docs/test-authoring-guidelines.md`. The two test names\n(`test_repeated_start_before_matching_end_is_a_silent_no_op`,\n`test_end_with_no_open_interval_is_a_silent_no_op`) assert a silence the\nshipped code does not provide.",
+      "filed_as": "BUG-0331",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one adapter function)",
+        "filed_as": "BUG-0331 (Path C-A — filed as BUG (code defect / regression / test failure))",
+        "regression": "yes",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "`metrics_csv_writer.py` docstring states the wrong preceding-column count",
+      "heading": "Finding 16: `metrics_csv_writer.py` docstring states the wrong preceding-column count",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one docstring sentence)\n**Filed As:** BUG-0332 (Path C-A — filed as BUG)\n\n`team/scripts/lib/metrics_csv_writer.py` line 24 reads \"added after the other\n**nineteen** columns were already a public contract\". `HISTORY_COLUMNS` holds 21\nentries and `HISTORY_COLUMNS.index(\"blocked_minutes\")` is 20, so twenty columns\nprecede it — confirmed against the live `history.csv`, whose header has exactly\n20 fields. The number in the sentence is wrong by one, in the one place a reader\ngoes to learn the column contract. The shipped operator docs are correct (they\nstate the position without a numeral); only the code docstring is wrong.\n\nThis was flagged in WRITER-20260918-044's own `status.md` as a concern for\nTESTER and is confirmed here.",
+      "filed_as": "BUG-0332",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one docstring sentence)",
+        "filed_as": "BUG-0332 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 17,
+      "label": "17",
+      "title": "Step 6.1 — release-state sanity",
+      "heading": "Finding 17: Step 6.1 — release-state sanity",
+      "level": 3,
+      "body": "**Category:** pass\n\n`release-state.md` holds exactly the four schema fields. `## Active RC` is\n`v2.24.0`, matching the branch under test; `## RC Opened At` is a well-formed\nISO-8601 value; `## RC Opened By Task` names `CM-20260918-046-open-rc-2-24-0`;\n`## Last Released` is a well-formed `v2.23.16`. The RC version is strictly\ngreater than the last released version, confirmed through the shared helper\n(`semver_gt v2.24.0 v2.23.16` → true), never an inline string compare. The file's\nmtime equals `RC Opened At` to the second, so it has not been touched since\n`cm/open-rc.sh` wrote it.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 18,
+      "label": "18",
+      "title": "Step 6.8 — synthetic release simulation",
+      "heading": "Finding 18: Step 6.8 — synthetic release simulation",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe diff touches `team/scripts/lib/metrics_csv_writer.py`, which the RC-close\npath invokes, so the simulation applies.\n`team/tests/integration/test_cm_release_synthetic.py` ran inside the gated\nintegration suite: 17 tests, all passed, exercising `cm-release.sh` against a\nfresh isolated temp repo without touching any real branch.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 19,
+      "label": "19",
+      "title": "Step 6.9 — constraint negative checks",
+      "heading": "Finding 19: Step 6.9 — constraint negative checks",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo hardcoded secrets, API keys, tokens, or passwords in any new file. No\nprovenance identifiers (`BUG-NNNN`, task IDs, RC citations) in the new\nproduction code, comments, log lines, or output strings. The one version literal\nin shipped output — the footer `Blocked tracked from v2.24.0` — is the exact\nstring the requirements doc mandates as deliverable 3, and states a data fact\n(when tracking began), not process history. The new `wake_blocked_ledger.sh`\ncarries no `set -euo pipefail`, matching every sourced sibling lib\n(`wake_project.sh`, `halt_after_invoke.sh`) rather than diverging from them.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 20,
+      "label": "20",
+      "title": "Step 6.10 — prerequisite dependency graph",
+      "heading": "Finding 20: Step 6.10 — prerequisite dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\nSequence numbers 039–047 are consecutive and non-colliding. The lifecycle\nbookends are correctly linked: `CM-20260918-046-open-rc-2-24-0` at the start,\nthis TESTER task at the end. Every task ID named in this task's `## Inputs` and\n`## Prerequisites` resolves to a real task folder, all seven `DONE`. No cycles.\nQueue markers agree with task states throughout (`[x]` for the seven `DONE`\ntasks and the CM task, `[A]` for this WORKING task).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 21,
+      "label": "21",
+      "title": "Step 6.13 — skip-cites-real-bug gate",
+      "heading": "Finding 21: Step 6.13 — skip-cites-real-bug gate",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/lint_skip_bug_gate.sh` → `BUG-NNNN file-existence check: 0\nmissing files`, `OK — all skip annotations are compliant`, exit 0. No\nplaceholder shapes (`BUG-SKIP`, `BUG-<letters>`) appear in a skip annotation;\nthe `BUG-NNNN` strings elsewhere in the test tree are fixture data inside\nsynthetic bug files the tests create themselves, not citations.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 22,
+      "label": "22",
+      "title": "Step 6.14 — coding-standards spot-check",
+      "heading": "Finding 22: Step 6.14 — coding-standards spot-check",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`blocked_ledger.py` ships a real argparse CLI whose `--help` names every\nsubcommand and argument. No new operational value is hardcoded where an operator\nwould want it configurable. One small duplication: the ledger path is built in\ntwo places — `blocked_ledger.ledger_path_for_project()` (used by the Python\ncallers) and a literal `\"${project_root}/metrics/blocked-intervals.jsonl\"` in\n`wake_blocked_ledger.sh`. The two cannot diverge today, because `pp_project_root`\nreturns exactly `<kanban_root>/projects/<name>` by string concatenation with no\nper-project override, so both resolve identically. Recorded as a caveat rather\nthan a finding: it is a latent-only duplication with no current incorrect\nbehaviour.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 23,
+      "label": "23",
+      "title": "Test fidelity of the RC's new tests",
+      "heading": "Finding 23: Test fidelity of the RC's new tests",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe integration test drives the real ledger writer, the real `aggregate_rc`, the\nreal `append_rc_row`, and the real `show-metrics.sh` with no mocks or\nmonkeypatching anywhere in the module — it exercises the production breaking\ncondition rather than a proxy. The unit tests for the dashboard, the ledger, and\nthe status-writer are likewise behavioural. The one concrete fidelity defect is\nthe stubbed `log()` in `test_wake_blocked_ledger.py`, recorded as part of\nFinding 15 rather than duplicated as its own filing, since it is the same defect.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "I verified `ai_rc/v2.32.1` at `9e611a6c` against `requirements/v2.32.1-bugfix-bundle-20261007.md`, a bug bundle of BUG-0597 (the post-release archive was skipped under CM's own wake chain lock) plus hygiene ride-alongs BUG-0598 (stale ICD), BUG-0599 (sweep flagged comment lines), BUG-0600 (the prereq gate re-sourced `pp_run_ops`) and BUG-0601 (the halt-after fixture lacked the archive package). I compared it with `ai_main` at `ac263b41`. Pre-flight passed. Every bundled item meets its own `## Acceptance` list, and I checked each one behaviorally, reproducing the original failure on an `ai_main` export and showing the fix on the RC. The requirements' compile and bash-syntax criteria pass across the tree. Both gated runners exited 0 (`UNIT_EXIT=0`, `INTEGRATION_EXIT=0`) with zero lint findings. No bug, gap or stale assertion was found, and the autonomous criterion shows no manual intervention.",
+  "findings": [],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

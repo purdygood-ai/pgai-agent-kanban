@@ -209,3 +209,60 @@ def test_task_id_increments_sequence_based_on_existing_dirs(tmp_path: pathlib.Pa
     )
     assert result.returncode == 0
     assert result.stdout.strip() == "CODER-20260518-004-new-task"
+
+
+# ---------------------------------------------------------------------------
+# kanban_task_id_is_canonical / kanban_task_id_pattern — the one shape every
+# id-accepting site validates against before an id is joined onto a path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "task_id",
+    [
+        "CODER-20260518-002-implement-feature",
+        "PM-20260101-001-decompose-v1-2-3",
+        "CM-20260930-010-open-rc-2-26-4",
+        "CLAUDE-CODER-20260315-002-legacy-participant-prefix",
+        "CLAUDE-20260412-001-legacy-agent-word",
+    ],
+)
+def test_canonical_shape_accepts_minted_and_legacy_ids(tmp_path: pathlib.Path, task_id: str) -> None:
+    """Every id the materializer mints, and the legacy CLAUDE- prefixed form, has the canonical shape."""
+    result = run_bash(tmp_path, _source(f"kanban_task_id_is_canonical '{task_id}'"))
+    assert result.returncode == 0, f"{task_id!r} must be canonical; stderr={result.stderr}"
+
+
+@pytest.mark.parametrize(
+    "task_id",
+    [
+        "..",
+        "../x",
+        "a.b",
+        ".",
+        "CODER-20260518-002-Implement.Feature",
+        "CODER-20260518-2-short-seq",
+        "CODER-20260518-T001-letter-seq",
+        "coder-20260518-002-lower-agent",
+        "CODER-20260518-002-under_score",
+        "CODER-20260518-002-slash/escape",
+        "",
+    ],
+)
+def test_canonical_shape_rejects_path_capable_and_off_shape_ids(tmp_path: pathlib.Path, task_id: str) -> None:
+    """A dotted, slashed, or otherwise off-shape id fails the predicate, so it can never be joined onto a path."""
+    result = run_bash(tmp_path, _source(f"kanban_task_id_is_canonical '{task_id}'"))
+    assert result.returncode != 0, f"{task_id!r} must be refused; stdout={result.stdout}"
+
+
+def test_pattern_is_the_single_shape_the_predicate_uses(tmp_path: pathlib.Path) -> None:
+    """kanban_task_id_pattern prints one regex bash and Python read identically; the predicate is that regex applied."""
+    result = run_bash(tmp_path, _source("kanban_task_id_pattern"))
+    assert result.returncode == 0
+    pattern = result.stdout.strip()
+    assert pattern.startswith("^") and pattern.endswith("$"), pattern
+    import re
+
+    assert re.match(pattern, "CODER-20260518-002-implement-feature")
+    assert not re.match(pattern, "..")
+    assert not re.match(pattern, "../x")

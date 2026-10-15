@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# cm-open-rc.sh
+# team/scripts/cm/open-rc.sh
 # Human-invoked or CM-agent-invoked: opens a release candidate branch from main.
 #
 # Usage:
-#   cm-open-rc.sh [--project <name>] <version> [task-id] [--help]
+#   cm/open-rc.sh [--project <name>] <version> [task-id] [--help]
 #
 # --project <name>   explicit project name (overrides PGAI_PROJECT_NAME env var)
 # --help, -h         print full usage and exit 0
 # <version>          must be in format vX.Y.Z (e.g. v0.4.0)
 # [task-id]          optional: the CM agent task ID that invoked this script.
 #                    Recorded as "RC Opened By Task" in release-state.md.
-#                    Defaults to "cm-open-rc.sh (manual)" if not provided.
+#                    Defaults to "cm/open-rc.sh (manual)" if not provided.
 #
 # Project context resolution (highest to lowest precedence):
 #   1. --project <name> flag
@@ -21,19 +21,36 @@
 #   1. Validates version format
 #   2. Reads project-scoped release-state.md ($KANBAN_ROOT/projects/<name>/release-state.md)
 #   3. Refuses if Active RC != none
-#   4. Checks rc/<version> does not already exist locally or on origin
-#   5. git fetch origin                      (skipped when push_to_remote=false)
+#   3a. Decides the push policy through the shared resolver (pp_push_policy):
+#       only a project registered in projects.cfg whose own project.cfg names
+#       dev_tree_path may push. An unresolved project logs one line
+#         [cm-open-rc] skipped-unresolved-project: project '<name>': missing <piece>: ...
+#       and then runs exactly like push_to_remote=false: no fetch, ls-remote,
+#       pull or push, and no remote contacted. REPO_ROOT or PGAI_DEV_TREE_PATH
+#       in the environment never makes a project pushable.
+#   3b. Resolves the remote every fetch, ls-remote, pull and push below
+#       names: project.cfg [project] git_remote_name, origin when absent or
+#       blank (pp_git_remote_name). An invalid value refuses dual-channel
+#       (git_remote_name.invalid) and exits 1 before any git command.
+#   4. Checks rc/<version> does not already exist locally or on the remote
+#      (the remote check, and the version lookup's tag fetch, are skipped
+#      when the project does not push), and that the release tag
+#      <branch_prefix><version> (e.g. ai_v0.4.0) does not exist locally
+#   5. git fetch <remote>                    (skipped when push_to_remote=false, and
+#                                              skipped with a narrated line when
+#                                              PGAI_AGENT_ROLE names a role other than
+#                                              cm -- only CM touches the remote)
 #   6. git checkout main && git pull --ff-only    (pull skipped when push_to_remote=false)
-#   7. Writes project-scoped release-state.md using here-doc template (canonical format)
+#   7. Updates project-scoped release-state.md fields in place (appended blocks kept)
 #      Writes the three RC-tracking fields (Active RC, RC Opened At, RC Opened
 #      By Task) plus the pre-existing Last Released field, read from the file
 #      being overwritten and carried forward unchanged (or "none" if absent).
 #      The canonical "what version are we at" answer is still the git tag
-#      created by cm-release.sh (via pp_last_released_version); Last Released
+#      created by cm/release.sh (via pp_last_released_version); Last Released
 #      in release-state.md is a narrower, latching field consumed only by the
 #      HALT-AFTER rc:vX.Y.Z drain check.
 #   8. git checkout -b rc/<version>
-#   9. git push -u origin rc/<version>
+#   9. git push -u <remote> rc/<version>
 #  10. git checkout main
 #  11. Prints success message and exits 0
 #
@@ -41,8 +58,8 @@
 #   $KANBAN_ROOT/projects/<name>/release-state.md
 # The dev tree's team/release-state.md is NOT read or written by this script.
 #
-# On any failure mid-sequence, the cleanup_on_exit trap attempts rollback:
-#   - Deletes rc/<version> from origin if it was pushed
+# On any failure mid-sequence, the rollback_on_exit trap attempts rollback:
+#   - Deletes rc/<version> from the remote if it was pushed
 #   - Deletes local rc/<version> branch if it was created
 #   - Restores the project-scoped release-state.md to its pre-run content
 #
@@ -73,11 +90,19 @@ Usage: $(basename "$0") [--project <name>] <version> [task-id] [--help]
 
 Open a release candidate branch from the project main branch.
 
+Push policy: the rc branch is pushed to the project's remote -- project.cfg
+[project] git_remote_name, origin when absent or blank -- only for a project
+registered in projects.cfg whose own project.cfg names dev_tree_path and
+does not set push_to_remote = false. A git_remote_name that is not a valid
+remote name refuses (git_remote_name.invalid) before any git command. Any other project opens the RC
+locally and contacts no remote; an unresolved one logs a
+skipped-unresolved-project line naming the missing piece.
+
 Arguments:
   --project <name>  project name; overrides PGAI_PROJECT_NAME env var
   <version>         RC version to open (required; format: vX.Y.Z, e.g. v0.4.0)
   [task-id]         CM agent task ID recorded as "RC Opened By Task" in
-                    release-state.md (default: cm-open-rc.sh (manual))
+                    release-state.md (default: scripts/cm/open-rc.sh (manual))
   --help, -h        print this message and exit 0
 
 Project context resolution (highest to lowest precedence):
@@ -91,8 +116,8 @@ Exit codes:
      (rollback attempted on non-zero exit)
 
 Example:
-  cm-open-rc.sh --project my-project v1.5.0
-  cm-open-rc.sh --project my-project v1.5.0 CM-YYYYMMDD-NNN-open-rc
+  scripts/cm/open-rc.sh --project my-project v1.5.0
+  scripts/cm/open-rc.sh --project my-project v1.5.0 CM-YYYYMMDD-NNN-open-rc
 
 Configuration:
   PGAI_PROJECT_NAME  fallback project name (when --project flag not used)
@@ -130,7 +155,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 VERSION="${_POSITIONAL[0]:-}"
-TASK_ID="${_POSITIONAL[1]:-cm-open-rc.sh (manual)}"
+TASK_ID="${_POSITIONAL[1]:-cm/open-rc.sh (manual)}"
 
 if [[ -z "$VERSION" ]]; then
   echo "ERROR: missing required argument <version>" >&2
@@ -170,6 +195,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/project_paths.sh"
 # shellcheck source=lib/semver.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/semver.sh"
 
+# --- Source pp_run_ops (JSON field reads of the per-RC state records) ---
+# shellcheck source=lib/pp_run_ops.sh
+declare -F pp_run_ops >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/../lib/pp_run_ops.sh"
+
 # --- Enable strict mode for our own code ---
 set -euo pipefail
 
@@ -182,6 +211,17 @@ PROJECT_NAME="$(pp_require_project_context "${PROJECT_ARG:-}")" || {
   echo "  Set PGAI_PROJECT_NAME=<name> in the environment, or pass --project <name>." >&2
   exit 1
 }
+
+# --- Push decision (shared resolver), taken before any git command ---
+# pp_push_policy asks pp_push_decision: only a project registered in
+# projects.cfg whose own project.cfg names dev_tree_path may push. An
+# unresolved project logs one skipped-unresolved-project line here and runs
+# the local-only path (_CM_PUSH_TO_REMOTE=false): no fetch, no ls-remote, no
+# push. A REPO_ROOT or PGAI_DEV_TREE_PATH from the environment never makes a
+# project pushable. Decided before REPO_ROOT so the line is logged even when
+# the dev tree cannot be resolved below.
+pp_push_policy "$PROJECT_NAME" "[cm-open-rc]"
+_CM_PUSH_TO_REMOTE="$PP_PUSH_TO_REMOTE"
 
 # --- Resolve REPO_ROOT from project.cfg dev_tree_path ---
 # REPO_ROOT may be overridden by the environment; otherwise derive from project.cfg.
@@ -204,41 +244,52 @@ fi
 # For projects with no branch_prefix, MAIN_BRANCH=main unchanged.
 MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
 
-# --- Read push_to_remote flag via pp_push_to_remote helper ---
-# Default: 'true' — pushes rc branch to origin (existing behavior preserved).
-# Set [project] push_to_remote = false in project.cfg to complete the full local
-# open-rc operation without any git push origin calls.
-_CM_PUSH_TO_REMOTE="$(KANBAN_ROOT="$KANBAN_ROOT" pp_push_to_remote "$PROJECT_NAME")"
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  echo "[cm-open-rc] Push policy: push_to_remote=true — rc branch will be pushed to origin."
-else
+# --- Resolve the remote every git network step below names ---
+# project.cfg [project] git_remote_name, origin when absent or blank. Resolved
+# on the local-only path too, so its narration names the configured remote.
+if ! GIT_REMOTE="$(pp_git_remote_name "$PROJECT_NAME")"; then
+  # BLOCK-WORTHY (docs/blocking-site-census.md): a git_remote_name that
+  # cannot name a remote would point the fetch, the RC-branch check and the
+  # push at a destination nobody configured; pp_git_remote_name has printed
+  # the dual-channel block naming the key and the file.
+  # CENSUS-ANCHOR: open-rc-git-remote-name-01
+  exit 1
+fi
+
+# --- Narrate the push policy decided above ---
+# A resolved project with no push_to_remote key pushes the rc branch (the
+# default); push_to_remote = false completes the open-rc locally without any
+# git push to the remote. An unresolved project already logged its skip line.
+if [[ "$PP_PUSH_DECISION" == "push" ]]; then
+  echo "[cm-open-rc] Push policy: push_to_remote=true — rc branch will be pushed to ${GIT_REMOTE}."
+elif [[ "$PP_PUSH_DECISION" == "no-push" ]]; then
   echo "[cm-open-rc] Push policy: push_to_remote=false — rc branch stays local. Operator must push manually."
 fi
 
 # --- Rollback state tracking ---
 # These flags are set as the atomic sequence progresses so that
-# cleanup_on_exit knows how far we got and what to undo.
+# rollback_on_exit knows how far we got and what to undo.
 RC_BRANCH_CREATED=0     # set to 1 after local rc branch created
-RC_BRANCH_PUSHED=0      # set to 1 after rc branch pushed to origin
+RC_BRANCH_PUSHED=0      # set to 1 after rc branch pushed to the remote
 RELEASE_STATE_WRITTEN=0 # set to 1 after project-scoped release-state.md is written
 RELEASE_STATE_ORIGINAL="" # populated with original content before we overwrite
 
 # --- Cleanup / rollback on exit ---
 # On non-zero exit, rolls back partial state from the atomic sequence.
 # Sets Needs Human: yes in a status note if rollback itself fails.
-cleanup_on_exit() {
+rollback_on_exit() {
   local exit_code=$?
   if [[ $exit_code -ne 0 ]]; then
     echo "" >&2
-    echo "--- cm-open-rc.sh FAILED (exit $exit_code) — attempting rollback ---" >&2
+    echo "--- scripts/cm/open-rc.sh FAILED (exit $exit_code) — attempting rollback ---" >&2
 
-    # Rollback: delete rc branch from origin if it was pushed
+    # Rollback: delete rc branch from the remote if it was pushed
     if [[ $RC_BRANCH_PUSHED -eq 1 ]]; then
-      echo "  Rolling back: deleting $RC_BRANCH from origin..." >&2
-      if git -C "$REPO_ROOT" push origin --delete "$RC_BRANCH" 2>/dev/null; then
-        echo "  Rolled back: $RC_BRANCH deleted from origin." >&2
+      echo "  Rolling back: deleting $RC_BRANCH from ${GIT_REMOTE}..." >&2
+      if git -C "$REPO_ROOT" push "$GIT_REMOTE" --delete "$RC_BRANCH" 2>/dev/null; then
+        echo "  Rolled back: $RC_BRANCH deleted from ${GIT_REMOTE}." >&2
       else
-        echo "  WARNING: could not delete $RC_BRANCH from origin. Needs Human: yes" >&2
+        echo "  WARNING: could not delete $RC_BRANCH from ${GIT_REMOTE}. Needs Human: yes" >&2
       fi
     fi
 
@@ -271,11 +322,11 @@ cleanup_on_exit() {
   wait 2>/dev/null || true
   exit $exit_code
 }
-trap cleanup_on_exit EXIT
+trap rollback_on_exit EXIT
 
 # --- Paths ---
 # Canonical release state file: project-scoped live install path.
-# This is the ONLY file cm-open-rc.sh reads from and writes to.
+# This is the ONLY file cm/open-rc.sh reads from and writes to.
 # The dev tree's team/release-state.md is NOT consulted.
 RELEASE_STATE="$(pp_release_state "$PROJECT_NAME")"
 
@@ -301,12 +352,10 @@ fi
 RELEASE_STATE_ORIGINAL="$(cat "$RELEASE_STATE")"
 
 # --- Read a named field from release-state.md ---
-# Usage: read_field <field_heading>
-# Finds "## <field_heading>" then returns the next non-blank non-comment line.
-read_field() {
-  local heading="$1"
-  python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/read_state_field.py" "$RELEASE_STATE" "$heading"
-}
+# read_field <field_heading>: the value under "## <field_heading>" in
+# RELEASE_STATE, or "none" (lib/cm/common.sh).
+# shellcheck source=../lib/cm/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/common.sh"
 
 ACTIVE_RC="$(read_field "Active RC")"
 
@@ -317,8 +366,8 @@ if [[ "$ACTIVE_RC" != "none" ]]; then
 fi
 
 # Read the pre-existing Last Released value so the rewrite below can carry it
-# forward unchanged. This field is monotonic and latching (SOP.md "Release
-# State File") -- open-rc must never clear or alter it, only preserve it.
+# forward unchanged. This field is monotonic and latching (roles/CM.md
+# "Release state") -- open-rc must never clear or alter it, only preserve it.
 # read_field returns "none" when the heading is absent or empty (fresh
 # project that has never shipped), which is itself a valid schema value.
 # Named distinctly from LAST_RELEASED (Guard 2 below) -- that variable holds
@@ -332,24 +381,38 @@ if git -C "$REPO_ROOT" rev-parse --verify "refs/heads/$RC_BRANCH" >/dev/null 2>&
   exit 1
 fi
 
-# --- Check rc/<version> does not already exist on origin ---
-if git -C "$REPO_ROOT" ls-remote --exit-code --heads origin "$RC_BRANCH" >/dev/null 2>&1; then
-  echo "ERROR: branch '$RC_BRANCH' already exists on origin" >&2
+# --- Check rc/<version> does not already exist on the remote ---
+# Only a pushing project asks the remote; the local-only path contacts none.
+if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]] && \
+   git -C "$REPO_ROOT" ls-remote --exit-code --heads "$GIT_REMOTE" "$RC_BRANCH" >/dev/null 2>&1; then
+  echo "ERROR: branch '$RC_BRANCH' already exists on ${GIT_REMOTE}" >&2
   exit 1
 fi
 
-# --- Guard 1: reject if a git tag for this version already exists ---
-# A pre-existing tag means cm-release.sh would fail at the `git tag` step.
-if git -C "$REPO_ROOT" rev-parse --verify "refs/tags/$VERSION" >/dev/null 2>&1; then
-  echo "ERROR: git tag '$VERSION' already exists in $REPO_ROOT" >&2
+# --- Guard 1: reject if the release tag for this version already exists ---
+# A pre-existing tag means cm/release.sh would fail at the `git tag` step.
+# The tag checked is the one the release cuts, pp_prefix_tag's
+# <branch_prefix><version> (ai_vX.Y.Z on a prefixed project), so a prefixed
+# lane sees its own shipped release and is not stopped by another lane's
+# bare vX.Y.Z tag.
+RELEASE_TAG="$(pp_prefix_tag "$PROJECT_NAME" "$VERSION")"
+if git -C "$REPO_ROOT" rev-parse --verify "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+  echo "ERROR: git tag '$RELEASE_TAG' already exists in $REPO_ROOT" >&2
   echo "  Opening an RC at a version that is already tagged would collide with" >&2
   echo "  the existing release. Choose a version that has not yet been tagged." >&2
   exit 1
 fi
 
 # --- Guard 2: reject if VERSION is not strictly greater than last released ---
-# pp_last_released_version returns the highest semver tag merged into origin/main.
-LAST_RELEASED="$(pp_last_released_version "$PROJECT_NAME")"
+# pp_last_released_version returns the highest semver tag merged into
+# <remote>/<prefix>main (the same remote, pp_git_remote_name).
+# On the local-only path PGAI_GIT_LOCAL_ONLY skips its best-effort tag fetch,
+# so the lookup reads local refs and contacts no remote.
+if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
+  LAST_RELEASED="$(pp_last_released_version "$PROJECT_NAME")"
+else
+  LAST_RELEASED="$(PGAI_GIT_LOCAL_ONLY=1 pp_last_released_version "$PROJECT_NAME")"
+fi
 if ! semver_gt "$VERSION" "$LAST_RELEASED"; then
   echo "ERROR: version '$VERSION' is not strictly greater than the last released version '$LAST_RELEASED'" >&2
   echo "  The RC version must be greater than the last release to avoid collision." >&2
@@ -359,55 +422,55 @@ if ! semver_gt "$VERSION" "$LAST_RELEASED"; then
   exit 1
 fi
 
-# --- git fetch (gated by push_to_remote: no origin traffic in local-only mode) ---
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  echo "Fetching origin..."
-  git -C "$REPO_ROOT" fetch origin
+# --- git fetch (gated by push_to_remote: no remote traffic in local-only mode) ---
+# Also skipped, with a narrated line, when PGAI_AGENT_ROLE names a role other
+# than cm (pp_agent_role_is_non_cm): CM is the only role that touches the
+# remote, and the boundary guard would refuse a non-CM fetch anyway -- running
+# it would change nothing and only spend an evidence record. An unset role (an
+# operator's own shell) keeps the fetch.
+if [[ "$_CM_PUSH_TO_REMOTE" != "true" ]]; then
+  echo "push_to_remote=false — skipping git fetch ${GIT_REMOTE} (local-only install)."
+elif pp_agent_role_is_non_cm; then
+  echo "PGAI_AGENT_ROLE=${PGAI_AGENT_ROLE} — skipping git fetch ${GIT_REMOTE} (only the cm role touches the remote; local refs are used as-is)."
 else
-  echo "push_to_remote=false — skipping git fetch origin (local-only install)."
+  echo "Fetching ${GIT_REMOTE}..."
+  git -C "$REPO_ROOT" fetch "$GIT_REMOTE"
 fi
 
 # --- Checkout main and pull ---
-# Gated by push_to_remote flag: the ff-only pull from origin is skipped when
-# push_to_remote=false (origin/$MAIN_BRANCH need not exist).  The checkout
+# Gated by push_to_remote flag: the ff-only pull from the remote is skipped
+# when push_to_remote=false ($GIT_REMOTE/$MAIN_BRANCH need not exist).  The checkout
 # still runs — the rc branch is cut from MAIN_BRANCH as current HEAD.
 echo "Checking out $MAIN_BRANCH and pulling..."
 git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  git -C "$REPO_ROOT" merge --ff-only "origin/$MAIN_BRANCH"
+  git -C "$REPO_ROOT" merge --ff-only "${GIT_REMOTE}/$MAIN_BRANCH"
 else
-  echo "push_to_remote=false — skipping ff-only pull from origin/$MAIN_BRANCH (local-only install)."
+  echo "push_to_remote=false — skipping ff-only pull from ${GIT_REMOTE}/$MAIN_BRANCH (local-only install)."
 fi
 
-# --- Write project-scoped release-state.md using here-doc template (canonical format) ---
-# Single blank line between sections. Written directly to the live install path.
+# --- Update project-scoped release-state.md fields in place ---
+# The shared field writer (write_rc_state.py release-state) changes only the
+# four schema fields and keeps every other line -- including appended HALT,
+# override, campaign-spend and decision blocks -- byte-for-byte, writing
+# atomically. Written directly to the live install path.
 # The three RC-tracking fields are refreshed for the new RC; Last Released is
 # carried forward unchanged from RELEASE_STATE_LAST_RELEASED (read above) --
 # open-rc never computes or fabricates that value, it only preserves whatever
-# was already on disk.
+# was already on disk (an absent heading is written as 'none').
 # The dev tree's team/release-state.md is NOT modified.
 OPENED_AT="$(date -Iseconds)"
 
-echo "Writing project-scoped release-state.md with canonical format..."
-cat > "$RELEASE_STATE" <<EOF
-# Release State
-
-## Active RC
-${VERSION}
-
-## RC Opened At
-${OPENED_AT}
-
-## RC Opened By Task
-${TASK_ID}
-
-## Last Released
-${RELEASE_STATE_LAST_RELEASED}
-EOF
+echo "Updating project-scoped release-state.md fields in place..."
+python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" release-state "$RELEASE_STATE" \
+  --active-rc "$VERSION" \
+  --rc-opened-at "$OPENED_AT" \
+  --rc-opened-by-task "$TASK_ID" \
+  --last-released "$RELEASE_STATE_LAST_RELEASED"
 RELEASE_STATE_WRITTEN=1
 
 # --- Atomic sequence: create rc branch and push ---
-# Rollback flags are set as we progress so cleanup_on_exit can undo partial work.
+# Rollback flags are set as we progress so rollback_on_exit can undo partial work.
 # Any failure in this block halts the script (set -e) and triggers rollback.
 # release-state.md is written to the project-scoped live install path only;
 # no git commit of release-state.md is made in the dev tree.
@@ -435,15 +498,10 @@ mkdir -p "$RC_STATE_DIR"
 # moved to history/ by cancel-rc.sh, but if it wasn't (e.g. cancel ran before
 # this fix shipped) we handle it here as well. Idempotent — no-op when absent.
 if [[ -f "$RC_STATE_JSON" ]]; then
-  _prior_outcome="$(python3 - "$RC_STATE_JSON" <<'PY'
-import json, sys
-try:
-    d = json.loads(open(sys.argv[1]).read())
-    print(d.get('outcome', ''))
-except Exception:
-    print('')
-PY
-)"
+  # The record's outcome field; empty when absent or the file is not a
+  # readable JSON object.
+  _prior_outcome="$(pp_run_ops pgai_agent_kanban.lib.json_field --file "$RC_STATE_JSON" outcome 2>/dev/null)" \
+    || _prior_outcome=""
   if [[ "$_prior_outcome" == "cancelled" ]]; then
     python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" archive-cancelled \
       "$RC_STATE_JSON" "$VERSION" "$OPENED_AT_UTC" 2>&1 || \
@@ -467,21 +525,21 @@ fi
 REQUIREMENTS_DIR="$(pp_requirements_dir "$PROJECT_NAME")"
 BUNDLE_FAMILY_JSON="$(python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/bundle_family.py" compute \
   "$REQUIREMENTS_DIR" "$VERSION" "$RC_STATE_DIR")"
-RC_ATTEMPT="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["attempt"])' "$BUNDLE_FAMILY_JSON")"
-RC_FAMILY_KEY="$(python3 -c 'import json,sys; v=json.loads(sys.argv[1])["family_key"]; print(v if v is not None else "none")' "$BUNDLE_FAMILY_JSON")"
-RC_CARGO_JSON="$(python3 -c 'import json,sys; print(json.dumps(json.loads(sys.argv[1])["cargo"]))' "$BUNDLE_FAMILY_JSON")"
+RC_ATTEMPT="$(pp_run_ops pgai_agent_kanban.lib.json_field "$BUNDLE_FAMILY_JSON" attempt)"
+RC_FAMILY_KEY="$(pp_run_ops pgai_agent_kanban.lib.json_field --null none "$BUNDLE_FAMILY_JSON" family_key)"
+RC_CARGO_JSON="$(pp_run_ops pgai_agent_kanban.lib.json_field --json "$BUNDLE_FAMILY_JSON" cargo)"
 
 python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" open-with-attempt \
   "$VERSION" "$OPENED_AT_UTC" "$RC_ATTEMPT" "$RC_FAMILY_KEY" "$RC_CARGO_JSON" > "$RC_STATE_JSON"
 echo "  Per-RC release-state JSON written: $RC_STATE_JSON (attempt ${RC_ATTEMPT}, family ${RC_FAMILY_KEY})"
 
-# Push rc branch to origin (gated by push_to_remote flag)
+# Push rc branch to the remote (gated by push_to_remote flag)
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  echo "Pushing $RC_BRANCH to origin..."
-  git -C "$REPO_ROOT" push -u origin "$RC_BRANCH"
+  echo "Pushing $RC_BRANCH to ${GIT_REMOTE}..."
+  git -C "$REPO_ROOT" push -u "$GIT_REMOTE" "$RC_BRANCH"
   RC_BRANCH_PUSHED=1
 else
-  echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: git push -u origin $RC_BRANCH"
+  echo "[push_to_remote=false] skipping ${GIT_REMOTE} push for ${PROJECT_NAME}: git push -u ${GIT_REMOTE} $RC_BRANCH"
 fi
 
 # Switch back to main

@@ -18,9 +18,13 @@
 #
 # To start pseudocron after installing:
 #
-#   python3 "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/pseudocron.py" \
-#       --config "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.cfg" \
-#       --env    "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.env"
+#   export PGAI_AGENT_KANBAN_ROOT_PATH=/path/to/kanban
+#   python3 "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/pseudocron.py" >> "$PGAI_AGENT_KANBAN_ROOT_PATH/logs/pseudocron.log" 2>&1
+#
+# pseudocron.py takes no options. It reads pseudocron.cfg and pseudocron.env
+# from the kanban root named by PGAI_AGENT_KANBAN_ROOT_PATH, which is
+# required in the environment pseudocron is launched from and has no
+# default: with it unset, pseudocron.py exits 1 naming the variable.
 #
 # -----------------------------------------------------------------------
 # FORMAT
@@ -40,6 +44,14 @@
 #   - To fire a command at multiple minutes, list it on multiple lines
 #   - Shell metacharacters (pipes, redirects, backticks) work because
 #     pseudocron runs every command through: bash -c "<command>"
+#   - <minute> is the minute of the host's LOCAL time, and the job fires
+#     once every hour at that minute (there is no hour, day or month field).
+#   - Every job runs with the kanban root (PGAI_AGENT_KANBAN_ROOT_PATH) as
+#     its working directory, so a relative path such as
+#     scripts/wake-batch.sh resolves inside the install.
+#   - Its environment is pseudocron.py's own (inherited from whatever
+#     launched it) with pseudocron.env's variables laid over it — see
+#     pseudocron.env.example.
 #
 # -----------------------------------------------------------------------
 # EXAMPLES

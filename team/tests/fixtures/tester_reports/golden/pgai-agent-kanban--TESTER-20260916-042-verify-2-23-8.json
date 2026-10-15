@@ -1,0 +1,200 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "v2.23.8 is a single-item bug bundle: the OVERWATCH empty-file check was quarantining the bug-id claim protocol's own zero-byte `.claim-NNNN.lock` sentinels, filing a self-inflicted report about them and consuming claim numbers. The RC narrows the check's scan to report files by excluding every dotfile, adds a bounded prune for the `.claim-NNNN.lock.empty.orphan` residue earlier firings left behind, adds a four-case unit test, and corrects the three prose surfaces that described the old scope. I verified the RC at commit `b74141f` in the task worktree: pre-flight clean, both gated runners green, every acceptance criterion in the requirements doc and in the two implementing tickets exercised as a live run against synthetic fixtures in a throwaway kanban root — including the original failure mode reproduced against the pre-RC script and confirmed absent from the RC script. No bug, gap, or stale assertion was found. Two `pass-with-caveat` notes (a bash mirror of the Python claim-lock regex in the prune path, and the prune's lack of an `-empty` predicate) are recorded with their reasoning and neither warrants a filing. The one open bug cited below, BUG-0305, was filed by the unit runner's own aggregate filer to track two quality-class hygiene findings and does not move the recommendation.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Bundled item BUG-0304 is addressed — the check no longer quarantines claim-lock sentinels",
+      "heading": "Finding 1: Bundled item BUG-0304 is addressed — the check no longer quarantines claim-lock sentinels",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe bundle's single item is the report OVERWATCH filed about a 0-byte file in `bugs/` that turned out to be the bug-id claim protocol's own `.claim-NNNN.lock` sentinel. The RC narrows `overwatch_check_empty_files`'s scan with `_cef_is_report_candidate`, which rejects any basename starting with `.`, and adds a bounded prune (`_cef_is_claim_lock_residue`, `_cef_do_prune`) for the `.claim-NNNN.lock.empty.orphan` residue earlier firings left behind. Both behaviors were exercised live (Checkpoint 2) rather than read: the sentinel survives, the residue is deleted after a backup, and every other `.empty.orphan` file stays as evidence. The item's own ask (\"reviewed and either deleted or completed\") is satisfied by the prune for the residue class.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Acceptance criterion — \"All Python files compile cleanly\"",
+      "heading": "Finding 2: Acceptance criterion — \"All Python files compile cleanly\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 -m py_compile` over all 488 tracked `.py` files in the RC tree: 0 failures. The gated unit runner's breakage-class gate independently reports `0 breakage-class failures` across 466 python files under `team/`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Acceptance criterion — \"All bash files pass syntax check\"",
+      "heading": "Finding 3: Acceptance criterion — \"All bash files pass syntax check\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash -n` over all 280 tracked `.sh` files in the RC tree: 0 failures. `bash -n team/scripts/lib/overwatch-checks/check-empty-files.sh` exits 0 specifically (the implementing ticket's own criterion).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "The implementing ticket's six acceptance criteria",
+      "heading": "Finding 4: The implementing ticket's six acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\nEach was exercised as a live run against synthetic fixtures in a throwaway root (Checkpoint 2), not inferred from the source:\n\n1. Claim-lock sentinel present and unrenamed, no report filed — verified, including in isolation where the sentinel is the only 0-byte file present.\n2. Empty `BUG-NNNN-<slug>.md` still renamed to `<name>.empty.orphan`, action logged, one consolidated report filed — verified; the filed report listed both quarantined report files and neither dotfile.\n3. Empty dotfile (`.bug-claims.log`) not quarantined — verified.\n4. Prune bounded to claim-lock-shaped `.empty.orphan` residue, every other `.empty.orphan` left in place, prune logged through `overwatch_log_action` — verified (`pruned-claim-lock-residue`), including the backup taken before deletion.\n5. New test under `team/tests/unit/` named for the behavior, covering all four cases, discovered and passing under the unit runner — verified: `test_overwatch_empty_files_report_scope_bash.py`, 4 passed, orphan-test lint clean.\n6. `bash -n` on the script and `python3 -m py_compile` on the test both exit 0 — verified.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "The three documentation surfaces match the shipped behavior",
+      "heading": "Finding 5: The three documentation surfaces match the shipped behavior",
+      "level": 3,
+      "body": "**Category:** pass\n\nRead in full and compared line-by-line against the merged script (TESTER.md Step 6.3 — documentation-layer files get particular care, because an error here fails the first time an agent reads the file rather than in a test):\n\n- `team/scripts/lib/overwatch-checks/README.md` catalog row 2 — names report files as the scan scope, states dotfiles are never scanned at any size, names the machinery the dot marks, corrects the rename suffix from `.orphan` to the `.empty.orphan` the code actually writes, and records the bounded prune plus the every-other-orphan-stays rule. All four claims match the code.\n- `team/roles/OVERWATCH.md` whitelist row 1 and `subagents/overwatch.md` check-list item 1 — same scope in each file's own register, no contradiction with the README or the script.\n- `grep -i \"zero-byte files in\"` across the three files returns nothing (criterion 4).\n- `git diff --name-only ai_main..ai_rc/v2.23.8` lists exactly the five expected files, so criterion 5 (\"no file outside those three is modified by this ticket\") holds for the documentation ticket's half of the diff.\n- Spot-check beyond the three named surfaces: `grep -rn \"check-empty-files\" --include=*.md` across the whole tree finds no fourth prose surface still describing the old scope.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "The claim-lock filename shape is mirrored in bash for the prune path",
+      "heading": "Finding 6: The claim-lock filename shape is mirrored in bash for the prune path",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe implementing ticket constrains the work with \"the claim-lock sentinel filename shape is owned by `team/pm-agent/lib/bug_scanner.py` — read it there rather than restating a pattern that can drift.\" The protection path honors this completely: `_cef_is_report_candidate` restates nothing, excluding every dotfile rather than matching the sentinel shape, so a future change to `_CLAIM_LOCK_RE` cannot expose a live claim lock to quarantine. The prune path does restate it — `_cef_is_claim_lock_residue` carries `^\\.claim-[0-9]{4,}\\.lock\\.empty\\.orphan$`, a hand-transcribed bash mirror of the Python `^\\.claim-(\\d{4,})\\.lock$`. The two agree exactly today (verified by reading both), and the comment above the function names `bug_scanner.py` and `_CLAIM_LOCK_RE` as the owner.\n\nRecorded as a caveat rather than a gap because the drift failure mode is inert: if the Python shape changes, the bash mirror stops *matching* and the prune silently becomes a no-op — leftover residue accumulates, nothing live is deleted and nothing is corrupted. A bash consumer cannot import a Python regex, so some mirror is unavoidable for a prune that must be shape-bounded; the alternative reading (that the constraint is literally unmet) is recorded here so a reader can weigh it rather than having it decided silently.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Prune deletes a residue-named file even if it carries content",
+      "heading": "Finding 7: Prune deletes a residue-named file even if it carries content",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe residue `find` has no `-empty` predicate, so a file named `.claim-NNNN.lock.empty.orphan` that somehow holds content is pruned too. Exercised: a non-empty residue file was deleted, and its content was preserved in `overwatch/backups/<timestamp>/` by the `overwatch_backup_file` call the prune makes before `rm`. Residue files are 0-byte by construction (they are renamed 0-byte sentinels), so this is a theoretical shape; the backup-before-modify contract makes it recoverable rather than destructive. Noted, not filed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Both gated runners green",
+      "heading": "Finding 8: Both gated runners green",
+      "level": 3,
+      "body": "**Category:** pass\n\n`UNIT_EXIT=0` and `INTEGRATION_EXIT=0` from `team/scripts/run-unit-tests.sh --coverage` and `team/scripts/run-integration-tests.sh --coverage`, run from the dev-tree root. This is the PASS evidence — not a pytest \"N passed\" line. No test failed, so there is no stale-assertion analysis to perform; CODER's `## Stale Literal Risks` section flagged only the new `pruned-claim-lock-residue` literal asserted in the test authored beside it, which is consistent with a green suite.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Steps with nothing to verify",
+      "heading": "Finding 9: Steps with nothing to verify",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Step 6.8 (synthetic release simulation) — skipped with a note: the diff touches no release-lifecycle file. The only `team/scripts/` paths in the diff are `lib/overwatch-checks/check-empty-files.sh` and that directory's README, neither of which is in the RC open/close cycle.\n- Step 6.10 (prereq dependency graph) — no cycles; every referenced task ID resolves to an existing folder; bookends correct (`CM-20260916-041-open-rc-2-23-8` opens, `CODER-039` → `WRITER-040` → `TESTER-042` → `CM-20260916-044-release-2-23-8` closes, the release task's prerequisites naming all three).\n- Step 6.13 (skip-cites-real-bug) — no placeholder skip shapes anywhere in `team/tests/`; every `BUG-NNNN` token found in the test tree is either a synthetic fixture the test itself writes into a temp dir or a fixture filename, not a skip citation. The runner's own `lint_skip_bug_gate` reported `0 missing files`.\n- Step 6.9 (constraint negative checks) — no secret-shaped, credential-shaped, or banned pattern introduced by the diff; the new test uses `tmp_path` throughout and references neither a bare `/tmp` path, `$HOME`, nor the live kanban root.\n- Step 6.11 (spot-check) — `Active RC v2.23.8` is consistent with an existing local `ai_rc/v2.23.8` branch and a `v2.23.7` last release (no state drift); the new mechanism is covered by both its own test and this report's live runs (not an untested mechanism); no prior-gap regression surfaced.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

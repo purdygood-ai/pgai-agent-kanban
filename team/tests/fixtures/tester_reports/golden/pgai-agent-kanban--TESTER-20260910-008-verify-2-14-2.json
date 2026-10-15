@@ -1,0 +1,220 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified release candidate `ai_rc/v2.14.2` (commit\n`acb939523890daec0b18dd4063c11883e9d7370b`) against\n`projects/pgai-agent-kanban/requirements/v2.14.2-bugfix-bundle-20260910.md`, a\nfour-item bug bundle (BUG-0220, BUG-0216, BUG-0218, BUG-0219). Verification ran\nin the isolated detached worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260910-008-verify-2-14-2`,\nwhich matched `ai_rc/v2.14.2` exactly, was clean, and carried no stashes.\nAll four bundled items were verified structurally and behaviorally -- every guard\nthis RC touched was exercised by triggering the failure mode it prevents, not by\nreading the code. All four fixes are correct. The integration gated runner exited\n0 (424 passed, 1 skipped). The unit gated runner exited 1 on three failures in\n`tests/unit/test_lint_comment_provenance.py`; those three failures were\nreproduced identically against `ai_main` (tagged `ai_v2.14.1`), so they predate\nthis RC and are not a regression. Their cause -- a quality-class lint finding\nreaching the certification exit code through a test that scans the real\nrepository instead of its own fixture -- is itself the pattern this RC's new\nblocking-severity doctrine forbids, and is filed. Three bugs were filed via Path\nC-A; none is a defect in this RC's own delivered work, and one (BUG-0223) is a\ncomment-only dangling doc pointer this RC introduced.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0220 -- governance byte budget demoted from hard gate to quality-class narration",
+      "heading": "Finding 1: BUG-0220 -- governance byte budget demoted from hard gate to quality-class narration",
+      "level": 3,
+      "body": "**Category:** pass\n\nVerified against every acceptance line in the bug.\n\n- **Over-budget produces narration, not failure.** The `pm` role is currently\n  over budget on the shipped tree. The unit runner printed, verbatim:\n\n  ```\n  Running governance byte-budget check...\n  ROLE             ASSEMBLED         BUDGET   VERDICT\n  po                   62811          65536   under\n  pm                   76391          73728   OVER\n  lint_governance_byte_budgets: pm over governance byte budget: assembled=76391 bytes budget=73728 bytes\n  coder                69217          69632   under\n  writer               68152          69632   under\n  tester              101060         102400   under\n  cm                   82780          86016   under\n  overwatch            73635          73728   under\n  [gated-runner] governance_byte_budget: OK\n  ```\n\n  The check reports `OK` to the runner while over budget. This is BUG-0220's\n  acceptance line 1 and line 5 satisfied together: v2.14.1's README growth (the\n  original HALT trigger) is still over budget, and it now narrates green.\n- **Findings-file entry, quality class.** Both `findings-unit.json` and\n  `findings-integration.json` carry\n  `{\"lint\": \"governance_byte_budget\", \"severity\": \"quality\", \"role\": \"pm\",\n  \"assembled_bytes\": 76391, \"budget_bytes\": 73728, ...}`.\n- **`test_composer_governance_byte_budget` no longer fails on the threshold.**\n  It passed (2 cases) while printing the same OVER row, and its own liveness case\n  pins `coder` to a 1-byte budget, asserts the verdict is `OVER`, and asserts the\n  process still returns 0.\n- **Under-budget is silent.** `test_lint_governance_byte_budgets.py:310` asserts\n  no `lint_governance_byte_budgets:` narration line appears when nothing is over.\n  Confirmed in the real run: only the `pm` row emitted a narration line; the six\n  under-budget roles emitted none.\n- **Doctrine paragraph present, and cited by the check.** `team/SOP-core.md` gains\n  a `## Blocking Severity: only real damage blocks` section, and both\n  `team/scripts/lint_governance_byte_budgets.sh` (two sites) and the wiring in\n  `run-unit-tests.sh` / `run-integration-tests.sh` cite it by name in their own\n  comments.\n- **No remaining size-threshold hard gate.** Grepped `team/tests/` for assertions\n  on byte/size thresholds of governance or docs: the only hits are the byte-budget\n  suite's own assertions on table text and finding fields, none of which fails on\n  a threshold. Grepped both gated runners: the only byte/budget references are the\n  quality-lint wiring block.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0216 -- census anchor marker-to-index reconciliation",
+      "heading": "Finding 2: BUG-0216 -- census anchor marker-to-index reconciliation",
+      "level": 3,
+      "body": "**Category:** pass\n\nVerified behaviorally by triggering both new finding kinds, in throwaway copies of\nthe RC tree extracted with `git archive` (the RC worktree itself was never\nmodified).\n\n- **Baseline is clean.** `python3 team/scripts/lint_gate_census_compliance.py`\n  prints `OK -- 35 file(s) checked, 0 offenders.` and exits 0 (BUG-0216\n  acceptance 4).\n- **Set difference is empty** (BUG-0216 acceptance 3). A strict scan of every\n  `^\\s*#\\s*CENSUS-ANCHOR:\\s*<token>\\s*$` line under `team/` finds 43 markers\n  across 21 files; every one is named by a `path:token CLASS` line in the\n  `CENSUS-LOCATOR-INDEX` fenced block. The RC adds exactly the 19 previously\n  missing entries the bug enumerated.\n- **`unindexed_anchor` fires** (BUG-0216 acceptance 1). Planted\n  `# CENSUS-ANCHOR: tester-probe-99` above a synthetic `exit 3` in the scanned\n  file `team/scripts/run-unit-tests.sh`. The lint produced:\n\n  ```\n  kind:    unindexed_anchor\n  cause:   team/scripts/run-unit-tests.sh:7 -- CENSUS-ANCHOR token 'tester-probe-99'\n           has no matching 'path:token CLASS' line in docs/blocking-site-census.md's\n           CENSUS-LOCATOR-INDEX\n  remedy:  Add 'team/scripts/run-unit-tests.sh:tester-probe-99 <CLASS>' to the\n           CENSUS-LOCATOR-INDEX fenced block ...\n  ```\n\n- **`anchor_class_mismatch` fires.** Changed the index entry\n  `team/scripts/lint_engine_size_dupe.py:engine-size-dupe-01` from `CONVERT` to\n  `BLOCK-WORTHY` while the site's own inline comment still declares `CONVERT`.\n  The lint produced exactly one finding, `kind: anchor_class_mismatch`, with\n  `index_class: BLOCK-WORTHY`, `site_class: CONVERT`, and a remedy naming both.\n- **No false positive** (BUG-0216 acceptance 2). The unmodified tree, carrying 43\n  correctly-paired markers, produces zero findings.\n- **Quality-class posture preserved.** The lint exited 0 in every one of the three\n  runs above, including the two that produced findings.\n- **Doc and lint agree on the finding set** (BUG-0216 acceptance 5).\n  `team/roles/CODER.md` now enumerates exactly three findings --\n  `missing_signal`, `unindexed_anchor`, `anchor_class_mismatch` -- matching\n  `_FINDING_KIND_*` in the script. The bug's acceptance text names `team/SOP.md`,\n  which no longer exists in the shipped tree (removed at v2.10.0); the equivalent\n  shipped text is `team/SOP-core.md` \"Authoring a new gate\" plus CODER.md \"Writing\n  a compliant anchor\", and neither now claims five findings or a both-directions\n  reconciliation. CODER.md states plainly that the mirror direction (an index\n  entry no marker names) is reported by nothing. Doc and implementation agree.\n- **`bash -n` / `py_compile` clean** on every changed file, and\n  `python3 -m compileall team/scripts team/pgai_agent_kanban` exits 0.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0218 -- release-bundle slug removed from the wake bootstrap comment",
+      "heading": "Finding 3: BUG-0218 -- release-bundle slug removed from the wake bootstrap comment",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe named instance is fixed; two of the bug's four acceptance lines remain unmet\nfor a reason external to this RC.\n\n- `grep -c \"v2.14.0-provider-runtime-hardening\" team/scripts/lib/wake_bootstrap.sh`\n  returns **0** (acceptance 2, pass).\n- `team/scripts/lib/wake_bootstrap.sh` contains no `provenance-allowlist` marker\n  (acceptance 3, pass). The rewrite deletes the parenthetical and lets the\n  sentence stand, exactly as the bug's hand-off suggested.\n- `python3 team/scripts/lint_comment_provenance.py` **does not** exit 0\n  (acceptance 1, unmet) and both findings files **do** still contain one\n  `comment_provenance` finding (acceptance 4, unmet). The residual finding is a\n  different instance in a different file -- `release-notes/v2.14.1.md:33` --\n  which is on `ai_main` and was written during the v2.14.1 release, after\n  BUG-0218 was filed. It is filed as BUG-0222 and dispositioned under Lint\n  Findings below.\n\n**Caveat, not a gap:** the deliverable BUG-0218 asked CODER for was delivered\nexactly. The two unmet lines are unmet because the bug's acceptance was written\nas a whole-tree assertion and the tree acquired a new, unrelated instance in the\ninterval. No finding is charged against this RC's work here.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "caveat_not_a_gap": "the deliverable BUG-0218 asked CODER for was delivered"
+      },
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0219 -- demo scratch-repo snippets guarded",
+      "heading": "Finding 4: BUG-0219 -- demo scratch-repo snippets guarded",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `grep -rn \"git commit --allow-empty\" team/demos/` returns nothing; every git\n  command in both blocks is now bound with `git -C <path>`, so no command in the\n  snippet can act on the reader's current directory.\n- **Original failure mode triggered.** Created a real git repo, created\n  `<repo>/nested/pgai-helloworld-src` inside it, and ran the shipped guard\n  (`git -C <target> rev-parse --git-dir`). It **refused**; the outer repo's commit\n  count stayed at 0. The exact accident that produced the stray empty commit on\n  `ai_rc/v2.14.0` is now prevented.\n- **New normal case verified.** Against a fresh directory outside any repo, the\n  block created the repo and the single empty commit (`rev-list --count HEAD` = 1).\n- **Re-run is safe.** Running the block a second time against the repo it just\n  created refuses and leaves the commit count at 1 -- no duplicate commit. This\n  preserves the idempotence the old helloworld snippet got from its\n  `git rev-parse --verify -q HEAD ||` guard, which the rewrite dropped.\n- **This RC's own branch is clean.**\n  `python3 team/scripts/lint_rc_empty_commits.py` prints\n  `OK -- checked 1 range(s) (ai_main..ai_rc/v2.14.2), no empty non-merge commits\n  found.` and exits 0. All 12 commits in the range change files or are merges.\n- The bug's \"leave `ai_rc/v2.14.0` alone\" constraint is honoured -- no history\n  rewrite anywhere in the diff.\n- The `<!-- doc-lint: skip -->` annotations added above the two multi-line blocks\n  are accepted: `test_helloworld_flow_harness.py` and the doc-lint integration\n  cases all pass.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "unit gated runner exits 1 -- provenance-lint tests scan the live release-notes directory",
+      "heading": "Finding 5: unit gated runner exits 1 -- provenance-lint tests scan the live release-notes directory",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium\n**Regression:** no (reproduced identically against `ai_main`, tagged `ai_v2.14.1`, the last shipped version and this RC's merge-base)\n**Integrity Damage:** no\n**Filed As:** BUG-0221 (Path C -- autonomous follow-up filing, non-blocking; Path C-A -- filed as BUG)\n\nThree cases in\n`team/tests/unit/test_lint_comment_provenance.py::TestCommentProvenanceUnshippedPathAndBareSlug`\nfail:\n\n```\ntest_docs_audits_path_not_flagged                       (line 649)\ntest_bare_release_slug_filename_value_not_flagged       (line 691)\ntest_bare_release_slug_format_description_not_flagged   (line 713)\n```\n\nEach writes a clean fixture into a scratch directory and calls\n`_lint.main([\"--code-dirs\", str(code_dir)])`, then asserts the result is 0.\n`--code-dirs` overrides only the *code* scan roots; the *prose* root stays at its\ndefault, which resolves to the repository's own `release-notes/` directory. All\nthree failures report the same single cause, unrelated to their fixtures:\n\n```\nrelease-notes/v2.14.1.md:33: [task-ID] provenance reference\n'TESTER-20260909-045' in code\n```\n\nSo the assertion is not testing what its docstring claims; it is testing \"the\nrepository currently has no provenance findings anywhere.\"\n\n**Regression evidence.** `git archive ai_main | tar -x` into a scratch tree and\nrunning the same three cases produces `3 failed, 5 passed`. `ai_main` is tagged\n`ai_v2.14.1` and is this RC's merge-base, so the failure is present in the last\nshipped version. This RC touches neither\n`team/tests/unit/test_lint_comment_provenance.py` nor\n`team/scripts/lint_comment_provenance.py` (empty diff for both), and\n`release-notes/v2.14.1.md` is unchanged between `ai_main` and the RC.\n\n**Why this matters beyond the exit code.** `comment_provenance` is a\nquality-class lint. Both gated runners correctly record its finding with\n`severity: quality` and neither runner fails on it -- the integration runner\nexits 0 with the finding present. The same finding nevertheless reaches the\ncertification exit code through a unit test. That is a quality-class advisory\nescalated into a hard gate, which is precisely what this RC's own new\n`team/SOP-core.md` \"Blocking Severity: only real damage blocks\" paragraph names\nas itself a bug. It also means no RC can record a PASS verdict until it is fixed.\n\n**On the Integrity Damage value.** This is suite breakage: the authoritative unit\ncertification command exits 1. Under `team/SOP-core.md`'s three-value `Integrity`\nfield, suite breakage reads `breakage`. Under this role file's yes/no\n`Integrity Damage` definition -- queue corruption, a violated lockfile invariant,\nsilently-lost task state, a destructive path that can run when it should not, or\ndata the system cannot reconstruct -- it is `no`: nothing is corrupted, no state\nis lost, and the shipped artefact is byte-identical either way. Both readings are\nstated here so CM can apply whichever its own matrix takes; the value written in\nthe parsed field is the one this role file defines.",
+      "filed_as": "BUG-0221",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug (pre-existing)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium",
+        "regression": "no (reproduced identically against `ai_main`, tagged `ai_v2.14.1`, the last shipped version and this RC's merge-base)",
+        "filed_as": "BUG-0221 (Path C -- autonomous follow-up filing, non-blocking; Path C-A -- filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "`release-notes/v2.14.1.md:33` cites an internal task ID",
+      "heading": "Finding 6: `release-notes/v2.14.1.md:33` cites an internal task ID",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low\n**Regression:** no (the file is on `ai_main`, added by the v2.14.1 release commits `9218ac1` / `9d83d8b`; unchanged by this RC)\n**Integrity Damage:** no\n**Filed As:** BUG-0222 (Path C-A)\n\nThe shipped v2.14.1 release notes end their Known Issues block with\n`(See TESTER report for filed bug IDs: TESTER-20260909-045-verify-2-14-1)` -- a\nkanban task folder a reader holding the release cannot open. This is the single\n`comment_provenance` finding in both runners' findings files, and it is the root\ncause of Finding 5's symptom (though not of Finding 5's defect, which is the test\nisolation). Recurrence of a class fixed twice before, at BUG-0165 and BUG-0173,\nboth `done`; no `open` or `running` bug covered it at filing time.",
+      "filed_as": "BUG-0222",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug (pre-existing)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low",
+        "regression": "no (the file is on `ai_main`, added by the v2.14.1 release commits `9218ac1` / `9d83d8b`; unchanged by this RC)",
+        "filed_as": "BUG-0222 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "two new comments cite `team/SOP.md`, a file removed from the tree at v2.10.0",
+      "heading": "Finding 7: two new comments cite `team/SOP.md`, a file removed from the tree at v2.10.0",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low\n**Regression:** yes (both lines are additions in this RC's diff)\n**Integrity Damage:** no\n**Filed As:** BUG-0223 (Path C-A)\n\n`team/scripts/lint_gate_census_compliance.py:47` and `:514`, both added by this\nRC, explain the anchor-reconciliation direction by citing `team/SOP.md`. That\nfile does not exist in the shipped tree -- `git cat-file -e ai_main:team/SOP.md`\nfails, `ls team/*.md` lists only `DIRECTIVES.md OVERVIEW.md README.md\nSOP-core.md TESTING.md`, and `install.sh` line 734 delivers `SOP-core.md` with no\nentry for `SOP.md`. The same RC cites `team/SOP-core.md` correctly in\n`lint_governance_byte_budgets.sh` and in both gated runners, so this is an\nisolated miss rather than a pattern. One pre-existing sibling instance exists at\n`team/scripts/lib/cm/release_campaign_spend.sh:30` and is named in the filing for\nthe same sweep.\n\nComment-only: no runtime effect, no operator-visible output.",
+      "filed_as": "BUG-0223",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low",
+        "regression": "yes (both lines are additions in this RC's diff)",
+        "filed_as": "BUG-0223 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "requirements-doc acceptance criteria",
+      "heading": "Finding 8: requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n| Criterion | Result |\n|---|---|\n| Each bundled item is addressed in the implementation | pass -- Findings 1-4; BUG-0218 with the caveat recorded there |\n| All Python files compile cleanly | pass -- `python3 -m compileall -q team/scripts team/pgai_agent_kanban` exit 0; each changed `.py` individually `py_compile`-clean |\n| All bash files pass syntax check | pass -- `bash -n` clean on all four changed `.sh` files |",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "structural, drift and dependency checks",
+      "heading": "Finding 9: structural, drift and dependency checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Step 6.1 release-state sanity.** `projects/pgai-agent-kanban/release-state.md`\n  reads `Active RC: v2.14.2`, `RC Opened At: 2026-09-10T02:39:38+00:00`,\n  `RC Opened By Task: CM-20260910-007-open-rc-2-14-2`, `Last Released: v2.14.1`.\n  `## Last Released` is well-formed `vX.Y.Z`. `v2.14.2` is strictly greater than\n  `v2.14.1` by semver. The named `ai_rc/v2.14.2` branch exists and matches the\n  worktree -- no `Active RC` / branch-state drift. The file's mtime (02:39)\n  matches its own `RC Opened At` value to the minute, consistent with\n  `cm-open-rc.sh` having written it.\n- **Step 6.8 synthetic release simulation.** The diff touches no\n  release-lifecycle file (`cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`,\n  `lib/project_paths.sh`); the trigger condition is not met. Run anyway as part of\n  the integration suite: `tests/integration/test_cm_release_synthetic.py` --\n  15 passed.\n- **Step 6.10 prereq graph.** Nine tasks in the cycle. `PM-001` -> `CM-007`\n  (open RC) -> `WRITER-002`, `CODER-003`, `CODER-004`, `CODER-005`, `WRITER-006`\n  (plan sequence 1-5, no inter-dependencies) -> `TESTER-008` -> `CM-010`\n  (release). `CM-010`'s `## Prerequisites` names all five work tasks plus\n  `TESTER-008`; every referenced task ID resolves to an existing folder. No\n  cycles, no colliding sequence numbers. Sequence 009 is unused -- the\n  HUMAN-APPROVE slot, unallocated because the bundle carries\n  `Human Approval Required: auto`. Bookends correct.\n- **Step 6.13 skip-cites-real-bug.** No placeholder skip IDs. No\n  `pytest.skip` / `mark.skip` annotation in `team/tests/` cites a `BUG-NNNN`, so\n  the file-existence sweep has nothing to resolve and reports nothing missing.\n  The only `BUG-NNNN` literal hits are inside archived runner logs under\n  `team/tests/artifacts/coverage-*-v2.3.0/`, which are fixture data.\n- **Step 6.14 coding-standards spot-check.** `--help` on both touched lints names\n  every argument, including the newly added `--findings-file` on\n  `lint_governance_byte_budgets.sh` (added to the usage block, the header comment,\n  and the schema documentation in the same change). Budgets stay in `kanban.cfg`\n  as operator-tunable config rather than moving into code. No newly duplicated\n  implementation of an existing `lib/` operation. The one directive-8 hit is\n  Finding 7.\n- **Step 6.11 spot-check.** No state drift found in the RC or the project's kanban\n  state. See Caveats for one observation about the operator's live install, which\n  is deliberately not charged as a finding.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

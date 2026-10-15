@@ -39,8 +39,9 @@
 #   Rejected:   0xRRGGBB  (must use # prefix — not 0x)
 #   Rejected:   #RGB      (three-digit short form not supported)
 #   Validation  happens only at write/check time; this library reads and
-#               echoes whatever is stored. Format checks belong in
-#               create-project.sh and add-project.sh.
+#               echoes whatever is stored. Format checks belong to the
+#               registry verbs (create_project / add_project in
+#               pgai_agent_kanban/ops/projects.py).
 #
 # Source order
 # ------------

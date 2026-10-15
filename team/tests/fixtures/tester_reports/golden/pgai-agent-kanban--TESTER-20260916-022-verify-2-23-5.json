@@ -1,0 +1,319 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "RC `ai_rc/v2.23.5` (HEAD `fdc1aff`) was verified against\n`requirements/v2.23.5-bugfix-bundle-20260916.md`, whose single bundled item is\n`BUG-0298-dashboard-snapshot-producer-missing` (four fix heads plus a doc-truth\nhead). The RC carries four merges — three CODER, one WRITER — touching eight\nfiles: `team/scripts/dashboard/{cadence-loop.sh,activation-hook-sender.sh}`,\n`team/scripts/dashboard/lib/{cadence.sh,snapshot.sh}`, two test modules, and\n`docs/{dashboard.md,DASHBOARD-PANES.md}`. All four fix heads were verified\nbehaviourally in throwaway sandboxes (not by reading alone): pane render stderr\nis routed to a per-pane debug log and never reaches the display stream; routine\nTTL-expiry misses are demoted to a debug tag while missing/unreadable misses and\nfailed cache writes stay at normal volume; the activation-hook sender emits zero\ndisplay bytes across a 30-switch storm and narrates only into per-pane logs; and\ncensus-identified streaming panes are excluded from signalling entirely. The\ngated unit suite is green. The gated integration suite exits 1 on three tests —\ntwo from a golden fixture this RC's own message-text change left stale, one from\na fixture that inherits `PGAI_AGENT_WAKE_ACTIVE` from the ambient wake\nenvironment. Neither failure is in production code; both are test-estate\ndefects, filed via Path C (autonomous follow-up filing — non-blocking). Two\nfurther findings were recorded: the stale-literal pre-flight check that should\nhave caught the golden does not scan fixture files, and a shipped test assertion\nmessage carries an internal bug identifier.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "pre-flight — the RC is intact",
+      "heading": "Finding 1: pre-flight — the RC is intact",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` = `git rev-parse ai_rc/v2.23.5` = `fdc1aff49b6d…`.\n`git status --porcelain` empty; `git stash list` empty. Every task folder whose\n`status.md` reads `DONE` and whose README names a feature branch was scanned:\nzero `ai_feature/*` branches exist locally (`git branch --list 'ai_feature/*'`\nreturns nothing), so every branch passes both merge checks trivially — the\nnormal post-merge shape, since CODER and WRITER delete branches after merging.\nThe four prerequisite tasks (CODER-017, CODER-018, CODER-019, WRITER-020) are\neach `DONE` with `Needs Human: no`, and each names its merge commit in its own\n`status.md`; all four merge commits are present in\n`git log ai_main..ai_rc/v2.23.5`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "gated unit suite green, no lint findings",
+      "heading": "Finding 2: gated unit suite green, no lint findings",
+      "level": 3,
+      "body": "**Category:** pass\n\n`UNIT_EXIT = 0`. The lint pre-flight passed and the findings file\n`$PGAI_AGENT_KANBAN_TEMP_DIR/lint/findings-unit.json` holds 0 findings, as does\n`findings-integration.json`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "the engine-behaviour baseline golden was not refreshed for this RC's new narration text",
+      "heading": "Finding 3: the engine-behaviour baseline golden was not refreshed for this RC's new narration text",
+      "level": 3,
+      "body": "**Category:** stale-assertion\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** medium (second occurrence of this class; the advisory\npre-flight meant to catch it has a blind spot — Finding 5)\n**Filed As:** BUG-0299-engine-baseline-golden-narration-text (Path C-A — filed\nas BUG: code defect / regression / test failure)\n**Regression:** yes\n**Integrity:** breakage\n\nTwo integration tests fail:\n\n- `tests/integration/test_engine_behavior_baseline_harness.py::test_compare_against_goldens_is_clean_on_unmodified_tree`\n  (line 161)\n- `tests/integration/test_engine_behavior_baseline_harness.py::test_compare_is_stable_across_invoking_shell_budget_values`\n  (line 301)\n\nBoth fail on the same one-line diff against the recorded golden\n`team/tests/fixtures/engine-baseline/board-render.txt:2`:\n\n```\n-[dashboard-snapshot] column-render CODER: no fresh snapshot (missing, unreadable, or older than 5s) -- rendering directly\n+[dashboard-snapshot] column-render CODER: no fresh snapshot (missing or unreadable) -- rendering directly\n```\n\n**Step 7 stale-assertion evidence.** The expected literal is the golden's line 2,\nquoted above. The production line that produces the actual value is\n`team/scripts/dashboard/lib/snapshot.sh:285`, changed by commit `51109c5`\n(\"Keep dashboard pane render narration off the display surface\",\nCODER-20260916-017) — the same commit that split the miss reason into\n`dashboard_snapshot_read` exit codes 1 and 2 so a routine TTL expiry could be\ndemoted. The new wording is required by the requirements doc's bundled item\n(fix head 2: demote the routine first-miss-per-tick narration \"so logs stay\nsignal not metronome\"): the old sentence enumerated staleness, which is now a\nseparate, separately-tagged line. `team/scripts/harness/engine-behavior-baseline.sh:281`\ncaptures the board render with `2>&1`, so the golden legitimately contains the\nstderr narration and simply needs recapturing. Production code is correct; the\ngolden is the thing that must change, and updating it is the correct fix for the\nnext iteration.\n\n**Why the filed bug is rated severity `high` with `Regression: yes`.**\n`run-integration-tests.sh` exited 0 on the immediately preceding release\n(`TESTER-20260916-014-verify-2-23-4`, `510 passed, 1 skipped`) and exits 1 here,\nand this RC's own work caused the divergence. Per `SOP-core.md` (\"Rating a\nFinding\", calibration), a command that worked in the last release and exits\nnon-zero in this one is `high` with `Regression: yes`; the rating was not\nsoftened to reach a preferred ship outcome. It is recorded as\n`Systemic Risk: medium` rather than `high` because the breakage is confined to\none recorded fixture line in the test estate — no shipped behaviour is wrong and\nthe fix is a single recapture — but a reader weighing this release should know\nthe suite is red for a reason this RC created.",
+      "filed_as": "BUG-0299",
+      "filed_by": null,
+      "severity": null,
+      "category": "stale-assertion",
+      "regression": "yes",
+      "integrity": "breakage",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "stale-assertion",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "medium (second occurrence of this class; the advisory",
+        "filed_as": "BUG-0299-engine-baseline-golden-narration-text (Path C-A — filed",
+        "regression": "yes",
+        "integrity": "breakage"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "the operator-force ship fixture inherits `PGAI_AGENT_WAKE_ACTIVE` from the wake environment",
+      "heading": "Finding 4: the operator-force ship fixture inherits `PGAI_AGENT_WAKE_ACTIVE` from the wake environment",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing — confirmed by diff analysis; both the\nproduction path and the fixture predate this RC)\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** medium (any suite run from inside an agent wake goes red for\na reason unrelated to the tree under test)\n**Filed As:** BUG-0300-ship-policy-fixture-inherits-wake-flag (Path C-A)\n\n`tests/integration/test_ship_policy_acceptance.py::TestOperatorForceShipsOverriddenTrigger::test_unforced_run_halts_then_forced_run_ships_and_writes_both_override_records`\nfails at line 866. The green half of the fixture invokes `cm/release.sh --force\n--reason …` expecting a ship, and gets:\n\n```\nerror:   cm-release.operator-force.agent-wake-refused\nmessage: --force was passed while PGAI_AGENT_WAKE_ACTIVE=1 — an agent wake is\n         running this invocation, and the operator override is operator-only.\n```\n\nThe refusal is correct behaviour. The defect is the fixture's environment\nhandling: `_run_cm_script` in `tests/integration/test_cm_release_synthetic.py:260`\nbuilds the subprocess environment as `dict(os.environ)` and scrubs only\n`PGAI_DEV_TREE_PATH`, so whatever the ambient shell carries is handed to the\nscript under test. `PGAI_AGENT_WAKE_ACTIVE=1` is exported into the TESTER agent's\nown environment by the wake layer (confirmed with `env` in this session), so the\n\"an operator, not a wake\" precondition the test depends on cannot hold when the\nsuite is run the way the kanban runs it. The sibling test three functions above\nsets `extra_env={\"PGAI_AGENT_WAKE_ACTIVE\": \"1\"}` explicitly to exercise the\nrefusal — which is only meaningful if the base environment does *not* carry it,\nso the two tests contradict each other under a wake.\n\n**Proof it is environment coupling and not this RC:**\n`env -u PGAI_AGENT_WAKE_ACTIVE python -m pytest\ntests/integration/test_ship_policy_acceptance.py::TestOperatorForceShipsOverriddenTrigger\n-x -q` → `1 passed in 4.07s`. `git log ai_main --\ntests/integration/test_ship_policy_acceptance.py` shows no change since the\nv2.21.0 release and `git log -S\"agent-wake-refused\" -- team/scripts/cm/release.sh`\nnone since v2.12.0; this RC's diff touches neither file. (Direct pytest is used\nhere only as the Step-7 tracing aid it is sanctioned to be, after the gated\nrunner had already failed — no pytest result is quoted as PASS evidence anywhere\nin this report.)",
+      "filed_as": "BUG-0300",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing — confirmed by diff analysis; both the",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "medium (any suite run from inside an agent wake goes red for",
+        "filed_as": "BUG-0300-ship-policy-fixture-inherits-wake-flag (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "the stale-literal pre-flight does not scan golden fixture files",
+      "heading": "Finding 5: the stale-literal pre-flight does not scan golden fixture files",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the same blind spot will pass the next message-text\nchange the same way)\n**Filed As:** BUG-0301-stale-literal-check-skips-golden-fixtures (Path C-A)\n\nAll three CODER tasks in this RC ran\n`team/scripts/coder-stale-literal-check.sh --diff ai_rc/v2.23.5...HEAD` and each\nrecorded `## Stale Literal Risks: (none)` in its `status.md` — while the changed\nliteral sat verbatim in `team/tests/fixtures/engine-baseline/board-render.txt`\nand took the integration suite red within the hour. The cause is the check's\nsearch shape: `literal_grep_tests` in `team/scripts/lib/literal-extraction.sh`\nmatches a literal only where it appears in an *assertion context* (`==`, `!=`,\n`assert`, `expected`, `assertEqual`, …). A recorded golden is a bare data file\nwith no assertion syntax, so no golden can ever match, and the check reports a\nclean bill for exactly the class of change — an operator-visible message string —\nthat goldens most often capture. The advisory output is false-negative by\nconstruction for recorded-output fixtures.",
+      "filed_as": "BUG-0301",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the same blind spot will pass the next message-text",
+        "filed_as": "BUG-0301-stale-literal-check-skips-golden-fixtures (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "a shipped test assertion message cites an internal bug identifier",
+      "heading": "Finding 6: a shipped test assertion message cites an internal bug identifier",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (isolated to one line)\n**Filed As:** BUG-0302-test-assertion-cites-internal-bug-id (Path C-A)\n\n`team/tests/unit/test_dashboard_activation_hook_lifecycle.py:382`, added by this\nRC:\n\n```python\n    assert result.stdout == \"\", (\n        f\"the sender must never write skip/signal narration to its own stdout \"\n        f\"(BUG-0298 ADDENDUM) -- got: {result.stdout!r}\"\n    )\n```\n\n`SOP-core.md` (\"Naming: describe behavior, not scaffolding or provenance\")\nforbids an internal bug identifier reaching a shipped artifact outside three\nsanctioned exceptions — a usage example, a skip annotation citing an OPEN\nfollow-up bug, and an external constraint. A failure message is none of the\nthree: it is text an operator or agent reads at runtime, and it states process\nhistory rather than the behaviour under test (which the rest of the same message\nalready states well). The hygiene lint does not catch it: on its test-tree\nsurface a bug-shaped token inside an ordinary string literal is exempt by design\n(`team/scripts/lint_hygiene.py`, \"Four scan surfaces\"), an exemption written for\nbug IDs used as test *data*, which this is not.\n`python3 team/scripts/lint_hygiene.py --classes provenance` is clean.",
+      "filed_as": "BUG-0302",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (isolated to one line)",
+        "filed_as": "BUG-0302-test-assertion-cites-internal-bug-id (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "fix head 1 — render stderr never reaches the pane display",
+      "heading": "Finding 7: fix head 1 — render stderr never reaches the pane display",
+      "level": 3,
+      "body": "**Category:** pass\n\nExercised, not inferred. In a throwaway sandbox root (`env -u PGAI_TASKS_DIR -u\nPGAI_PROJECT_ROOT KANBAN_ROOT=$S PGAI_AGENT_KANBAN_ROOT_PATH=$S\nPGAI_AGENT_KANBAN_TEMP_DIR=$S/tmp`), `cadence-loop.sh --interval 1 --\n<renderer>` was run for four ticks with **stdout and stderr merged** — the single\nsurface a tmux pane actually paints. Result: four `RENDERED-COLUMN-LINE` rows and\nzero `dashboard-snapshot` bytes on the display stream, with the narration present\nin `$S/tmp/dashboard/logs/unknown-pane.log`. The merged-stream capture matters: a\n`stderr=DEVNULL` capture passes against the pre-fix code too, which is the trap\nCODER-019's own test notes call out.\n\nGuard behaviour was checked at its boundary as well: the loop resolves the log\ntarget once and probes it with `: >>\"$path\"`, falling back to `/dev/null` when\nthe probe fails, so an unwritable temp root loses the narration and never the\ncolumns; and the pane-label sanitiser maps a non-tmux identity to `unknown-pane`\n(observed above) rather than producing `.` or `..`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "fix head 2 — narration volume is split by miss reason",
+      "heading": "Finding 8: fix head 2 — narration volume is split by miss reason",
+      "level": 3,
+      "body": "**Category:** pass\n\n`dashboard_snapshot_read` exit codes were observed directly: fresh → `0`,\npresent-but-past-TTL → `2`, missing → `1`. Driving `dashboard_snapshot_render`\nthrough all four states in the sandbox produced exactly one line each, all on\nstderr, with stdout byte-identical in every path:\n\n```\n[dashboard-snapshot] column-render K1: no fresh snapshot (missing or unreadable) -- rendering directly\n[dashboard-snapshot-debug] column-render K1: snapshot older than 1s -- rendering directly (routine expiry)\n[dashboard-snapshot] column-render K2: failed to write snapshot for twin readers\n```\n\nThe write-failure line (produced by chmod-ing the snapshot directory read-only)\nis new behaviour this RC adds — the previous code swallowed a failed cache\nrefresh with `|| true`. The routine-expiry case is the one demoted to the\n`-debug` tag, which is the head's stated intent.\n\n**Twin parity and cache disposability** (the bundled item's second acceptance\nbullet): three successive renders of a key whose renderer emits a fresh random\nvalue returned byte-identical output (`DATA-11500` three times), proving the\ncache-hit path rather than two scans coincidentally agreeing; deleting the\nsnapshot directory mid-session left the next render working and the display\nclean.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "fix heads 3 and 4 — sender narration and census-scoped signalling",
+      "heading": "Finding 9: fix heads 3 and 4 — sender narration and census-scoped signalling",
+      "level": 3,
+      "body": "**Category:** pass\n\nA private tmux server (socket inside the sandbox) was started with a four-pane\n`main` window matching the census layout, and\n`activation-hook-sender.sh --session … --window main --kanban-root $S` was run\nwith no arm markers present. Results:\n\n- sender **stdout 0 bytes, stderr 0 bytes** — nothing exists for `run-shell` to\n  paint onto whichever pane the operator switched to.\n- `main.0.log`, `main.2.log`, `main.3.log` each received the\n  `activation-hook-sender: skipping pane …: not armed yet…` line.\n- `main.1` — the census's `logs.sh` streaming pane — produced **no log file and\n  no narration at all**, i.e. it was excluded from the target set before the arm\n  check, which is head 4's \"not signal targets at all\".\n\n**Window-switch storm** (the addendum's acceptance): 30 consecutive sender\ninvocations produced **0 bytes** of combined stdout+stderr.\n\n**The dual-label arm check was exercised too.** Creating the marker under the\nbare window-name key (`armed/<session>/main`, the convention `create.sh` uses for\nits single-pane windows) caused pane `main.0` to be signalled — observed by the\npane dying under `USR1`'s default disposition in the un-trapped sandbox pane,\nwhich is positive proof the signal was delivered rather than skipped. Reading\n`create.sh` confirms the scope of that fallback is exactly right: of the 50\n`dashboard_send_armed_keys` call sites only four use a bare window name\n(`attention`, `metadata`, `agent-metrics`, `logs`), and all four are single-pane\nwindows, i.e. pane index 0.\n\n**The exclusion list was checked against the census rather than taken on trust.**\n`_sender_is_streaming_script` hardcodes `logs.sh|cron-tail.sh|debug-logs.sh`;\nevery other census pane script resolves to a `cadence-loop.sh`-wrapped command in\n`create.sh`, and every pane — including the one-shot `suggested-commands.sh`\nreference pane and the interactive shells — is dispatched through\n`dashboard_send_armed_keys`, so no pane is left permanently unarmed and narrating\nafter this change. The hardcoded triple is a drift risk rather than a defect\ntoday (see Caveats).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "documentation matches the shipped behaviour",
+      "heading": "Finding 10: documentation matches the shipped behaviour",
+      "level": 3,
+      "body": "**Category:** pass\n\n`docs/dashboard.md` (\"Shared render snapshots\", \"Where pane narration goes\") and\n`docs/DASHBOARD-PANES.md` (\"Pane debug logs\") were read in full and checked claim\nby claim against the merged code and the sandbox runs above: the log path shape\n`<temp-root>/dashboard/logs/<window-name>.<pane-index>.log`, the\n`unknown-pane.log` fallback outside tmux, the underscore substitution for unsafe\nfilename characters, the create-on-loop-start and die-with-the-session lifecycle,\nthe \"cannot write the log → still renders\" fallback, the three streaming scripts\nexcluded from signalling, and the narration reference table — all four table rows\nmatch the exact strings `snapshot.sh` and `activation-hook-sender.sh` now emit.\nThe doc correctly retires the bug report's superseded \"no producer exists\"\ndiagnosis by documenting the cooperative cache instead, which is what the\ndoc-truth head asked for, and the added sections disturb no CENSUS-GENERATED\nblock.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "requirements acceptance criteria",
+      "heading": "Finding 11: requirements acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"All Python files compile cleanly\" — `git ls-files '*.py' | xargs -n50 python3\n  -m py_compile` → clean, exit 0.\n- \"All bash files pass syntax check\" — `bash -n` over all 280 tracked `*.sh`\n  files → 0 failures.\n- \"Each bundled item is addressed in the implementation\" — the bundled item's\n  four fix heads plus its doc-truth acceptance bullet are each verified above\n  (Findings 7-10). The item is addressed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "release-state and version ordering",
+      "heading": "Finding 12: release-state and version ordering",
+      "level": 3,
+      "body": "**Category:** pass\n\n`release-state.md` holds the four-field schema: `Active RC v2.23.5`, `RC Opened\nAt 2026-09-16T12:10:25+00:00`, `RC Opened By Task CM-20260916-021-open-rc-2-23-5`,\n`Last Released v2.23.4` — the last of those written by `cm/release.sh` by design,\nnot drift. `semver_gt \"v2.23.5\" \"v2.23.4\"` (from `team/scripts/lib/semver.sh`,\nnever an inline compare) is true, and `pp_last_released_version\n\"pgai-agent-kanban\"` returns `v2.23.4`. The `ai_rc/v2.23.5` branch exists and\nmatches the recorded Active RC — no state drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "skip-cites-a-real-bug gate",
+      "heading": "Finding 13: skip-cites-a-real-bug gate",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo placeholder skip shapes (`BUG-SKIP`, `skip` near `BUG-<letters>`) exist in\n`team/tests/`. `bash team/scripts/lint_skip_bug_gate.sh` → \"OK — all skip\nannotations are compliant\", 0 missing bug files.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "synthetic release simulation not applicable",
+      "heading": "Finding 14: synthetic release simulation not applicable",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.8 applies only when the diff touches release-lifecycle files. This RC's\ndiff touches none of `cm/release.sh`, `cm/open-rc.sh`, `cm/cancel-rc.sh`,\n`team/scripts/lib/project_paths.sh`, or the open/close cycle — it is confined to\n`team/scripts/dashboard/`, two test modules and two docs. Skipped with this note.\n(`test_cm_release_synthetic.py` ran inside the gated integration suite and passed\nregardless.)",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

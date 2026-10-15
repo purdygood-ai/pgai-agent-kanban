@@ -1,0 +1,16 @@
+# team/config/tester-report-census-allowlist.txt
+#
+# Allowlist for team/scripts/lint_tester_report_census.py (quality class,
+# never fatal), which reports non-test code outside
+# team/pgai_agent_kanban/reports/tester_report.py that parses a TESTER
+# report itself.
+#
+# Format: one repository-relative path per line
+# (e.g. team/scripts/lib/example.sh). Blank lines are ignored and text after
+# a "#" is a comment. Every entry carries its reason in a comment on the
+# line(s) immediately above it. A listed file is not scanned.
+#
+# The list ships empty: TESTER reports have one parser, so an entry is a
+# deliberate, explained exception. A whole-tree run reports an entry that no
+# longer names a matching file, so remove an entry as soon as its file reads
+# the report through the parser module.

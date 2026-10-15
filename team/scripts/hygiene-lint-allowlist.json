@@ -1,0 +1,639 @@
+[
+  {
+    "class": "provenance",
+    "content_hash": "57d6ab041997",
+    "file": "team/scripts/harness/engine-behavior-baseline.sh",
+    "justification": "fixture literal, not a real task ID -- required so column-render.sh's compact-ID parser exercises its real code path against this synthetic entry (see the marker comment directly above this line)",
+    "line_hint": 228
+  },
+  {
+    "class": "provenance",
+    "content_hash": "9f025dbc3e25",
+    "file": "team/scripts/harness/engine-behavior-baseline.sh",
+    "justification": "fixture literal, not a real task ID -- required so column-render.sh's compact-ID parser exercises its real code path against this synthetic entry (see the marker comment directly above this line)",
+    "line_hint": 229
+  },
+  {
+    "class": "provenance",
+    "content_hash": "aafc229bf739",
+    "file": "team/scripts/harness/engine-behavior-baseline.sh",
+    "justification": "fixture literal, not a real task ID -- required so column-render.sh's compact-ID parser exercises its real code path against this synthetic entry (see the marker comment directly above this line)",
+    "line_hint": 237
+  },
+  {
+    "class": "provenance",
+    "content_hash": "569821ff6521",
+    "file": "team/scripts/harness/engine-behavior-baseline.sh",
+    "justification": "fixture literal, not a real task ID -- required so column-render.sh's compact-ID parser exercises its real code path against this synthetic entry (see the marker comment directly above this line)",
+    "line_hint": 238
+  },
+  {
+    "class": "provenance",
+    "content_hash": "4439089a3414",
+    "file": "team/scripts/harness/engine-behavior-baseline.sh",
+    "justification": "fixture literal, not a real task ID -- required so column-render.sh's compact-ID parser exercises its real code path against this synthetic entry (see the marker comment directly above this line)",
+    "line_hint": 249
+  },
+  {
+    "class": "provenance",
+    "content_hash": "a1b8820d2902",
+    "file": "team/scripts/harness/engine-behavior-baseline.sh",
+    "justification": "fixture literal, not a real task ID -- required so column-render.sh's compact-ID parser exercises its real code path against this synthetic entry (see the marker comment directly above this line)",
+    "line_hint": 250
+  },
+  {
+    "class": "provenance",
+    "content_hash": "aca1b7019ce1",
+    "file": "team/scripts/harness/engine-behavior-baseline.sh",
+    "justification": "fixture literal, not a real task ID -- required so column-render.sh's compact-ID parser exercises its real code path against this synthetic entry (see the marker comment directly above this line)",
+    "line_hint": 347
+  },
+  {
+    "class": "provenance",
+    "content_hash": "81bd160d03d4",
+    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
+    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
+    "line_hint": 268
+  },
+  {
+    "class": "provenance",
+    "content_hash": "cb7b36973d71",
+    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
+    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
+    "line_hint": 327
+  },
+  {
+    "class": "provenance",
+    "content_hash": "edc72ab3458e",
+    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
+    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
+    "line_hint": 394
+  },
+  {
+    "class": "provenance",
+    "content_hash": "d9d3b47c1011",
+    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
+    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
+    "line_hint": 439
+  },
+  {
+    "class": "provenance",
+    "content_hash": "57841d7aff6d",
+    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
+    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
+    "line_hint": 482
+  },
+  {
+    "class": "provenance",
+    "content_hash": "560ea878c23e",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 667
+  },
+  {
+    "class": "provenance",
+    "content_hash": "f8b40e197e8c",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1321
+  },
+  {
+    "class": "provenance",
+    "content_hash": "fb0b97977e8e",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1334
+  },
+  {
+    "class": "provenance",
+    "content_hash": "4b9f6fadfca4",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1338
+  },
+  {
+    "class": "provenance",
+    "content_hash": "b983b7111cdb",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1339
+  },
+  {
+    "class": "provenance",
+    "content_hash": "a5b01a244f01",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1340
+  },
+  {
+    "class": "provenance",
+    "content_hash": "9ddb383dc890",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1341
+  },
+  {
+    "class": "provenance",
+    "content_hash": "dd142710f8f7",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1342
+  },
+  {
+    "class": "provenance",
+    "content_hash": "e04272aa5283",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1343
+  },
+  {
+    "class": "provenance",
+    "content_hash": "8ce56ff4f45c",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1344
+  },
+  {
+    "class": "provenance",
+    "content_hash": "44a6ee1c0011",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1345
+  },
+  {
+    "class": "provenance",
+    "content_hash": "736429915a3c",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1346
+  },
+  {
+    "class": "provenance",
+    "content_hash": "c404ab9ebd76",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1347
+  },
+  {
+    "class": "provenance",
+    "content_hash": "9244e7210413",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1348
+  },
+  {
+    "class": "provenance",
+    "content_hash": "239e57b6faae",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1349
+  },
+  {
+    "class": "provenance",
+    "content_hash": "dfe455648d98",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 1350
+  },
+  {
+    "class": "provenance",
+    "content_hash": "e6807b22508d",
+    "file": "docs/OPERATIONS.md",
+    "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
+    "line_hint": 2912
+  },
+  {
+    "class": "provenance",
+    "content_hash": "0b23b3f70885",
+    "file": "docs/creating-a-workflow.md",
+    "justification": "usage-example requirements-file path illustrating the version-slug naming convention a project's requirements documents follow, not a citation of a real release",
+    "line_hint": 436
+  },
+  {
+    "class": "provenance",
+    "content_hash": "6fe972b0f171",
+    "file": "docs/creating-a-workflow.md",
+    "justification": "usage-example requirements-file path illustrating the version-slug naming convention a project's requirements documents follow, not a citation of a real release",
+    "line_hint": 616
+  },
+  {
+    "class": "provenance",
+    "content_hash": "500874f9ac5e",
+    "file": "docs/disk-hygiene.md",
+    "justification": "worked usage example illustrating which task-ID shape the active-RC guard looks for in a requirements bundle before it skips a task folder, not a citation of a real task",
+    "line_hint": 227
+  },
+  {
+    "class": "provenance",
+    "content_hash": "c7f191c9819b",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 679
+  },
+  {
+    "class": "provenance",
+    "content_hash": "72a91d395330",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 681
+  },
+  {
+    "class": "provenance",
+    "content_hash": "3d74ff31f7c9",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 685
+  },
+  {
+    "class": "provenance",
+    "content_hash": "8e9c6f298649",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 792
+  },
+  {
+    "class": "provenance",
+    "content_hash": "c34167387388",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 793
+  },
+  {
+    "class": "provenance",
+    "content_hash": "280582d8e1ab",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 1311
+  },
+  {
+    "class": "provenance",
+    "content_hash": "7e237be202a9",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 1379
+  },
+  {
+    "class": "provenance",
+    "content_hash": "7faba941d621",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 1380
+  },
+  {
+    "class": "provenance",
+    "content_hash": "4f4a6e3386ff",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 1415
+  },
+  {
+    "class": "provenance",
+    "content_hash": "f44fc75755ee",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 1420
+  },
+  {
+    "class": "provenance",
+    "content_hash": "209e70ca4e41",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 1425
+  },
+  {
+    "class": "provenance",
+    "content_hash": "392a7433c5ab",
+    "file": "docs/operator-api.md",
+    "justification": "operator API reference: an example request or response value (a bug filename, a task key, a report path) illustrating the documented request/response shape, not a citation of a real bug or task",
+    "line_hint": 1430
+  },
+  {
+    "class": "provenance",
+    "content_hash": "7804cc739bf5",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 70
+  },
+  {
+    "class": "provenance",
+    "content_hash": "3ff0668af9c6",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 71
+  },
+  {
+    "class": "provenance",
+    "content_hash": "729d925f391f",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 119
+  },
+  {
+    "class": "provenance",
+    "content_hash": "75b177c2d6c6",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 120
+  },
+  {
+    "class": "provenance",
+    "content_hash": "6fa3a26b28b9",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 121
+  },
+  {
+    "class": "provenance",
+    "content_hash": "51806fc38b11",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 122
+  },
+  {
+    "class": "provenance",
+    "content_hash": "460183f6c0f2",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 123
+  },
+  {
+    "class": "provenance",
+    "content_hash": "19bbf82d4e1d",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 126
+  },
+  {
+    "class": "provenance",
+    "content_hash": "97fb568a8c28",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 127
+  },
+  {
+    "class": "provenance",
+    "content_hash": "f482061e08d5",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 177
+  },
+  {
+    "class": "provenance",
+    "content_hash": "23e9e7db4160",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 200
+  },
+  {
+    "class": "provenance",
+    "content_hash": "96aae74418a6",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 282
+  },
+  {
+    "class": "provenance",
+    "content_hash": "42eb9ee3978b",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 283
+  },
+  {
+    "class": "provenance",
+    "content_hash": "75fc974112f5",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 289
+  },
+  {
+    "class": "provenance",
+    "content_hash": "14c00ba3becd",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 346
+  },
+  {
+    "class": "provenance",
+    "content_hash": "032af2bc1b08",
+    "file": "team/scripts/lint_hygiene.py",
+    "justification": "Documented worked-example BUG-ID token illustrating the test-tree string-literal-content exemption in the module's own docstring, not a real ledger citation.",
+    "line_hint": 140
+  },
+  {
+    "class": "provenance",
+    "content_hash": "b14c4d29ec8b",
+    "file": "team/scripts/lint_hygiene.py",
+    "justification": "Documented worked-example BUG-ID token illustrating the Markdown-H1-heading false-positive case in the module's own docstring, not a real ledger citation.",
+    "line_hint": 170
+  },
+  {
+    "class": "provenance",
+    "content_hash": "53add083e06d",
+    "file": "team/scripts/lint_hygiene.py",
+    "justification": "Documented worked-example task-ID token (CODER-009 / CODER-1) illustrating the short-form task-ID pattern's own comment, not a real ledger citation.",
+    "line_hint": 432
+  },
+  {
+    "class": "provenance",
+    "content_hash": "574ce0c6880d",
+    "file": "team/pgai_agent_kanban/api/routers/operations.py",
+    "justification": "usage example: a task-ID-shaped value illustrating the only key shape wontdo accepts, in a runnable remedy",
+    "line_hint": 1998
+  },
+  {
+    "class": "provenance",
+    "content_hash": "a36f8eae9985",
+    "file": "release-notes/v2.25.2.md",
+    "justification": "verbatim discovery stderr quoted as evidence of the failed test; the requirements path is a synthetic file the test fixture writes into a throwaway project, not a real requirements document, and rewording it would alter the quoted output",
+    "line_hint": 44
+  },
+  {
+    "class": "provenance",
+    "content_hash": "9bd4ab4b81c5",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example task folder name assigned to KEY to illustrate the --key value task-status.sh takes; a sanctioned usage example, not a citation",
+    "line_hint": 288
+  },
+  {
+    "class": "operator-literal",
+    "content_hash": "1d11a6d528ac",
+    "file": "docker/claude-abliterated/Dockerfile",
+    "justification": "in-image account home, not an operator's: the path is the home directory of the container's own kanban account (uid/gid 1000), which this same RUN block creates with useradd or renames to with usermod --move-home, so the literal is the image's account contract rather than one person's account name",
+    "line_hint": 97
+  },
+  {
+    "class": "provenance",
+    "content_hash": "f8bd15122233",
+    "file": "team/roles/OVERWATCH.md",
+    "justification": "usage example, sanctioned by SOP-core.md's Naming rule exception for usage EXAMPLES where a bug-shaped VALUE illustrates an interface: the bug-filed suffix shows the shape of the actions.log action-taken entry for a filed bug, not a citation of a real bug",
+    "line_hint": 143
+  },
+  {
+    "class": "provenance",
+    "content_hash": "e66d73ef3bee",
+    "file": "team/roles/PM.md",
+    "justification": "usage example, sanctioned by SOP-core.md's Naming rule exception for usage EXAMPLES where a version-shaped VALUE illustrates an interface: the source_documents value in the plan JSON schema example shows the shape of a source-document name, not a citation of a real release",
+    "line_hint": 202
+  },
+  {
+    "class": "provenance",
+    "content_hash": "51e7fc49dde1",
+    "file": "team/pgai_agent_kanban/api/routers/operations.py",
+    "justification": "usage example: a task-ID-shaped value illustrating the only key shape wontdo accepts, in the runnable remedy of the field-confinement refusal",
+    "line_hint": 2806
+  },
+  {
+    "class": "provenance",
+    "content_hash": "c71be4b4ba1c",
+    "file": "docs/quarantine-recovery.md",
+    "justification": "quarantine-recovery reference: a worked example of the bug/priority intake-key naming pattern (a regex plus a matching example filename), not a citation of a real bug or priority",
+    "line_hint": 40
+  },
+  {
+    "class": "provenance",
+    "content_hash": "5de3e7829bde",
+    "file": "docs/quarantine-recovery.md",
+    "justification": "quarantine-recovery reference: a worked example of the bug/priority intake-key naming pattern (a regex plus a matching example filename), not a citation of a real bug or priority",
+    "line_hint": 52
+  },
+  {
+    "class": "provenance",
+    "content_hash": "6d030a85aa43",
+    "file": "docs/quarantine-recovery.md",
+    "justification": "quarantine-recovery reference: a worked example of the bug/priority intake-key naming pattern (a regex plus a matching example filename), not a citation of a real bug or priority",
+    "line_hint": 62
+  },
+  {
+    "class": "provenance",
+    "content_hash": "207e9a789942",
+    "file": "docs/quarantine-recovery.md",
+    "justification": "quarantine-recovery reference: a worked example of the bug/priority intake-key naming pattern (a regex plus a matching example filename), not a citation of a real bug or priority",
+    "line_hint": 63
+  },
+  {
+    "class": "provenance",
+    "content_hash": "85b432e078c2",
+    "file": "docs/quarantine-recovery.md",
+    "justification": "quarantine-recovery reference: a worked example of the bug/priority intake-key naming pattern (a regex plus a matching example filename), not a citation of a real bug or priority",
+    "line_hint": 69
+  },
+  {
+    "class": "provenance",
+    "content_hash": "1ab0e0a7a1b1",
+    "file": "docs/quarantine-recovery.md",
+    "justification": "quarantine-recovery reference: a worked example of the bug/priority intake-key naming pattern (a regex plus a matching example filename), not a citation of a real bug or priority",
+    "line_hint": 70
+  },
+  {
+    "class": "provenance",
+    "content_hash": "70b8bd437ffe",
+    "file": "docs/quarantine-recovery.md",
+    "justification": "quarantine-recovery reference: a worked example of the bug/priority intake-key naming pattern (a regex plus a matching example filename), not a citation of a real bug or priority",
+    "line_hint": 71
+  },
+  {
+    "class": "provenance",
+    "content_hash": "8797fa5e614a",
+    "file": "docs/quarantine-recovery.md",
+    "justification": "quarantine-recovery reference: a worked example of the bug/priority intake-key naming pattern (a regex plus a matching example filename), not a citation of a real bug or priority",
+    "line_hint": 82
+  },
+  {
+    "class": "provenance",
+    "content_hash": "15637f41ca8a",
+    "file": "docs/quarantine-recovery.md",
+    "justification": "quarantine-recovery reference: a worked example of the bug/priority intake-key naming pattern (a regex plus a matching example filename), not a citation of a real bug or priority",
+    "line_hint": 83
+  },
+  {
+    "class": "provenance",
+    "content_hash": "adfffaf8c90e",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 21
+  },
+  {
+    "class": "provenance",
+    "content_hash": "b0f6b0c4d906",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 47
+  },
+  {
+    "class": "provenance",
+    "content_hash": "9c898e320c79",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 67
+  },
+  {
+    "class": "provenance",
+    "content_hash": "0f0915b5dcbd",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 84
+  },
+  {
+    "class": "provenance",
+    "content_hash": "e7b44940c411",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 85
+  },
+  {
+    "class": "provenance",
+    "content_hash": "0ec7fcf56377",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 108
+  },
+  {
+    "class": "provenance",
+    "content_hash": "b0f6b0c4d906",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 114
+  },
+  {
+    "class": "provenance",
+    "content_hash": "4703d3f30958",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 115
+  },
+  {
+    "class": "provenance",
+    "content_hash": "be898132f4e8",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 140
+  },
+  {
+    "class": "provenance",
+    "content_hash": "dc19e27d9009",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 142
+  },
+  {
+    "class": "provenance",
+    "content_hash": "009636b51858",
+    "file": "team/templates/project/document/document-brief-example.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 144
+  },
+  {
+    "class": "provenance",
+    "content_hash": "b0f6b0c4d906",
+    "file": "team/templates/project/document/document-brief-template.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 118
+  },
+  {
+    "class": "provenance",
+    "content_hash": "4703d3f30958",
+    "file": "team/templates/project/document/document-brief-template.md",
+    "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
+    "line_hint": 119
+  }
+]

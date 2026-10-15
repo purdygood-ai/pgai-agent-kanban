@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # team/scripts/lib/wake_common.sh
-# Shared substrate logic for all wake scripts (wake-claude.sh, wake-codex.sh, etc.).
+# Shared substrate driver for all wake scripts (wake/claude.sh, wake/codex.sh).
 #
-# Source this file AFTER sourcing the provider-specific lib (which defines
-# provider_invoke_agent) and AFTER argument parsing and provider checking are
+# Source this file AFTER sourcing the provider-specific lib (which must
+# implement the five-function provider interface — env preflight, model
+# preflight, dispatch, output parse, dispatch-refused; see provider_claude.sh's
+# documented contract) and AFTER argument parsing and provider checking are
 # complete in the calling wake script.
 #
 # Contract: the following variables MUST be set by the caller before sourcing:
@@ -13,2453 +15,158 @@
 #   TEAM_ROOT   — resolved kanban root path
 #   SCRIPT_DIR  — absolute path to the directory containing the wake script
 #
-# Contract: the following function MUST be defined by the caller (provider lib):
-#   provider_invoke_agent <prompt> <selected_model> <model_source>
-#                         <task_id> <task_artifact_dir> <log_file>
-#       Called by process_one_task to invoke the LLM provider CLI.
-#       Sets PROVIDER_AGENT_EXIT_CODE to the exit code of the CLI invocation.
+# process_one_task and run_project_chain (the shared pipeline that reaches
+# the provider interface) live in lib/wake_driver.sh, sourced separately by
+# the calling wake script after this file and the provider lib.
 #
-# This file sources project_paths.sh, projects.sh, task_ids.sh, discovery.sh,
-# semver.sh, and other required libs. It does NOT source token_capture.sh or
-# any other provider-specific lib — those are the provider lib's responsibility.
+# This file is now a thin driver over six sourced lib stages, each split
+# out so it stays a self-contained file under 800 lines with a documented
+# public entry point; see each stage's own header for its full function
+# list and dependencies.
+# Sourced in this order (the order is load-bearing — see each file's own
+# "Dependencies" section):
+#   1. wake_bootstrap.sh      — env/config/secrets sourcing, tunables,
+#                               path/lock resolution, debug/training gates,
+#                               and the log() function every later stage uses.
+#   2. semver.sh              — semver_from_filename / semver_gt, needed by
+#                               wake_autonomous_scan.sh.
+#   3. wake_autonomous_scan.sh — the discovery pipeline's autonomous
+#                               requirements-queue scan and bug-bundling scan
+#                               (get_release_state_field, scan_requirements_queue,
+#                               scan_and_bundle_bugs, drop_self_pm_ticket).
+#   4. wake_readme_meta.sh    — task-README field readers used during wake
+#                               dispatch (get_role_from_readme,
+#                               get_assigned_agent_from_readme,
+#                               role_is_valid_agent, get_model_override_from_readme).
+#   5. wake_task_state.sh     — status-file readers/writers, prerequisite
+#                               checks, state transitions, WAITING/BLOCKED
+#                               promotion and recheck, and the
+#                               task-liveness primitives the reconciliation
+#                               sweeps read.
+#   6. wake_reconcile_sweeps.sh — reconcile_stale_active and
+#                               reconcile_terminal_worktrees, the two
+#                               once-per-wake, once-per-project
+#                               reconciliation sweeps. Depends on
+#                               wake_task_state.sh's mark_backlog/get_state/
+#                               task_liveness_* primitives, so sourced
+#                               immediately after it.
+#   7. wake_task_transition.sh — transition_task_state, the single write
+#                               path that moves a task's ## State and its
+#                               queue marker together. Depends on
+#                               wake_task_state.sh's set_state/mark_backlog,
+#                               so sourced immediately after it.
+#   8. wake_lifecycle.sh      — post-exit WORKING handling
+#                               (handle_working_after_exit), the CODER/WRITER
+#                               completion gate (coder_writer_completion_gate),
+#                               and finalize=report intake closure
+#                               (close_intake_on_finalize_report,
+#                               sweep_running_intake_census). Depends on
+#                               wake_task_state.sh's set_state/set_block/
+#                               normalize_status_file and
+#                               wake_task_transition.sh's
+#                               transition_task_state, so sourced after both.
+#   9. wake_project.sh        — feature-branch naming/README helpers, the
+#                               HALT-AFTER sentinel check
+#                               (_check_halt_after_for_project), the
+#                               per-project dev-tree gate
+#                               (_check_project_dev_tree), and the OVERWATCH
+#                               resolution-stage call site
+#                               (run_overwatch_resolution_stage).
+#   10. wake_blocked_ledger.sh — the blocked-interval ledger adapter
+#                               (pgai_stamp_halt_boundary,
+#                               pgai_stamp_fleet_halt_boundary) called from
+#                               the HALT fast-exit and per-project HALT
+#                               checks below. Depends on
+#                               _disc_get_release_field, already sourced
+#                               transitively via wake_bootstrap.sh's own
+#                               discovery.sh source line.
+#
+# This file's own remaining code is the two functions every wake script
+# calls directly -- wake_common_preflight (script-level preflight) and
+# wake_common_run (the HALT check, stagger sleep, and multi-project
+# iteration loop) -- plus wake_stop_file_present, the operator stop-file
+# check both wake_common_run and run_project_chain read. wake_common_run's
+# end-of-iteration retry pass also reports each project that ends the
+# firing still deferred on repo-lock contention to the lock-starvation
+# guard (wlw_starvation_note_deferral, lib/wake_lock_wait.sh -- sourced by
+# wake_driver.sh, which every wake script sources before calling
+# wake_common_run).
 #
 # Exported functions (public API for wake scripts):
-#   wake_common_run — main entry point; sets up env, runs multi-project loop.
+#   wake_common_preflight — script-level preflight checks.
+#   wake_common_run       — main entry point; sets up env, runs
+#                           multi-project loop.
+#   wake_stop_file_present — true while the operator's stop file exists;
+#                           the batch-level stop condition wake_common_run
+#                           and run_project_chain both read.
 #
-# Provider-neutral substrate shared by wake_claude_provider.sh,
-# wake_codex_provider.sh, and future provider scripts.
+# Provider-neutral substrate shared by provider_claude.sh,
+# provider_codex.sh, and future provider scripts.
 
-# --- Env-var name migration guard ---
-# PGAI_AGENT_KANBAN_ROOT_PATH is the canonical name. The legacy shim
-# Only the canonical name PGAI_AGENT_KANBAN_ROOT_PATH is honored.
-# name is honored.
+# --- Source bootstrap stage (env/config/secrets sourcing, tunables,
+# path/lock resolution, debug/training gates) ---
+# shellcheck source=scripts/lib/wake_bootstrap.sh
+source "${SCRIPT_DIR}/../lib/wake_bootstrap.sh"
 
-# --- Resolve script and repo team directories (for autonomous scan helpers) ---
-# SCRIPT_DIR is set by the caller (the wake script itself).
-# REPO_TEAM_DIR: the team/ directory in the repository checkout, one level up.
-REPO_TEAM_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-# KANBAN_ROOT is required by lib/project_paths.sh pp_* helpers.
-export KANBAN_ROOT="$TEAM_ROOT"
-
-# --- Source project-path helpers (pp_* functions) ---
-# Must be sourced before any pp_* call.
-# shellcheck source=scripts/lib/project_paths.sh
-source "${SCRIPT_DIR}/../lib/project_paths.sh"
-
-# --- Source project registry helpers (projects_cfg_list, etc.) ---
-# Must be sourced AFTER project_paths.sh (it uses pp_* helpers internally).
-# shellcheck source=scripts/lib/projects.sh
-source "${SCRIPT_DIR}/../lib/projects.sh"
-
-# --- Source shared task-ID helper ---
-# shellcheck source=scripts/lib/task_ids.sh
-source "${SCRIPT_DIR}/../lib/task_ids.sh"
-
-# --- Source discovery pipeline library ---
-# shellcheck source=scripts/lib/discovery.sh
-source "${SCRIPT_DIR}/../lib/discovery.sh"
-
-# --- Source workflow-type dispatcher (wf_load_plugin and wf_* surface) ---
-# Must be sourced after discovery.sh; provides wf_load_plugin and the uniform
-# wf_* call surface used by CODER/WRITER task dispatch to select worktree
-# behavior by capability rather than by workflow_type string comparison.
-# shellcheck source=scripts/lib/workflow.sh
-source "${SCRIPT_DIR}/../lib/workflow.sh"
-
-# --- Source config loader (single source of truth for kanban.cfg keys) ---
-# config_loader.sh defines load_config and config_get.  It self-bootstraps
-# ini_parser.sh if read_ini is not yet available.  Must be sourced before
-# any kanban.cfg read (load_config is called below after secrets are sourced).
-# shellcheck source=scripts/lib/config_loader.sh
-source "${SCRIPT_DIR}/../lib/config_loader.sh"
-
-# --- Source dev_tree helper (resolve_global_dev_tree / require_dev_tree) ---
-# shellcheck source=scripts/lib/dev_tree.sh
-source "${SCRIPT_DIR}/../lib/dev_tree.sh"
-
-# --- Source pp_run_ops helper (cwd-independent python3 -m invocations) ---
-# Provides pp_run_ops() so all pgai_agent_kanban.* module calls are
-# cwd-independent and do not require a pre-set PYTHONPATH from the caller.
-# shellcheck source=scripts/lib/pp_run_ops.sh
-source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
-
-# --- Source OVERWATCH protocol helpers (transient_retry_* substrate) ---
-# Provides transient_retry_limit / transient_retry_field / transient_retry_write:
-# the ONE durable machine-readable retry record used by
-# handle_working_after_exit and recheck_blocked_tasks below. Side-effect-free
-# on source (no top-level commands run; KANBAN_ROOT/OVERWATCH_PROJECT are only
-# needed by the overwatch_backup_file/overwatch_log_action/overwatch_halt_first_fix
-# functions, none of which wake calls).
-# shellcheck source=scripts/lib/overwatch_protocol.sh
-source "${SCRIPT_DIR}/../lib/overwatch_protocol.sh"
-
-# --- Source the shared dual-channel error-contract emitter ---
-# coder_writer_completion_gate's refusal narrations speak both channels
-# through this one primitive: see team/scripts/lib/error_contract.sh for the
-# house shape.
-# shellcheck source=scripts/lib/error_contract.sh
-source "${SCRIPT_DIR}/../lib/error_contract.sh"
-
-# PGAI_PROJECT_ROOT / PGAI_PROJECT_NAME initial values.
-# These are pre-loop placeholders overridden per-project in wake_common_run.
-# Resolution: honor PGAI_PROJECT_NAME if already set in the environment
-# (operator-explicit or single-project install that set it upstream); otherwise
-# leave empty — wake_common_run's multi-project loop sets both per-project via
-# pp_project_root() before any task work begins.  Never silently fall back to
-# the first registered project: on a multi-project install that would silently
-# operate on the wrong project.
-if [[ -n "${PGAI_PROJECT_NAME:-}" ]]; then
-    export PGAI_PROJECT_ROOT="$(pp_project_root "${PGAI_PROJECT_NAME}" 2>/dev/null || true)"
-    export PGAI_PROJECT_NAME="${PGAI_PROJECT_NAME}"
-else
-    export PGAI_PROJECT_ROOT=""
-    export PGAI_PROJECT_NAME=""
-fi
-
-# --- Bootstrap: delegate root absolutization to env_bootstrap.sh, then source
-# shell-env for PATH/venv side effects.
-#
-# Why pre-export before sourcing env_bootstrap.sh:
-#   env_bootstrap.sh walks up from BASH_SOURCE[1] to derive the kanban root.
-#   When wake_common.sh is sourced (a lib file), BASH_SOURCE[1] resolves to
-#   scripts/lib/wake_common.sh — pointing to the lib directory, not the root.
-#   Sourcing env_bootstrap.sh without pre-setting the env var would cause the
-#   walk to land at scripts/lib/ (not a recognized scripts-layer dir), produce
-#   a wrong candidate, and fail loud — breaking cron's protected entry point.
-#
-#   By pre-exporting from TEAM_ROOT (already resolved by the caller via
-#   ${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}), we trigger
-#   env_bootstrap.sh's idempotency guard: it absolutizes the pre-set value and
-#   returns 0 immediately without walking BASH_SOURCE or sourcing shell-env.
-#   The result: env_bootstrap.sh handles absolutization for all its callers in
-#   a single consistent path; wake gets the same treatment without a separate
-#   implementation.
-#
-#   Operator-env-wins is preserved: if PGAI_AGENT_KANBAN_ROOT_PATH was already
-#   set by the operator (cron, explicit export), the ${:-} below is a no-op and
-#   env_bootstrap.sh absolutizes the operator's value; TEAM_ROOT carries the
-#   default and never overwrites the operator's choice.
-export PGAI_AGENT_KANBAN_ROOT_PATH="${PGAI_AGENT_KANBAN_ROOT_PATH:-$TEAM_ROOT}"
-# shellcheck source=scripts/lib/env_bootstrap.sh
-source "${SCRIPT_DIR}/../lib/env_bootstrap.sh"
-
-# --- Source optional shell-env for PATH and Python venv activation ---
-# Root resolution is now env_bootstrap.sh's responsibility (above).
-# Shell-env's remaining side effects — PATH adjustments and venv activation —
-# still need a direct source here.  Optional: wake scripts work without it
-# when cron inherits a usable PATH and shell-env is absent.
-[[ -f "$TEAM_ROOT/shell-env" ]] && source "$TEAM_ROOT/shell-env"
-
-# --- Python >= 3.12 guard (after shell-env so post-venv interpreter is checked) ---
-_py_ver=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" 2>/dev/null || echo "0.0.0")
-_py_maj=$(python3 -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "0")
-_py_min=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
-if [[ "$_py_maj" -lt 3 ]] || [[ "$_py_maj" -eq 3 && "$_py_min" -lt 12 ]]; then
-    echo "FATAL: pgai-agent-kanban requires Python 3.12+. Found: ${_py_ver}." >&2
-    exit 1
-fi
-unset _py_ver _py_maj _py_min
-
-# --- Read ai_auth_mode from kanban.cfg BEFORE sourcing secrets ---
-# This is the ONE legitimate pre-loader bootstrap read_ini call in this file.
-# AI_AUTH_MODE must be set before secrets is sourced so the secrets file can
-# branch on its value (e.g. to skip or set ANTHROPIC_API_KEY).
-# load_config (called below, after secrets) will re-export AI_AUTH_MODE with
-# the same value; the ${AI_AUTH_MODE:-...} precedence rule means this earlier
-# assignment wins and load_config's export is a no-op.
-# read_ini is available here because project_paths.sh sources ini_parser.sh.
-# Default: oauth — backward-compatible; existing installs using `claude login`
-# continue to work without modification.
-export AI_AUTH_MODE="${AI_AUTH_MODE:-$(read_ini "${TEAM_ROOT}/kanban.cfg" providers ai_auth_mode oauth)}"
-
-# --- Source optional secrets (OAuth tokens, API keys) ---
-# secrets is a dedicated file for credentials, gitignored. Sourced after
-# shell-env so credentials are available to any tool launched downstream.
-# Optional — wake scripts work without it if credentials are provided
-# through some other mechanism (e.g. ~/.claude/credentials from claude login).
-[[ -f "$TEAM_ROOT/secrets" ]] && source "$TEAM_ROOT/secrets"
-
-# --- Source operator's personal INI overrides (optional, rarely used) ---
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
-
-# --- Load kanban.cfg into env vars via config_loader.sh ---
-# load_config reads every kanban.cfg key once, validates keys, applies OPTIONAL
-# defaults from the registry, and exports canonical env vars.
-# It supersedes the former load_kanban_cfg_to_env() function.
-#
-# Precedence preserved: env var already set > config value > registry default.
-# The pre-loader AI_AUTH_MODE read above is honored by load_config's
-# ${AI_AUTH_MODE:-...} export pattern.
-#
-# dev_tree_path is OPTIONAL: load_config exports PGAI_DEV_TREE_PATH
-# as the config value (or empty when unset).  Per-project existence checks are
-# done in run_project_chain via _check_project_dev_tree (after pp_load_config).
-# There is no global dev-tree existence gate at wake entry (D3).
-if ! load_config "${TEAM_ROOT}/kanban.cfg"; then
-    echo "ERROR: load_config failed for ${TEAM_ROOT}/kanban.cfg." >&2
-    exit 1
-fi
-# --- Now enable strict mode for our own code ---
-set -euo pipefail
-
-# Deprecation warning state — one-shot per wake-batch firing.
-_VERBOSE_MODE_DEPRECATION_WARNED=false
-_REASONING_TRACE_DEPRECATION_WARNED=false
-
-# --- Clean exit handling ---
-# Reap any lingering child processes on exit.
-cleanup_on_exit() {
-  local exit_code=$?
-  jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
-  wait 2>/dev/null || true
-  exit $exit_code
-}
-trap cleanup_on_exit EXIT
-trap cleanup_on_exit SIGTERM SIGINT
-
-# --- Tunables ---
-MAX_TASKS_PER_WAKE="${MAX_TASKS_PER_WAKE:-5}"
-MAX_RUNTIME_SECONDS="${MAX_RUNTIME_SECONDS:-14400}"
-PAUSE_BETWEEN_TASKS="${PAUSE_BETWEEN_TASKS:-5}"
-STOP_ON_BLOCKED="${STOP_ON_BLOCKED:-true}"
-STOP_FILE="${STOP_FILE:-${PGAI_AGENT_KANBAN_TEMP_DIR}/wakeup/stop}"
-MAX_TASK_SECONDS="${MAX_TASK_SECONDS:-5400}"
-MAX_PROJECT_SECONDS="${MAX_PROJECT_SECONDS:-${MAX_RUNTIME_SECONDS}}"
-KILL_GRACE_SECONDS="${KILL_GRACE_SECONDS:-30}"
-
-# CLI options override environment / config-file tunables
-[[ -n "${_CLI_MAX_TASKS:-}" ]] && MAX_TASKS_PER_WAKE="$_CLI_MAX_TASKS"
-
-mkdir -p "$(dirname "$STOP_FILE")"
-
-# --- Paths (initial values; overridden per-project by run_project_chain) ---
-# Resolution: honor PGAI_PROJECT_NAME if already set in the environment;
-# otherwise leave empty — run_project_chain sets _CURRENT_PROJECT, TASKS_ROOT,
-# QUEUE_DIR, and BACKLOG per-project before process_one_task is called.
-# Never silently fall back to the first registered project on a multi-project
-# install: that picks the wrong project's queue.
-if [[ -n "${PGAI_PROJECT_NAME:-}" ]]; then
-    _CURRENT_PROJECT="${PGAI_PROJECT_NAME}"
-    TASKS_ROOT="$(pp_tasks_dir "$_CURRENT_PROJECT")"
-    QUEUE_DIR="${TASKS_ROOT}/queues"
-    BACKLOG="$(pp_queue_path "$_CURRENT_PROJECT" "$AGENT")"
-else
-    _CURRENT_PROJECT=""
-    TASKS_ROOT=""
-    QUEUE_DIR=""
-    BACKLOG=""
-fi
-# Per-firing batch logs live at $KANBAN_ROOT/logs/agents/.
-# They are cron-firing-scope, not project-scope — a single wake firing may
-# iterate multiple projects, so the artifact belongs at kanban root alongside
-# cron-<agent>.log. Per-task progress logs remain at tasks/<task_id>/logs/.
-LOG_DIR="${KANBAN_ROOT}/logs/agents"
-LOG_FILE="${LOG_DIR}/${AGENT}-batch-$(date +%Y%m%d-%H%M%S).log"
-
-# --- Lock paths ---
-LOCK_DIR="${TEAM_ROOT}/locks"
-
-mkdir -p "$LOG_DIR" "$LOCK_DIR"
-
-WAKE_START_EPOCH=$(date +%s)
-
-log() {
-  echo "[$(date -Iseconds)] wake(${AGENT}): $*" | tee -a "$LOG_FILE"
-}
-
-# ---------------------------------------------------------------------------
-# _resolve_debug_gate <project> <agent>
-# Compute the single debug-enable boolean for a (project, agent) pair.
-# Echoes "true" or "false".
-#
-# Resolution:
-#   1. PGAI_VERBOSE_MODE=1 (legacy shim): true for all projects; emits a
-#      one-shot deprecation warning on the first call per wake-batch firing.
-#   2. pp_verbose_mode true AND agent in pp_verbose_agents: true.
-#   3. Everything else: false.
-# ---------------------------------------------------------------------------
-_resolve_debug_gate() {
-    local project="${1:-}"
-    local agent="${2:-}"
-
-    if [[ "${PGAI_VERBOSE_MODE:-0}" == "1" ]]; then
-        # Emit deprecation warning to stderr only (never via log/tee) so that
-        # stdout stays clean when this function is called via command substitution.
-        # The _VERBOSE_MODE_DEPRECATION_WARNED guard suppresses repeat warnings when
-        # the parent shell has already set the flag (see one-shot propagation in
-        # process_one_task).  Assignments inside this subshell do not propagate back
-        # to the parent shell, so the caller is responsible for setting the guard
-        # after the first $(...) call returns (see call site in process_one_task).
-        if [[ "${_VERBOSE_MODE_DEPRECATION_WARNED}" != "true" ]]; then
-            local _warn_msg="[$(date -Iseconds)] wake(${AGENT:-wake}): WARNING: PGAI_VERBOSE_MODE env var is deprecated; move per-project debug control to project.cfg [debug] verbose_mode"
-            # Write to stderr only — never via log()/tee — so stdout stays clean.
-            # Also append to LOG_FILE directly so the warning still lands in the log.
-            echo "${_warn_msg}" >&2
-            echo "${_warn_msg}" >> "${LOG_FILE:-/dev/null}"
-        fi
-        echo "true"
-        return 0
-    fi
-
-    [[ -n "$project" ]] || { echo "false"; return 0; }
-
-    local vm
-    vm="$(pp_verbose_mode "$project" 2>/dev/null || echo "false")"
-    [[ "$vm" == "true" ]] || { echo "false"; return 0; }
-
-    local va
-    va="$(pp_verbose_agents "$project" 2>/dev/null || echo "pm,coder,writer,tester,cm")"
-
-    if printf '%s\n' "$va" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -qx "$agent"; then
-        echo "true"
-        return 0
-    fi
-
-    echo "false"
-}
-
-# ---------------------------------------------------------------------------
-# _resolve_training_gate <project> <agent>
-# Compute the single training-capture boolean for a (project, agent) pair.
-# Echoes "true" or "false".
-#
-# Resolution:
-#   1. PGAI_REASONING_TRACE=1 (legacy shim): true for all projects/agents;
-#      emits a one-shot deprecation warning on the first call per wake-batch.
-#   2. pp_reasoning_trace true AND agent in pp_training_agents (non-empty list): true.
-#   3. Everything else: false (includes empty pp_training_agents — narrow-start).
-# ---------------------------------------------------------------------------
-_resolve_training_gate() {
-    local project="${1:-}"
-    local agent="${2:-}"
-
-    if [[ "${PGAI_REASONING_TRACE:-0}" == "1" ]]; then
-        # Emit deprecation warning to stderr only (never via log/tee) so that
-        # stdout stays clean when this function is called via command substitution.
-        # The _REASONING_TRACE_DEPRECATION_WARNED guard suppresses repeat warnings
-        # when the parent shell has already set the flag (see one-shot propagation
-        # in process_one_task).  Assignments inside this subshell do not propagate
-        # back to the parent shell, so the caller is responsible for setting the
-        # guard after the first $(...) call returns (see call site in process_one_task).
-        if [[ "${_REASONING_TRACE_DEPRECATION_WARNED}" != "true" ]]; then
-            local _warn_msg="[$(date -Iseconds)] wake(${AGENT:-wake}): WARNING: PGAI_REASONING_TRACE env var is deprecated; move per-project training control to project.cfg [training] reasoning_trace and training_agents"
-            # Write to stderr only — never via log()/tee — so stdout stays clean.
-            # Also append to LOG_FILE directly so the warning still lands in the log.
-            echo "${_warn_msg}" >&2
-            echo "${_warn_msg}" >> "${LOG_FILE:-/dev/null}"
-        fi
-        echo "true"
-        return 0
-    fi
-
-    [[ -n "$project" ]] || { echo "false"; return 0; }
-
-    local rt
-    rt="$(pp_reasoning_trace "$project" 2>/dev/null || echo "false")"
-    [[ "$rt" == "true" ]] || { echo "false"; return 0; }
-
-    local ta
-    ta="$(pp_training_agents "$project" 2>/dev/null || echo "")"
-
-    # Empty training_agents means NO agents enabled (narrow-start default).
-    [[ -n "$ta" ]] || { echo "false"; return 0; }
-
-    if printf '%s\n' "$ta" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -qx "$agent"; then
-        echo "true"
-        return 0
-    fi
-
-    echo "false"
-}
-
-require_file() {
-  local f="$1"
-  [[ -f "$f" ]] || { log "missing file: $f"; exit 1; }
-}
-
-# --- Source semver helpers (needed for autonomous PM scan) ---
+# --- Source semver helpers (needed by wake_autonomous_scan.sh) ---
 source "${SCRIPT_DIR}/../lib/semver.sh"
 
-# ---------------------------------------------------------------------------
-# get_release_state_field FIELD
-# Read a named ## FIELD block from release-state.md and print its content.
-# ---------------------------------------------------------------------------
-get_release_state_field() {
-    local field="$1"
-    local release_state
-    release_state="$(pp_release_state "${_CURRENT_PROJECT}")"
-    python3 - "$release_state" "$field" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-field = sys.argv[2]
-m = re.search(rf'^## {re.escape(field)}\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-if not m:
-    raise SystemExit(1)
-print(m.group(1).strip())
-PY
-}
-
-# ---------------------------------------------------------------------------
-# scan_requirements_queue
-# Scan projects/<name>/requirements/ NON-RECURSIVELY for eligible .md files.
-# ---------------------------------------------------------------------------
-scan_requirements_queue() {
-    local active_rc last_released requirements_dir eligible sorted lowest_ver
-    local count_at_lowest f ver
-
-    active_rc="$(get_release_state_field "Active RC" 2>/dev/null || true)"
-    if [[ -n "$active_rc" && "$active_rc" != "none" ]]; then
-        log "autonomous scan: Active RC is ${active_rc}, skipping requirements queue (RC in flight)"
-        return 1
-    fi
-
-    if [[ -f "${TEAM_ROOT}/HALT" ]]; then
-        log "autonomous scan: HALT flag present, skipping requirements queue"
-        return 1
-    fi
-
-    last_released="$(get_release_state_field "Last Released" 2>/dev/null || true)"
-    if [[ -z "$last_released" || "$last_released" == "none" ]]; then
-        log "autonomous scan: cannot determine Last Released version from release-state.md"
-        return 1
-    fi
-
-    requirements_dir="$(pp_requirements_dir "${_CURRENT_PROJECT}")"
-    if [[ ! -d "$requirements_dir" ]]; then
-        return 1
-    fi
-
-    eligible=()
-    for f in "$requirements_dir"/*.md; do
-        [[ -f "$f" ]] || continue
-        ver="$(semver_from_filename "$f")"
-        [[ -z "$ver" ]] && continue
-        if semver_gt "$ver" "$last_released"; then
-            eligible+=("${ver}"$'\t'"${f}")
-        fi
-    done
-
-    if [[ ${#eligible[@]} -eq 0 ]]; then
-        return 1
-    fi
-
-    sorted="$(printf '%s\n' "${eligible[@]}" | sort -t$'\t' -k1,1V -k2,2)"
-    lowest_ver="$(printf '%s\n' "$sorted" | head -n1 | cut -f1)"
-
-    count_at_lowest="$(printf '%s\n' "$sorted" | awk -F$'\t' -v v="$lowest_ver" '$1 == v {c++} END {print c+0}')"
-    if [[ "$count_at_lowest" -gt 1 ]]; then
-        log "autonomous scan: WARNING: ${count_at_lowest} requirements docs at version ${lowest_ver}; picking first lexically"
-    fi
-
-    printf '%s\n' "$sorted" | head -n1 | cut -f2
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# scan_and_bundle_bugs
-# ---------------------------------------------------------------------------
-scan_and_bundle_bugs() {
-    local active_rc last_released bugs_dir bug_backlog priority_dir
-    local today patch_ver req_doc_name req_doc_path
-    local f slug summary line already_bundled
-
-    active_rc="$(get_release_state_field "Active RC" 2>/dev/null || true)"
-    if [[ -n "$active_rc" && "$active_rc" != "none" ]]; then
-        log "autonomous scan (bugs): Active RC is ${active_rc}, skipping bug scan"
-        return 1
-    fi
-
-    if [[ -f "${TEAM_ROOT}/HALT" ]]; then
-        log "autonomous scan (bugs): HALT flag present, skipping bug scan"
-        return 1
-    fi
-
-    last_released="$(get_release_state_field "Last Released" 2>/dev/null || true)"
-    if [[ -z "$last_released" || "$last_released" == "none" ]]; then
-        log "autonomous scan (bugs): cannot determine Last Released from release-state.md, skipping"
-        return 1
-    fi
-
-    bugs_dir="$(pp_bugs_dir "${_CURRENT_PROJECT}")"
-    bug_backlog="$(pp_queue_path "${_CURRENT_PROJECT}" "bug")"
-    priority_dir="$(pp_requirements_dir "${_CURRENT_PROJECT}")/priority"
-
-    local bundled_ids=()
-    if [[ -f "$bug_backlog" ]]; then
-        while IFS= read -r line; do
-            local bid
-            bid="$(printf '%s' "$line" | grep -oE '\[x\]\s+BUG-[0-9]+-[A-Za-z0-9-]+' | grep -oE 'BUG-[0-9]+-[A-Za-z0-9-]+' | head -n1 || true)"
-            [[ -n "$bid" ]] && bundled_ids+=("$bid")
-        done < "$bug_backlog"
-    fi
-
-    local unhandled_slugs=()
-    local unhandled_files=()
-    local unhandled_summaries=()
-
-    for f in "$bugs_dir"/BUG-*.md; do
-        [[ -f "$f" ]] || continue
-        local basename_f
-        basename_f="$(basename "$f")"
-        [[ "$basename_f" == "BUG-TEMPLATE.md" ]] && continue
-        [[ "$basename_f" == "README.md" ]] && continue
-
-        slug="${basename_f%.md}"
-
-        already_bundled=false
-        local bid
-        for bid in "${bundled_ids[@]+"${bundled_ids[@]}"}"; do
-            if [[ "$bid" == "$slug" ]]; then
-                already_bundled=true
-                break
-            fi
-        done
-        [[ "$already_bundled" == "true" ]] && continue
-
-        summary="$(grep -m1 '^# ' "$f" 2>/dev/null | sed 's/^# //' || true)"
-        if [[ -z "$summary" ]]; then
-            summary="$slug"
-        fi
-
-        unhandled_slugs+=("$slug")
-        unhandled_files+=("$f")
-        unhandled_summaries+=("$summary")
-    done
-
-    local bug_count="${#unhandled_slugs[@]}"
-    if [[ "$bug_count" -eq 0 ]]; then
-        log "autonomous scan (bugs): no unhandled bugs found"
-        return 1
-    fi
-
-    log "autonomous scan (bugs): found ${bug_count} unhandled bug(s), bundling"
-
-    local ver_stripped major minor patch
-    ver_stripped="${last_released#v}"
-    major="$(printf '%s' "$ver_stripped" | cut -d. -f1)"
-    minor="$(printf '%s' "$ver_stripped" | cut -d. -f2)"
-    patch="$(printf '%s' "$ver_stripped" | cut -d. -f3)"
-    patch=$(( patch + 1 ))
-    patch_ver="v${major}.${minor}.${patch}"
-
-    today="$(date +%Y%m%d)"
-    req_doc_name="${patch_ver}-bugfix-bundle-${today}.md"
-    req_doc_path="${priority_dir}/${req_doc_name}"
-
-    mkdir -p "$priority_dir"
-
-    local bug_sections=""
-    local i
-    for i in "${!unhandled_slugs[@]}"; do
-        local s="${unhandled_slugs[$i]}"
-        local sv="${unhandled_summaries[$i]}"
-        local rel_path="${bugs_dir#${KANBAN_ROOT}/}/${s}.md"
-        bug_sections="${bug_sections}
-#### ${s}
-- **File:** ${rel_path}
-- **Summary:** ${sv}
-"
-    done
-
-    local dev_tree_path
-    dev_tree_path="${PP_dev_tree_path:-${PGAI_DEV_TREE_PATH:-}}"
-    local project_git_repo="none"
-    if [[ -n "${PP_git_repo_url:-}" ]]; then
-        project_git_repo="${PP_git_repo_url}"
-    elif [[ -d "${dev_tree_path}/.git" ]]; then
-        project_git_repo="$(git -C "${dev_tree_path}" remote get-url origin 2>/dev/null || echo "none")"
-    fi
-
-    cat > "$req_doc_path" <<EOF
-# Requirements: ${patch_ver} — Bug Fix Bundle ($(date +%Y-%m-%d))
-
-## Target Version
-${patch_ver}
-
-## Workflow Type
-release
-
-## Test Required
-true
-
-## Working Directory
-${dev_tree_path}
-
-## Git Repo
-${project_git_repo}
-
-## Summary
-Priority bug fix bundle containing ${bug_count} unhandled bug report(s).
-The Working Directory above is propagated to every task PM decomposes from this brief.
-Each worker task operates in a per-task worktree off the RC branch.
-
-## Scope
-
-### Bug Reports
-${bug_sections}
-## Suggested Decomposition
-(Leave this to PM to determine during decomposition)
-
-## Acceptance Criteria
-- [ ] All listed bugs are addressed
-- [ ] No regressions introduced
-EOF
-
-    log "autonomous scan (bugs): wrote priority requirements doc ${req_doc_path}"
-    log "autonomous scan (bugs): project Working Directory = ${dev_tree_path}"
-    log "autonomous scan (bugs): project Git Repo = ${project_git_repo}"
-
-    mkdir -p "$(dirname "$bug_backlog")"
-    if [[ ! -f "$bug_backlog" ]]; then
-        cat > "$bug_backlog" <<'BEOF'
-# Bug Agent Backlog
-
-<!-- Managed by wake script bug scan on PM's behalf. -->
-<!-- Format: - [x] BUG-NNNN-slug — summary -->
-
-## Queue
-
-BEOF
-    elif ! grep -q '^## Queue' "$bug_backlog"; then
-        printf '\n## Queue\n\n' >> "$bug_backlog"
-    fi
-
-    for i in "${!unhandled_slugs[@]}"; do
-        local entry="- [x] ${unhandled_slugs[$i]} — ${unhandled_summaries[$i]}"
-        printf '%s\n' "$entry" >> "$bug_backlog"
-        log "autonomous scan (bugs): marked bundled: ${unhandled_slugs[$i]}"
-    done
-
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# drop_self_pm_ticket PATHS
-# Create a PM task folder and append it to pm_backlog.md.
-# ---------------------------------------------------------------------------
-drop_self_pm_ticket() {
-    local raw_paths="$1"
-    local today task_id task_dir first_path brief_ver inputs_block line
-
-    today="$(date +%Y%m%d)"
-
-    first_path="$(printf '%s\n' "$raw_paths" | head -n1 | tr -d '[:space:]')"
-    brief_ver="$(semver_from_filename "$first_path" 2>/dev/null || true)"
-    if [[ -z "$brief_ver" ]]; then
-        log "drop_self_pm_ticket: cannot parse version from '${first_path}'; skipping ticket creation"
-        return 0
-    fi
-
-    task_id="$(kanban_task_id "${TASKS_ROOT}" "PM" "${today}" "decompose-${brief_ver}")"
-    task_dir="${TASKS_ROOT}/${task_id}"
-
-    if [[ -d "$task_dir" ]]; then
-        log "drop_self_pm_ticket: task ${task_id} already exists, skipping"
-        return 0
-    fi
-
-    mkdir -p "$task_dir"
-
-    inputs_block=""
-    while IFS= read -r line; do
-        [[ -z "$line" ]] && continue
-        inputs_block="${inputs_block}- ${line}"$'\n'
-    done <<< "$raw_paths"
-    inputs_block="${inputs_block%$'\n'}"
-
-    local pm_dev_tree
-    # PP_dev_tree_path is the per-project override (set by pp_load_config);
-    # fall back to the process-wide default only when the per-project value
-    # is unset.  Matches the resolution pattern in scan_and_bundle_bugs.
-    pm_dev_tree="${PP_dev_tree_path:-${PGAI_DEV_TREE_PATH:-}}"
-
-    cat > "${task_dir}/README.md" <<EOF
-# Task: Autonomous PM — requirements brief ${brief_ver}
-
-## Task ID
-${task_id}
-
-## Owner
-Claude
-
-## Role
-PM
-
-## Assigned Agent
-none
-
-## Working Directory
-${pm_dev_tree}
-
-## Goal
-Decompose requirements brief(s) into an implementation plan
-
-## Inputs
-${inputs_block}
-
-## Prerequisites
-none
-
-## Release Version
-${brief_ver}
-
-## Notes
-Self-ticket created by wake script autonomous scan on ${today}.
-EOF
-
-    cat > "${task_dir}/status.md" <<EOF
-# Status
-
-## Task
-${task_id}
-
-## Participant
-Claude
-
-## Role
-PM
-
-## State
-BACKLOG
-
-## Summary
-Autonomous PM self-ticket for requirements brief ${brief_ver}.
-
-## Artifacts
-none
-
-## Blockers
-none
-
-## Blocked By Agent
-none
-
-## Blocked Reason
-none
-
-## Needs Human
-no
-
-## Next Recommended Step
-Process requirements brief(s) and produce a plan JSON.
-
-## Instruction Conflicts
-none
-EOF
-
-    local pm_backlog
-    pm_backlog="$(pp_queue_path "${_CURRENT_PROJECT}" "pm")"
-    mkdir -p "$(dirname "$pm_backlog")"
-    if [[ ! -f "$pm_backlog" ]]; then
-        cat > "$pm_backlog" <<'QEOF'
-# PM Backlog
-
-<!-- Auto-managed by wake script. One task per line. -->
-<!-- Format: - [ ] TASK-ID -->
-
-QEOF
-    fi
-    printf -- '- [ ] %s\n' "$task_id" >> "$pm_backlog"
-
-    log "drop_self_pm_ticket: created task ${task_id} (${brief_ver}) from ${first_path}"
-}
-
-# --- Helpers ---
-
-ensure_status_file() {
-  local status_file="$1"
-  if [[ ! -f "$status_file" ]] || [[ ! -s "$status_file" ]]; then
-    cat > "$status_file" <<'EOF'
-## State
-BACKLOG
-
-## Summary
-TBD
-
-## Artifacts
-none
-
-## Blockers
-none
-
-## Needs Human
-no
-
-## Next Recommended Step
-TBD
-
-## Instruction Conflicts
-none
-EOF
-    log "created status.md template for task"
-  fi
-}
-
-get_first_pending_task() {
-  python3 - "$BACKLOG" "$TASKS_ROOT" <<'PY'
-import re, sys, pathlib
-backlog = pathlib.Path(sys.argv[1])
-tasks_root = pathlib.Path(sys.argv[2])
-text = backlog.read_text()
-for line in text.splitlines():
-    m = re.match(r'^\s*-?\s*\[\s*[ B]\s*\]\s+([A-Za-z0-9._-]+)(\s+.*)?$', line)
-    if not m:
-        continue
-    task_id = m.group(1)
-    status_file = tasks_root / task_id / "status.md"
-    if not status_file.is_file():
-        print(task_id)
-        raise SystemExit(0)
-    status_text = status_file.read_text()
-    state_match = re.search(r'^## State\s*\n(.*?)(\n+##|\Z)', status_text, flags=re.S | re.M)
-    if not state_match:
-        print(task_id)
-        raise SystemExit(0)
-    state = state_match.group(1).strip().upper()
-    if state == "BACKLOG":
-        print(task_id)
-        raise SystemExit(0)
-raise SystemExit(1)
-PY
-}
-
-# get_role_from_readme <readme-path>
-# Extracts the raw ## Role value, uppercased and trimmed. Prints an empty
-# string when the section is absent or empty. Does NOT validate or default
-# the value — callers must check the result against role_is_valid_agent
-# and fail closed (BLOCKED, never a silent CODER fallback) on a bad value.
-get_role_from_readme() {
-  local readme="$1"
-  python3 - "$readme" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'^## Role\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-if not m:
-    print("")
-    raise SystemExit(0)
-role = m.group(1).strip().split('|')[0].strip().upper()
-print(role)
-PY
-}
-
-# get_assigned_agent_from_readme <readme-path>
-# Extracts the raw ## Assigned Agent value, uppercased and trimmed. Prints
-# an empty string when the section is absent, empty, or explicitly "none"
-# (case-insensitive) — those all mean "not present" to dispatch. A
-# non-empty result may still be invalid; callers validate with
-# role_is_valid_agent before using it to select a subagent.
-get_assigned_agent_from_readme() {
-  local readme="$1"
-  python3 - "$readme" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'^## Assigned Agent\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-if not m:
-    print("")
-    raise SystemExit(0)
-value = m.group(1).strip().split('|')[0].strip().upper()
-if not value or value == "NONE":
-    value = ""
-print(value)
-PY
-}
-
-# role_is_valid_agent <value>
-# True (exit 0) when <value> is one of the six recognized task roles /
-# subagent names. Shared by every wake provider's dispatch assertion so the
-# valid-role set is defined in exactly one place.
-role_is_valid_agent() {
-  case "$1" in
-    CODER|WRITER|CM|TESTER|PO|PM) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-get_model_override_from_readme() {
-  local readme="$1"
-  python3 - "$readme" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'^##\s+(?:Force\s+Model|Model\s+Override)[^\S\n]*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M | re.I)
-if not m:
-    raise SystemExit(0)
-value = m.group(1).strip()
-if not value or value.lower() == 'none':
-    raise SystemExit(0)
-print(value)
-PY
-}
-
-check_prerequisites() {
-  local readme="$1"
-  python3 - "$readme" "$TASKS_ROOT" <<'PY'
-import pathlib, re, sys
-readme = pathlib.Path(sys.argv[1])
-tasks_root = pathlib.Path(sys.argv[2])
-
-text = readme.read_text()
-m = re.search(r'^## Prerequisites\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-if not m:
-    raise SystemExit(0)
-
-body = m.group(1).strip()
-body = re.sub(r'<!--.*?-->', '', body, flags=re.S).strip()
-if not body or body.lower() == "none":
-    raise SystemExit(0)
-
-prereqs = []
-for line in body.splitlines():
-    line = line.strip()
-    if line.startswith("-"):
-        line = line[1:].strip()
-    if not line or line.lower() == "none":
-        continue
-    for token in line.split(","):
-        token = token.strip()
-        if token and token.lower() != "none" and re.match(r'^[A-Za-z0-9._-]+$', token):
-            prereqs.append(token)
-
-if not prereqs:
-    raise SystemExit(0)
-
-SATISFIED = {"DONE", "WONT-DO"}
-
-unsatisfied = []
-for prereq_id in prereqs:
-    status_file = tasks_root / prereq_id / "status.md"
-    if not status_file.is_file():
-        unsatisfied.append(f"{prereq_id}:MISSING")
-        continue
-    status_text = status_file.read_text()
-    sm = re.search(r'^## State\s*\n(.*?)(\n+##|\Z)', status_text, flags=re.S | re.M)
-    if not sm:
-        unsatisfied.append(f"{prereq_id}:UNPARSEABLE")
-        continue
-    state = sm.group(1).strip().upper()
-    if state not in SATISFIED:
-        unsatisfied.append(f"{prereq_id}:{state}")
-
-if unsatisfied:
-    for u in unsatisfied:
-        print(u)
-    raise SystemExit(1)
-raise SystemExit(0)
-PY
-}
-
-get_state() {
-  local status_file="$1"
-  python3 - "$status_file" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'(^## State\s*\n)(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-if not m:
-    raise SystemExit("Could not parse ## State block")
-print(m.group(2).strip().upper())
-PY
-}
-
-normalize_status_file() {
-  local status_file="$1"
-  python3 - "$status_file" <<'PY'
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-text = path.read_text()
-text = re.sub(r'\n\n\n+', '\n\n', text)
-path.write_text(text)
-PY
-}
-
-set_state() {
-  local status_file="$1"
-  local new_state="$2"
-  python3 - "$status_file" "$new_state" <<'PY'
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-new_state = sys.argv[2]
-text = path.read_text()
-text_new, n = re.subn(
-    r'(^## State\s*\n)(.*?)(\n+##|\Z)',
-    lambda m: m.group(1) + new_state.strip() + "\n" + (m.group(3) if m.group(3) else ''),
-    text,
-    flags=re.S | re.M,
-)
-if n == 0:
-    raise SystemExit("Could not update ## State block")
-path.write_text(text_new)
-PY
-}
-
-set_block() {
-  local status_file="$1"
-  local heading="$2"
-  local body="$3"
-  python3 - "$status_file" "$heading" "$body" <<'PY'
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-heading = sys.argv[2]
-body = sys.argv[3]
-text = path.read_text()
-pattern = rf'(^## {re.escape(heading)}\s*\n)(.*?)(\n+##|\Z)'
-text_new, n = re.subn(
-    pattern,
-    lambda m: m.group(1) + body.strip() + "\n" + (m.group(3) if m.group(3) else '\n'),
-    text,
-    flags=re.S | re.M,
-)
-if n == 0:
-    raise SystemExit(f"Could not update ## {heading} block")
-path.write_text(text_new)
-PY
-}
-
-# --- stamp_model_field <status_file> <model_string> ---
-# Write the resolved model string into the ## Model section of a task status file.
-# If the section is absent it is inserted after ## Role (or after ## Participant
-# when ## Role is absent, or at the end when neither anchor is found).
-# Only ## Model is touched; all other sections are preserved byte-identically.
-# Best-effort: on failure a warning is logged to stderr and the task continues.
-stamp_model_field() {
-  local status_file="$1"
-  local model_value="$2"
-  python3 - "$status_file" "$model_value" <<'PY'
-import pathlib, re, sys
-
-path = pathlib.Path(sys.argv[1])
-model_value = sys.argv[2].strip()
-
-try:
-    text = path.read_text()
-except OSError as e:
-    raise SystemExit(f"stamp_model_field: cannot read {path}: {e}")
-
-# If ## Model section already exists, replace its body (section-scoped update).
-if re.search(r'^## Model\s*$', text, flags=re.M):
-    text_new, n = re.subn(
-        r'(^## Model\s*\n)(.*?)(\n+##|\Z)',
-        lambda m: m.group(1) + model_value + "\n" + (m.group(3) if m.group(3) else ''),
-        text,
-        flags=re.S | re.M,
-    )
-    if n == 0:
-        raise SystemExit("stamp_model_field: found ## Model header but subn matched 0 times")
-    path.write_text(text_new)
-    raise SystemExit(0)
-
-# Section absent — insert after ## Role, or ## Participant, or at end.
-# The replacement captures (anchor-header + body)(newline(s) + next-##) and
-# injects the new ## Model section between them, normalising spacing so the
-# output reads as two blank-line-separated sections.
-new_section = f"## Model\n{model_value}\n"
-for anchor in (r'^(## Role\s*\n.*?)(\n+##)', r'^(## Participant\s*\n.*?)(\n+##)'):
-    text_new, n = re.subn(
-        anchor,
-        lambda m: m.group(1) + "\n\n" + new_section + "\n" + m.group(2).lstrip('\n'),
-        text,
-        count=1,
-        flags=re.S | re.M,
-    )
-    if n > 0:
-        # Collapse any run of 3+ newlines introduced by the splice.
-        text_new = re.sub(r'\n{3,}', '\n\n', text_new)
-        path.write_text(text_new)
-        raise SystemExit(0)
-
-# Fallback: append at end.
-path.write_text(text.rstrip('\n') + "\n\n" + new_section)
-PY
-  local _stamp_exit=$?
-  if [[ $_stamp_exit -ne 0 ]]; then
-    echo "WARNING: stamp_model_field failed (exit ${_stamp_exit}) for ${status_file}; continuing" >&2
-  fi
-}
-
-mark_backlog() {
-  local task_id="$1"
-  local marker="$2"
-  python3 - "$BACKLOG" "$task_id" "$marker" <<'PY'
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-task_id = sys.argv[2]
-marker = sys.argv[3]
-text = path.read_text()
-pattern = rf'^(\s*-\s*)\[[xRBWA\s]*\](\s+{re.escape(task_id)})(\s.*)?$'
-text_new, n = re.subn(pattern, lambda m: m.group(1) + f'[{marker}]' + m.group(2) + (m.group(3) if m.group(3) else ''), text, flags=re.M)
-if n == 0:
-    raise SystemExit(f"Could not update backlog entry for {task_id}")
-path.write_text(text_new)
-PY
-}
-
-promote_waiting_to_backlog() {
-  local task_id="$1"
-  local task_status="$2"
-  python3 - "$BACKLOG" "$task_id" "$task_status" <<'PY'
-import pathlib, re, sys
-
-backlog_path = pathlib.Path(sys.argv[1])
-task_id = sys.argv[2]
-status_path = pathlib.Path(sys.argv[3])
-
-try:
-    queue_text = backlog_path.read_text()
-except OSError as e:
-    raise SystemExit(f"Cannot read queue file: {e}")
-
-try:
-    status_text = status_path.read_text()
-except OSError as e:
-    raise SystemExit(f"Cannot read status file: {e}")
-
-queue_pattern = rf'^(\s*-\s*)\[\s*[W\s]\s*\](\s+{re.escape(task_id)})(\s.*)?$'
-queue_new, queue_n = re.subn(
-    queue_pattern,
-    lambda m: m.group(1) + '[ ]' + m.group(2) + (m.group(3) if m.group(3) else ''),
-    queue_text,
-    flags=re.M,
-)
-if queue_n == 0:
-    raise SystemExit(f"Could not find [W] or [ ] queue entry for {task_id}")
-
-new_summary = "Promoted from WAITING to BACKLOG by wake script: prerequisites satisfied."
-
-def replace_block(text, heading, new_body):
-    pattern = rf'(^## {re.escape(heading)}\s*\n)(.*?)(\n+##|\Z)'
-    text_new, n = re.subn(
-        pattern,
-        lambda m: m.group(1) + new_body.strip() + "\n" + (m.group(3) if m.group(3) else ''),
-        text,
-        flags=re.S | re.M,
-    )
-    if n == 0:
-        raise SystemExit(f"Could not update ## {heading} block in status.md")
-    return text_new
-
-try:
-    status_new = replace_block(status_text, "State", "BACKLOG")
-    status_new = replace_block(status_new, "Blockers", "none")
-    status_new = replace_block(status_new, "Summary", new_summary)
-except SystemExit:
-    raise
-
-status_new = re.sub(r'\n\n\n+', '\n\n', status_new)
-
-try:
-    backlog_path.write_text(queue_new)
-except OSError as e:
-    raise SystemExit(f"Failed to write queue file: {e}")
-
-try:
-    status_path.write_text(status_new)
-except OSError as e:
-    try:
-        backlog_path.write_text(queue_text)
-    except OSError as rollback_err:
-        raise SystemExit(
-            f"CRITICAL: Failed to write status file ({e}) AND failed to roll back "
-            f"queue file ({rollback_err}). Manual intervention required for {task_id}."
-        )
-    raise SystemExit(f"Failed to write status file (queue rolled back): {e}")
-
-PY
-}
-
-promote_blocked_to_backlog() {
-  local task_id="$1"
-  local task_status="$2"
-  local cleared_reason="$3"
-  python3 - "$BACKLOG" "$task_id" "$task_status" "$cleared_reason" <<'PY'
-import pathlib, re, sys
-
-backlog_path = pathlib.Path(sys.argv[1])
-task_id = sys.argv[2]
-status_path = pathlib.Path(sys.argv[3])
-cleared_reason = sys.argv[4]
-
-try:
-    queue_text = backlog_path.read_text()
-except OSError as e:
-    raise SystemExit(f"Cannot read queue file: {e}")
-
-try:
-    status_text = status_path.read_text()
-except OSError as e:
-    raise SystemExit(f"Cannot read status file: {e}")
-
-queue_pattern = rf'^(\s*-\s*)\[\s*B\s*\](\s+{re.escape(task_id)})(\s.*)?$'
-queue_new, queue_n = re.subn(
-    queue_pattern,
-    lambda m: m.group(1) + '[ ]' + m.group(2) + (m.group(3) if m.group(3) else ''),
-    queue_text,
-    flags=re.M,
-)
-if queue_n == 0:
-    raise SystemExit(f"Could not find [B] queue entry for {task_id}")
-
-new_summary = f"Promoted from BLOCKED to BACKLOG by wake script: blocker cleared ({cleared_reason})."
-
-def replace_block(text, heading, new_body):
-    pattern = rf'(^## {re.escape(heading)}\s*\n)(.*?)(\n+##|\Z)'
-    text_new, n = re.subn(
-        pattern,
-        lambda m: m.group(1) + new_body.strip() + "\n" + (m.group(3) if m.group(3) else ''),
-        text,
-        flags=re.S | re.M,
-    )
-    if n == 0:
-        return text
-    return text_new
-
-try:
-    status_new = replace_block(status_text, "State", "BACKLOG")
-    status_new = replace_block(status_new, "Blockers", "none")
-    status_new = replace_block(status_new, "Blocked By Agent", "none")
-    status_new = replace_block(status_new, "Blocked Reason", "none")
-    status_new = replace_block(status_new, "Needs Human", "no")
-    status_new = replace_block(status_new, "Summary", new_summary)
-except SystemExit:
-    raise
-
-status_new = re.sub(r'\n\n\n+', '\n\n', status_new)
-
-try:
-    backlog_path.write_text(queue_new)
-except OSError as e:
-    raise SystemExit(f"Failed to write queue file: {e}")
-
-try:
-    status_path.write_text(status_new)
-except OSError as e:
-    try:
-        backlog_path.write_text(queue_text)
-    except OSError as rollback_err:
-        raise SystemExit(
-            f"CRITICAL: Failed to write status file ({e}) AND failed to roll back "
-            f"queue file ({rollback_err}). Manual intervention required for {task_id}."
-        )
-    raise SystemExit(f"Failed to write status file (queue rolled back): {e}")
-
-PY
-}
-
-# --- BLOCKED-task blocker-check dispatch table ---
-
-_blocked_check_active_rc() {
-  local active_rc
-  active_rc="$(get_release_state_field "Active RC" 2>/dev/null || true)"
-  if [[ -z "$active_rc" || "$active_rc" == "none" ]]; then
-    return 0  # cleared
-  fi
-  return 1  # still blocked
-}
-
-recheck_waiting_tasks() {
-  log "re-checking WAITING tasks for satisfied prerequisites..."
-
-  local waiting_ids
-  waiting_ids=$(python3 - "$BACKLOG" "$TASKS_ROOT" <<'PY'
-import re, sys, pathlib
-
-backlog_path = pathlib.Path(sys.argv[1])
-tasks_root = pathlib.Path(sys.argv[2])
-text = backlog_path.read_text()
-
-for line in text.splitlines():
-    m = re.match(r'^\s*-?\s*\[\s*W\s*\]\s+([A-Za-z0-9._-]+)(\s+.*)?$', line)
-    if m:
-        print(m.group(1))
-        continue
-    m = re.match(r'^\s*-?\s*\[\s*\]\s+([A-Za-z0-9._-]+)(\s+.*)?$', line)
-    if m:
-        task_id = m.group(1)
-        status_file = tasks_root / task_id / "status.md"
-        if not status_file.is_file():
-            continue
-        status_text = status_file.read_text()
-        state_match = re.search(r'^##\s+State\s*\n(.*?)(\n+##|\Z)', status_text, flags=re.S | re.M)
-        if state_match and state_match.group(1).strip().upper() == "WAITING":
-            print(task_id)
-PY
-)
-
-  if [[ -z "$waiting_ids" ]]; then
-    log "no WAITING tasks to re-check"
-    return 0
-  fi
-
-  local promoted=0
-  while IFS= read -r task_id; do
-    [[ -z "$task_id" ]] && continue
-    local task_dir="${TASKS_ROOT}/${task_id}"
-    local task_readme="${task_dir}/README.md"
-    local task_status="${task_dir}/status.md"
-
-    if [[ ! -f "$task_readme" ]] || [[ ! -f "$task_status" ]]; then
-      log "WAITING task ${task_id} missing files; skipping re-check"
-      continue
-    fi
-
-    local check_exit=0
-    set +e
-    check_prerequisites "$task_readme" >/dev/null
-    check_exit=$?
-    set -e
-
-    if [[ $check_exit -eq 0 ]]; then
-      log "WAITING task ${task_id}: prerequisites satisfied, promoting to BACKLOG"
-      local promote_exit=0
-      set +e
-      promote_waiting_to_backlog "$task_id" "$task_status"
-      promote_exit=$?
-      set -e
-      if [[ $promote_exit -ne 0 ]]; then
-        log "WARNING: atomic promotion failed for ${task_id}; skipping (no partial update)"
-        continue
-      fi
-      promoted=$((promoted + 1))
-    fi
-  done <<< "$waiting_ids"
-
-  log "re-check complete: promoted ${promoted} task(s) from WAITING to BACKLOG"
-}
-
-recheck_blocked_tasks() {
-  log "re-checking BLOCKED tasks for cleared blockers..."
-
-  local blocked_ids
-  blocked_ids=$(python3 - "$BACKLOG" "$TASKS_ROOT" <<'PY'
-import re, sys, pathlib
-
-backlog_path = pathlib.Path(sys.argv[1])
-tasks_root = pathlib.Path(sys.argv[2])
-text = backlog_path.read_text()
-
-for line in text.splitlines():
-    m = re.match(r'^\s*-?\s*\[\s*B\s*\]\s+([A-Za-z0-9._-]+)(\s+.*)?$', line)
-    if m:
-        task_id = m.group(1)
-        status_file = tasks_root / task_id / "status.md"
-        if not status_file.is_file():
-            continue
-        status_text = status_file.read_text()
-        state_match = re.search(r'^##\s+State\s*\n(.*?)(\n+##|\Z)', status_text, flags=re.S | re.M)
-        if state_match and state_match.group(1).strip().upper() == "BLOCKED":
-            print(task_id)
-PY
-)
-
-  if [[ -z "$blocked_ids" ]]; then
-    log "no BLOCKED tasks to re-check"
-    return 0
-  fi
-
-  local promoted=0
-  while IFS= read -r task_id; do
-    [[ -z "$task_id" ]] && continue
-    local task_dir="${TASKS_ROOT}/${task_id}"
-    local task_readme="${task_dir}/README.md"
-    local task_status="${task_dir}/status.md"
-
-    if [[ ! -f "$task_readme" ]] || [[ ! -f "$task_status" ]]; then
-      log "BLOCKED task ${task_id} missing files; skipping re-check"
-      continue
-    fi
-
-    local needs_human
-    needs_human=$(python3 - "$task_status" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'^##\s+Needs Human\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-print(m.group(1).strip().lower() if m else "yes")
-PY
-)
-    if [[ "$needs_human" == "yes" ]]; then
-      log "BLOCKED task ${task_id}: Needs Human=yes, skipping auto-resolve"
-      continue
-    fi
-
-    local blocked_reason
-    blocked_reason=$(python3 - "$task_status" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'^##\s+Blocked Reason\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-print(m.group(1).strip() if m else "")
-PY
-)
-
-    local cleared=false
-    local cleared_desc=""
-
-    if echo "$blocked_reason" | grep -qi "active rc"; then
-      local check_exit=0
-      set +e
-      _blocked_check_active_rc "$task_id" "$blocked_reason"
-      check_exit=$?
-      set -e
-      if [[ $check_exit -eq 0 ]]; then
-        cleared=true
-        cleared_desc="Active RC=none"
-      fi
-    fi
-
-    # --- Transient API error auto-retry ---
-    # A task whose durable ## Transient Retry record has reason_code
-    # transient_api_error and whose Needs Human=no (already confirmed above)
-    # is eligible for automatic promotion back to BACKLOG so the next wake can
-    # retry it. This reads the SAME durable record that
-    # handle_working_after_exit writes — never the ## Blocked Reason prose
-    # (which promote_blocked_to_backlog resets to "none" on every promotion,
-    # so it cannot be trusted as a retry-count source of truth). The record's
-    # own retry_limit is preferred so a promoted-then-reclassified task is
-    # judged against the ceiling that was in effect when it was recorded;
-    # transient_retry_limit() is the fallback for older/malformed records.
-    #
-    # The comparison here is intentionally identical to handle_working_after_exit's
-    # ("< ceiling"): if handle_working_after_exit already escalated to
-    # Needs Human=yes at the ceiling, this branch is never reached for that task
-    # (filtered out by the needs_human=="yes" check above). This branch remains
-    # as a safety double-check for the case where TRANSIENT_RETRY_CAP was
-    # lowered between the record being written and this recheck running.
-    if [[ "$cleared" == "false" ]]; then
-      local _retry_reason_code
-      _retry_reason_code="$(transient_retry_field "$task_status" "reason_code" "")"
-      if [[ "$_retry_reason_code" == "transient_api_error" ]]; then
-        local _transient_cap
-        _transient_cap="$(transient_retry_field "$task_status" "retry_limit" "")"
-        [[ "$_transient_cap" =~ ^[0-9]+$ ]] || _transient_cap="$(transient_retry_limit)"
-        local _retry_count
-        _retry_count="$(transient_retry_field "$task_status" "retry_count" "0")"
-        [[ "$_retry_count" =~ ^[0-9]+$ ]] || _retry_count=0
-
-        if [[ "$_retry_count" -lt "$_transient_cap" ]]; then
-          cleared=true
-          cleared_desc="transient API error auto-retry (attempt ${_retry_count}/${_transient_cap})"
-          log "BLOCKED task ${task_id}: transient API error — scheduling auto-retry (attempt ${_retry_count}/${_transient_cap})"
-        else
-          log "BLOCKED task ${task_id}: transient API error — retry cap reached (${_retry_count}/${_transient_cap}); leaving for human"
-        fi
-      fi
-    fi
-
-    if [[ "$cleared" == "true" ]]; then
-      log "BLOCKED task ${task_id}: blocker cleared (${cleared_desc}), promoting to BACKLOG"
-      local promote_exit=0
-      set +e
-      promote_blocked_to_backlog "$task_id" "$task_status" "$cleared_desc"
-      promote_exit=$?
-      set -e
-      if [[ $promote_exit -ne 0 ]]; then
-        log "WARNING: atomic promotion failed for ${task_id}; skipping (no partial update)"
-        continue
-      fi
-      promoted=$((promoted + 1))
-    fi
-  done <<< "$blocked_ids"
-
-  log "re-check complete: promoted ${promoted} BLOCKED task(s) to BACKLOG"
-}
-
-reconcile_stale_active() {
-  local stale_ids
-  stale_ids=$(python3 - "$BACKLOG" <<'PY'
-import re, sys, pathlib
-
-backlog_path = pathlib.Path(sys.argv[1])
-text = backlog_path.read_text()
-
-for line in text.splitlines():
-    m = re.match(r'^\s*-?\s*\[\s*A\s*\]\s+([A-Za-z0-9._-]+)(\s+.*)?$', line)
-    if m:
-        print(m.group(1))
-PY
-)
-
-  if [[ -z "$stale_ids" ]]; then
-    return 0
-  fi
-
-  log "stale-active reconciliation: checking [A] markers for orphaned tasks..."
-
-  local reconciled=0
-  while IFS= read -r task_id; do
-    [[ -z "$task_id" ]] && continue
-
-    if pgrep -f "$task_id" >/dev/null 2>&1; then
-      log "stale-active: ${task_id} has active process, keeping [A]"
-      continue
-    fi
-
-    local task_status="${TASKS_ROOT}/${task_id}/status.md"
-    if [[ ! -f "$task_status" ]]; then
-      log "stale-active: ${task_id} missing status.md; resetting marker to [ ]"
-      mark_backlog "$task_id" " "
-      reconciled=$((reconciled + 1))
-      continue
-    fi
-
-    log "stale-active: ${task_id} has no active process, resetting to [ ]/BACKLOG"
-
-    # --- Teardown prior worktree/branch before BACKLOG reset ---
-    # The interrupted attempt may have left a worktree directory and/or feature
-    # branch on disk.  Tear them down so the subsequent create_task_worktree call
-    # (in the next process_one_task invocation) gets a clean slate instead of
-    # hitting "branch already exists" and hard-blocking with Needs Human=yes.
-    #
-    # Reuses:
-    #   teardown_task_worktree (worktree.sh) — 'git worktree remove --force' + prune
-    #   pp_prefix_branch (project_paths.sh) — compute prefix-aware feature branch name
-    # Both helpers are available here: wake/claude.sh and wake/codex.sh both source
-    # worktree.sh before calling run_project_chain, which calls reconcile_stale_active.
-    #
-    # PP_dev_tree_path is populated by pp_load_config (called in run_project_chain
-    # before reconcile_stale_active); PGAI_DEV_TREE_PATH is used when unset.
-    # Teardown is best-effort: failures emit a WARNING but never block the state reset
-    # (create_task_worktree is itself idempotent; this is defense-in-depth).
-    local _sa_dev_tree="${PP_dev_tree_path:-${PGAI_DEV_TREE_PATH:-}}"
-    if [[ -n "$_sa_dev_tree" && -d "$_sa_dev_tree/.git" ]]; then
-      # Compute the prefix-aware feature branch name (mirrors reset.sh Step 4).
-      local _sa_feature_branch=""
-      local _sa_fb_exit=0
-      set +e
-      _sa_feature_branch="$(pp_prefix_branch "${_CURRENT_PROJECT:-}" "feature/${task_id}" 2>/dev/null)"
-      _sa_fb_exit=$?
-      set -e
-      if [[ $_sa_fb_exit -ne 0 || -z "$_sa_feature_branch" ]]; then
-        _sa_feature_branch="feature/${task_id}"   # safe fallback when helper fails
-      fi
-
-      # Step 1: remove the worktree directory (branch may be checked out there).
-      local _sa_wt_path=""
-      if _sa_wt_path="$(pgai_worktree_path "$task_id" 2>/dev/null)" && [[ -d "$_sa_wt_path" ]]; then
-        log "stale-active: ${task_id} tearing down prior worktree at ${_sa_wt_path}"
-        if ! teardown_task_worktree "$task_id" "$_sa_dev_tree" 2>/dev/null; then
-          log "stale-active: ${task_id} WARNING: worktree teardown failed (non-fatal; create_task_worktree will retry idempotently)"
-        else
-          log "stale-active: ${task_id} prior worktree removed"
-        fi
-      fi
-
-      # Step 2: delete the feature branch if it still exists locally.
-      if git -C "$_sa_dev_tree" rev-parse --verify "refs/heads/${_sa_feature_branch}" >/dev/null 2>&1; then
-        log "stale-active: ${task_id} deleting prior feature branch ${_sa_feature_branch}"
-        # Suppress stdout as well as stderr — git branch -D emits "Deleted branch ..."
-        # to stdout, which would appear as stray output in cron logs.
-        if git -C "$_sa_dev_tree" branch -D "$_sa_feature_branch" >/dev/null 2>&1; then
-          log "stale-active: ${task_id} feature branch ${_sa_feature_branch} deleted"
-        else
-          log "stale-active: ${task_id} WARNING: could not delete feature branch ${_sa_feature_branch} (non-fatal)"
-        fi
-      fi
-    else
-      log "stale-active: ${task_id} no dev tree configured or accessible — skipping git teardown"
-    fi
-
-    set_state "$task_status" "BACKLOG"
-    set_block "$task_status" "Summary" "Reset from stale WORKING state by wake script reconciliation."
-    normalize_status_file "$task_status"
-    mark_backlog "$task_id" " "
-    reconciled=$((reconciled + 1))
-  done <<< "$stale_ids"
-
-  if [[ $reconciled -gt 0 ]]; then
-    log "stale-active reconciliation: reset ${reconciled} orphaned [A] task(s)"
-  fi
-}
-
-# ---------------------------------------------------------------------------
-# handle_working_after_exit <task_id> <task_status> <log_file> <agent_exit>
-#
-# Provider-neutral WORKING-after-exit handler.  Called by both claude.sh and
-# codex.sh when a task is still in WORKING state after the agent process exits.
-#
-# This is the ONE controller that classifies and records transient
-# retry state: it is the sole writer of the durable ## Transient Retry record
-# (via transient_retry_write, overwatch_protocol.sh). recheck_blocked_tasks
-# below, and OVERWATCH's check-transient-api-error.sh, only ever READ this
-# record — neither maintains its own counter or ceiling.
-#
-# Behaviour:
-#   1. Grep the tail of <log_file> for known transient provider error signatures
-#      (Anthropic: 5xx/overloaded/rate-limit/429; OpenAI: server_error/Rate limit
-#      reached/The server had an error/500-503/529).  'insufficient_quota' is
-#      intentionally excluded — it is a billing failure, not a retry-worthy hiccup.
-#   2. If a transient signature is found, read the previous retry_count from the
-#      durable ## Transient Retry record (never from ## Blocked Reason prose —
-#      that section is promotion-erased and human-narrative-only), increment
-#      it, write the updated record, and:
-#        - If retry_count is still BELOW the ceiling (transient_retry_limit):
-#          BLOCKED + Needs Human=no
-#        - If retry_count has REACHED the ceiling: BLOCKED + Needs Human=yes
-#          (escalate; exactly-at-cap is never left in limbo)
-#   3. If no transient signature, fall through to the generic path:
-#        BLOCKED + Needs Human=yes (agent exited without updating state)
-#   4. Normalizes the status file and prints the resulting final_state ("BLOCKED")
-#      to stdout.
-#
-# The detection regex and retry-count logic live here exactly once; the two
-# wake scripts' local log() calls may note the outcome, but neither script
-# re-implements the detection substrate.
-# ---------------------------------------------------------------------------
-handle_working_after_exit() {
-  local task_id="${1:-}"
-  local task_status="${2:-}"
-  local log_file="${3:-}"
-  local agent_exit="${4:-}"
-
-  local _transient_cap
-  _transient_cap="$(transient_retry_limit)"
-  local _transient_matched=false
-  local _transient_sig=""
-
-  # --- Transient API error detection ---
-  # Grep the last 50 lines of the agent log for known transient provider
-  # signatures.  Two regex patterns are used:
-  #   _DETECT_RE  — fast boolean match (grep -q); determines if any signature
-  #                 is present in the tail.
-  #   _EXTRACT_RE — extract the first matching fragment for the label; must be
-  #                 a subset of _DETECT_RE.
-  # Anthropic signatures: API Error 5xx, overloaded, overloaded_error,
-  #   rate_limit / rate limit / 429, 50[023], 529.
-  # OpenAI/codex signatures: server_error, Rate limit reached,
-  #   The server had an error, HTTP 500/502/503/529 in error context.
-  # EXCLUDED: insufficient_quota (non-transient billing failure).
-  # NOTE: bare numeric alternations (429, 50[023], 529) are digit-bounded via
-  #   (^|[^0-9])N([^0-9]|$) so they cannot match inside task-ID date segments,
-  #   token counts, or elapsed-ms values (e.g. 20260503, 15030, 5029ms).
-  #   Each numeric is a separate alternation to avoid |N| substrings that would
-  #   be caught by the bare-alternation lint check.
-  local _DETECT_RE='API Error: 5[0-9][0-9]|[Oo]verloaded|overloaded_error|rate[_. -]?limit|(^|[^0-9])429([^0-9]|$)|(^|[^0-9])50[023]([^0-9]|$)|(^|[^0-9])529([^0-9]|$)|server_error|[Tt]he server had an error|[Rr]ate limit reached'
-  local _EXTRACT_RE='API Error: 5[0-9][0-9][^\n]*|[Oo]verloaded[^\n]*|overloaded_error[^\n]*|rate[_. -]?limit[^\n]*|(^|[^0-9])429([^0-9]|$)|(^|[^0-9])50[023]([^0-9]|$)|(^|[^0-9])529([^0-9]|$)|server_error[^\n]*|[Tt]he server had an error[^\n]*|[Rr]ate limit reached[^\n]*'
-
-  if [[ -f "$log_file" ]]; then
-    local _tail_lines
-    _tail_lines="$(tail -50 "$log_file" 2>/dev/null || true)"
-    # Here-string (<<<), not `echo ... | grep`: piping into `grep -q` forks a
-    # separate writer process whose write() can race grep's early exit-on-match.
-    # Under host CPU contention, grep -q closing its read end mid-write can
-    # deliver SIGPIPE to the echo side; with `set -o pipefail` (active in every
-    # caller of this function) the pipeline's reported exit status becomes the
-    # echo side's non-zero SIGPIPE code instead of grep's real (successful)
-    # match, so the `if` silently takes the no-match branch even though the
-    # tail content plainly contains the signature. A here-string hands grep its
-    # input via a pre-written temp fd before grep execs, so there is no writer
-    # process and no such race. Measured a nonzero false-negative rate for the
-    # piped form under host CPU contention versus zero failures for the
-    # here-string form across an equivalent number of trials.
-    if grep -qiE "$_DETECT_RE" <<< "$_tail_lines"; then
-      _transient_matched=true
-      _transient_sig="$(grep -iEo "$_EXTRACT_RE" <<< "$_tail_lines" \
-        | tail -1 | cut -c1-80 || true)"
-      [[ -z "$_transient_sig" ]] && _transient_sig="transient provider error"
-    fi
-  fi
-
-  if [[ "$_transient_matched" == "true" ]]; then
-    # Read the previous retry_count from the durable ## Transient Retry record
-    # — NOT from ## Blocked Reason prose. The record is the ONE authoritative
-    # count and survives BACKLOG promotion; Blocked Reason is reset to "none"
-    # by promote_blocked_to_backlog and must never be relied on for state.
-    local _retry_count
-    _retry_count="$(transient_retry_field "$task_status" "retry_count" "0")"
-    [[ "$_retry_count" =~ ^[0-9]+$ ]] || _retry_count=0
-    _retry_count=$(( _retry_count + 1 ))
-
-    # Record the classification BEFORE branching so the durable record is
-    # always up to date, regardless of which branch below fires.
-    transient_retry_write "$task_status" "transient_api_error" "$_retry_count" \
-      "$_transient_cap" "${ACTIVE_PROVIDER:-unknown}" "$_transient_sig"
-
-    # Strictly-less-than the ceiling is the only
-    # condition that leaves Needs Human=no. Exactly AT the ceiling escalates
-    # immediately — there is no longer a limbo state where Needs Human=no but
-    # retry_count has already reached the cap (recheck_blocked_tasks below
-    # uses the identical "< ceiling" comparison against the same record, so
-    # the two paths can never disagree).
-    # NOTE: the "TRANSIENT API ERROR" prefix on ## Blocked Reason is preserved
-    # verbatim (not reworded) because team/pgai_agent_kanban/dashboard/scan_attention.py's
-    # _is_transient_blocked() does a case-insensitive startswith("TRANSIENT API
-    # ERROR") check on this exact field to render the dashboard's TRANSIENT
-    # section. The record (not this prose) is now the retry-count source of
-    # truth, but the prefix itself remains a stable narrative marker.
-    if [[ "$_retry_count" -lt "$_transient_cap" ]]; then
-      log "task ${task_id} left in WORKING after transient API error (${_transient_sig}); marking BLOCKED+TRANSIENT (retry ${_retry_count}/${_transient_cap})"
-      set_state "$task_status" "BLOCKED"
-      set_block "$task_status" "Blocked Reason" "TRANSIENT API ERROR — ${_transient_sig} — safe to retry (retry ${_retry_count}/${_transient_cap}; see ## Transient Retry record); no human action required. See ${log_file}."
-      set_block "$task_status" "Blockers" "TRANSIENT API ERROR (retry ${_retry_count}/${_transient_cap}): ${_transient_sig}. See ${log_file}."
-      set_block "$task_status" "Needs Human" "no"
-    else
-      log "task ${task_id} left in WORKING after transient API error (${_transient_sig}); retry cap reached (${_retry_count}/${_transient_cap}) — escalating to Needs Human=yes"
-      set_state "$task_status" "BLOCKED"
-      set_block "$task_status" "Blocked Reason" "TRANSIENT API ERROR (retry cap ${_transient_cap} reached) — ${_transient_sig} — repeated transient failures; human investigation required (see ## Transient Retry record). Exit code: ${agent_exit}. See ${log_file}."
-      set_block "$task_status" "Blockers" "TRANSIENT API ERROR (retry cap ${_transient_cap} reached): ${_transient_sig}. Exit code: ${agent_exit}. See ${log_file}."
-      set_block "$task_status" "Needs Human" "yes"
-    fi
-  else
-    log "task ${task_id} left in WORKING state after agent exited; marking BLOCKED"
-    set_state "$task_status" "BLOCKED"
-    set_block "$task_status" "Blockers" "Agent exited without updating task state. Exit code: ${agent_exit}. See ${log_file}."
-    set_block "$task_status" "Needs Human" "yes"
-  fi
-
-  normalize_status_file "$task_status"
-  printf 'BLOCKED\n'
-}
-
-# ---------------------------------------------------------------------------
-# coder_writer_completion_gate <task_id> <task_status> <subagent>
-#                               <feature_branch> <source_branch> <worktree_path>
-#
-# Mechanical completion gate for CODER/WRITER DONE-claims. Called by both
-# claude.sh and codex.sh immediately after final_state is read from the
-# task's status.md, BEFORE the DONE transition is accepted anywhere else in
-# wake reconciliation (mark_backlog, the on-BLOCK overwatch trigger, the
-# training-corpus copy, worktree teardown). Verifies the completion contract
-# mechanically instead of trusting the agent's own done-claim:
-#
-#   1. Merge check — the task's feature branch must be merged into its
-#      target (source/RC) branch. Checked via `git merge-base --is-ancestor`
-#      when the feature branch ref still exists (the common "agent skipped
-#      the merge" failure mode this gate exists to catch). When the ref is
-#      already gone, the CODER/WRITER procedure's only deletion path is
-#      `git branch -d` (never -D — see roles/CODER.md "Step 8"), which
-#      refuses to delete a branch that is not already merged. A missing ref
-#      is trusted as "merged" in either of two ways:
-#        (a) the worktree's current HEAD is the expected source branch —
-#            the state a plain `-d` performed IN this worktree requires; or
-#        (b) merge-evidence read from the source branch's own history,
-#            independent of this worktree's HEAD state — either a merge
-#            commit naming the feature branch appears in the source
-#            branch's recent log (the `--no-ff` procedure in CODER.md/
-#            WRITER.md always produces one), or this worktree's current
-#            HEAD commit is itself an ancestor of the source branch.
-#      (b) exists because git allows a branch checked out in only one
-#      worktree at a time, so when a
-#      sibling task's worktree legitimately holds the source/RC branch,
-#      this task's own merge --no-ff necessarily happens in THAT sibling
-#      worktree, not here. This worktree is then merely detached so its
-#      feature-branch ref can be deleted — its HEAD never becomes the
-#      source branch, even though the merge is real and complete. Evidence
-#      is read from the source branch itself (shared across every worktree
-#      of the same repository) so the verdict does not depend on which
-#      worktree happened to perform the merge.
-#   2. Cleanliness check — the task worktree must have no uncommitted
-#      changes at done-claim time (`git status --porcelain`).
-#
-# Both checks are delivery checks — they confirm the work actually landed on
-# the source branch and that nothing was left uncommitted; that is the
-# gate's whole job. A third check, a diff-scope comment-provenance lint, ran
-# here through v2.3.10 and is retired: by gate time the merge has usually
-# already landed and the feature branch is already deleted, so a
-# wording-only finding at this point cost an operator reword-and-reset for
-# litter the TESTER-time path already catches. The same litter class is
-# still caught — the gated runners' quality-class provenance lint
-# (`lint_comment_provenance.py`, tree-wide, no `--diff-scope`) still scans
-# every release, its findings still ride the non-blocking findings file,
-# and TESTER still cites-or-files the low-severity bug. Detection did not
-# regress; only the expensive, already-redundant stopping point did.
-#
-# Scope: only CODER/WRITER subagents route through this gate (the call site
-# in each wake provider script only invokes it for those two). Tasks with no
-# worktree (workflow git_mode=none, e.g. the document workflow) pass
-# trivially — there is nothing to verify. CM/TESTER/PM completion semantics
-# are untouched; this function is never called for those roles.
-#
-# On refusal, rewrites task_status to BLOCKED with a prescriptive remedy
-# naming both branches (merge failure) or the dirty paths (cleanliness
-# failure), sets Needs Human=yes, and echoes "BLOCKED". On pass, the status
-# file is untouched and the function echoes "DONE" — byte-identical to the
-# final_state the caller already had, so a properly merged, clean
-# completion adds zero friction to the golden path.
-#
-# Narration: every outcome (pass or either refusal) is logged as exactly one
-# line via log(), so intermittent agent omissions become a visible pattern
-# in the wake log rather than a downstream surprise. Each log() call here is
-# redirected to /dev/null at the call site (log() tees its message to both
-# LOG_FILE and its own stdout — the ONE legitimate way to keep the durable
-# log write while keeping this function's own stdout clean for the caller's
-# `final_state="$(coder_writer_completion_gate ...)"` command substitution).
-# ---------------------------------------------------------------------------
-coder_writer_completion_gate() {
-  local task_id="${1:-}"
-  local task_status="${2:-}"
-  local subagent="${3:-}"
-  local feature_branch="${4:-}"
-  local source_branch="${5:-}"
-  local worktree_path="${6:-}"
-
-  if [[ "$subagent" != "coder" && "$subagent" != "writer" ]]; then
-    printf 'DONE\n'
-    return 0
-  fi
-
-  if [[ -z "$worktree_path" || -z "$feature_branch" || -z "$source_branch" ]]; then
-    log "completion gate: task ${task_id} has no git worktree/branch to verify (workflow git_mode=none) — pass trivially" >/dev/null
-    printf 'DONE\n'
-    return 0
-  fi
-
-  if [[ ! -d "$worktree_path" ]]; then
-    log "completion gate: task ${task_id} WARNING: worktree ${worktree_path} not found at gate time — cannot verify; passing (best-effort; gate must run before worktree teardown)" >/dev/null
-    printf 'DONE\n'
-    return 0
-  fi
-
-  # --- Merge check ---
-  local merge_ok=false
-  local feature_ref_exists=false
-  local current_head=""
-  local merge_evidence=""
-  if git -C "$worktree_path" rev-parse --verify --quiet "$feature_branch" >/dev/null 2>&1; then
-    feature_ref_exists=true
-    if git -C "$worktree_path" merge-base --is-ancestor "$feature_branch" "$source_branch" 2>/dev/null; then
-      merge_ok=true
-    fi
-  else
-    current_head="$(git -C "$worktree_path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-    if [[ "$current_head" == "$source_branch" ]]; then
-      merge_ok=true
-    else
-      # Merge-evidence fallback. The ref is gone AND this
-      # worktree's HEAD is not the source branch — the shape produced when
-      # the merge legitimately happened in a SIBLING worktree that held the
-      # source/RC branch at merge time (git allows a branch checked out in
-      # only one worktree, so this worktree's own merge --no-ff was
-      # impossible here). Read evidence from the source branch's own
-      # history instead, which is shared across every worktree of the same
-      # repository regardless of which one performed the merge.
-      local _merge_log_hits
-      _merge_log_hits="$(git -C "$worktree_path" log --format=%s -50 "$source_branch" 2>/dev/null | grep -cF -- "$feature_branch" || true)"
-      if [[ "${_merge_log_hits:-0}" -gt 0 ]]; then
-        merge_ok=true
-        merge_evidence="merge commit naming ${feature_branch} found in ${source_branch}'s recent history"
-      else
-        local _worktree_head_commit
-        _worktree_head_commit="$(git -C "$worktree_path" rev-parse --verify --quiet HEAD 2>/dev/null || true)"
-        if [[ -n "$_worktree_head_commit" ]] && git -C "$worktree_path" merge-base --is-ancestor "$_worktree_head_commit" "$source_branch" 2>/dev/null; then
-          merge_ok=true
-          merge_evidence="worktree's current commit ${_worktree_head_commit} is an ancestor of ${source_branch}"
-        fi
-      fi
-    fi
-  fi
-
-  if [[ "$merge_ok" != "true" ]]; then
-    log "completion gate: task ${task_id} REFUSED — ${feature_branch} is not merged into ${source_branch}" >/dev/null
-    if [[ "$feature_ref_exists" == "true" ]]; then
-      set_block "$task_status" "Blockers" "$(pgai_format_error_contract \
-        "wake.completion-gate.merge-not-found" \
-        "The completion gate refused this DONE-claim because ${feature_branch} is not merged into ${source_branch} — the work is intact on the feature branch, but the merge step (CODER/WRITER PHASE 2 Step 7) never ran." \
-        "Reset this task; on re-entry the agent merges and re-completes (or an operator can run: git checkout ${source_branch} && git merge --no-ff ${feature_branch}, then reset the task).")"
-    else
-      set_block "$task_status" "Blockers" "$(pgai_format_error_contract \
-        "wake.completion-gate.merge-evidence-not-found" \
-        "The completion gate refused this DONE-claim because ${feature_branch} no longer exists and the worktree at ${worktree_path} is not on ${source_branch} (HEAD=${current_head:-detached}) — the merge cannot be confirmed." \
-        "A human must inspect ${worktree_path} for the feature branch's work (check 'git reflog' / dangling commits if the branch was deleted without merging), then reset this task.")"
-    fi
-    set_state "$task_status" "BLOCKED"
-    set_block "$task_status" "Needs Human" "yes"
-    normalize_status_file "$task_status"
-    printf 'BLOCKED\n'
-    return 0
-  fi
-
-  # --- Cleanliness check ---
-  local dirty_status
-  dirty_status="$(git -C "$worktree_path" status --porcelain 2>/dev/null || true)"
-  if [[ -n "$dirty_status" ]]; then
-    local dirty_paths_oneline
-    dirty_paths_oneline="$(printf '%s' "$dirty_status" | tr '\n' ';' | sed 's/;$//')"
-    log "completion gate: task ${task_id} REFUSED — worktree ${worktree_path} has uncommitted changes" >/dev/null
-    set_state "$task_status" "BLOCKED"
-    set_block "$task_status" "Blockers" "$(pgai_format_error_contract \
-      "wake.completion-gate.dirty-worktree" \
-      "The completion gate refused this DONE-claim because the task worktree ${worktree_path} has uncommitted changes at done-claim time (dirty paths: ${dirty_paths_oneline})." \
-      "Reset this task; on re-entry the agent commits or discards the changes and re-completes (or an operator can inspect ${worktree_path}, commit or discard, then reset the task). The worktree is retained (not torn down) so the dirty paths remain inspectable.")"
-    set_block "$task_status" "Needs Human" "yes"
-    normalize_status_file "$task_status"
-    printf 'BLOCKED\n'
-    return 0
-  fi
-
-  if [[ -n "$merge_evidence" ]]; then
-    log "completion gate: task ${task_id} PASS — ${feature_branch} merged into ${source_branch} via merge-evidence fallback (${merge_evidence}), worktree clean" >/dev/null
-  else
-    log "completion gate: task ${task_id} PASS — ${feature_branch} merged into ${source_branch}, worktree clean" >/dev/null
-  fi
-  printf 'DONE\n'
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-# close_intake_on_finalize_report
-#   <task_id> <task_readme> <project_root> <tasks_root> <wf_manifest_finalize>
-#   [<req_path_override>]
-#
-# Closure-parity helper for testing-only (finalize=report) workflows.
-# Mirrors the CM intake-item closure that cm/release.sh Step 16b performs for
-# release workflows via cm/promote_bundled_items.py.
-#
-# Root-cause evidence (an earlier defect, 2026-07-14T14:04:10):
-#   "finalize_mode:report not found in README constraints — skipping intake
-#   closure (not a finalize=report terminal ticket)"
-# The prior Guard 2 checked for a README marker that inject_simple_tester_task
-# writes — but PM-authored one-ticket plans never carry it.  The fix replaces
-# that marker check with a completion census: every sibling task that shares
-# the same requirements path must be terminal before closure fires.  This is
-# shape-blind (one-ticket, two-ticket, injected or PM-authored) and mirrors
-# the same rule CM workflows implement implicitly (CM is positionally last).
-#
-# Reference: an earlier defect (this fix), an earlier defect (original helper), an earlier defect
-#   (report half), an earlier defect (design).
-# Parity with: cm/release.sh Step 16b + cm/promote_bundled_items.py.
-#
-# Behaviour:
-#   1. Guard 1: <wf_manifest_finalize> must equal "report".  Any other value
-#      (tag, publish, …) exits immediately — no-op for release/document paths.
-#   2. Requirements path: when <req_path_override> (6th arg) is non-empty it is
-#      used directly, bypassing README extraction.  Otherwise the first
-#      absolute-path entry in <task_readme>'s ## Inputs section is used
-#      (requirements file prepended by create_task_folder).
-#   3. Completion census: scan ALL task folders under <tasks_root> whose
-#      README ## Inputs cite the same requirements path.  Terminal states are
-#      exactly {DONE, WONT-DO}; all others (WORKING, BACKLOG, WAITING,
-#      BLOCKED) are non-terminal.  If every sibling is terminal, proceed to
-#      closure.  Otherwise log the census result (counts, non-terminal siblings
-#      by ID and state) and skip.  Note: the BLOCKED mid-run check from the
-#      prior implementation is subsumed here — BLOCKED is non-terminal and will
-#      prevent closure via the census, so no separate BLOCKED-only pass is
-#      needed.
-#   4. Closure: invoke the canonical close_item helper via the ops package:
-#        pp_run_ops pgai_agent_kanban.ops close_item <project_root> <key>
-#      where <key> is the requirements file's basename (without .md extension).
-#
-# Returns 0 on success (closure fired or legitimately skipped).
-# Never fails the caller — all internal error paths return 0.
-# ---------------------------------------------------------------------------
-close_intake_on_finalize_report() {
-  local _task_id="${1:-}"
-  local _task_readme="${2:-}"
-  local _project_root="${3:-}"
-  local _tasks_root="${4:-}"
-  local _wf_finalize="${5:-}"
-  local _req_path_override="${6:-}"
-
-  # Narration prefix: when called from sweep_running_intake_census (_task_id=="sweep"),
-  # use "sweep-census:" so all sweep-mode helper lines share one grep-able prefix.
-  # Non-sweep callers keep the "task <id>: close_intake_on_finalize_report:" form.
-  local _log_pfx
-  if [[ "${_task_id}" == "sweep" ]]; then
-    _log_pfx="sweep-census:"
-  else
-    _log_pfx="task ${_task_id}: close_intake_on_finalize_report:"
-  fi
-
-  # Guard 1: finalize capability must be "report".
-  # All other values (tag, publish, none) skip this block entirely so that
-  # release workflows and document workflows are byte-identical to their prior
-  # behaviour.
-  if [[ "$_wf_finalize" != "report" ]]; then
-    return 0
-  fi
-
-  # Resolve the requirements file path.
-  # When a path override is provided (sweep call site), use it directly.
-  # Otherwise extract the first absolute path from the task README ## Inputs
-  # (create_task_folder always prepends the requirements path as the first
-  # entry when one is present).
-  local _req_path=""
-  if [[ -n "$_req_path_override" ]]; then
-    _req_path="$_req_path_override"
-  else
-    _req_path="$(python3 - "$_task_readme" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-except Exception:
-    raise SystemExit(1)
-m = re.search(r'^##\s+Inputs\s*\n(.*?)(?=\n##|\Z)', text, flags=re.S | re.M)
-if not m:
-    raise SystemExit(1)
-for line in m.group(1).splitlines():
-    line = line.strip()
-    if line.startswith('-'):
-        line = line[1:].strip()
-    if line.startswith('/') and line.endswith('.md'):
-        print(line)
-        raise SystemExit(0)
-raise SystemExit(1)
-PY
-)" || true
-  fi
-
-  if [[ -z "$_req_path" ]]; then
-    log "${_log_pfx} could not extract requirements path from README ## Inputs — skipping intake closure"
-    return 0
-  fi
-
-  if [[ ! -f "$_req_path" ]]; then
-    log "${_log_pfx} requirements file not found at ${_req_path} — skipping intake closure"
-    return 0
-  fi
-
-  log "${_log_pfx} requirements file identified: ${_req_path}"
-
-  # Completion census: scan ALL task folders under tasks_root whose README
-  # ## Inputs cite the same requirements path.  Closure fires only when every
-  # sibling (current task included, called post-transition as DONE) is
-  # terminal.  Terminal states: DONE, WONT-DO.  Non-terminal: everything else
-  # (WORKING, BACKLOG, WAITING, BLOCKED).  Prior-run corpses in WONT-DO are
-  # terminal and do not prevent closure.
-  local _census_result=""
-  if [[ -d "$_tasks_root" ]]; then
-    _census_result="$(python3 - "$_tasks_root" "$_req_path" <<'PY'
-import pathlib, re, sys
-
-TERMINAL = {"DONE", "WONT-DO"}
-
-tasks_root = pathlib.Path(sys.argv[1])
-req_path   = sys.argv[2]
-
-total      = 0
-non_terminal = []  # list of "id:state" strings
-
-for task_dir in sorted(tasks_root.iterdir()):
-    if not task_dir.is_dir() or task_dir.name == "queues":
-        continue
-    readme      = task_dir / "README.md"
-    status_file = task_dir / "status.md"
-    if not readme.is_file() or not status_file.is_file():
-        continue
-    try:
-        readme_text = readme.read_text(encoding="utf-8")
-    except OSError:
-        continue
-    # Filter to tasks whose ## Inputs cite the same requirements path
-    m = re.search(r'^##\s+Inputs\s*\n(.*?)(?=\n##|\Z)', readme_text, flags=re.S | re.M)
-    if not m or req_path not in m.group(1):
-        continue
-    total += 1
-    # Read sibling state
-    try:
-        status_text = status_file.read_text(encoding="utf-8")
-    except OSError:
-        # Unreadable status — treat as non-terminal to be safe
-        non_terminal.append(f"{task_dir.name}:UNKNOWN")
-        continue
-    state_m = re.search(r'^##\s+State\s*\n\s*(\S+)', status_text, re.M)
-    state = state_m.group(1).strip().upper() if state_m else "UNKNOWN"
-    if state not in TERMINAL:
-        non_terminal.append(f"{task_dir.name}:{state}")
-
-if non_terminal:
-    summary = ", ".join(non_terminal)
-    print(f"skip:{total} sibling(s), {len(non_terminal)} non-terminal: {summary}")
-else:
-    print(f"ok:{total}")
-PY
-)" || true
-  fi
-
-  # Parse census result: "ok:N" means all siblings are terminal; "skip:..." means not.
-  if [[ -z "$_census_result" || "$_census_result" == skip:* ]]; then
-    local _census_detail="${_census_result#skip:}"
-    log "${_log_pfx} census incomplete — skipping intake closure (${_census_detail:-tasks_root not found or unreadable})"
-    return 0
-  fi
-
-  # All siblings are terminal: invoke canonical close_item helper.
-  # Key is the requirements file basename without the .md extension.
-  local _req_key
-  _req_key="$(basename "$_req_path" .md)"
-
-  log "${_log_pfx} closing intake item '${_req_key}' (finalize=report terminal ticket complete; parity with CM Step 16b)"
-
-  local _close_exit=0
-  set +e
-  pp_run_ops pgai_agent_kanban.ops close_item "$_project_root" "$_req_key" done 2>&1 | \
-    while IFS= read -r _line; do log "${_log_pfx} ${_line}"; done
-  _close_exit="${PIPESTATUS[0]}"
-  set -e
-
-  if [[ $_close_exit -eq 0 ]]; then
-    log "${_log_pfx} intake item '${_req_key}' closed done"
-  elif [[ $_close_exit -eq 2 ]]; then
-    log "${_log_pfx} WARNING: ambiguous key '${_req_key}' — could not uniquely identify intake item; item left at running"
-  elif [[ $_close_exit -eq 3 ]]; then
-    log "${_log_pfx} WARNING: intake item '${_req_key}' not found — nothing to close"
-  else
-    log "${_log_pfx} WARNING: close_item exited ${_close_exit} for '${_req_key}'; item may not have been closed"
-  fi
-
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-# sweep_running_intake_census
-#
-# Per-wake self-healing pass: close stranded intake items whose sibling tasks
-# all reached a terminal state but whose own ## Status is still "running".
-# Called from the per-wake re-check sweep (alongside recheck_waiting_tasks and
-# recheck_blocked_tasks) so that items whose closing moment was missed by a
-# crash, restart, or clock-racing tick are healed on the next wake.
-#
-# Context: runs inside run_project_chain after pp_load_config, so the
-# following shell variables are available:
-#   _CURRENT_PROJECT — the project currently being processed
-#   PGAI_PROJECT_ROOT — the project root directory
-#   TASKS_ROOT — tasks/ directory for this project
-#
-# Resolution: workflow type and finalize capability are resolved PER ITEM from
-# each requirements doc's "## Workflow Type" field (not from project.cfg).
-# A project whose cfg lacks workflow_type, or a project hosting items of mixed
-# workflow types, is handled correctly: each item is evaluated independently.
-# project.cfg is at most a hint; it is never the gate.
-#
-# Plugin cache: wf_load_plugin is called at most once per distinct workflow
-# type per wake — an associative array keyed by type memoises the finalize
-# value within this function's scope so repeated items of the same type do
-# not repeat the plugin load.
-#
-# Narration: every item-level outcome is logged at the standard log level so
-# there is always at least one sweep-census line per wake when running items
-# exist.  Silent early returns are eliminated.
-#
-# Guard (one glob): if the requirements directory is absent or empty the
-# function logs a skip line and returns after one directory iteration.
-#
-# For each running intake item where finalize=report the existing
-# close_intake_on_finalize_report census logic runs: all sibling tasks must
-# be terminal (DONE or WONT-DO) before the item is flipped to done.
-#
-# Returns 0 always (never blocks the caller).
-# ---------------------------------------------------------------------------
-sweep_running_intake_census() {
-  # Guard: find the requirements directory for this project.
-  # pp_requirements_dir echoes "<project_root>/requirements".
-  local _swc_req_dir=""
-  _swc_req_dir="$(pp_requirements_dir "${_CURRENT_PROJECT:-}" 2>/dev/null || true)"
-  if [[ -z "$_swc_req_dir" || ! -d "$_swc_req_dir" ]]; then
-    log "sweep-census: project ${_CURRENT_PROJECT:-}: skipped — no requirements directory"
-    return 0
-  fi
-
-  # Per-wake plugin cache: declare -A in local scope.
-  # Keys are workflow type strings; values are the resolved finalize capability.
-  # "LOAD_FAILED" is stored when wf_load_plugin returns non-zero so the
-  # failure is cached and not retried for subsequent items of the same type.
-  declare -A _swc_finalize_cache
-
-  # Iterate over requirements files (one glob); check each for running status.
-  local _swc_found_running=false
-  local _swc_req_file
-  for _swc_req_file in "$_swc_req_dir"/*.md; do
-    [[ -f "$_swc_req_file" ]] || continue
-
-    # Read ## Status from the requirements doc.
-    local _swc_status=""
-    _swc_status="$(python3 - "$_swc_req_file" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-except Exception:
-    raise SystemExit(1)
-m = re.search(r'^##\s+Status\s*\n\s*(\S+)', text, re.M)
-print(m.group(1).strip().lower() if m else "")
-PY
-    )" || true
-
-    [[ "$_swc_status" == "running" ]] || continue
-
-    _swc_found_running=true
-
-    # Read ## Workflow Type from the requirements doc (item-level resolution).
-    # Defaults to "release" when the field is absent or unreadable.
-    local _swc_item_wf_type=""
-    _swc_item_wf_type="$(python3 - "$_swc_req_file" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-except Exception:
-    print("release"); raise SystemExit(0)
-m = re.search(r'^##\s+Workflow\s+Type[^\S\n]*\n(.*?)(\n+##|\Z)', text, flags=re.S|re.M|re.I)
-if not m:
-    print("release"); raise SystemExit(0)
-val = m.group(1).strip().lower()
-print(val if val else "release")
-PY
-    )" || _swc_item_wf_type="release"
-
-    # Resolve finalize capability from cache or by loading the plugin.
-    local _swc_item_finalize=""
-    if [[ -v _swc_finalize_cache["$_swc_item_wf_type"] ]]; then
-      _swc_item_finalize="${_swc_finalize_cache[$_swc_item_wf_type]}"
-    else
-      local _swc_plugin_exit=0
-      set +e
-      wf_load_plugin "${_swc_item_wf_type}" 2>/dev/null
-      _swc_plugin_exit=$?
-      set -e
-      if [[ $_swc_plugin_exit -eq 0 ]]; then
-        _swc_item_finalize="${WF_MANIFEST_FINALIZE:-}"
-      else
-        _swc_item_finalize="LOAD_FAILED"
-      fi
-      _swc_finalize_cache["$_swc_item_wf_type"]="$_swc_item_finalize"
-    fi
-
-    if [[ "$_swc_item_finalize" == "LOAD_FAILED" ]]; then
-      log "sweep-census: skipped — ${_swc_req_file}: workflow type '${_swc_item_wf_type}' plugin failed to load"
-      continue
-    fi
-
-    if [[ "$_swc_item_finalize" != "report" ]]; then
-      log "sweep-census: skipped — ${_swc_req_file}: finalize=${_swc_item_finalize} — not report"
-      continue
-    fi
-
-    log "sweep-census: project ${_CURRENT_PROJECT:-}: running intake item ${_swc_req_file}; attempting completion census"
-    close_intake_on_finalize_report \
-      "sweep" \
-      "" \
-      "${PGAI_PROJECT_ROOT:-}" \
-      "${TASKS_ROOT:-}" \
-      "report" \
-      "$_swc_req_file"
-  done
-
-  if [[ "$_swc_found_running" == "false" ]]; then
-    log "sweep-census: project ${_CURRENT_PROJECT:-}: no running intake items"
-  fi
-
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-# _build_feature_branch <task_id> <project_name>
-# Calls pp_prefix_branch() to produce the prefixed feature branch name.
-# Returns "<prefix>feature/<task_id>" when branch_prefix is set in project.cfg.
-# Returns "feature/<task_id>" when branch_prefix is empty (pure-AI install).
-# Returns non-zero when pp_prefix_branch fails (invalid config).
-# ---------------------------------------------------------------------------
-_build_feature_branch() {
-    local task_id="${1:-}"
-    local project="${2:-}"
-    local base="feature/${task_id}"
-    [[ -z "$project" ]] && { printf '%s' "$base"; return 0; }
-    local result
-    result="$(pp_prefix_branch "$project" "$base")"
-    printf '%s' "${result:-$base}"
-}
-
-# ---------------------------------------------------------------------------
-# _update_readme_feature_branch <readme_path> <feature_branch>
-# Overwrites the ## Feature Branch field in a task README with <feature_branch>.
-# No-op (non-fatal) when the field is absent from the README.
-# ---------------------------------------------------------------------------
-_update_readme_feature_branch() {
-    local readme="$1"
-    local branch="$2"
-    python3 - "$readme" "$branch" <<'PY'
-import pathlib, re, sys
-p = pathlib.Path(sys.argv[1])
-b = sys.argv[2]
-try:
-    t = p.read_text()
-    t2, n = re.subn(
-        r'(^## Feature Branch\s*\n)(.*?)(\n+##|\Z)',
-        lambda m: m.group(1) + b + "\n" + (m.group(3) if m.group(3) else ''),
-        t, flags=re.S | re.M,
-    )
-    if n > 0:
-        p.write_text(t2)
-except Exception:
-    pass
-PY
-}
-
-# ---------------------------------------------------------------------------
-# _check_halt_after_for_project <project_name>
-# Evaluates the HALT-AFTER sentinel for a single project on each wake.
-#
-# Scope resolution (project scope takes precedence):
-#   1. $project_root/HALT-AFTER  — project-scoped sentinel
-#   2. $KANBAN_ROOT/HALT-AFTER   — root-scoped sentinel (applies to all projects)
-#
-# Delegates to the Python halt_after module (python3 -m halt_after <scope_root>)
-# which parses the sentinel token, evaluates the drain condition, and when
-# drain is satisfied performs the atomic promotion (rm HALT-AFTER, touch HALT,
-# append audit entry to release-state.md).
-#
-# Return values (mirroring halt_after exit codes):
-#   0 — HALT-AFTER was promoted to HALT; caller MUST skip this project
-#   1 — drain not yet satisfied; chain continues normally
-#   2 — invalid token; warning already logged by Python; chain continues
-#   3 — no HALT-AFTER present; chain continues
-#   4 — HALT-AFTER check could not execute; warning logged; chain continues
-#
-# Called once AFTER run_project_chain returns in wake_common_run (so promotion
-# is decided after the agent drains its queue) and once inside the
-# post-discovery block so a fresh promotion is honored mid-wake.
-# ---------------------------------------------------------------------------
-_check_halt_after_for_project() {
-  local project_name="$1"
-  local project_root
-  project_root="$(pp_project_root "$project_name" 2>/dev/null)" || return 3
-
-  # Determine the scope root: project scope takes precedence over root scope.
-  local scope_root=""
-  if [[ -f "${project_root}/HALT-AFTER" ]]; then
-    scope_root="$project_root"
-    log "project ${project_name}: HALT-AFTER sentinel found at project scope (${project_root}/HALT-AFTER)"
-  elif [[ -f "${KANBAN_ROOT}/HALT-AFTER" ]]; then
-    scope_root="$KANBAN_ROOT"
-    log "project ${project_name}: HALT-AFTER sentinel found at root scope (${KANBAN_ROOT}/HALT-AFTER)"
-  else
-    return 3  # no sentinel present; chain continues
-  fi
-
-  # Delegate to the Python module for token parsing, drain evaluation, and promotion.
-  # Put KANBAN_ROOT on PYTHONPATH explicitly so cron cwd never controls imports.
-  #
-  # When the sentinel is at root scope ($KANBAN_ROOT/HALT-AFTER), scope_root is
-  # $KANBAN_ROOT but release-state.md lives under the per-project directory.
-  # Pass project_root as the second argument so the Python module uses the correct
-  # release-state.md for the rc-token bind and drain checks.  When sentinel is at
-  # project scope, scope_root == project_root, so the second argument is redundant
-  # but harmless (backward-compatible).
-  local halt_after_exit
-  local halt_after_output
-  local halt_after_pythonpath
-  halt_after_pythonpath="${KANBAN_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-  set +e
-  halt_after_output="$(PYTHONPATH="$halt_after_pythonpath" python3 -m halt_after "$scope_root" "$project_root" 2>&1)"
-  halt_after_exit="$?"
-  set -e
-
-  if [[ -n "$halt_after_output" ]]; then
-    while IFS= read -r _ha_line; do
-      log "project ${project_name}: halt_after: ${_ha_line}"
-    done <<< "$halt_after_output"
-  fi
-
-  case "$halt_after_exit" in
-    0)
-      log "project ${project_name}: HALT-AFTER promoted to HALT (scope: ${scope_root}); project will be skipped this wake"
-      ;;
-    1)
-      if grep -q "drain not yet satisfied" <<< "$halt_after_output"; then
-        log "project ${project_name}: HALT-AFTER drain in progress — chain continues normally"
-      else
-        log "project ${project_name}: WARNING: HALT-AFTER check failed to run (exit ${halt_after_exit}) — chain continues"
-        halt_after_exit=4
-      fi
-      ;;
-    2)
-      log "project ${project_name}: HALT-AFTER invalid token — warning logged; chain continues normally"
-      ;;
-    3)
-      log "project ${project_name}: HALT-AFTER absent — chain continues normally"
-      ;;
-    *)
-      log "project ${project_name}: WARNING: HALT-AFTER check failed to run (exit ${halt_after_exit}) — chain continues"
-      halt_after_exit=4
-      ;;
-  esac
-
-  return "$halt_after_exit"
-}
-
-# ---------------------------------------------------------------------------
-# _check_project_dev_tree <project_name>
-# Per-project dev-tree existence gate for run_project_chain.
-#
-# Called AFTER pp_load_config so PP_dev_tree_path and PP_workflow_type are set.
-#
-# For git-workflow projects (git_mode != none): if PP_dev_tree_path is empty
-# or not a directory, log the canonical skip line and return 1 (caller must
-# skip this project and continue to the next).
-#
-# Projects whose workflow plugin declares git_mode=none are exempt — they have
-# no dev tree by design (e.g. document workflow).  The plugin is loaded
-# best-effort; a failed load is treated conservatively (dev tree required).
-#
-# Return values:
-#   0 — dev tree present (or exempt); caller continues normally
-#   1 — dev tree missing; caller must skip this project
-# ---------------------------------------------------------------------------
-_check_project_dev_tree() {
-    local project_name="${1:-}"
-
-    # Determine the workflow's git mode by loading its plugin.
-    # Projects with git_mode=none have no dev tree by design — exempt.
-    local _wf="${PP_workflow_type:-release}"
-    local _wf_git_mode="rw"   # conservative default: require dev tree
-    local _wf_load_exit=0
-    set +e
-    wf_load_plugin "$_wf" 2>/dev/null
-    _wf_load_exit=$?
-    set -e
-    if [[ $_wf_load_exit -eq 0 ]]; then
-        _wf_git_mode="$(wf_git_mode 2>/dev/null || echo "rw")"
-    fi
-
-    if [[ "$_wf_git_mode" == "none" ]]; then
-        return 0
-    fi
-
-    local _tree="${PP_dev_tree_path:-}"
-
-    # Empty path or non-directory — skip with the canonical log line.
-    if [[ -z "$_tree" || ! -d "$_tree" ]]; then
-        log "project ${project_name}: dev tree '${_tree}' missing — skipping this project"
-        return 1
-    fi
-
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# run_overwatch_resolution_stage <project_name>
-# Invokes pgai_agent_kanban.overwatch.resolution_stage for the named
-# project when AGENT is overwatch. No-op for every other agent.
-#
-# This is the ONE call site both wake provider siblings (claude.sh, codex.sh)
-# invoke from run_project_chain, once per project, on every OVERWATCH firing
-# — including the firing the on-BLOCK trigger produces within seconds of a
-# fresh BLOCKED task (see "on-BLOCK overwatch trigger" below and
-# team/roles/OVERWATCH.md "Autonomous Block Resolution (v2.0.0)"). The stage
-# itself decides whether there is anything to resolve; calling it on every
-# firing (including ordinary firings with no ship-policy HALT present) is
-# safe and cheap — it declines silently when there is nothing to evaluate.
-#
-# This call site is also where a project-scope HALT reaches the resolution
-# stage's own classification (see the wake-loop carve-out comment at the
-# per-project HALT fast-exit above): the outer loop lets an overwatch firing
-# through despite a projects/<name>/HALT file so this call can classify it
-# as ship-policy or operator-authored and narrate the matching decline
-# itself, rather than the project being skipped unnarrated by the coarser
-# gate before this ever runs.
-#
-# Runs with the per-project repo flock already held by the caller (see the
-# "Per-project repo flock" block above this function's call site), so the
-# drill's git-touching step (cm-cancel-rc.sh) never races another agent's
-# git operations on the same dev tree.
-#
-# Failure is logged and swallowed — a broken resolution stage must never
-# abort the wake loop or prevent OVERWATCH's own task processing from
-# running; the on-BLOCK trigger's degrade-to-next-hour-coverage guarantee
-# (see OVERWATCH.md "Fire-and-forget") extends to this stage as well.
-# ---------------------------------------------------------------------------
-run_overwatch_resolution_stage() {
-  local project_name="$1"
-  [[ "$AGENT" == "overwatch" ]] || return 0
-  mkdir -p "${KANBAN_ROOT}/logs" 2>/dev/null || true
-  pp_run_ops pgai_agent_kanban.overwatch.resolution_stage \
-    --project "$project_name" --kanban-root "$KANBAN_ROOT" \
-    >>"${KANBAN_ROOT}/logs/overwatch-resolution-stage.log" 2>&1 \
-    || log "project ${project_name}: overwatch resolution stage exited non-zero (see logs/overwatch-resolution-stage.log)"
-}
+# --- Source autonomous-scan stage (requirements-queue scan, bug-bundling scan) ---
+# shellcheck source=scripts/lib/wake_autonomous_scan.sh
+source "${SCRIPT_DIR}/../lib/wake_autonomous_scan.sh"
+
+# --- Source README-metadata stage (dispatch field readers) ---
+# shellcheck source=scripts/lib/wake_readme_meta.sh
+source "${SCRIPT_DIR}/../lib/wake_readme_meta.sh"
+
+# --- Source task-state stage (status-file readers/writers, prerequisite
+# checks, state transitions, WAITING/BLOCKED promotion and recheck) ---
+# shellcheck source=scripts/lib/wake_task_state.sh
+source "${SCRIPT_DIR}/../lib/wake_task_state.sh"
+
+# --- Source the reconciliation-sweeps stage (reconcile_stale_active,
+# reconcile_terminal_worktrees) -- split out of wake_task_state.sh to keep
+# both files under the engine-decomposition line ceiling. Depends on
+# wake_task_state.sh's mark_backlog/get_state/task_liveness_* primitives,
+# so sourced immediately after it. ---
+# shellcheck source=scripts/lib/wake_reconcile_sweeps.sh
+source "${SCRIPT_DIR}/../lib/wake_reconcile_sweeps.sh"
+
+# --- Source task-transition stage (the single write path that moves a
+# task's ## State and queue marker together). Depends on wake_task_state.sh's
+# set_state/mark_backlog, so sourced immediately after it. ---
+# shellcheck source=scripts/lib/wake_task_transition.sh
+source "${SCRIPT_DIR}/../lib/wake_task_transition.sh"
+
+# --- Source lifecycle stage (post-exit WORKING handling, CODER/WRITER
+# completion gate, finalize=report intake closure). Depends on
+# wake_task_state.sh's set_state/set_block/normalize_status_file and
+# wake_task_transition.sh's transition_task_state, so sourced after both. ---
+# shellcheck source=scripts/lib/wake_lifecycle.sh
+source "${SCRIPT_DIR}/../lib/wake_lifecycle.sh"
+# --- Provider usage-limit pause: recorded post-exit, checked at dispatch. ---
+# shellcheck source=scripts/lib/wake_provider_pause.sh
+source "${SCRIPT_DIR}/../lib/wake_provider_pause.sh"
+
+# --- Source the shared halt_after CLI invocation helper (scope-root
+# resolution + `python3 -m halt_after` call) before wake_project.sh, which
+# depends on it for _check_halt_after_for_project. ---
+# shellcheck source=scripts/lib/halt_after_invoke.sh
+source "${SCRIPT_DIR}/../lib/halt_after_invoke.sh"
+
+# --- Source per-project stage (feature-branch/README helpers, HALT-AFTER
+# check, per-project dev-tree gate, OVERWATCH resolution-stage call site) ---
+# shellcheck source=scripts/lib/wake_project.sh
+source "${SCRIPT_DIR}/../lib/wake_project.sh"
+
+# --- Source the blocked-interval ledger adapter (pgai_stamp_halt_boundary,
+# pgai_stamp_fleet_halt_boundary), called from the HALT checks below.
+# Depends on _disc_get_release_field (discovery_guards.sh, sourced
+# transitively by wake_bootstrap.sh's own discovery.sh source line), so
+# sourced after wake_bootstrap.sh -- which every earlier source line here
+# already is. ---
+# shellcheck source=scripts/lib/wake_blocked_ledger.sh
+source "${SCRIPT_DIR}/../lib/wake_blocked_ledger.sh"
 
 # ---------------------------------------------------------------------------
 # wake_common_preflight
@@ -2469,7 +176,29 @@ run_overwatch_resolution_stage() {
 wake_common_preflight() {
   # Provider CLI is checked by the provider lib (it knows which binary to check).
   # Python3 is a substrate requirement.
+  # BLOCK-WORTHY: every wake-substrate script below this point assumes a
+  # working python3 on PATH; a missing interpreter is caught here before any
+  # of that substrate runs, rather than failing opaquely partway through it.
+  # CENSUS-ANCHOR: wake-common-01
   command -v python3 >/dev/null 2>&1 || { log "python3 not found in PATH"; exit 1; }
+}
+
+# ---------------------------------------------------------------------------
+# wake_stop_file_present
+# True while the operator's stop file (STOP_FILE; kanban.cfg [wake]
+# stop_file) exists. The file is operator-owned and shared by every wake
+# batch on the host: each batch, for every agent and every registered
+# project, stops at its own next task boundary while the file exists, and
+# nothing in the chain ever removes it -- the operator deletes it to let
+# dispatch resume. The boundaries are: before each task within a project
+# (run_project_chain, lib/wake_driver.sh), before each project, and before
+# the end-of-iteration contention retry pass (both in wake_common_run
+# below); a wake waiting for a wake chain's repo lock also stops waiting at
+# its next attempt (lib/wake_lock_wait.sh). Call it only inside an `if` condition: this file runs under
+# `set -e`, and a bare false call would trip errexit.
+# ---------------------------------------------------------------------------
+wake_stop_file_present() {
+  [[ -n "${STOP_FILE:-}" && -f "$STOP_FILE" ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -2484,11 +213,39 @@ wake_common_run() {
       log "HALT_OVERWATCH flag detected at ${TEAM_ROOT}/HALT_OVERWATCH — exiting cleanly without processing tasks"
       exit 0
     fi
+    # The fleet-wide HALT stops OVERWATCH's wake too: block triage, the
+    # resolution stage and task processing all change state, and an
+    # operator stopping every project has asked for none of that. CM never
+    # writes this file (its ship-policy HALT is project-scoped), so there
+    # is nothing here for the resolution stage to resolve. The fleet
+    # blocked-interval ledger is stamped by the other agents' wakes, not
+    # here, so the overwatch schedule adds no boundaries of its own.
+    if [[ -f "${TEAM_ROOT}/HALT" ]]; then
+      log "HALT flag detected at ${TEAM_ROOT}/HALT — exiting cleanly without block triage, resolution stage or task processing for any project"
+      # BLOCK-WORTHY: an invariant by design -- an operator's fleet-wide
+      # stop; only the operator removes it, and the wake exits 0.
+      # CENSUS-ANCHOR: wake-common-overwatch-halt-01
+      pgai_emit_error_contract "wake.overwatch_fix_deferred_halt_present" \
+        "fix deferred: HALT present at ${TEAM_ROOT}/HALT; the OVERWATCH wake changed nothing for any project. Fixes resume once the operator removes the HALT." \
+        "cat ${TEAM_ROOT}/HALT"
+      exit 0
+    fi
   else
     if [[ -f "${TEAM_ROOT}/HALT" ]]; then
       log "HALT flag detected at ${TEAM_ROOT}/HALT — exiting cleanly without processing tasks"
+      # Fleet-scoped HALT blocks every project's own active RC at once —
+      # stamp a block-start for each one (best-effort; a no-op once a
+      # prior cycle already opened it). CENSUS CLASS CONVERT: this must
+      # never affect the HALT skip/exit it rides beside.
+      pgai_stamp_fleet_halt_boundary "halt:global" start
       exit 0
     fi
+    # HALT absent: close any block-start a prior cycle opened for this
+    # same fleet-scoped source, for every project. A no-op when nothing
+    # was ever opened. See wake_blocked_ledger.sh's own header for why
+    # this attempt-every-cycle shape needs no separate "was it open last
+    # cycle" state of its own.
+    pgai_stamp_fleet_halt_boundary "halt:global" end
   fi
 
   # --- Sub-minute stagger sleep ---
@@ -2504,9 +261,42 @@ wake_common_run() {
   log "starting multi-project iteration (agent=${AGENT})"
 
   _ITER_PROJECT_COUNT=0
+  # Projects run_project_chain declined this firing because another agent
+  # held the repo lock (return code 3 — see the contract comment above
+  # run_project_chain in lib/wake_driver.sh). Collected here so the
+  # end-of-iteration retry pass below knows which projects to give a second
+  # look, after every project in projects_cfg_list has had its ordinary turn.
+  declare -a _CONTENDED_PROJECTS=()
+  # The subset that ends the firing still deferred on that contention --
+  # not retried for lack of batch budget, or still contended on the retry.
+  # Each is reported to the lock-starvation guard once, after the retry
+  # pass. A project the stop file or a HALT kept from its retry is not:
+  # that deferral is the operator's, not the lock's.
+  declare -a _LOCK_DEFERRED_PROJECTS=()
 
   while IFS= read -r _iter_project; do
     [[ -z "$_iter_project" ]] && continue
+
+    # --- Operator stop file: the between-projects boundary ---
+    # Checked before every project, the first included, so a file touched
+    # while an earlier project's chain was mid-task stops the whole batch
+    # here instead of only that project's own task loop, and a batch that
+    # starts while the file already exists dispatches nothing at all. The
+    # file is left in place -- see wake_stop_file_present.
+    if wake_stop_file_present; then
+      log "stop file present at ${STOP_FILE} -- stopping the batch before project ${_iter_project} (every agent's batch stops at its next task boundary while the file exists; remove it to resume dispatch)"
+      break
+    fi
+
+    # --- Disabled project: projects.cfg enabled=false ---
+    # Skipped for every agent, OVERWATCH's daily wake included, before any
+    # HALT stamp, lock, discovery, agent or provider call -- one line per
+    # firing. projects_cfg_enabled (lib/projects.sh) is the one rule;
+    # `why` reads the same one, so it reports this project IDLE.
+    if ! projects_cfg_enabled "$_iter_project"; then
+      log "$(projects_cfg_disabled_skip_line "$_iter_project")"
+      continue
+    fi
 
     # --- HALT fast-exit: skip project if an existing HALT sentinel is present ---
     # This honors an ALREADY-promoted HALT file so the wake exits fast without
@@ -2525,11 +315,18 @@ wake_common_run() {
     # only "does the resolution stage get to classify the HALT", never "does
     # a halted project still get worked".
     if pp_project_halted "$_iter_project" 2>/dev/null; then
+      # Best-effort; never affects the skip/carve-out decision below.
+      pgai_stamp_halt_boundary "$_iter_project" "halt:project" start
       if [[ "$AGENT" != "overwatch" ]]; then
         log "project ${_iter_project}: per-project HALT present, skipping"
         continue
       fi
       log "project ${_iter_project}: per-project HALT present; overwatch carve-out — entering chain so the resolution stage can classify it"
+    else
+      # HALT absent: close any block-start a prior cycle opened for this
+      # project's own "halt:project" source. No-op when nothing was ever
+      # opened -- see wake_blocked_ledger.sh's own header.
+      pgai_stamp_halt_boundary "$_iter_project" "halt:project" end
     fi
 
     export PGAI_PROJECT_ROOT="$(pp_project_root "$_iter_project")"
@@ -2539,7 +336,20 @@ wake_common_run() {
     _ITER_PROJECT_COUNT=$(( _ITER_PROJECT_COUNT + 1 ))
     log "project ${_iter_project}: beginning chain (project ${_ITER_PROJECT_COUNT})"
 
+    # set +e/-e: run_project_chain returns 3 on repo-lock contention (see
+    # its contract comment in lib/wake_driver.sh), and this script runs
+    # under `set -e` — a bare call whose exit status is read on the next
+    # line does not survive errexit, so the non-zero return must be taken
+    # inside a set +e/set -e bracket, the same idiom process_one_task's own
+    # callers already use in wake_driver.sh.
+    set +e
     run_project_chain "$_iter_project"
+    _rpc_exit=$?
+    set -e
+
+    if [[ $_rpc_exit -eq 3 ]]; then
+      _CONTENDED_PROJECTS+=("$_iter_project")
+    fi
 
     # --- HALT-AFTER post-work check ---
     # Evaluate whether the HALT-AFTER drain condition is satisfied NOW that the
@@ -2558,6 +368,122 @@ wake_common_run() {
     fi
 
   done < <(projects_cfg_list 2>/dev/null)
+
+  # --- End-of-iteration contention retry pass ---
+  # Once means once: exactly one retry attempt per project that
+  # run_project_chain declined this firing for repo-lock contention (return
+  # code 3 — see the contract comment above run_project_chain in
+  # lib/wake_driver.sh), after every project in projects_cfg_list has had
+  # its ordinary turn and the contending holder has had the rest of the
+  # iteration to finish. This pass itself never loops, polls, or takes a
+  # blocking flock — it calls run_project_chain exactly once per contended
+  # project. That call takes the lock the way the first pass did
+  # (wlw_acquire_chain_lock, lib/wake_lock_wait.sh): non-blocking attempts,
+  # with a backoff wait for a wake-chain holder bounded by what is left of
+  # the project's ONE lock_wait_seconds budget for this firing -- usually
+  # nothing once the first pass waited it out, so the retry is then a
+  # single attempt -- and by the remaining batch runtime budget.
+  if (( ${#_CONTENDED_PROJECTS[@]} > 0 )); then
+    _RETRY_ELAPSED=$(( $(date +%s) - WAKE_START_EPOCH ))
+    # The operator stop file is a task boundary for the retry pass too: a
+    # retry dispatches tasks exactly as the first pass does, so a file that
+    # appeared during the first pass (or during an earlier retry, below)
+    # performs no retry. Checked ahead of the runtime budget so the log
+    # names the operator's stop, not an incidental budget reading.
+    if wake_stop_file_present; then
+      log "retry pass: stop file present at ${STOP_FILE} -- performing no retry for ${#_CONTENDED_PROJECTS[@]} contended project(s): ${_CONTENDED_PROJECTS[*]}"
+    elif (( _RETRY_ELAPSED >= MAX_RUNTIME_SECONDS )); then
+      log "retry pass: batch runtime budget already exhausted (elapsed=${_RETRY_ELAPSED}s, cap=${MAX_RUNTIME_SECONDS}s) -- performing no retry for ${#_CONTENDED_PROJECTS[@]} contended project(s): ${_CONTENDED_PROJECTS[*]}"
+      _LOCK_DEFERRED_PROJECTS=("${_CONTENDED_PROJECTS[@]}")
+    else
+      log "retry pass: ${#_CONTENDED_PROJECTS[@]} project(s) were contended on the first pass, retrying: ${_CONTENDED_PROJECTS[*]}"
+
+      for _retry_index in "${!_CONTENDED_PROJECTS[@]}"; do
+        _retry_project="${_CONTENDED_PROJECTS[$_retry_index]}"
+        if wake_stop_file_present; then
+          log "retry pass: stop file present at ${STOP_FILE} -- skipping remaining retries (next would have been project ${_retry_project})"
+          break
+        fi
+        _RETRY_ELAPSED=$(( $(date +%s) - WAKE_START_EPOCH ))
+        if (( _RETRY_ELAPSED >= MAX_RUNTIME_SECONDS )); then
+          log "retry pass: batch runtime budget reached mid-retry (elapsed=${_RETRY_ELAPSED}s, cap=${MAX_RUNTIME_SECONDS}s) -- skipping remaining retries"
+          _LOCK_DEFERRED_PROJECTS+=("${_CONTENDED_PROJECTS[@]:$_retry_index}")
+          break
+        fi
+
+        # Re-evaluate the per-project HALT fast-exit fresh, exactly as the
+        # first pass does at the top of this loop -- a project that
+        # acquired a HALT sentinel while the first pass ran is not retried
+        # on the strength of the first pass's (necessarily earlier) answer.
+        # Same overwatch carve-out as the first pass: overwatch alone is let
+        # through so run_overwatch_resolution_stage gets a look, and
+        # run_project_chain's own per-project HALT check still refuses
+        # further task processing for a halted project either way.
+        if pp_project_halted "$_retry_project" 2>/dev/null; then
+          # Best-effort; same call as the first pass's own HALT check —
+          # a project reaching the retry pass never got this stamp on the
+          # first pass (it wasn't halted then, or it would not be here).
+          pgai_stamp_halt_boundary "$_retry_project" "halt:project" start
+          if [[ "$AGENT" != "overwatch" ]]; then
+            log "project ${_retry_project}: retry pass: per-project HALT now present, not retried"
+            continue
+          fi
+          log "project ${_retry_project}: retry pass: per-project HALT present; overwatch carve-out -- retrying so the resolution stage can classify it"
+        fi
+
+        # Preserve the per-project environment discipline: export fresh for
+        # the project being retried rather than inheriting whatever the
+        # last first-pass project (or a prior retry in this same pass) left
+        # exported.
+        export PGAI_PROJECT_ROOT="$(pp_project_root "$_retry_project")"
+        export PGAI_PROJECT_NAME="$_retry_project"
+        export PGAI_TASKS_DIR="$(pp_tasks_dir "$_retry_project")"
+
+        log "project ${_retry_project}: retry pass: retrying after end-of-iteration deferral"
+
+        # set +e/-e: see the matching comment on the first pass's call —
+        # run_project_chain can return 3 (still contended) and this script
+        # runs under `set -e`.
+        set +e
+        run_project_chain "$_retry_project"
+        _retry_rpc_exit=$?
+        set -e
+
+        if [[ $_retry_rpc_exit -eq 3 ]]; then
+          # Closing summary: the underlying
+          # lock.provenance.contended narration fired at most once per
+          # lock this process (lock_provenance.sh's own memoization), so
+          # this line -- not a repeat of that dual-channel block -- is
+          # what names the total probe count once this project gives up
+          # for the firing.
+          _retry_lock_file="$(pp_repo_lock_path "$_retry_project" 2>/dev/null)" || _retry_lock_file=""
+          _retry_probe_count=0
+          if [[ -n "$_retry_lock_file" ]]; then
+            _retry_probe_count="$(pgai_lock_contention_probe_count "$_retry_lock_file")"
+          fi
+          log "project ${_retry_project}: retry pass: still contended after retry (${_retry_probe_count} probe(s) this firing), deferring to the next wake firing"
+          _LOCK_DEFERRED_PROJECTS+=("$_retry_project")
+        else
+          log "project ${_retry_project}: retry pass: chain completed"
+        fi
+
+        # Same HALT-AFTER post-work check as the first pass, evaluated now
+        # that the retried project's queue has actually had a chance to
+        # drain on this firing.
+        if _check_halt_after_for_project "$_retry_project"; then
+          log "project ${_retry_project}: HALT-AFTER promoted after retry work loop -- halted for next wake"
+        fi
+      done
+    fi
+  fi
+
+  # --- Lock-starvation guard: one report per project still deferred ---
+  # Counts the deferral while this role has a BACKLOG task in that project
+  # (resets the count when it has none) and logs the starvation warning at
+  # and past [wake] lock_starvation_firings -- see lib/wake_lock_wait.sh.
+  for _deferred_project in "${_LOCK_DEFERRED_PROJECTS[@]}"; do
+    wlw_starvation_note_deferral "$_deferred_project"
+  done
 
   ELAPSED=$(( $(date +%s) - WAKE_START_EPOCH ))
   log "done: iterated ${_ITER_PROJECT_COUNT} project(s), total elapsed=${ELAPSED}s"

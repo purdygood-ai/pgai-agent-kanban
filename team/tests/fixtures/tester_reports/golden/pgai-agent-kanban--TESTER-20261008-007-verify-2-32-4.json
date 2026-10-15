@@ -1,0 +1,63 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "I verified RC v2.32.4 (`ai_rc/v2.32.4` @ dd196680) against\n`requirements/v2.32.4-bugfix-bundle-20261008.md`. The bundle has six bugs: BUG-0610,\nBUG-0613 and BUG-0614 are the headline items, and BUG-0608, BUG-0609 and BUG-0611 are\nhygiene ride-alongs. Four tasks delivered them: CODER-002, CODER-003, CODER-004 and\nWRITER-005. For each bug, I reproduced the original failure on ai_main and then\nconfirmed the RC fixes it. All six fixes work as specified. Both gated runners exited\n0, and the requirements doc's compile and syntax criteria pass. The checks found two\ndefects, both filed via Path C (autonomous follow-up filing — non-blocking) as\nPath C-A (filed as BUG — code defect / regression / test failure):\n\n- **BUG-0616.** The new release-notes Status-section reader added by this RC can\n  fail open. It treats a `<!--` quoted above `## Status` as a real comment opener,\n  so Step 4e skips the stamp and ships the notes with `PENDING-RELEASE` still in\n  place. Rated medium. This is a regression on an edge-case input.\n- **BUG-0617.** The OVERWATCH Lane A drill still runs its destructive steps after a\n  failed RC cancel. This predates the RC; CODER-003 asked TESTER to file it.\n  Rated medium.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Status-section reader fails open on a quoted comment opener above ## Status",
+      "heading": "Finding 1: Status-section reader fails open on a quoted comment opener above ## Status",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (this RC's own BUG-0608 fix is the same quoted-`<!--` defect class, reappearing in a sibling reader written in parallel; it could recur in any reader with its own comment scanner)\n**Filed As:** BUG-0616 (Path C-A)\n**Regression:** yes\n**Integrity:** none\n\n- Traces to: requirements AC \"each bundled item is addressed\" (BUG-0610 / BUG-0613),\n  and the CODER-002 constraint \"the post-stamp guard stays a real stop when the\n  placeholder genuinely survives under ## Status\".\n- Location: `team/pgai_agent_kanban/cm/notes_status_section.py` (`_segments`,\n  `_visible_lines`, `status_sections`). It feeds\n  `cm_release_notes_status_has_placeholder` (`team/scripts/lib/cm/release_known_issue.sh`)\n  and Step 4e in `team/scripts/lib/cm/release_ship_policy.sh`.\n- Expected: a `<!--` quoted in prose or inline code above `## Status` is text. The\n  placeholder is stamped, or the trigger-9 guard halts.\n- Actual: I drove the real `cm_release_apply_ship_policy` on the sandbox lane\n  (`tests/fixtures/ship_policy_sandbox.py`) with notes whose header line quotes\n  `` `<!--` `` above `## Status` / `PENDING-RELEASE`. Result: exit 0, no HALT, and\n  Step 4e printed \"already complete, continuing\". The committed notes still read\n  `PENDING-RELEASE`. The control (the same notes without the quote) stamps KNOWN-BUGS.\n  On ai_main the quoted-opener input stamps correctly. No later step checks for the\n  placeholder.\n- Why medium and not high: the release command still works for every notes file\n  that does not quote `<!--` above `## Status`. The template puts `## Status`\n  directly after the title block, so normal drafts never reach this path. No\n  current notes file has this shape, and the workaround is simple: do not quote the\n  opener above Status, or correct the Status value by hand. Under SOP-core\n  \"Rating a Finding\" that is \"incorrect, but a workaround exists / nothing depends\n  on it yet\". It is still this RC's regression (`Regression: yes`), and it bypasses\n  a BLOCK-WORTHY guard, so I recorded it as a bug rather than a caveat. CM should\n  weigh this paragraph. The rating was not softened to reach a ship outcome.",
+      "filed_as": "BUG-0616",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (this RC's own BUG-0608 fix is the same quoted-`<!--` defect class, reappearing in a sibling reader written in parallel; it could recur in any reader with its own comment scanner)",
+        "filed_as": "BUG-0616 (Path C-A)",
+        "regression": "yes",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Lane A drill deletes the bundle doc and clears the HALT after a failed RC cancel",
+      "heading": "Finding 2: Lane A drill deletes the bundle doc and clears the HALT after a failed RC cancel",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing-bug)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one pre-existing code path; the sibling drill was fixed in this RC)\n**Filed As:** BUG-0617 (Path C-A)\n**Regression:** no\n**Integrity:** none\n\n- Traces to: the CODER-003 ticket Notes (\"if CODER confirms the same defect there,\n  record it in status.md for TESTER to file\"). CODER-003 recorded it from code\n  reading only. This also falls under the Step 6.11 spot-check category\n  \"regressions of prior gaps\", since it is the same class as BUG-0614.\n- Location: `team/pgai_agent_kanban/overwatch/resolution_stage.py`\n  `execute_lane_a_drill`.\n- Expected: when unwind-rc or cancel-rc fails, the bundle doc and the ship-policy\n  HALT are left in place.\n- Actual: I set up a throwaway kanban root and stubbed both `_run_unwind_rc` and\n  `_run_cm_cancel_rc` to return LOCKED. The bundle doc was deleted and the HALT\n  removed, while `## Active RC` stayed set. ai_main behaves identically.\n- Rated medium as a real but unexercised defect. Lane A runs only when\n  `overwatch_resolve` is enabled, and it is off by default for this project.",
+      "filed_as": "BUG-0617",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing-bug)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one pre-existing code path; the sibling drill was fixed in this RC)",
+        "filed_as": "BUG-0617 (Path C-A)",
+        "regression": "no",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

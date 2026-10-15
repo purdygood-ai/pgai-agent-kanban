@@ -318,7 +318,7 @@ _TMP_NEW=""
 if [[ -n "$_TMP_AFTER" ]]; then
     while IFS= read -r _item; do
         if [[ -z "$_item" ]]; then continue; fi
-        if ! echo "$_TMP_BEFORE" | grep -qxF "$_item"; then
+        if ! grep -qxF "$_item" <<< "$_TMP_BEFORE"; then
             _TMP_NEW="${_TMP_NEW}${_item}"$'\n'
         fi
     done <<< "$_TMP_AFTER"

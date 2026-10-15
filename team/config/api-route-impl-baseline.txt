@@ -1,0 +1,12 @@
+# team/config/api-route-impl-baseline.txt
+#
+# Baseline for team/scripts/lint_api_route_impl.py: the number of
+# operator verb manifest rows whose impl column is "shell". The count
+# may only fall. When a change flips rows to "module:", lower this
+# number in the same change (the lint reports a baseline above the
+# measured count); never raise it. Documented launchers
+# (team/config/api-route-impl-launchers.txt) are counted here too.
+# Regenerate with:
+#   python3 team/scripts/lint_api_route_impl.py --emit-baseline > team/config/api-route-impl-baseline.txt
+#
+shell_rows	3

@@ -1,19 +1,29 @@
 #!/usr/bin/env bash
-# cm-cancel-rc.sh
+# team/scripts/cm/cancel-rc.sh
 # Human-invoked: cleanly abandons an active release candidate branch.
+# The remote it touches is the project's git remote: project.cfg [project]
+# git_remote_name, origin when absent or blank (pp_git_remote_name /
+# pgai_agent_kanban.lib.git_remote); "origin" below means that remote.
 #
 # Usage:
-#   cm-cancel-rc.sh --project <name> --key vX.Y.Z [--yes] [--help]
+#   cm/cancel-rc.sh --project <name> --key vX.Y.Z [--yes] [--force] [--help]
 #
 # Both --project and --key are REQUIRED. Positional invocation is not supported.
 #
 # --project <name>   project name (required; overrides PGAI_PROJECT_NAME env var)
 # --key vX.Y.Z       RC version to cancel (required; format: vX.Y.Z)
 # --yes              skip interactive confirmation prompt (for scripted/non-interactive use)
+# --force            bypass only the Active-RC-matches-version check; never the
+#                    confirmation. The RC branch and per-RC record of vX.Y.Z are
+#                    cleaned up and release-state.md, which then describes a
+#                    different RC, is left unchanged.
 # --help             print this message and exit 0
 #
-# Project context resolution:
-#   --project flag drives project resolution via the pp layer.
+# This script parses flags, prints --help, and resolves the project name
+# (--project, else PGAI_PROJECT_NAME). Everything else -- the checks, the
+# confirmation prompt, the git steps, the release-state.md reset and the
+# per-RC archive -- is pgai_agent_kanban.cm.cancel.cancel_rc, reached through
+# pp_run_ops. POST /operations/cancel-rc calls the same function in process.
 #
 # =============================================================================
 # FOOTPRINT — what this script touches and what it deliberately leaves alone
@@ -22,7 +32,8 @@
 # TOUCHES (modifies or deletes):
 #   rc/<version> branch on origin
 #     - Deleted via `git push origin --delete rc/<version>` if the branch
-#       exists on origin. Skipped (idempotent) if already absent.
+#       exists on origin and the project pushes (see "Push decision" below).
+#       Skipped (idempotent) if already absent.
 #   rc/<version> branch locally
 #     - Deleted via `git branch -D rc/<version>` if the branch exists locally.
 #       Switches to main first if currently on the rc branch.
@@ -33,21 +44,24 @@
 #         RC Opened At
 #         RC Opened By Task
 #     - Skipped (idempotent) if Active RC is already `none`.
+#   $KANBAN_ROOT/projects/<name>/release-state/<version>.json
+#     - Marked cancelled, then moved to release-state/history/ as
+#       <version>-cancelled-<timestamp>.json, freeing the version for re-use.
 #   main branch (local)
 #     - After resetting release-state.md the script checks out main and runs
-#       `merge --ff-only origin/main` (when push_to_remote=true).
+#       `merge --ff-only origin/main` (when the project pushes).
 #       This ensures the repo is on main after cancellation.
 #
 # DOES NOT TOUCH (explicitly preserved):
-#   main branch             — never checked out, never merged, never pushed
+#   main branch on origin   — never pushed
 #   git tags                — no tags are created, moved, or deleted
 #   ## Last Released field in release-state.md
 #                           — read from the file before the rewrite and
 #                             written back byte-for-byte; cancel never
 #                             clears, alters, or computes this value. The
-#                             git tag created by cm-release.sh remains the
-#                             canonical Last Released record (SOP.md
-#                             "Release State File" — the field is monotonic
+#                             git tag created by cm/release.sh remains the
+#                             canonical Last Released record (roles/CM.md
+#                             "Release state" — the field is monotonic
 #                             and latching; cm-cancel-rc must never clear it).
 #   Task folders            — task status.md files are not modified by this script;
 #                             caller is responsible for marking tasks WONT-DO
@@ -57,12 +71,13 @@
 #   bugs/ files             — bug files are not modified
 #   Artifacts               — task artifacts/ directories are not modified
 #   Dev tree source files   — no files under the git worktree are modified
+#   $KANBAN_ROOT/archive/<name>/
+#                           — a cancelled RC never runs the post-release
+#                             archive; only cm/release.sh's finalize does,
+#                             after a release ships
 #
-# NOTE: The top-level team/scripts/cancel-rc.sh script (distinct from this one)
-# performs a broader "full unwind" that DOES touch task folders, queue files,
-# requirements files, priority files, bugs files, and PM plan markers. Use that
-# script when a full cancellation is needed. Use this script (cm/cancel-rc.sh)
-# when only the git branch and release-state.md need to be reset.
+# For a full unwind (task folders, queue markers, requirements files,
+# priority files, bug files, PM plan markers) use unwind-rc.sh instead.
 #
 # If you need to re-run the CM release step without deleting the rc branch, use
 # reset.sh --project <name> --key <version> instead.
@@ -72,28 +87,48 @@
 # Behavior:
 #   1.  Validates version format
 #   2.  Validates repository state (must be on main or rc/<version>)
-#   3.  git fetch origin   (skipped when push_to_remote=false)
+#   3.  git fetch origin   (skipped when the project does not push, and skipped
+#       with a narrated line when PGAI_AGENT_ROLE names a role other than
+#       cm -- only CM touches the remote; the guard would refuse the fetch)
 #   4.  Reads Active RC from project-scoped release-state.md (live install) and
-#       verifies Active RC = <version>
+#       verifies Active RC = <version> (or none; --force bypasses this check)
 #   5.  Lists pending tasks for the cancelled RC version
 #   6.  Prompts for confirmation (unless --yes passed)
-#   7.  Deletes rc/<version> branch from origin (if it exists there)
+#   7.  Deletes rc/<version> branch from origin (if the project pushes and the
+#       branch exists there)
 #   8.  Deletes rc/<version> branch locally (if it exists)
 #   9.  Resets project-scoped release-state.md: clears Active RC + RC Opened At +
 #       RC Opened By Task. The ## Last Released field is read before the rewrite
-#       and carried forward unchanged — the git tag created by cm-release.sh
+#       and carried forward unchanged — the git tag created by cm/release.sh
 #       remains the canonical Last Released record.
-#  10.  Prints success message and exits 0
+#  10.  Marks the per-RC JSON cancelled and archives it to release-state/history/
+#  11.  Prints success message and exits 0
 #
 # release-state.md is the project-scoped live install file only:
 #   $KANBAN_ROOT/projects/<name>/release-state.md
 # The dev tree's team/release-state.md is NOT read or written by this script.
 #
+# Push decision:
+#   Origin is touched only for a project the shared push-decision resolver
+#   (team/pgai_agent_kanban/lib/push_decision.py) answers "push" for --
+#   registered in projects.cfg, with its own project.cfg naming dev_tree_path
+#   and not setting push_to_remote = false. A registered project with no
+#   push_to_remote key still pushes. push_to_remote = false, or an unresolved
+#   project (not registered, no project.cfg, or no dev_tree_path in it),
+#   contacts no remote at all: no fetch, no ls-remote, no push, no pull from
+#   origin. REPO_ROOT and PGAI_DEV_TREE_PATH never make a project pushable.
+#   An unresolved project logs one line naming the missing piece, before the
+#   repository is resolved:
+#     [cm-cancel-rc] skipped-unresolved-project: project '<name>': missing <piece>: ...
+#
 # Idempotency:
 #   Safe to re-run if a step failed midway. Steps 7 and 8 are skipped if the
-#   branch does not exist. Steps 9-10 are skipped if Active RC is already none.
+#   branch does not exist. Step 9 is skipped if Active RC is already none.
 #
-# DOES NOT touch main, does not touch tags. Conservative cleanup only.
+# Exit codes:
+#   0  cancelled, or nothing left to cancel
+#   1  usage error, a refused check, or the confirmation declined
+#   N  a git step failed: git's own exit code
 #
 # Configuration:
 #   PGAI_PROJECT_NAME — fallback project name (when --project flag not used)
@@ -106,19 +141,21 @@
 PROJECT_ARG=""
 VERSION=""
 YES_FLAG=0
+FORCE_FLAG=0
 
 _cm_cancel_rc_usage() {
-  echo "Usage: $(basename "$0") --project <name> --key vX.Y.Z [--yes] [--help]" >&2
+  echo "Usage: $(basename "$0") --project <name> --key vX.Y.Z [--yes] [--force] [--help]" >&2
   echo "" >&2
   echo "  --project <name>  project name (required)" >&2
   echo "  --key vX.Y.Z      RC version to cancel (required; format: vX.Y.Z)" >&2
   echo "  --yes             skip interactive confirmation prompt" >&2
+  echo "  --force           bypass the Active-RC-matches-version check (not the prompt)" >&2
   echo "  --help            print full usage and footprint documentation" >&2
 }
 
 _cm_cancel_rc_help() {
   cat <<HELPTEXT
-Usage: $(basename "$0") --project <name> --key vX.Y.Z [--yes] [--help]
+Usage: $(basename "$0") --project <name> --key vX.Y.Z [--yes] [--force] [--help]
 
 Cancel an active release candidate branch and reset release-state.md.
 
@@ -128,19 +165,26 @@ Arguments:
   --project <name>  project name; drives project resolution via the pp layer
   --key vX.Y.Z      RC version to cancel (format: vX.Y.Z, e.g. v0.15.4)
   --yes             skip the interactive confirmation prompt
+  --force           bypass only the Active-RC-matches-version check; the
+                    prompt still runs unless --yes is also given. The RC
+                    branch and its per-RC record are cleaned up and
+                    release-state.md, which then names a different RC,
+                    is left unchanged
   --help            print this message and exit 0
 
-FOOTPRINT — what this script touches vs. leaves alone:
+FOOTPRINT — what this script touches vs. leaves alone. <remote> is the
+project's git remote: project.cfg [project] git_remote_name, origin when
+that key is absent or blank.
 
   TOUCHES:
-    origin/rc/<version>          deleted (git push origin --delete)
+    <remote>/rc/<version>        deleted (git push <remote> --delete)
     local rc/<version>           deleted (git branch -D)
     release-state.md             Active RC / RC Opened At / RC Opened By Task
                                  reset to 'none'
-    main branch (local)          checked out; fast-forward pulled from origin when push_to_remote=true
+    main branch (local)          checked out; fast-forward pulled from <remote> when push_to_remote=true
 
   DOES NOT TOUCH:
-    main branch on origin        never pushed (operator pushes via finalize-release.sh if needed)
+    main branch on <remote>      never pushed (operator pushes via finalize-release.sh if needed)
     git tags                     never created, moved, or deleted
     release-state.md ## Last Released field
                                  read before the rewrite and written back
@@ -156,7 +200,7 @@ FOOTPRINT — what this script touches vs. leaves alone:
 
   NOTE: For a full unwind (task folders, queue markers, requirements file,
   priority files, bug files, PM plan markers) use the top-level
-  team/scripts/cancel-rc.sh instead.
+  scripts/unwind-rc.sh instead.
 
   NOTE: To re-run the CM release step without deleting the rc branch, use
   reset.sh --project <name> --key <version> instead.
@@ -196,6 +240,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --yes|-y)
       YES_FLAG=1
+      shift
+      ;;
+    --force)
+      FORCE_FLAG=1
       shift
       ;;
     --*)
@@ -254,6 +302,10 @@ fi
 # shellcheck source=lib/project_paths.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/project_paths.sh"
 
+# --- Source the python-module runner (cwd-independent PYTHONPATH) ---
+# shellcheck source=../lib/pp_run_ops.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/pp_run_ops.sh"
+
 # --- Enable strict mode for our own code ---
 set -euo pipefail
 
@@ -267,317 +319,19 @@ PROJECT_NAME="$(pp_require_project_context "${PROJECT_ARG:-}")" || {
   exit 1
 }
 
-# --- Resolve REPO_ROOT from project.cfg dev_tree_path ---
-# REPO_ROOT may be overridden by the environment; otherwise derive from project.cfg.
-if [[ -z "${REPO_ROOT:-}" ]]; then
-  pp_load_config "$PROJECT_NAME" || {
-    echo "ERROR: could not load project.cfg for project '$PROJECT_NAME'" >&2
-    echo "  Expected: $(pp_project_root "$PROJECT_NAME" 2>/dev/null || echo "<unresolvable>")/project.cfg" >&2
-    exit 1
-  }
-  REPO_ROOT="${PP_dev_tree_path:-}"
-  if [[ -z "$REPO_ROOT" ]]; then
-    echo "ERROR: dev_tree_path is not set in project.cfg for project '$PROJECT_NAME'" >&2
-    echo "  Add 'dev_tree_path=<path>' to $(pp_project_root "$PROJECT_NAME")/project.cfg" >&2
-    exit 1
-  fi
+# --- Cancel ---
+# cancel_rc prints the plan and the narration, asks for confirmation on this
+# script's stdin unless --yes was given, and exits with the code documented
+# in the header. REPO_ROOT, when set, names the repository directly instead
+# of project.cfg's dev_tree_path.
+CANCEL_ARGS=(--kanban-root "$KANBAN_ROOT" --project "$PROJECT_NAME" --key "$VERSION")
+if [[ $YES_FLAG -eq 1 ]]; then
+  CANCEL_ARGS+=(--yes)
 fi
-
-# --- Resolve base branch names via pp_prefix_branch ---
-# For projects with branch_prefix=ai_, MAIN_BRANCH=ai_main.
-# For projects with no branch_prefix, MAIN_BRANCH=main unchanged.
-MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
-
-# --- Read push_to_remote flag via pp_push_to_remote helper ---
-# Default: 'true' — deletes rc branch from origin (existing behavior).
-# Set [project] push_to_remote = false in project.cfg to perform only local cleanup
-# (no origin branch delete).
-_CM_PUSH_TO_REMOTE="$(KANBAN_ROOT="$KANBAN_ROOT" pp_push_to_remote "$PROJECT_NAME")"
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  echo "[cm-cancel-rc] Push policy: push_to_remote=true — origin branch delete will proceed."
-else
-  echo "[cm-cancel-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only."
+if [[ $FORCE_FLAG -eq 1 ]]; then
+  CANCEL_ARGS+=(--force)
 fi
-
-# --- Paths ---
-# Canonical release state file: project-scoped live install path.
-# This is the ONLY file cm-cancel-rc.sh reads from and writes to.
-# The dev tree's team/release-state.md is NOT consulted.
-RELEASE_STATE="$(pp_release_state "$PROJECT_NAME")"
-
-# --- Validate version format ---
-VERSION_REGEX='^v[0-9]+\.[0-9]+\.[0-9]+$'
-if [[ ! "$VERSION" =~ $VERSION_REGEX ]]; then
-  echo "ERROR: invalid version format: '$VERSION'" >&2
-  echo "Expected format: vX.Y.Z (e.g. v0.15.4)" >&2
-  exit 1
+if [[ -n "${REPO_ROOT:-}" ]]; then
+  CANCEL_ARGS+=(--repo-root "$REPO_ROOT")
 fi
-
-RC_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "rc/$VERSION")"
-
-# --- Read a named field from release-state.md ---
-# Usage: read_field <field_heading>
-# Finds "## <field_heading>" then returns the next non-blank non-comment line.
-read_field() {
-  local heading="$1"
-  python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/read_state_field.py" "$RELEASE_STATE" "$heading"
-}
-
-# --- Step 1: git fetch (gated by push_to_remote: no origin traffic in local-only mode) ---
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  echo "Fetching origin..."
-  git -C "$REPO_ROOT" fetch origin
-else
-  echo "push_to_remote=false — skipping git fetch origin (local-only install)."
-fi
-
-# --- Step 2: Check current branch is main (or prefixed equivalent) or rc/<version> ---
-CURRENT_BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || echo "DETACHED")"
-if [[ "$CURRENT_BRANCH" != "$MAIN_BRANCH" && "$CURRENT_BRANCH" != "$RC_BRANCH" ]]; then
-  echo "ERROR: must be on '$MAIN_BRANCH' or '$RC_BRANCH' to cancel this RC" >&2
-  echo "Current branch: $CURRENT_BRANCH" >&2
-  echo "Please checkout $MAIN_BRANCH or $RC_BRANCH first." >&2
-  exit 1
-fi
-
-# --- Step 3: Read Active RC from project-scoped release-state.md ---
-# Read from the canonical live install file — this is the authoritative source.
-if [[ ! -f "$RELEASE_STATE" ]]; then
-  echo "ERROR: project-scoped release-state.md not found: $RELEASE_STATE" >&2
-  echo "Expected path: \$KANBAN_ROOT/projects/<name>/release-state.md" >&2
-  exit 1
-fi
-
-ACTIVE_RC="$(read_field "Active RC")"
-
-# Read the pre-existing Last Released value so the Step 10 rewrite can carry
-# it forward unchanged. This field is monotonic and latching (SOP.md
-# "Release State File") -- cancel-rc must never clear or alter it, only
-# preserve it. read_field returns "none" when the heading is absent or
-# empty (fresh project that has never shipped), which is itself a valid
-# schema value. Mirrors the same read-before-overwrite pattern in
-# cm/open-rc.sh (RELEASE_STATE_LAST_RELEASED).
-RELEASE_STATE_LAST_RELEASED="$(read_field "Last Released")"
-
-# --- Step 4: Check idempotency — if already cancelled, report and exit cleanly ---
-RC_LOCAL_EXISTS=0
-RC_REMOTE_EXISTS=0
-
-if git -C "$REPO_ROOT" rev-parse --verify "refs/heads/$RC_BRANCH" >/dev/null 2>&1; then
-  RC_LOCAL_EXISTS=1
-fi
-if git -C "$REPO_ROOT" ls-remote --exit-code --heads origin "$RC_BRANCH" >/dev/null 2>&1; then
-  RC_REMOTE_EXISTS=1
-fi
-
-if [[ "$ACTIVE_RC" == "none" && $RC_LOCAL_EXISTS -eq 0 && $RC_REMOTE_EXISTS -eq 0 ]]; then
-  echo "INFO: RC cancellation already complete (idempotent run)." >&2
-  echo "  Active RC on main: none"
-  echo "  $RC_BRANCH: not found locally or on origin"
-  echo ""
-  echo "Nothing to do. Exiting cleanly."
-  exit 0
-fi
-
-# --- Step 5: Validate that Active RC matches the version we are cancelling ---
-# Allow the case where Active RC is already none (partial cancellation recovery)
-if [[ "$ACTIVE_RC" != "none" && "$ACTIVE_RC" != "$VERSION" ]]; then
-  echo "ERROR: Active RC mismatch." >&2
-  echo "  release-state.md shows Active RC = '$ACTIVE_RC'" >&2
-  echo "  You requested cancel of: '$VERSION'" >&2
-  echo "  Only the active RC can be cancelled." >&2
-  exit 1
-fi
-
-# --- Step 6: List pending tasks for the cancelled RC ---
-echo ""
-echo "RC to cancel: $RC_BRANCH"
-echo "Current Active RC on main: $ACTIVE_RC"
-echo ""
-
-# Search for tasks referencing this RC version in the kanban root
-PENDING_TASKS=()
-TASK_DIRS=()
-for d in "$(pp_tasks_dir "$PROJECT_NAME")"/*/; do
-  [[ -d "$d" ]] || continue
-  status_file="$d/status.md"
-  [[ -f "$status_file" ]] || continue
-  readme_file="$d/README.md"
-  [[ -f "$readme_file" ]] || continue
-
-  # Check if task references this RC version and is not done/wont-do
-  state_line="$(grep -m1 '^## State' "$status_file" 2>/dev/null || true)"
-  state_val="$(echo "$state_line" | sed 's/## State//' | xargs 2>/dev/null || true)"
-  if [[ "$state_val" == "DONE" || "$state_val" == "WONT-DO" ]]; then
-    continue
-  fi
-
-  # Check if README references this version
-  if grep -q "$VERSION" "$readme_file" 2>/dev/null; then
-    task_id="$(basename "$d")"
-    PENDING_TASKS+=("$task_id ($state_val)")
-    TASK_DIRS+=("$d")
-  fi
-done
-
-if [[ ${#PENDING_TASKS[@]} -gt 0 ]]; then
-  echo "Pending tasks for $VERSION:"
-  for t in "${PENDING_TASKS[@]}"; do
-    echo "  - $t"
-  done
-  echo ""
-  echo "NOTE: These tasks will NOT be automatically cancelled by this script."
-  echo "      You should manually set them to WONT-DO after cancellation."
-  echo ""
-else
-  echo "No pending tasks found for $VERSION in kanban root."
-  echo ""
-fi
-
-# --- Step 7: Confirmation prompt (unless --yes) ---
-if [[ $YES_FLAG -eq 0 ]]; then
-  echo "This will:"
-  if [[ $RC_REMOTE_EXISTS -eq 1 ]]; then
-    echo "  - Delete $RC_BRANCH from origin"
-  fi
-  if [[ $RC_LOCAL_EXISTS -eq 1 ]]; then
-    echo "  - Delete local branch $RC_BRANCH"
-  fi
-  if [[ "$ACTIVE_RC" != "none" ]]; then
-    echo "  - Reset release-state.md: Active RC -> none"
-  fi
-  echo ""
-  echo "This does NOT touch main, does NOT delete any tags."
-  echo ""
-  read -r -p "Proceed with cancellation of $RC_BRANCH? [y/N] " confirm
-  case "$confirm" in
-    [yY]|[yY][eE][sS]) ;;
-    *)
-      echo "Cancelled. No changes made."
-      exit 1
-      ;;
-  esac
-  echo ""
-fi
-
-# --- Step 8: Delete rc branch from origin (if it exists) ---
-# Gated by push_to_remote flag: skipped when push_to_remote=false.
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  if [[ $RC_REMOTE_EXISTS -eq 1 ]]; then
-    echo "Deleting $RC_BRANCH from origin..."
-    git -C "$REPO_ROOT" push origin --delete "$RC_BRANCH"
-    echo "  Deleted $RC_BRANCH from origin."
-  else
-    echo "  $RC_BRANCH not found on origin — skipping remote delete (idempotent)."
-  fi
-else
-  echo "[push_to_remote=false] skipping origin push for ${PROJECT_NAME}: git push origin --delete $RC_BRANCH (Step 8)"
-fi
-
-# --- Step 9: Delete rc branch locally (if it exists) ---
-if [[ $RC_LOCAL_EXISTS -eq 1 ]]; then
-  # Must not be on the branch we are deleting
-  if [[ "$CURRENT_BRANCH" == "$RC_BRANCH" ]]; then
-    echo "Switching to $MAIN_BRANCH before deleting local branch..."
-    git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
-    if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-      git -C "$REPO_ROOT" merge --ff-only "origin/$MAIN_BRANCH"
-    fi
-  fi
-  echo "Deleting local branch $RC_BRANCH..."
-  git -C "$REPO_ROOT" branch -D "$RC_BRANCH"
-  echo "  Deleted local branch $RC_BRANCH."
-else
-  echo "  Local branch $RC_BRANCH not found — skipping local delete (idempotent)."
-fi
-
-# --- Step 10: Reset release-state.md ---
-if [[ "$ACTIVE_RC" != "none" ]]; then
-  # Reset the three RC-tracking fields to none. ## Last Released is carried
-  # forward unchanged from RELEASE_STATE_LAST_RELEASED (read in Step 3,
-  # before this rewrite) -- cancel-rc never computes, clears, or fabricates
-  # that value, it only preserves whatever was already on disk (SOP.md
-  # "Release State File": the field is monotonic and latching). Mirrors the
-  # same read-then-rewrite pattern used by cm/open-rc.sh.
-  echo "Resetting project-scoped release-state.md (Active RC -> none)..."
-  cat > "$RELEASE_STATE" <<EOF
-# Release State
-
-## Active RC
-none
-
-## RC Opened At
-none
-
-## RC Opened By Task
-none
-
-## Last Released
-${RELEASE_STATE_LAST_RELEASED}
-EOF
-
-  echo "  release-state.md reset."
-  echo "  Path: $RELEASE_STATE"
-
-  # Switch to main so the repo is in a clean state after cancellation.
-  echo "Switching to $MAIN_BRANCH..."
-  git -C "$REPO_ROOT" checkout "$MAIN_BRANCH"
-  if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-    git -C "$REPO_ROOT" merge --ff-only "origin/$MAIN_BRANCH"
-    echo "  $MAIN_BRANCH fast-forward updated from origin."
-  else
-    echo "[push_to_remote=false] skipping origin pull for ${PROJECT_NAME}: merge --ff-only origin/$MAIN_BRANCH (Step 10)"
-    echo "  $MAIN_BRANCH checked out locally; no pull (push_to_remote=false)."
-  fi
-else
-  echo "  Active RC already none — skipping release-state.md reset (idempotent)."
-fi
-
-# --- Write/update per-RC release-state JSON with cancelled outcome, then archive ---
-# Written after the cancel operation completes (branch deleted, release-state.md cleared).
-# Reads existing opened_at from the file if present (written by open-rc.sh).
-# If no state file exists (open-rc ran before this fix shipped), writes a minimal record.
-#
-# After marking the JSON cancelled, it is moved to release-state/history/ as
-# vX.Y.Z-cancelled-TIMESTAMP.json. This frees the version slot so a re-selected
-# requirement with the same hardcoded Target can invoke open-rc without collision,
-# while preserving the full audit trail in history/.
-#
-# Idempotent: if the JSON is already absent (already archived), the archive step
-# is a no-op and produces no error.
-#
-# Non-blocking: any failure is logged as a warning; cancel exit code is unaffected.
-_rc_state_dir="${KANBAN_ROOT}/projects/${PROJECT_NAME}/release-state"
-_rc_state_json="${_rc_state_dir}/${VERSION}.json"
-_cancel_closed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-mkdir -p "$_rc_state_dir" 2>/dev/null || true
-
-# Step A: mark the JSON cancelled (preserves opened_at, sets outcome=cancelled)
-python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" cancel \
-  "$_rc_state_json" "$VERSION" "$_cancel_closed_at" 2>&1 || \
-  echo "  WARNING: could not update per-RC release-state JSON at $_rc_state_json" >&2
-
-# Step B: archive the cancelled JSON to history/ — frees the version slot for re-use
-python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py" archive-cancelled \
-  "$_rc_state_json" "$VERSION" "$_cancel_closed_at" 2>&1 || \
-  echo "  WARNING: could not archive per-RC release-state JSON from $_rc_state_json" >&2
-
-echo ""
-echo "RC cancellation complete."
-echo "  Cancelled: $RC_BRANCH"
-echo "  Cancelled at: $(date -Iseconds)"
-echo ""
-if [[ ${#PENDING_TASKS[@]} -gt 0 ]]; then
-  echo "Reminder: mark these tasks as WONT-DO in the kanban:"
-  for t in "${PENDING_TASKS[@]}"; do
-    echo "  - $t"
-  done
-  echo ""
-fi
-echo "Reminder: close the requirements bundle intake item to prevent re-selection:"
-echo "  close.sh --project $PROJECT_NAME --key ${VERSION}-bugfix-bundle-<YYYYMMDD> --state wont-do"
-echo "  (replace <YYYYMMDD> with the date suffix on the bundle file in requirements/)"
-echo "  Leaving the bundle live re-arms the discovery re-selection path."
-echo ""
-echo "You may now open a new RC with cm-open-rc.sh <version>."
-exit 0
+pp_run_ops pgai_agent_kanban.cm cancel_rc "${CANCEL_ARGS[@]}"

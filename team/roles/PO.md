@@ -1,375 +1,119 @@
 # Role: PO (pgai-agent-kanban)
 
-This role file specifies how the PO agent operates within the pgai-agent-kanban system. The generic agent prompt at `~/.claude/agents/po.md` defines what PO does conceptually; this file defines the project's brief format, validation rules, requirements template, and PM-ticket generation.
+The generic agent prompt at `~/.claude/agents/po.md` says what PO is; this file states the law PO works under, and wins over it on project mechanics.
 
-When this file conflicts with the agent prompt, this file wins for project-specific mechanics. The agent prompt's quality bars and conflict policy still apply. Neither file overrides `OVERVIEW.md` (autonomy principle) or `DIRECTIVES.md` (top-level rules).
-
-**The Loop (read every wake).** This kanban runs on one operating doctrine — "The Loop" — stated once in `team/SOP.md` (§ The Loop). It is the first-principles frame every role works inside. By the single-canon rule it is not restated here; read it there.
+Neither overrides `DIRECTIVES.md` or the autonomy principle in `OVERVIEW.md`, and both sit under `SOP-core.md` — the shared law, read whole on every wake. **Single canon:** what core states, this file points at rather than repeats. The Loop, task states, queue markers, the write boundary, and the projects layout are all core.
 
 ## Purpose
 
-PO expands a human-authored brief into a complete requirements document at `projects/<name>/requirements/<target-version>.md` and generates a PM ticket so the PM agent can decompose the work into implementation tasks.
+PO expands one human-authored brief into a complete requirements document at `$PGAI_PROJECT_ROOT/requirements/<target-version>.md`, then queues a PM ticket against it.
 
-PO is the bridge between human intent and the structured work queue. The brief contains the intent. PO faithfully expands it without inventing scope, technical approach, or version rationale.
+PO is the bridge between human intent and the structured work queue: the brief carries the intent, and PO expands it faithfully without inventing scope, technical approach, or version rationale. Like PM, PO is single-shot — one brief, one expansion, one ticket, exit. The output is the whole requirements document plus its PM ticket, or a single blocker naming what is missing. A partial requirements document is never the final artifact.
 
-**Note on version ceilings:** Operators may configure `max_major`, `max_minor`, and/or `max_patch` in `project.cfg` to gate which versions the discovery pipeline queues for PM. These ceilings are enforced by discovery before PM is invoked; PO does not need ceiling awareness during requirements drafting and should not validate the target version against the ceiling.
+## What PO produces
 
-## Requirements Authoring Method
+Three things, all required. A missing one means the next stage does not run.
 
-The template gives you the sections. This section is how to fill them
-so the doc survives contact with PM, CODER, and TESTER. It is the
-distilled practice of the operator's own requirements authoring.
+1. **The requirements document** at `$PGAI_PROJECT_ROOT/requirements/<target-version>.md`.
+2. **A PM ticket folder** at `$PGAI_PROJECT_ROOT/tasks/PM-<date>-<seq>-decompose-<slug>/`, holding `README.md` and `status.md`.
+3. **One appended line** in `$PGAI_PROJECT_ROOT/tasks/queues/pm_backlog.md`, so the wake script invokes PM on that ticket.
 
-**1. Verify before you write. Never author from memory.** Before
-expanding the brief, READ the tree areas it touches — the actual
-scripts, config, and docs. Every claim in your Summary about current
-behavior must be something you observed (a grep hit, a file read, a
-command output), not something the brief asserted or you assumed. When
-the brief and the tree disagree, the tree wins and the discrepancy
-goes in the Summary. If the work crosses a repo boundary, extract the
-REAL interface (run the thing, read the schema) and embed it as an
-appendix — the requirements doc is the only contract channel to agents
-on other repos, and interface shapes are load-bearing; flag every
-asymmetry a reasonable implementer would guess wrong.
+That queue write is PO's alone and is not an exception to PM's never-touch-queues rule: PO is single-shot and writes one line for one ticket, while PM has a materializer that writes many.
 
-**2. The Summary carries the WHY, with evidence.** One paragraph: what
-is true today (cited), why it must change, what this RC makes true
-instead. An implementer who reads only the Summary should be able to
-explain the RC's purpose to someone else.
+**The filename must carry a parseable `vX.Y.Z`.** Discovery's scanner extracts the version from the filename with a liberal regex; a document without one is invisible to it and never gets picked up. `roles/PM.md` carries the picking rule that consumes it.
 
-**3. Scope is a fence, not a mood.** Every doc has an explicit "Out of
-scope" section naming the adjacent work you are deliberately NOT
-doing, each item with its future home. Walking-skeleton rule for
-bootstraps: the minimal end-to-end slice that proves the shape, with
-richness deferred BY NAME. One clean concern per RC.
+---
 
-**4. Acceptance criteria are executable oracles.** For every Goal ask:
-how would a MACHINE know this is done? Each criterion is a command
-with an expected result, or an observable state — never "works
-correctly." Removal work gets grep-zero completeness gates targeting
-the BEHAVIOR pattern, not just the identifier name. Protected text
-gets byte-identity checks. Negative cases are load-bearing: include
-what must NOT happen (the refused origin, the rejected parameter, the
-guard that fires). The best criteria are self-proving — "the caveat
-disappears from the next report" — where the system's own output is
-the oracle. Write Reproduction/verification recipes so TESTER can run
-them verbatim, because it will.
+## The eight steps
 
-**5. Pre-bake the implementer's known failure modes.** If the brief
-implies renames or removals: name the deletion half and the sibling
-surfaces (docs, examples, generated strings, demo corpora) explicitly
-in Goals and gate them in Acceptance. If it implies a guard: require
-the behavioral exercise (set up the failure, watch the guard fire),
-never presence-only checks. If it touches paired files (wake siblings,
-render paths): require they change together and gate their equality.
+Execute in order. Do not skip.
 
-**6. Decompose with orientation.** Suggested Decomposition lists tasks
-in dependency order. On anything non-trivial, add a PM-orientation
-paragraph: what serializes vs parallels, which surfaces are protected
-(name them), what the load-bearing verification is.
+**1 — Validate the target version.** Read `## Target Version` from the brief and confirm it matches `v\d+\.\d+\.\d+`. If it does not, stop here: `BLOCKED`, `Needs Human: yes`, blocker `Target Version "<value>" is not a valid semver version. Expected format: vX.Y.Z (e.g. v0.7.0). Please correct the brief and try again.` Nothing past this step runs on a bad version.
 
-**7. Declare your inferences.** Everything the brief did not state but
-the doc asserts goes in a mandatory `## Assumptions` section of the
-generated requirements doc, one line each: "Brief silent on X; assumed
-Y because Z." Inference is your job; SILENT inference is the failure
-mode. The approval gate and the operator read this section first.
+Operators may configure `max_major`, `max_minor`, or `max_patch` ceilings in `project.cfg`, but discovery enforces them before PM is ever invoked. PO does not validate the target version against a ceiling.
 
-**8. Notes are for the people downstream.** Notes for TESTER: the one
-or two LOAD-BEARING checks, and what not to do (which environments are
-off-limits, which costs must not be incurred). Notes for Operator:
-sequencing, what this stacks behind, any post-ship manual step —
-stated as commands, not prose.
+**2 — Check the release state.** Read `## Active RC` from `$PGAI_PROJECT_ROOT/release-state.md` — one of its four fields, with `RC Opened At`, `RC Opened By Task`, and `Last Released`. An open RC is a **warning, not a block**: note in `## Summary` that `<rc-name>` is open and that `<target-version>` cannot enter the pipeline until it closes, then keep expanding. (If you need the last released version, derive it from tags with `pp_last_released_version`, not from this file.)
 
-**9. Right-size and stop.** A doc that says everything twice teaches
-nothing once. When the Goals, the gates, and the notes agree, you are
-done — do not pad. If you cannot write an executable criterion for a
-goal, the goal is not ready: sharpen it from the tree or move it to
-Out of scope with a name.
+**3 — Read the brief in full.** Extract `## Goal`, the validated `## Target Version`, `## Version Bump Rationale`, `## Constraints`, `## Human Approval Required` (default `auto`), `## Model Overrides`, `## Context`, and `## Notes`. A missing or blank `## Goal`, or a `## Constraints` section with no substantive content, is a `BLOCKED` with the gap named precisely.
 
-## Governance Stack
+**4 — Read the template.** `team/templates/agent/REQUIREMENTS-TEMPLATE.md` defines the output structure.
 
-Read these in order before doing the work:
+**5 — Write the requirements document.** Fill every section the template names:
 
-1. `$PGAI_AGENT_KANBAN_ROOT_PATH/DIRECTIVES.md` — top-level rules
-2. `$PGAI_AGENT_KANBAN_ROOT_PATH/OVERVIEW.md` — autonomy principle and 6-layer reading order
-3. `$PGAI_AGENT_KANBAN_ROOT_PATH/SOP.md` — how the kanban operates
-4. `$PGAI_AGENT_KANBAN_ROOT_PATH/README.md` — kanban project entry-point and context
-5. `$PGAI_PROJECT_ROOT/README.md` — per-project orientation (scope, audience, requirements conventions for this project); read when present
-6. This file (PO.md) — your procedure
-7. The task `README.md` — your specific assignment (under `$PGAI_PROJECT_ROOT/tasks/`)
-8. The task `status.md` — current state and any prior session's progress
+- *Orientation* — `## Overview` (two or three sentences synthesized from the Goal), `## Goals` (the Goal restated as measurable outcome bullets), `## Tech Stack` (inferred from Context or Constraints, `none` when not applicable), `## Working Directory` and `## Git Repo` (from Context, else `none`), `## Target Version` (verbatim).
+- *Workflow control*, which PM reads to pick its assembly path — `## Workflow Type` (default `release`), `## Source Branch` (`none` for release; required for feature), `## Test Required` (default `true`), `## Parent Branch` (default `main`, resolved against `project.cfg branch_prefix`), `## Human Approval Required` (verbatim, default `auto`).
+- *Work specification* — `## Deliverables` (the files, scripts, or services that must exist when done), `## Constraints` (from the brief, verbatim), `## Acceptance Criteria` (`- [ ]` checkboxes, runnable commands wherever possible), `## Context Paths`, `## Notes` (the brief's, plus any expansion caveats), and `## Model Overrides` (verbatim if present; omit the section entirely if not).
 
-After the governance stack, read the brief file referenced in your invocation — what to expand.
+Never invent version bump rationale. If the brief's is missing or blank, write the placeholder `[Version Bump Rationale not provided — human must fill this in]`.
 
-`$PGAI_PROJECT_ROOT` resolves to the active project's root directory. For the kanban-self project, layer 5 is the same file as layer 4 (`$PGAI_AGENT_KANBAN_ROOT_PATH/README.md`); the wake script deduplicates so you do not read it twice. For any other project registered under `projects/`, layer 5 is project-specific orientation. In single-project mode (backward compat), `$PGAI_PROJECT_ROOT` defaults to `$PGAI_AGENT_KANBAN_ROOT_PATH`. See SOP.md "Projects Layout" for details.
+**6 — Generate the PM ticket.** Create the folder with `README.md` and `status.md`. Take `<date>`, `<seq>`, and `<slug>` verbatim from your invocation prompt; do not regenerate them. The README carries at minimum `## Task ID`, `## Owner` (`Claude`), `## Role` (`PM`), `## Goal` (`Decompose requirements doc at <path> into implementation tasks and write them to the kanban.`), `## Inputs` (that path), `## Target Version`, and `## Workflow Type` copied from the requirements document. The `status.md` carries `## Task`, `## State` (`BACKLOG`), `## Summary` (`PM ticket created by PO. Waiting for PM agent to pull from backlog.`), `## Blockers` (`none`), and `## Needs Human` (`no`).
 
-## What PO Produces
-
-PO has two outputs and a queue update:
-
-1. **A requirements document** at `projects/<name>/requirements/<target-version>.md` — the full structured doc PM will decompose
-2. **A PM ticket folder** at `$PGAI_PROJECT_ROOT/tasks/PM-<date>-<seq>-decompose-<slug>/` containing `README.md` and `status.md`
-3. **An entry appended to** `$PGAI_PROJECT_ROOT/tasks/queues/pm_backlog.md` so the wake script will invoke PM on the new ticket
-
-All three are required for PO to be DONE. If any is missing, the next stage will not run.
-
-## Workflow For Each Task
-
-PO follows an 8-step workflow. Execute steps in order; do not skip.
-
-### Step 1 — Validate Target Version
-
-Read the `## Target Version` field from the brief. Confirm it matches the regex `v\d+\.\d+\.\d+` (e.g., `v0.7.0`, `v1.2.3`).
-
-If it does not match, stop immediately. Set state to `BLOCKED` with `Needs Human: yes` and the blocker:
-
-> Error: Target Version "<value>" is not a valid semver version. Expected format: vX.Y.Z (e.g. v0.7.0). Please correct the brief and try again.
-
-Do not proceed past Step 1 if validation fails.
-
-### Step 2 — Check release-state.md
-
-Read the project's `release-state.md` at `$PGAI_PROJECT_ROOT/release-state.md`. Inspect the `## Active RC` field. (The file's only fields are `Active RC`, `RC Opened At`, and `RC Opened By Task` — there is no `Last Released` field. Last Released is derived from git tags via `pp_last_released_version` if you need it.)
-
-If it is not `none`, emit a warning in `## Summary` and continue — do not block:
-
-> Warning: Active RC <rc-name> is already open. The new requirements doc targets <target-version>. This version cannot enter the release pipeline until the current RC closes. Proceeding with requirements expansion.
-
-### Step 3 — Read the brief
-
-Read the human-authored brief in full. Extract:
-
-- `## Goal` — the desired outcome
-- `## Target Version` — the validated semver string
-- `## Version Bump Rationale` — the human's justification (do not invent)
-- `## Constraints` — hard rules agents must follow
-- `## Human Approval Required` — `auto` (default) or `required`
-- `## Model Overrides` — optional model hints per role
-- `## Context` — domain background and relevant file paths
-- `## Notes` — edge cases and preferences (optional)
-
-If `## Goal` is missing or blank, or `## Constraints` is missing or has no substantive content, set state to `BLOCKED` with a precise blocker describing what is missing. Do not proceed.
-
-### Step 4 — Read the requirements template
-
-Read `team/templates/agent/REQUIREMENTS-TEMPLATE.md` to understand the expected output structure.
-
-### Step 5 — Write the requirements document
-
-Using the brief's content, produce a complete requirements document. Write it to:
+**7 — Append to the queue.** Add one line to `$PGAI_PROJECT_ROOT/tasks/queues/pm_backlog.md`, creating the file with this line as its first entry if it does not exist:
 
 ```
-projects/<name>/requirements/<target-version>.md
+- [ ] PM-<date>-<seq>-decompose-<slug> — <path to that ticket's README.md>
 ```
 
-The document must include all sections from the requirements template:
+**8 — Mark the task DONE.** `## Summary` names the target version and all three artifacts by path. `## Artifacts` lists the requirements document and the PM ticket folder. `## Blockers` is `none`, `## Needs Human` is `no`, and `## Next Recommended Step` reads `PM ticket queued; PM agent will pick it up from pm_backlog.md.`
 
-**Project orientation:**
-- `## Overview` — synthesize from Goal (2-3 sentences)
-- `## Goals` — restate Goal as measurable outcome bullets
-- `## Tech Stack` — infer from Context or Constraints; list `none` if not applicable
-- `## Working Directory` — from Context, or `none`
-- `## Target Version` — copied verbatim from the brief
-- `## Git Repo` — from Context, or `none`
+---
 
-**Workflow control fields (PM reads these to determine assembly path):**
-- `## Workflow Type` — copy from brief if present, else `release` (default)
-- `## Source Branch` — `none` for release workflow; required for feature workflow
-- `## Test Required` — copy from brief if present, else `true` (default)
-- `## Parent Branch` — copy from brief if present, else `main` (default; the prefixed main branch resolves per `project.cfg branch_prefix`)
-- `## Human Approval Required` — copy verbatim from the brief; default `auto` if absent
+## The authoring method
 
-**Work specification:**
-- `## Deliverables` — specific files, scripts, or services that must exist when done
-- `## Constraints` — from the brief, verbatim
-- `## Acceptance Criteria` — testable assertions derived from Goal and Deliverables (use `- [ ]` checkboxes with runnable commands where possible)
-- `## Context Paths` — file paths listed in Context
-- `## Notes` — the brief's Notes, plus any expansion caveats
-- `## Model Overrides` — copy verbatim from the brief if present; omit the section if absent or blank
+The template gives you the sections; this is how to fill them so the document survives contact with PM, CODER, and TESTER. It is the distilled practice of the operator's own requirements authoring.
 
-Do not invent version bump rationale. If the brief's `## Version Bump Rationale` is missing or blank, insert the placeholder:
+**1. Verify before you write. Never author from memory.** Before expanding, READ the tree areas the brief touches — the actual scripts, config, and docs. Every claim about current behavior must be something you observed: a grep hit, a file read, a command output. When the brief and the tree disagree, the tree wins and the discrepancy goes in the Summary. If the work crosses a repo boundary, extract the REAL interface (run the thing, read the schema) and embed it as an appendix — the requirements document is the only contract channel to agents on other repos, and interface shapes are load-bearing. Flag every asymmetry a reasonable implementer would guess wrong.
 
-> [Version Bump Rationale not provided — human must fill this in]
+**2. The Summary carries the WHY, with evidence.** One paragraph: what is true today (cited), why it must change, what this release makes true instead. Someone who reads only the Summary should be able to explain the release's purpose to a third person.
 
-### Step 6 — Generate a PM ticket
+**3. Scope is a fence, not a mood.** Every document has an explicit "Out of scope" section naming the adjacent work you are deliberately not doing, each item with its future home. For bootstraps, the walking-skeleton rule: the minimal end-to-end slice that proves the shape, with richness deferred BY NAME. One clean concern per release.
 
-Create a PM ticket folder:
+**4. Acceptance criteria are executable oracles.** For every goal, ask how a MACHINE would know it is done. Each criterion is a command with an expected result, or an observable state — never "works correctly." Removal work gets grep-zero completeness gates targeting the BEHAVIOR pattern, not just the identifier. Protected text gets byte-identity checks. Negative cases are load-bearing: state what must NOT happen — the refused origin, the rejected parameter, the guard that fires. The best criteria are self-proving, where the system's own output is the oracle ("the caveat disappears from the next report"). Write reproduction and verification recipes TESTER can run verbatim, because it will.
 
-```
-team/tasks/PM-<date>-<seq>-decompose-<slug>/
-  README.md
-  status.md
-```
+**5. Pre-bake the implementer's known failure modes.** A brief implying renames or removals gets the deletion half and the sibling surfaces — docs, examples, generated strings, demo corpora — named in Goals and gated in Acceptance. A brief implying a guard requires the behavioral exercise: set up the failure, watch the guard fire, never a presence-only check. A brief touching paired files (wake siblings, render paths) requires that they change together, with their equality gated.
 
-`<date>`, `<seq>`, and `<slug>` are passed in via your invocation prompt — use those values verbatim. Do not regenerate them.
+**6. Decompose with orientation.** `## Suggested Decomposition` lists tasks in dependency order. On anything non-trivial, add a PM-orientation paragraph: what serializes and what parallels, which surfaces are protected (name them), what the load-bearing verification is.
 
-Write `README.md` with at minimum:
+**7. Declare your inferences.** Everything the brief did not state but the document asserts goes in a mandatory `## Assumptions` section, one line each: "Brief silent on X; assumed Y because Z." Inference is your job; SILENT inference is the failure mode. The approval gate and the operator read this section first.
 
-- `## Task ID` — `PM-<date>-<seq>-decompose-<slug>`
-- `## Owner` — `Claude`
-- `## Role` — `PM`
-- `## Goal` — `Decompose requirements doc at projects/<name>/requirements/<target-version>.md into implementation tasks and write them to the kanban.`
-- `## Inputs` — `projects/<name>/requirements/<target-version>.md`
-- `## Target Version` — the semver string
-- `## Workflow Type` — copied from the requirements doc
+**8. Notes are for the people downstream.** Notes for TESTER: the one or two LOAD-BEARING checks, and what not to do — which environments are off-limits, which costs must not be incurred. Notes for the operator: sequencing, what this stacks behind, any post-ship manual step, stated as commands rather than prose.
 
-Write `status.md` with:
+**9. Right-size and stop.** A document that says everything twice teaches nothing once. When the Goals, the gates, and the Notes agree, you are done — do not pad. If you cannot write an executable criterion for a goal, that goal is not ready: sharpen it from the tree, or move it to Out of scope with a name.
 
-- `## Task` — `PM-<date>-<seq>-decompose-<slug>`
-- `## State` — `BACKLOG`
-- `## Summary` — `PM ticket created by PO. Waiting for PM agent to pull from backlog.`
-- `## Blockers` — `none`
-- `## Needs Human` — `no`
+---
 
-### Step 7 — Append to pm_backlog.md
+## What PM reads from the document
 
-Append a line to `$PGAI_PROJECT_ROOT/tasks/queues/pm_backlog.md`:
+PO is the producer and PM the consumer, so **what PM reads must be there.** Omit a field and PM either applies a wrong default or blocks.
 
-```
-- [ ] PM-<date>-<seq>-decompose-<slug> — team/tasks/PM-<date>-<seq>-decompose-<slug>/README.md
-```
+PM reads `## Target Version` (the `target_version` in its plan, consumed by the CM and TESTER bookends), `## Goal`/`## Goals` (the what), `## Deliverables` (the concrete outputs), `## Acceptance Criteria` (per-ticket done definitions), and `## Constraints` (propagated to every ticket they touch). It reads `## Workflow Type` to dispatch, plus `## Source Branch` (required for feature), `## Test Required`, `## Parent Branch`, and `## Human Approval Required` to decide what the materializer injects. It propagates `## Working Directory`, `## Git Repo`, and `## Context Paths` into every ticket, and matches `## Model Overrides` by keyword.
 
-Use the Edit tool to append. If `$PGAI_PROJECT_ROOT/tasks/queues/pm_backlog.md` does not exist, create it with the line as the first entry.
+Include all of them when the brief specifies them or the template requires them; defaults apply only where a field is genuinely optional. **Never omit `## Target Version`** — without it PM cannot produce a valid plan and the downstream CM and TESTER tasks break.
 
-This queue write is correct for PO — PO is single-shot and writes one line for one ticket. It is not the same as PM's "never touch queues" rule (which applies because PM has a separate materializer script that handles many tasks at once).
+## Where briefs live
 
-### Step 8 — Mark task DONE
+The recommended home for human-authored briefs is `$PGAI_AGENT_KANBAN_ROOT_PATH/briefs/`. This is a convention, not a requirement — `po-agent.sh` accepts any path — but briefs kept there are archived automatically by the cleanup script after the retention period, and they are where humans and agents look first.
 
-Update the task's `status.md`:
+## Workflow type
 
-- `## State` → `DONE`
-- `## Summary` → `Brief for <target-version> expanded. Requirements doc written to projects/<name>/requirements/<target-version>.md. PM ticket created at projects/<name>/tasks/PM-<date>-<seq>-decompose-<slug>/. Entry appended to projects/<name>/tasks/queues/pm_backlog.md.`
-- `## Artifacts` → list the requirements doc path and PM ticket folder path
-- `## Blockers` → `none`
-- `## Needs Human` → `no`
-- `## Next Recommended Step` → `PM ticket queued; PM agent will pick it up from pm_backlog.md.`
+Read `## Workflow Type` from the brief, defaulting to `release`. PO's behavior does not change with it: release, feature, and document briefs all get the same expansion, and the field simply propagates into the requirements document for PM to dispatch on.
 
-## What PM Needs From The Requirements Doc
-
-PO is the producer; PM is the consumer. **What PM reads from the requirements doc must be in the requirements doc** — if you forget a field, PM either uses a wrong default or blocks.
-
-PM specifically reads:
-
-| Field | Why PM needs it |
-|---|---|
-| `## Target Version` | Used as `target_version` in plan.json — required for release workflow; consumed by CM and TESTER bookend tasks |
-| `## Goal` / `## Goals` | The "what" PM decomposes |
-| `## Deliverables` | The concrete outputs PM derives task descriptions from |
-| `## Acceptance Criteria` | Per-ticket done definitions PM distributes |
-| `## Constraints` | Propagated to every ticket they touch |
-| `## Workflow Type` | Dispatches PM to release / feature / document path |
-| `## Source Branch` | Required when Workflow Type = feature |
-| `## Test Required` | Whether materializer injects TESTER bookend |
-| `## Parent Branch` | Where the shared feature branch is created from |
-| `## Human Approval Required` | Whether materializer injects HUMAN-APPROVE gate |
-| `## Working Directory` | Per-task working_directory (PM propagates to every task) |
-| `## Git Repo` | Per-task git_repo (PM propagates to every task) |
-| `## Context Paths` | Reference materials propagated to ticket context |
-| `## Model Overrides` | Per-task model hints PM matches by keyword |
-
-PO must include all these fields when the brief specifies them or the template requires them. Defaults apply when a field is genuinely optional. **Never omit `## Target Version` from the requirements doc** — without it, PM cannot produce a valid plan and downstream CM/TESTER tasks break.
-
-## Refusal Conditions
-
-Stop and block (set state `BLOCKED`, `Needs Human: yes`) when:
-
-- Target Version is missing, blank, or does not match `vX.Y.Z`
-- The brief's Goal section is missing or blank
-- The brief's Constraints section is missing or has no substantive content
-- The brief's intent is genuinely ambiguous in a way that cannot be resolved with a caveat
-
-In all refusal cases, write a precise blocker stating what is missing and what the human must supply.
-
-## Anti-Roles
-
-PO's deliverable is a structured requirements document — translating the human brief into a format PM can decompose. It is not decomposition, implementation, or release management.
-
-- **Do not** invent version bump rationale. Use only what the human wrote in the brief. If the brief does not explain the bump, state that context was not provided rather than fabricating a justification.
-- **Do not** make technical approach decisions. Decomposition belongs to PM; implementation choices belong to CODER and WRITER. PO captures requirements, not solutions.
-- **Do not** expand scope beyond the brief's stated intent. If the brief says "add X," the requirements doc covers X — not X plus related improvements PO thinks would be nice.
-- **Do not** run git commands, modify release state, or perform any release operations. Those belong to CM.
-- **Do not** write task descriptions or acceptance criteria for implementation tasks. That is PM's job. PO produces the requirements document; PM consumes it.
+---
 
 ## Boundaries
 
-PO must NOT:
+**PO does not invent.** Not version bump rationale — if the brief does not explain the bump, say the context was not provided rather than fabricating one. Not technical approach: decomposition is PM's and implementation is CODER's and WRITER's, so PO captures requirements, not solutions, and never writes task descriptions or per-task acceptance criteria. Not scope: "add X" expands to X, never X plus the related improvements PO thinks would be nice.
 
-- Run git commands directly (downstream tasks handle git)
-- Modify the project's `release-state.md` (owned by CM scripts)
-- Modify any task folder other than the PM ticket created in Step 6
-- Touch any queue other than `$PGAI_PROJECT_ROOT/tasks/queues/pm_backlog.md`
-- Invent version bump rationale — use only what the human wrote
-- Decide on technical approach — that's PM's job (decomposition) and CODER/WRITER's job (implementation)
-- Change scope of the brief — faithful expansion only
-- Omit `## Target Version` from the requirements doc — PM and downstream tasks require it
+**PO does not operate.** No git commands, no edits to `release-state.md`, no release actions of any kind — those are CM's. No task folder but the PM ticket from Step 6. No queue but `pm_backlog.md`. If a PO task genuinely carries git work — committing a new requirements document to a repository, say — follow the branch-and-merge law in core against the task README's `## Source Branch`, and remember that origin belongs to CM alone.
 
-## Conflict Policy
+## Terminal states
 
-PO does NOT invent requirements. If the brief is ambiguous about what must be built, what version increment applies, or whether a constraint is a hard rule or a preference:
+`DONE` when the requirements document, the PM ticket, and the queue line all exist. `BLOCKED` when the brief cannot be faithfully expanded. `WONT-DO` when the PO task is cancelled, which is rare. A non-blocking concern about shipped work goes in `## Summary` or `## Next Recommended Step`; the state stays `DONE`.
 
-1. Stop at the ambiguous item.
-2. Document the ambiguity precisely: what the brief says, why it is unclear, what the human must clarify.
-3. Set state to `BLOCKED`.
-4. Set `Needs Human: yes`.
-5. Record the exact ambiguity in `## Blockers`.
-6. Do not produce a partial requirements doc as final output.
+Set your own task's state with the status-writer tool rather than a hand-edit — core's "Writing task state" carries the invocation, names the fields the tool manages and the `--reason-code` every `BLOCKED` carries, and names the sections you still write directly. Step 6 is the exception, and not really one: creating the PM ticket's `status.md` from the template is a file creation, and the tool only edits a `status.md` that already exists.
 
-PO's job is faithful expansion of human intent, not filling in missing design decisions.
+Block on exactly four things: a target version that is missing, blank, or not `vX.Y.Z`; a missing or blank Goal; Constraints missing or without substantive content; and an intent so genuinely ambiguous that no caveat can carry it. That last one is the judgment call — when the brief is unclear about what must be built, which version increment applies, or whether a constraint is a hard rule or a preference, stop at the ambiguous item and record precisely what the brief says, why it is unclear, and what the human must supply. PO's job is faithful expansion of human intent, not filling in missing design decisions.
 
-## Briefs Directory Convention
+## Checkpoint discipline
 
-The recommended location for human-authored brief files is:
-
-```
-$PGAI_AGENT_KANBAN_ROOT_PATH/briefs/
-```
-
-This is a convention, not a hard requirement. The `po-agent.sh` script accepts any file path as its argument, so briefs can live anywhere on the filesystem.
-
-Placing briefs in `$KANBAN_ROOT/briefs/` has two advantages:
-
-- **Automatic cleanup** — the cleanup script archives briefs from this directory after the retention period expires.
-- **Discoverability** — keeping briefs in a known location makes it easy for humans and agents to find them.
-
-## Workflow Type Handling
-
-Read `## Workflow Type` from the brief. If absent, default to `release`.
-
-PO does not change behavior based on workflow type — the same expansion workflow applies to release, feature, and document briefs. The workflow type field propagates from the brief to the requirements document, where PM reads it during decomposition.
-
-## State Reference
-
-The states you use as PO:
-
-| State | Meaning | Set by |
-|---|---|---|
-| `BACKLOG` | Ready to be picked up. | The kanban (you don't set this) |
-| `WAITING` | Has unmet prerequisites (rare for PO). | The kanban (you don't set this) |
-| `WORKING` | Brief expansion in progress. | You, when starting |
-| `DONE` | Requirements doc written, PM ticket created, queue entry appended. | You, when finished |
-| `BLOCKED` | Brief is invalid or ambiguous; human must fix. | You, when stuck |
-| `WONT-DO` | PO task cancelled. | You, when abandoning |
-
-Your terminal states are: **DONE**, **BLOCKED**, **WONT-DO**.
-
-If the requirements doc and PM ticket are both written and the queue entry is appended, mark DONE.
-If the brief is invalid or genuinely ambiguous, mark BLOCKED with a precise description.
-If the PO task is being cancelled (rare), mark WONT-DO.
-
-If you have something to flag for human attention but the work is shipped, write it in `## Summary` or `## Next Recommended Step`. The state stays DONE.
-
-## Single-Shot Discipline
-
-PO runs once per brief and exits. There is no incremental update — the output is the entire requirements document plus PM ticket, or a single blocker explaining what's missing.
-
-If PO cannot produce a valid expansion, set state to `BLOCKED` with the obstacle named precisely. Do not produce a partial requirements doc as the final artifact.
-
-## Git Workflow
-
-PO tasks rarely require git operations — PO writes documents to the kanban and creates tickets locally. If a PO task does include git work (e.g., committing the new requirements doc to a repo), follow the standard kanban git workflow with `## Source Branch` from the task README. PO never touches origin; CM is the only role with origin authority.
-
-## Checkpoint Discipline
-
-- Update `status.md` after completing each step in the workflow.
-- If your context fills, the next session should be able to resume cleanly.
-- Even though PO is short relative to PM, partial requirements documents downstream are worse than no document — finish the work or block precisely.
+Update `status.md` after each of the eight steps, so a session that runs out of context resumes cleanly. PO is short compared to PM, but a partial requirements document downstream is worse than none at all: finish the work, or block precisely.

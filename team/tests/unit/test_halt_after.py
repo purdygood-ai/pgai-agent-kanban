@@ -331,16 +331,24 @@ def test_check_drain_versioned_rc(
     assert result is expected
 
 
-def test_check_drain_bare_rc_promotes_immediately_when_no_active_rc(
+def test_check_drain_bare_rc_reports_drained_when_no_active_rc(
     tmp_path: Path,
 ) -> None:
-    """check_drain (bare 'rc') promotes to HALT immediately when Active RC is 'none' (an earlier defect)."""
+    """check_drain (bare 'rc') reports drained when Active RC is 'none' (an earlier defect fixed).
+
+    check_drain only REPORTS the condition; it no longer promotes itself.
+    Promotion is the RC-close gate's job (rc_gate.evaluate) so there is
+    exactly one call site that ever invokes promote() -- see
+    team/pgai_agent_kanban/halt_after/rc_gate.py. Prior to that module's
+    introduction, this branch called promote() directly; that behavior
+    moved to rc_gate.evaluate() (see test_halt_after_rc_gate.py), which is
+    exercised end-to-end in test_halt_after_rc_close_gate.py's fixtures.
+    """
     root = _make_project_root_with_release_state(tmp_path, active_rc="none")
     (root / "HALT-AFTER").write_text("rc\n", encoding="utf-8")
     result = check_drain("rc", root)
-    # an earlier defect: should promote immediately and return True
     assert result is True
-    assert (root / "HALT").exists()
+    assert not (root / "HALT").exists(), "check_drain must not promote by itself"
 
 
 def test_check_drain_bare_rc_rewrites_halt_after_when_active_rc_present(

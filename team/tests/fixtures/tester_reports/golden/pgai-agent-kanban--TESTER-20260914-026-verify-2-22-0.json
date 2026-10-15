@@ -1,0 +1,221 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified release candidate `ai_rc/v2.22.0` (commit `389edfe`, 22 files,\n+8382/-281) against\n`projects/pgai-agent-kanban/requirements/v2.22.0-docs-truth-rollup.md` — \"Every\npublic claim is one that is already true.\" The RC lands a doc-truth lint\n(`team/scripts/lint_doc_command_truth.py`, three checks: command existence /\n`--help`-parses, config-key parity, dashboard window-pane parity), three\ngenerator plus `--check` pairs (operator verb reference, dashboard window tour,\nmeasured-pace block), a four-stage stranger's-path run-through fixture\n(`team/scripts/harness/strangers-path-check.sh`), and regenerated\nREADME / ARCHITECTURE / HOW_TO / OPERATIONS / operator-troubleshooting /\ndocker / dashboard documents.\n\nBoth gated runners exit 0. The three generators' `--check` modes are green and\ntheir drift guards were exercised by seeding edits into scratch copies — each\nnamed the drifted item, exited non-zero, and wrote nothing. The stranger's-path\nfixture was re-run independently for this report and passed all four stages\n(container, install, board, helloworld) with exit 0, so the second half of the\nrelease's Acceptance is met and demonstrated rather than taken on trust.\n\nThe first half is not. `python3 team/scripts/lint_doc_command_truth.py` exits 1\nwith 55 command findings plus 46 key-parity and 12 pane-parity findings, so the\nAcceptance clause \"Doc-truth lint green\" is unmet. The completion note for\n`CODER-20260914-024-strangers-path-fixture` records that clause as MET, but the\nevidence it quotes is four suites of the pre-existing\n`team/scripts/harness/doc-lint.sh` harness rather than the lint tickets 1 and 2\ndelivered; those are different programs, and only the former is green.\n\nNothing regressed. Of the 96 distinct document-and-line sites the lint flags,\nzero sit on a line this RC added — every flagged citation is context this RC\nleft untouched. The RC's real effect is that defects which were previously\ninvisible are now enumerated, which is what the release set out to build.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Release Acceptance clause \"Doc-truth lint green\" is not met",
+      "heading": "Finding 1: Release Acceptance clause \"Doc-truth lint green\" is not met",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** medium (3-5 CODER tasks — the five filings below)\n**Systemic Risk:** low (documentation accuracy; no runtime path affected)\n**Regression:** no — established by diffing every finding site against the RC's\nown diff: of 96 distinct `<doc>:<line>` sites the lint reports, 0 fall inside a\nhunk this RC added. Every one is unchanged context that shipped in v2.21.2 and\nearlier.\n**Integrity Damage:** no\n**Filed As:** decomposed into BUG-0268, BUG-0269, BUG-0270, BUG-0271, BUG-0272,\nBUG-0273 (Path C-A — filed as BUG — code defect / regression / test failure).\nNo separate bug is filed for the roll-up.\n\nEvidence, run from the RC worktree:\n\n```\n$ python3 team/scripts/lint_doc_command_truth.py ; echo \"EXIT=$?\"\nlint_doc_command_truth: scanned 509 citation(s) across 9 document(s); 55 finding(s).\nlint_doc_command_truth: key-parity: scanned 90 key citation(s) across 11 document(s) against 56 registry key(s); 46 finding(s) (11 loader key(s) no scanned document mentions).\nlint_doc_command_truth: pane-parity: scanned 43 window/pane citation(s) across 9 document(s) against 15 census window id(s) (16 row(s)); 12 finding(s) (0 census window(s) no scanned document describes).\nEXIT=1\n```\n\nFinding headlines by class: 47 `MISSING COMMAND`, 33 `UNKNOWN CONFIG KEY`, 12\n`DASHBOARD WINDOW NAME MISMATCH`, 11 `UNDOCUMENTED CONFIG KEY`, 8 `HELP FAILS`,\n2 `CONFIG DEFAULT MISMATCH`.\n\nThe five documents the requirement names as its deliverable are much cleaner\nthan the manifest set: scanned explicitly, `README.md`, `HOW_TO.md`,\n`ARCHITECTURE.md` and `docs/docker.md` produce 4 command findings (all of them\nFindings 4 and 6 below), 1 key finding, and 11 worklist-direction pane entries —\nno missing commands, no stale window names. The regeneration work did its job\non the documents it was pointed at; the shortfall is in the wider manifest set\n(`docs/OPERATIONS.md` alone carries 55 of the 96 sites; `kanban.cfg_example` 15 and `project.cfg_example` 12 more) and in the check itself.",
+      "filed_as": "BUG-0268",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "medium (3-5 CODER tasks — the five filings below)",
+        "systemic_risk": "low (documentation accuracy; no runtime path affected)",
+        "regression": "no — established by diffing every finding site against the RC's",
+        "filed_as": "decomposed into BUG-0268, BUG-0269, BUG-0270, BUG-0271, BUG-0272,"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Key-parity check reports genuinely-accepted configuration keys as unknown",
+      "heading": "Finding 2: Key-parity check reports genuinely-accepted configuration keys as unknown",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium — a check that is wrong about thirty of its\nthirty-three assertions trains its readers to ignore it, and a CODER acting on\none of the false findings would delete correct documentation. This is the\nfailure the release's own Intent names (\"it teaches them to distrust the rest of\nthe page\"), reproduced in the tool built to prevent it.\n**Regression:** no — the check is new in this RC and no prior behavior existed\nto break; the shipped documents it misjudges are unchanged.\n**Integrity Damage:** no\n**Filed As:** BUG-0268 (Path C-A)\n\nThe check treats `team/scripts/lib/config_loader.sh`'s `# Key Registry` comment\nblock as the system's accepted key set. It is not, in three ways:\n\n1. The registry's own opening line reads \"Every **kanban.cfg** key known to the\n   wake chain is listed here\", but the check validates `project.cfg_example`\n   against it, so all twelve ordinary project.cfg keys are reported unknown —\n   including `[project] branch_prefix`, which is what produces this project's\n   own `ai_` branch prefix.\n2. Keys read through `read_ini` / `config_get` outside `config_loader.sh` are\n   invisible to it. `[governance] budget_bytes_cm` is read at\n   `team/scripts/lint_governance_byte_budgets.sh:229`;\n   `[dashboard] snapshot_ttl_seconds` at\n   `team/scripts/dashboard/lib/snapshot.sh:124`; `[docker] docker_exe` at\n   `team/scripts/lib/docker_engine.sh:67`; `[paths] cleanup_retention_days` at\n   `team/scripts/cleanup/cleanup.sh:97`; `[release] max_rc_retries` at\n   `team/scripts/lib/project_paths.sh:1019`. All are reported unknown.\n3. `team/scripts/lib/config_loader.sh:427` reads `[wake] zero_progress_cap`, and\n   the registry block does not list it, so `kanban.cfg_example:322` documenting\n   it is reported unknown.\n\nThe check is not uniformly wrong — `docs/OPERATIONS.md:930` genuinely documents\n`max_tasks_per_wake` under `[chain]` where the loader reads it under `[wake]`.\nThat real catch is currently buried under roughly thirty false ones.",
+      "filed_as": "BUG-0268",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium — a check that is wrong about thirty of its",
+        "regression": "no — the check is new in this RC and no prior behavior existed",
+        "filed_as": "BUG-0268 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Installed reference documents cite scripts that were renamed and no longer exist",
+      "heading": "Finding 3: Installed reference documents cite scripts that were renamed and no longer exist",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks; mostly mechanical, two citations need a\ndecision)\n**Systemic Risk:** low\n**Regression:** no — none of the 47 citations sits on a line this RC added; the\nrename predates this RC and the documents have been stale since it happened.\n**Integrity Damage:** no\n**Filed As:** BUG-0269 (Path C-A)\n\n`cm-open-rc.sh` (14 citations), `cm-cancel-rc.sh` (11), `cm-release.sh` (7),\n`cm-finalize.sh`, `cm-open-doc.sh`, `dashboard-create.sh`,\n`dashboard-column-render.sh`, `$KANBAN_ROOT/team/scripts/dashboard.sh` (5),\n`halt_after/drain.py` (2) and `aggregate_tokens.py` all resolve to nothing:\n\n```\n$ find . -path ./.git -prune -o -name 'cm-open-rc.sh' -print\n$ ls team/scripts/cm/\ncancel-rc.sh  finalize-release.sh  finalize.sh  open-doc.sh  open-rc.sh  promote_bundled_items.py  push-watchdog.sh  release.sh\n```\n\n`docs/OPERATIONS.md` carries the bulk, and it is on\n`team/config/docs-manifest.txt`, so the dead citations are copied onto every\ninstalled and upgraded kanban root. `docs/OPERATIONS.md:1915` instructs a reader\nrecovering from a botched RC to run `cm-open-rc.sh v0.15.5`.",
+      "filed_as": "BUG-0269",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks; mostly mechanical, two citations need a",
+        "systemic_risk": "low",
+        "regression": "no — none of the 47 citations sits on a line this RC added; the",
+        "filed_as": "BUG-0269 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "`pseudocron.py --help` starts the scheduler instead of printing usage",
+      "heading": "Finding 4: `pseudocron.py --help` starts the scheduler instead of printing usage",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low — the side effect is a scheduler the caller did not ask\nfor, which they can kill; nothing is corrupted.\n**Regression:** no — `team/scripts/pseudocron.py` is not in this RC's diff. The\nnew lint is what surfaced it.\n**Integrity Damage:** no\n**Filed As:** BUG-0270 (Path C-A)\n\n```\n$ timeout 10 python3 team/scripts/pseudocron.py --help ; echo \"rc=$?\"\nTerminated\nrc=124\n```\n\n`grep -n 'argparse\\|sys.argv' team/scripts/pseudocron.py` returns nothing:\n`main()` (line 164) resolves the kanban root, reads `pseudocron.cfg`, installs\nSIGINT/SIGTERM handlers, and enters `while True:` at line 215 without ever\nlooking at its arguments. Cited at `docs/docker.md:120` and `docs/docker.md:451`.\n\nThe existing `team/scripts/lint_help_presence.py` reports `87 script(s)\nchecked, 0 exempt, 0 offenders` because its scan set is the `.sh` files under\n`team/scripts` and `team/scripts/cm`; a `.py` entry point beside them is outside\nits view. That is why this survived until a lint that reads documents rather\nthan directories went looking.",
+      "filed_as": "BUG-0270",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low — the side effect is a scheduler the caller did not ask",
+        "regression": "no — `team/scripts/pseudocron.py` is not in this RC's diff. The",
+        "filed_as": "BUG-0270 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Two installed documents describe the previous dashboard layout",
+      "heading": "Finding 5: Two installed documents describe the previous dashboard layout",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low\n**Regression:** no — neither passage is on a line this RC added.\n**Integrity Damage:** no\n**Filed As:** BUG-0271 (Path C-A)\n\n`docs/OPERATIONS.md:1138-1142` lists window 0 as `Status`, 1 as `logs`, 2 as\n`terminal`, 3 as `attention`. `team/config/dashboard_windows.census` — the\ntree's declared authority — says `0 main`, `1 operator`, `2 visibility`,\n`3 attention`, with `logs` at 9 and `terminal` at 12. Only window 3 matches.\n\n`docs/cm-release-reference.md:53` tells the reader a pending `HUMAN-APPROVE`\ngate surfaces on \"dashboard window 14 (human-review)\" and line 55 says the\napproval commands are copy-pasteable from window 14. The census puts\n`human-review` at 13; window 14 is `drill-N`.",
+      "filed_as": "BUG-0271",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low",
+        "regression": "no — neither passage is on a line this RC added.",
+        "filed_as": "BUG-0271 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "`dashboard/create.sh --help` dies of SIGPIPE intermittently",
+      "heading": "Finding 6: `dashboard/create.sh --help` dies of SIGPIPE intermittently",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low\n**Regression:** no — `team/scripts/dashboard/create.sh`'s help path is not in\nthis RC's diff, and the same flake is recorded independently in\n`WRITER-20260914-022-regen-operations-trouble`'s completion note, including a\nfinding citing a document line that task never touched.\n**Integrity Damage:** no\n**Filed As:** BUG-0272 (Path C-A)\n\n```\n$ for i in 1 2 3; do timeout 20 bash team/scripts/dashboard/create.sh --help >/dev/null 2>&1; echo \"attempt$i rc=$?\"; done\nattempt1 rc=0\nattempt2 rc=141\nattempt3 rc=141\n```\n\n141 is 128+13 (SIGPIPE). Because the doc-truth lint invokes `--help` on every\ncited command, this makes its `HELP FAILS` count differ between runs against a\nbyte-identical tree.",
+      "filed_as": "BUG-0272",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low",
+        "regression": "no — `team/scripts/dashboard/create.sh`'s help path is not in",
+        "filed_as": "BUG-0272 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "The doc-truth lint is invoked by nothing, and its default scan set omits four of the five documents the release names",
+      "heading": "Finding 7: The doc-truth lint is invoked by nothing, and its default scan set omits four of the five documents the release names",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks, sequenced after Finding 2)\n**Systemic Risk:** medium — `team/SOP.md` (\"No silent skips\") states the rule\nthis breaks: a check nobody can see the result of is indistinguishable from a\ncheck that passed. A future TESTER report that does not happen to run this lint\nby hand says nothing about doc truth, which reads as \"fine\".\n**Regression:** no — the lint is new in this RC; nothing previously ran it\neither.\n**Integrity Damage:** no\n**Filed As:** BUG-0273 (Path C-A)\n\n```\n$ grep -rn \"lint_doc_command_truth\" --include='*.sh' --include='*.py' \\\n    --include='*.txt' --include='*.cfg' --include='*.json' . \\\n  | grep -v '^./.git' | grep -v '^./team/scripts/lint_doc_command_truth.py' \\\n  | grep -v '/tests/'\n$\n```\n\nNo output. In particular the name appears in neither\n`team/scripts/lib/gated_runner_lint.sh`, `team/scripts/run-unit-tests.sh`,\n`team/scripts/run-integration-tests.sh`, nor\n`team/scripts/harness/doc-lint.sh`. Consistent with that,\n`${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-unit.json` from this run's gated\nunit runner contains only `hygiene` entries.\n\nSecond half: the default scan set is `team/config/docs-manifest.txt`, whose nine\nscanned entries do not include `README.md`, `HOW_TO.md`, `ARCHITECTURE.md`, or\n`docs/docker.md` — four of the five documents the requirement's first\nDeliverable names. Checking them requires twelve explicit flags.",
+      "filed_as": "BUG-0273",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks, sequenced after Finding 2)",
+        "systemic_risk": "medium — `team/SOP.md` (\"No silent skips\") states the rule",
+        "regression": "no — the lint is new in this RC; nothing previously ran it",
+        "filed_as": "BUG-0273 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Suites, generators, fixture, and structural criteria — all pass",
+      "heading": "Finding 8: Suites, generators, fixture, and structural criteria — all pass",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Gated unit runner.** `bash team/scripts/run-unit-tests.sh --coverage` →\n  `UNIT_EXIT=0`; `4463 passed, 31 skipped in 750.04s`.\n- **Gated integration runner.**\n  `bash team/scripts/run-integration-tests.sh --coverage` →\n  `INTEGRATION_EXIT=0`; `464 passed, 1 skipped in 510.90s`.\n- **Stranger's-path fixture (Acceptance half 2).** Re-run independently for this\n  report: `SP_EXIT=0`, all four stages PASS — container (image\n  `pgai-agent-kanban-debian:latest` built, `docs/docker.md:146` launch, mount\n  contract held), install (`docs/docker.md:115`, `Installation complete!`),\n  board (pseudocron started, dashboard session up with 14 windows), helloworld\n  (`helloworld-flow-check.sh --compare` exit 0, outcome files match the\n  committed goldens). Every step is reported with the `docs/docker.md:<line>` it\n  was taken from, which is the \"docs verbatim\" property the Acceptance asks for.\n- **Generators, `--check` green.** `generate_operator_verb_docs.py --check` →\n  `OK -- all 27 verb block(s) match the manifest and their own --help output`\n  (27 = the manifest's active-verb count, and 27 `OPERATOR-VERBS-GENERATED:BEGIN`\n  markers are present in `docs/operator-commands.md`).\n  `dashboard/generate_window_docs.py --check` → `OK -- all surfaces match the\n  census` (16 tour rows = 16 census `W` rows).\n  `generate_measured_pace_docs.py --check` → `OK -- both docs match the measured\n  rollups`.\n- **Drift guards exercised (Step 6.5).** Seeding a changed flag into a `halt`\n  verb block in a scratch copy of `docs/operator-commands.md` produced\n  `DRIFT -- verb='halt' block disagrees with its --help output`, exit 1, file\n  md5 unchanged. Seeding a wrong pane count for window 5 into a scratch\n  `docs/dashboard.md` produced `DRIFT -- docs/dashboard.md: window tour entry\n  for window=5 name='git' variant='-' disagrees with the census`, exit 1, file\n  unchanged. Both refusals carry the dual-channel contract.\n- **Measured-pace honesty (Deliverable 2).** The rendered block reads \"5.4–142.7\n  min, median 17.3 min. Sample: 112 RC(s), 864 task(s)\" — the measured value,\n  not the brief's estimated 13–17 min/task, which is the correct precedence. No\n  `10–20 minutes` fiction survives anywhere in the tree\n  (`grep -rn \"10–20 minutes\\|10-20 minutes\\|10 to 20 minutes\" --include=*.md`\n  returns nothing). Thin-data and no-data paths were exercised against scratch\n  rollup directories: one rollup renders \"thin sample (1 RC(s)); treat as\n  provisional\", zero rollups renders \"not available yet -- no per-RC metric\n  rollups were found\"; neither fabricates a number.\n- **Deliverable 1 spot-checks.** All ten flags `install.sh --help` accepts are\n  documented in `HOW_TO.md`, including `--no-system-cron` and the deprecated\n  `--no-crontab` / `--crontab-tier=none`. `docs/OPERATIONS.md` now carries the\n  deep-verify material (8 case-insensitive hits, 0 at the RC base);\n  `docs/operator-troubleshooting.md` leads with `why.sh` (20 hits, 0 at the RC\n  base). `docs/docker.md` states the board-up path as 9 ordered `### Step N`\n  headings. The README agent roster reconciles one-for-one with the seven files\n  under `team/roles/`.\n- **Link integrity.** All 107 relative links across `README.md`, `HOW_TO.md`,\n  `ARCHITECTURE.md`, `docs/docker.md`, `docs/dashboard.md`,\n  `docs/OPERATIONS.md`, `docs/operator-commands.md` and\n  `docs/operator-troubleshooting.md` resolve; 0 dead. The four\n  `team/scripts/harness/doc-lint.sh` suites (`links`, `cmd`, `fossil-greps`,\n  `feature-greps`) all exit 0.\n- **Census and gate compliance.** `lint_gate_census_compliance.py` → `OK -- 36\n  file(s) checked, 0 offenders`. The RC's four new anchors\n  (`doc-command-truth-01`, `doc-key-truth-01`, `doc-pane-truth-01` as `CONVERT`;\n  `strangers-path-check-stage-failed-01` as `BLOCK-WORTHY`) each resolve to\n  exactly one source marker and one matching Locator Index line.\n  `lint_operator_verb_manifest.py` → `0 drift finding(s)`.\n  `lint_skip_bug_gate.sh` → `OK — all skip annotations are compliant`;\n  `0 missing files` (the four `BUG-123x` greps hit only fixture literals inside\n  `team/tests/unit/test_skip_bug_citation_scan.py`).\n- **Release-state drift (Step 6.1).** `pp_last_released_version` returns\n  `v2.21.2`; `semver_gt v2.22.0 v2.21.2` is true. `## Active RC` reads `v2.22.0`\n  and matches the live `ai_rc/v2.22.0` branch; `## Last Released` is a\n  well-formed `v2.21.2`.\n- **Pre-flight (Steps 2a, 3, 3a).** Worktree HEAD `389edfe` equals\n  `ai_rc/v2.22.0`; `git status --short` empty; `git stash list` empty. All ten\n  prerequisite tasks are DONE with their feature branches merged and deleted\n  (normal post-merge cleanup), so both merge checks are satisfied; no live\n  feature branch remains to examine anywhere in the project.\n- **Prereq graph (Step 6.10).** 23 tasks in the v2.21.1–v2.22.0 span; no cycles,\n  every referenced task ID exists, sequence numbers 015–026 non-colliding,\n  bookends correct (`CM-20260914-025-open-rc-2-22-0` at the start,\n  `CM-20260914-028-release-2-22-0` waiting at the end).\n- **Synthetic release simulation (Step 6.8).** Skipped with note: the RC's diff\n  touches no release-lifecycle file — no `team/scripts/cm/*`, no\n  `project_paths.sh`, nothing in the open/close cycle.\n- **Coding-standards spot-check (Step 6.14).** No bug ID, task ID, or version\n  provenance appears in any of the five new source files\n  (`lint_doc_command_truth.py`, `generate_operator_verb_docs.py`,\n  `generate_measured_pace_docs.py`, `strangers-path-check.sh`,\n  `doc_step_extract.py`). Every new script ships a `--help` naming its arguments;\n  each generator exposes path overrides rather than hardcoding operational\n  paths, which is what made the drift-guard verification above possible without\n  touching the worktree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

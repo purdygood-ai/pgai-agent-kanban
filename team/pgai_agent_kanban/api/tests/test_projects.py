@@ -4,7 +4,7 @@ test_projects.py — Tests for GET /projects/{name} metadata card endpoint.
 Acceptance criteria verified:
   1. GET /projects/<fixture> returns 200 with every required field present.
   2. last_released in the response equals the value read by
-     board_classifier.get_last_released_for_project (behavioral cross-check:
+     pgai_agent_kanban.board.get_last_released_for_project (behavioral cross-check:
      the endpoint and the helper use the same source).
   3. queue_counts includes all five agent roles with {open, working, done}
      counts matching the fixture.
@@ -25,7 +25,7 @@ from typing import Generator
 import pytest
 from fastapi.testclient import TestClient
 
-from pgai_agent_kanban.api.board_classifier import get_last_released_for_project
+from pgai_agent_kanban.board import get_last_released_for_project
 
 # ---------------------------------------------------------------------------
 # Fixture constants
@@ -285,7 +285,7 @@ class TestProjectMetadataEndpoint:
         assert ceilings["max_patch"] == 21
 
     # -----------------------------------------------------------------------
-    # AC2: last_released cross-check against board_classifier helper
+    # AC2: last_released cross-check against the pgai_agent_kanban.board helper
     # -----------------------------------------------------------------------
 
     def test_last_released_matches_classifier_helper(
@@ -293,7 +293,7 @@ class TestProjectMetadataEndpoint:
         meta_client: TestClient,
         project_fixture_root: pathlib.Path,
     ) -> None:
-        """last_released equals the value board_classifier.get_last_released_for_project returns.
+        """last_released equals the value pgai_agent_kanban.board.get_last_released_for_project returns.
 
         This is the behavioral cross-check: the endpoint and the helper share the
         same resolution path (release-state.md ## Last Released), so they must
@@ -517,7 +517,7 @@ class TestProjectMetadataEndpoint:
         )
 
     # -----------------------------------------------------------------------
-    # Additional: halt flag, color, ceilings null when absent
+    # Additional: halt flag, color, the ceilings in effect
     # -----------------------------------------------------------------------
 
     def test_halt_false_when_no_halt_file(
@@ -554,25 +554,53 @@ class TestProjectMetadataEndpoint:
             f"halt must be True when HALT file exists; got {body['halt']!r}"
         )
 
-    def test_ceilings_null_when_project_cfg_absent(
+    @pytest.mark.parametrize(
+        "versioning, expected, warned",
+        [
+            pytest.param(
+                None, {"max_major": 0, "max_minor": 13, "max_patch": 21}, False,
+                id="no-project-cfg-reads-the-defaults",
+            ),
+            pytest.param(
+                "", {"max_major": 0, "max_minor": 13, "max_patch": 21}, False,
+                id="no-versioning-section-reads-the-defaults",
+            ),
+            pytest.param(
+                "[versioning]\nmax_minor = 5\nmax_major = none\n",
+                {"max_major": None, "max_minor": 5, "max_patch": 21}, False,
+                id="none-reports-unlimited",
+            ),
+            pytest.param(
+                "[versioning]\nmax_major = O\n",
+                {"max_major": None, "max_minor": 13, "max_patch": 21}, True,
+                id="malformed-reports-null-with-a-warning",
+            ),
+        ],
+    )
+    def test_ceilings_report_the_ceiling_in_effect(
         self,
         tmp_path: pathlib.Path,
         monkeypatch: pytest.MonkeyPatch,
+        versioning: "str | None",
+        expected: dict,
+        warned: bool,
     ) -> None:
-        """Version ceilings are null when project.cfg has no [versioning] section."""
-        root = tmp_path / "no_cfg_root"
-        proj_name = "no-cfg-project"
+        """Each ceiling is the number in effect: an absent key (or project.cfg)
+        reads as its default, ``none`` is null (unlimited), and a malformed
+        value is null with one warning naming the file, key and value."""
+        root = tmp_path / "ceiling_root"
+        proj_name = "ceiling-project"
 
         _write(
             root / "projects.cfg",
             f"[project:{proj_name}]\npriority=1\ndashboard_color=#378ADD\n",
         )
         proj_dir = root / "projects" / proj_name
-        # project.cfg exists but has no [versioning] section
-        _write(
-            proj_dir / "project.cfg",
-            f"[project]\nproject_name = {proj_name}\n",
-        )
+        if versioning is not None:
+            _write(
+                proj_dir / "project.cfg",
+                f"[project]\nproject_name = {proj_name}\n\n{versioning}",
+            )
         _write(
             proj_dir / "release-state.md",
             "# Release State\n\n## Active RC\nnone\n\n## Last Released\nnone\n",
@@ -595,10 +623,14 @@ class TestProjectMetadataEndpoint:
 
         assert resp.status_code == 200
         body = resp.json()
-        ceilings = body["ceilings"]
-        assert ceilings["max_major"] is None
-        assert ceilings["max_minor"] is None
-        assert ceilings["max_patch"] is None
+        assert body["ceilings"] == expected
+        ceiling_warnings = [w for w in body["warnings"] if "version ceiling" in w]
+        if warned:
+            assert len(ceiling_warnings) == 1, body["warnings"]
+            assert str(proj_dir / "project.cfg") in ceiling_warnings[0]
+            assert "max_major = 'O'" in ceiling_warnings[0]
+        else:
+            assert ceiling_warnings == [], body["warnings"]
 
     def test_color_uses_palette_fallback_when_absent_in_registry(
         self,

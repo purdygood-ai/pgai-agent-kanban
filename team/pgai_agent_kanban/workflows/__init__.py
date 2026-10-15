@@ -1,1 +1,1 @@
-# team/pgai_agent_kanban/workflows — Python package for workflow scaffolding utilities.
+"""team/pgai_agent_kanban/workflows — Python package for workflow scaffolding utilities."""

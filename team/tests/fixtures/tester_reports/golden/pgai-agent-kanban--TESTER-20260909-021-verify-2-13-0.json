@@ -1,0 +1,232 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "This is the re-run of the v2.13.0 cycle, re-opened by `CM-20260909-020-open-rc-2-13-0`\nafter the first attempt was cancelled on the regression recorded as BUG-0206.\nTen prerequisite tasks (CODER-010 through CODER-018 and WRITER-019) are DONE and\nall merged; pre-flight merge verification passed with no unmerged branches and no\nzero-commit anomalies.\n\nThe feature itself — the deferral posture, its four `[release]` config keys, the\nprecedence chain, the DEFER-LOW-BUGS campaign overlay, the discovery bug-step\ndeferral gate and piggyback carry, the ship-time campaign spend, and the dashboard\nsurfaces — was verified behaviourally end to end against sandboxed throwaway roots,\nnot merely read. Every acceptance criterion in the requirements doc is met, and every\none of the five bugs the cancelled cycle filed (BUG-0206 through BUG-0210) is\ndemonstrably closed on this tree: the unit suite is green again, refusals name their\naccepted sets, the cfg examples describe live keys, and PM's K=2 ride-along cap is\npresent and matched byte-for-byte by the bundle writer's rendered suffix.\n\nOne defect blocks a clean PASS. The gated integration runner exits 1 on\n`test_engine_behavior_baseline_harness.py::test_compare_against_goldens_is_clean_on_unmodified_tree`.\nThe release added four intended start-up narration lines to the wake log and did not\nre-capture the golden the engine-behavior regression lock compares against. The same\ntest passes on `ai_main`, so the direction is established: this release turned that\nlock red. The narration is correct; the golden is stale. Filed as BUG-0213.\n\nTwo quality-class lint classes also fired, both non-blocking and both filed\n(BUG-0214, BUG-0215).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Integration suite red — engine-behavior baseline golden not refreshed for the new loader narration",
+      "heading": "Finding 1: Integration suite red — engine-behavior baseline golden not refreshed for the new loader narration",
+      "level": 3,
+      "body": "**Category:** stale-assertion\n**Fix Effort:** small (1 CODER task — re-capture one fixture file)\n**Systemic Risk:** medium (the shipped gated integration runner exits 1, and the regression lock it guards is disabled until refreshed; nothing about chain integrity or data is at risk)\n**Regression:** yes (`test_compare_against_goldens_is_clean_on_unmodified_tree` passes on `ai_main` and fails on this RC — verified by running the file against a `git archive ai_main` extraction: `2 passed in 8.44s`)\n**Integrity Damage:** no\n**Filed As:** BUG-0213 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`team/scripts/lib/config_loader.sh` now emits, on the first `load_config` of a\nprocess, one stderr line per absent `[release]` posture key:\n\n```\nconfig_loader: load_config: [release] deferred_bugs absent; applying documented default 'false'.\nconfig_loader: load_config: [release] deferred_bug_level absent; applying documented default 'low'.\nconfig_loader: load_config: [release] defer_piggyback absent; applying documented default 'true'.\nconfig_loader: load_config: [release] deep_verify absent; applying documented default 'weekly'.\n```\n\nThat is exactly what the requirements doc asks for (\"absent key = default, narrated\nonce per run\"), and I confirmed the once-per-run guarantee holds across two\n`load_config` calls in one process — four lines, not eight. The defect is the\nun-refreshed half of the change: `team/tests/fixtures/engine-baseline/wake-log.txt`\nstill records the pre-release wake log, so the byte-identical comparison fails.\n\n**Stale-assertion evidence (per Step 7):**\n\n- **Test:** `team/tests/integration/test_engine_behavior_baseline_harness.py:102`\n  (`test_compare_against_goldens_is_clean_on_unmodified_tree`).\n- **Failing assertion:** `assert result.returncode == 0` — expected 0, actual 1.\n  The harness's own diff names the four added lines and nothing else\n  (`@@ -1,3 +1,7 @@`).\n- **Production code change:** `team/scripts/lib/config_loader.sh`,\n  `_config_loader_narrate_default_once` plus the four `[release]` key blocks in\n  `load_config`.\n- **RC commit / task:** `0db0193` (merge `205b734`), task\n  `CODER-20260909-010-defer-posture-config-keys`.\n- **Correct fix:** re-capture `team/tests/fixtures/engine-baseline/wake-log.txt` via\n  the harness's capture mode, reviewing the diff to confirm the four narration lines\n  are the only change. The production narration must not be removed.\n\n**Why medium and not high.** The rubric's `high` first condition is \"something that\nworked in the last shipped version does not work in this one.\" What stopped working\nis the test lock, not the product: the wake log's change is the release's own intended\noutput, the operator-facing behaviour is correct, and `bash team/scripts/run-unit-tests.sh`\nis green. Shipping does not make the running system worse. It does leave a red gate in\nthe shipped tree that an operator or CM running the suite will hit, and leaves the\nengine-behavior lock unable to catch the next real drift, which is why this is a real\ndefect at `medium` rather than hygiene at `low`. `Regression: yes` is stated honestly\nbecause this RC's changes are what produced it.",
+      "filed_as": "BUG-0213",
+      "filed_by": null,
+      "severity": null,
+      "category": "stale-assertion",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no",
+        "test": "team/tests/integration/test_engine_behavior_baseline_harness.py:102",
+        "failing_assertion": "`assert result.returncode == 0` — expected 0, actual 1.",
+        "production_code_change": "`team/scripts/lib/config_loader.sh`,",
+        "rc_commit_task": "`0db0193` (merge `205b734`), task",
+        "correct_fix": "re-capture `team/tests/fixtures/engine-baseline/wake-log.txt` via"
+      },
+      "raw": {
+        "category": "stale-assertion",
+        "fix_effort": "small (1 CODER task — re-capture one fixture file)",
+        "systemic_risk": "medium (the shipped gated integration runner exits 1, and the regression lock it guards is disabled until refreshed; nothing about chain integrity or data is at risk)",
+        "regression": "yes (`test_compare_against_goldens_is_clean_on_unmodified_tree` passes on `ai_main` and fails on this RC — verified by running the file against a `git archive ai_main` extraction: `2 passed in 8.44s`)",
+        "filed_as": "BUG-0213 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Deliverable — `[release]` config keys, defaults, and loud refusals",
+      "heading": "Finding 2: Deliverable — `[release]` config keys, defaults, and loud refusals",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll four keys registered in `team/scripts/lib/config_loader.sh` and validated.\nVerified behaviourally against a throwaway `kanban.cfg` under\n`$PGAI_AGENT_KANBAN_TEMP_DIR` (never the live root):\n\n| Case | Result |\n|---|---|\n| all four absent | rc=0; defaults false / low / true / weekly, each narrated once |\n| `deferred_bugs = on` | rc=1, `config_loader.release.invalid_deferred_bugs`, remedy names `true|false` and states `'on'/'off' are not accepted spellings` |\n| `deferred_bugs = off` | rc=1, same refusal |\n| `deferred_bug_level = urgent` | rc=1, remedy names `low|medium|high` |\n| `defer_piggyback = yes` | rc=1, remedy names `true|false` |\n| `deep_verify = sometimes` | rc=1, remedy names `weekly|off (or true|false)` |\n| `deep_verify = off` / `false` | rc=0, `PGAI_DEEP_VERIFY=false` |\n| `deep_verify = weekly` / `true` | rc=0, `PGAI_DEEP_VERIFY=true` |\n| all four set explicitly | rc=0, values exported verbatim |\n\nEvery refusal carries the full dual-channel triple (stable `error` key,\nplain-language `message`, runnable `remedy`) and every refusal site carries both a\n`BLOCK-WORTHY` class comment and a `CENSUS-ANCHOR` marker with a matching\nLocator Index entry. This is the acceptance criterion \"Loader: unknown value for any\nkey refuses loud with the accepted set; on/off rejected for booleans\" — met.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Deliverable — precedence chain, campaign overlay, and its refusals",
+      "heading": "Finding 3: Deliverable — precedence chain, campaign overlay, and its refusals",
+      "level": 3,
+      "body": "**Category:** pass\n\n`resolve_defer_posture` in `team/scripts/lib/defer_posture.sh`, exercised against a\nsandboxed root:\n\n| Case | Result |\n|---|---|\n| nothing set | `false|default`, `low|default`, `true|default`, `until=|none` |\n| kanban.cfg only | values tiered `kanban.cfg` |\n| project.cfg over kanban.cfg | per-key: `deferred_bugs` stayed `kanban.cfg`, `deferred_bug_level`/`defer_piggyback` moved to `project.cfg` |\n| campaign file present | `deferred_bugs=true|campaign file`, `deferred_bug_level=low|campaign file`, `until=v9.9.9|campaign file`, `campaign_file=<path>`; `defer_piggyback` correctly left on `project.cfg` |\n| campaign `until=9.9` | rc=1, `defer_posture.campaign_malformed_until`, `DEFER_POSTURE_LAST_ERROR_FILE` names the file |\n| campaign with no `until=` line | rc=1, `defer_posture.campaign_unparseable`, error file named |\n| `deferred_bugs = on` in project.cfg | rc=1, refusal names the accepted set and the offending file |\n| stray `defer_piggyback = any` outside `[release]` | rc=0, not read, no refusal |\n\nPrecedence is exactly `campaign file > project.cfg > kanban.cfg > default`, one\ndocumented line, and it holds per-key rather than per-file. The \"never silently off\"\nrule holds: a malformed campaign file refuses rather than falling through to a tier\nthat might say deferral is off. `DEFER_POSTURE_LAST_ERROR_FILE` survives the call\n(the implementation deliberately avoids `$(...)` around internal helpers so a subshell\ncannot swallow the global) — confirmed, the variable read correctly after each refusal.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Deliverable — operator verbs `defer.sh`, `undefer.sh`, `why.sh`",
+      "heading": "Finding 4: Deliverable — operator verbs `defer.sh`, `undefer.sh`, `why.sh`",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll three ship `--help` naming every argument (coding-standards directive 6).\nExercised against a sandboxed root:\n\n- `defer.sh --project demo --until v9.9.9` writes `DEFER-LOW-BUGS` carrying a\n  commented header and `until=v9.9.9`; narrates project, target, and path.\n- `defer.sh --project demo` refuses `defer.until_required`; remedy shows the full command.\n- `defer.sh --project demo --until 9.9` refuses `defer.until_malformed`, \"not well-formed\n  semver (expected vX.Y.Z)\" — validated at write, as the doc requires.\n- `defer.sh --project nope --until v9.9.9` refuses `defer.project_not_found` naming the path.\n- `why.sh --project demo` with a campaign live prints each field with its source\n  tier, and names the exact campaign file path.\n- `undefer.sh --project demo` removes the file and says so; a second run is\n  idempotent and says there was nothing to clear (exit 0 both times).\n- `why.sh` on an unparseable campaign file refuses through the resolver rather than\n  printing a guessed posture.\n\nThis covers the acceptance criteria \"undefer verb\" and \"why.sh names the resolved\nposture and its source tier\".",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Deliverable — discovery deferral gate, piggyback carry, hygiene sweep",
+      "heading": "Finding 5: Deliverable — discovery deferral gate, piggyback carry, hygiene sweep",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/scripts/lib/discovery_defer.sh` implements the founding rule correctly by\nconstruction and by test:\n\n- A deferred bug is never echoed to `discovery_step_bugs` as a bundle candidate, so\n  it cannot open an RC. A deferred bug can never become the trigger — the trigger is\n  always drawn from the kept set.\n- A severity that is not one of `low|medium|high` (empty, a typo, or `critical`)\n  resolves to `unparseable` and is **kept**, never silently swallowed into deferred,\n  and the run names the file.\n- Piggyback narration is the exact required shape:\n  `piggybacking N deferred bugs (trigger: <trigger-id> <severity>)`.\n- The ride-along wire format (`path\\tRIDE_ALONG:<trigger-id>`) renders in the bundle\n  as ` — hygiene ride-along (piggyback on <TRIGGER-ID>)`, byte-identical to the fixed\n  wording `team/roles/PM.md` (line 127) specifies and keys off.\n- The `<=K` consolidation cap is `team/roles/PM.md` line 129 — \"At most K tickets, and\n  K is 2 … a ceiling on tickets, never on bugs\", grouped by area. Present and\n  unambiguous; this is what the cancelled cycle filed as BUG-0208 and it is closed.\n- The hygiene sweep fires only when every unhandled bug is deferred **and**\n  `_disc_requirements_queue_empty` holds; ceiling-blocked and auto-invalid\n  requirements are correctly not counted as pending work.\n\nThe acceptance matrix is covered by named integration tests, all passing:\n`test_bundle_carries_the_trigger_and_every_deferred_low_with_ride_along_annotation`,\n`test_bundle_carries_only_the_trigger_while_low_bugs_stay_open_and_uncached`,\n`test_medium_bug_defers_and_opens_no_bundle`,\n`test_high_severity_bug_defers_and_opens_no_bundle`,\n`test_low_severity_bug_also_defers_at_level_high`,\n`test_sweep_bundles_deferred_bugs_once_bug_and_requirements_queues_are_both_empty`,\n`test_sweep_is_withheld_while_an_unprocessed_requirement_is_present`.\nThe \"requirements decompose normally in every state\" criterion is explicitly\nasserted per matrix cell by `_assert_requirements_file_still_decomposes`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Deliverable — ship-time campaign spend",
+      "heading": "Finding 6: Deliverable — ship-time campaign spend",
+      "level": 3,
+      "body": "**Category:** pass\n\n`cm_release_spend_campaign_file` is wired into `release_finalize.sh` Step 12 and\nexercised directly against a sandboxed project root:\n\n| Case | Result |\n|---|---|\n| no campaign file | narrates \"nothing to spend\", rc=0 |\n| shipped v2.14.0 < until v2.20.0 | file left in place, narrates the target still in force |\n| shipped v2.20.0 == until v2.20.0 | file removed, `## Campaign Spend Event` appended to release-state.md |\n| shipped v2.21.5 > until v2.20.0 | file removed (latching `>=`, not equality) |\n| malformed `until=2.20` | WARNs, leaves the file, returns 0 — never fails an already-tagged release |\n| root-scoped `$KANBAN_ROOT/DEFER-LOW-BUGS` | untouched; only the project-scoped file is spent |\n\nSemver ordering is the shared helper, not a string compare: `semver_gte v2.9.7 v2.17.1`\ncorrectly returns false. The audit block mirrors the HALT-AFTER promotion shape.\nThis is the \"until-file spend … precedence (file over cfg, resumes after spend)\"\ncriterion — met; after removal the resolver falls straight through to the cfg tiers\nwith no further action, which I confirmed by re-resolving after a spend.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Deliverable — dashboard surfaces and icon truth",
+      "heading": "Finding 7: Deliverable — dashboard surfaces and icon truth",
+      "level": 3,
+      "body": "**Category:** pass\n\n`dashboard_defer_status_segment` and `dashboard_defer_card_ids` in\n`team/scripts/dashboard/lib/defer_scope.sh`, exercised against a sandboxed two-bug\nfixture (one `low`, one `high`):\n\n| Case | Segment |\n|---|---|\n| deferral off | `off` (segment omitted by the renderer) |\n| on, level=low | `on / count=1 / low` — only the low bug counted |\n| on, level=high | `on / count=2 / high` — both counted |\n| bug flipped to `## Status: done` | count drops to 1 — non-open bugs correctly excluded |\n| campaign live | `on / count / low / until=v3.0.0` |\n| campaign malformed | `malformed / … / <path to the offending file>` |\n\n`dashboard_defer_card_ids` returns the compact `BUG-NNNN` form the card renderers\nalready display, and on `malformed` returns no ID list at all — the caller then\nrenders the warning glyph on every open card rather than guessing which the\nunreadable posture would have held. The status bar text is\n`BUGS DEFERRED n (<=level)[ until vX.Y.Z]`, with `GLYPH_DEFERRED_BUG=\"✋\"` and\n`GLYPH_DEFER_WARNING=\"⚠️\"` centralised in `team/scripts/lib/status_glyphs.sh`.\nAll three dashboard callers (`status-right.sh`, `status-bottom.sh`,\n`column-render.sh`) source `project_paths.sh`, which the scope library requires for\n`pp_bugs_dir`; I confirmed that dependency is satisfied in every caller.\n\nThe \"never-lie law\" criterion is met: the count is derived by calling the same\n`_disc_bug_severity` / `_disc_severity_defer_decision` primitives discovery itself\napplies, not by a second copy of the rule, and the malformed path renders a warning\nand a path instead of a posture. All three `test_defer_icon_truth.py` tests pass.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Deliverable — documentation",
+      "heading": "Finding 8: Deliverable — documentation",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/SOP-core.md` gains a \"Deferral Posture\" section with the four-key table, the\nprecedence line, the `level=high` consequence stated as the operator-knows-best case,\nthe campaign-file semantics, and the hygiene-sweep condition. `docs/operator-commands.md`\ndocuments `defer`, `undefer`, and `why`; `docs/OPERATIONS.md` carries the campaign\nwalkthrough and the status-bar rendering. `kanban.cfg_example` and `project.cfg_example`\nboth describe all four keys with accepted values and defaults — closing BUG-0209,\nwhich had reported the examples claiming the keys did nothing. `docs/blocking-site-census.md`\ngains fourteen new Locator Index entries, all in the anchor-token form, all resolving.\n\nI read the changed governance and documentation files fully rather than grepping them.\nSee Caveats for two out-of-scope sentence removals in `team/SOP-core.md` that I checked\nand concluded were not content loss.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Prior cycle's filed bugs are demonstrably closed",
+      "heading": "Finding 9: Prior cycle's filed bugs are demonstrably closed",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe cancelled first attempt filed BUG-0206 through BUG-0210. On this tree:\nBUG-0206 (unit suite red on the emitter guard line) — unit runner exits 0;\nBUG-0207 (new integration tests cite task IDs) — the provenance lint now reports one\nfinding and it is not in the test tree; BUG-0208 (piggyback carry has no task cap) —\n`team/roles/PM.md` carries the K=2 ceiling and the bundle writer emits the matching\nannotation; BUG-0209 (config examples say keys do nothing) — both examples now\ndocument live, validated keys; BUG-0210 (resolver refusal omits accepted set) — every\nresolver refusal I triggered named its accepted set. All five are `## Status: done`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Release-state and dependency-graph sanity",
+      "heading": "Finding 10: Release-state and dependency-graph sanity",
+      "level": 3,
+      "body": "**Category:** pass\n\n`## Active RC` is `v2.13.0`, opened `2026-09-09T03:14:15+00:00` by\n`CM-20260909-020-open-rc-2-13-0`; the `ai_rc/v2.13.0` branch exists and the worktree\nHEAD matches it exactly. `## Last Released` reads `v2.12.2`, well-formed, and\n`v2.13.0 > v2.12.2` by semver. No state drift between the file and the branch.\nAll ten prerequisite task IDs named in the task README exist and are DONE; the\nlifecycle bookends are correctly linked (CM-020 open-RC at the start, this TESTER task\nat the end); sequence numbers 010–021 are consistent and non-colliding, with no cycles.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

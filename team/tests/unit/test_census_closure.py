@@ -3,7 +3,7 @@ test_census_closure.py
 ======================
 Unit tests for the completion-census gate in close_intake_on_finalize_report
 and the per-wake sweep_running_intake_census function
-(team/scripts/lib/wake_common.sh).
+(team/scripts/lib/wake_lifecycle.sh).
 
 These tests exercise:
 
@@ -18,8 +18,8 @@ These tests exercise:
 
   (d) Sweep self-healing: stranded intake item (status running, all sibling tasks
       terminal, no task transition occurring) → sweep_running_intake_census closes
-      it on the next wake cycle.  This is the production corpse shape addressed by
-      BUG-0071.
+      it on the next wake cycle.  This is the production corpse shape the
+      sweep exists to heal.
 
   (e) Sweep mid-run negative: one sibling is WORKING → sweep logs the census
       attempt and does NOT close the item.
@@ -30,14 +30,17 @@ via bash subprocess using a controlled environment that stubs python3
 -m pgai_agent_kanban.ops close_item and the log() function so assertions can
 observe invocations and log lines.
 
-The census Python snippet is also tested directly (extracted from the heredoc
-in wake_common.sh) to confirm logic correctness without the bash integration
-surface.  Both levels of testing are intentional:
-  - Python-level tests: fast, no bash dep, confirm logic
+The census Python snippet is also tested directly: its source is read out of
+the heredoc in close_intake_on_finalize_report at test time and executed as
+shipped, so no copy of the census logic lives in this file and a change to the
+shipped heredoc changes what these tests observe.  That level includes an empty
+## Inputs followed by a section citing the requirements path, which must not
+count the task.  Both levels of testing are intentional:
+  - Python-level tests: fast, no bash dep, confirm the shipped census logic
   - Bash-level tests: confirm the shell function's guard/log/dispatch wiring
 
 Naming: function names describe behavior under test, never bug IDs or task IDs
-(SOP.md "Test Authoring Guidelines", Anti-pattern 6).
+(roles/TESTER.md "Test Authoring Guidelines", Anti-pattern 6).
 """
 
 from __future__ import annotations
@@ -53,70 +56,76 @@ import pytest
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
 
-_WAKE_COMMON_LIB = pathlib.Path("scripts/lib/wake_common.sh")
+_WAKE_LIFECYCLE_LIB = pathlib.Path("scripts/lib/wake_lifecycle.sh")
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 
 
 # ---------------------------------------------------------------------------
-# Census Python logic (extracted from wake_common.sh heredoc for direct testing)
+# Census Python logic, taken from the shipped wake_lifecycle.sh at test time
 #
-# This is the same Python snippet embedded in close_intake_on_finalize_report.
-# Tested here directly so census correctness is validated without the bash
-# integration surface.
+# The census is the python heredoc embedded in close_intake_on_finalize_report.
+# Its source is read out of the lib on every run and executed as-is, so a
+# change to the shipped heredoc (its ## Inputs reader included) changes what
+# these tests observe.  No copy of the census logic lives in this file.
 # ---------------------------------------------------------------------------
+
+_WAKE_LIFECYCLE_ABS = _TEAM_DIR / "scripts" / "lib" / "wake_lifecycle.sh"
+_CENSUS_FUNCTION = "close_intake_on_finalize_report"
+_CENSUS_MARKER = "TERMINAL = {"
+
+
+def _shipped_census_source() -> str:
+    """Return the census heredoc source from close_intake_on_finalize_report.
+
+    Scopes the search to the function body (header line to the first
+    column-0 closing brace) and returns the one ``<<'PY'`` heredoc in it
+    that defines the terminal-state set.  Fails loudly, naming the lib and
+    the marker, if the function or the heredoc cannot be found exactly once.
+    """
+    text = _WAKE_LIFECYCLE_ABS.read_text(encoding="utf-8")
+    fn = re.search(
+        rf"^{_CENSUS_FUNCTION}\(\)\s*\{{.*?^\}}[ \t]*$",
+        text,
+        flags=re.S | re.M,
+    )
+    assert fn, f"function {_CENSUS_FUNCTION}() not found in {_WAKE_LIFECYCLE_ABS}"
+    bodies = [
+        m.group(1)
+        for m in re.finditer(
+            r"<<'PY'[ \t]*\n(.*?)\n[ \t]*PY[ \t]*$", fn.group(0), flags=re.S | re.M
+        )
+        if _CENSUS_MARKER in m.group(1)
+    ]
+    assert len(bodies) == 1, (
+        f"expected exactly one heredoc containing {_CENSUS_MARKER!r} in "
+        f"{_CENSUS_FUNCTION}() of {_WAKE_LIFECYCLE_ABS}; found {len(bodies)}"
+    )
+    return bodies[0]
 
 
 def _run_census(tasks_root: pathlib.Path, req_path: str) -> str:
-    """Run the completion census over *tasks_root* for *req_path*.
+    """Run the shipped census heredoc over *tasks_root* for *req_path*.
 
-    Mirrors the Python heredoc embedded in close_intake_on_finalize_report.
-    Returns:
+    The heredoc is invoked exactly as the lib invokes it:
+    ``python3 - <tasks_root> <req_path>`` with the source on stdin.
+    Returns its stdout, stripped:
         "ok:<N>"          — all N siblings are terminal
         "skip:<detail>"   — one or more siblings are non-terminal
-        ""                — tasks_root does not exist
+    A non-zero exit fails the test with the heredoc's stderr.
     """
-    TERMINAL = {"DONE", "WONT-DO"}
-
-    if not tasks_root.is_dir():
-        return ""
-
-    total = 0
-    non_terminal: list[str] = []
-
-    for task_dir in sorted(tasks_root.iterdir()):
-        if not task_dir.is_dir() or task_dir.name == "queues":
-            continue
-        readme = task_dir / "README.md"
-        status_file = task_dir / "status.md"
-        if not readme.is_file() or not status_file.is_file():
-            continue
-        try:
-            readme_text = readme.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        # Filter to tasks whose ## Inputs cite the same requirements path
-        m = re.search(
-            r"^##\s+Inputs\s*\n(.*?)(?=\n##|\Z)",
-            readme_text,
-            flags=re.S | re.M,
-        )
-        if not m or req_path not in m.group(1):
-            continue
-        total += 1
-        try:
-            status_text = status_file.read_text(encoding="utf-8")
-        except OSError:
-            non_terminal.append(f"{task_dir.name}:UNKNOWN")
-            continue
-        state_m = re.search(r"^##\s+State\s*\n\s*(\S+)", status_text, re.M)
-        state = state_m.group(1).strip().upper() if state_m else "UNKNOWN"
-        if state not in TERMINAL:
-            non_terminal.append(f"{task_dir.name}:{state}")
-
-    if non_terminal:
-        summary = ", ".join(non_terminal)
-        return f"skip:{total} sibling(s), {len(non_terminal)} non-terminal: {summary}"
-    return f"ok:{total}"
+    proc = subprocess.run(
+        ["python3", "-", str(tasks_root), req_path],
+        input=_shipped_census_source(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(_TEAM_DIR),
+    )
+    assert proc.returncode == 0, (
+        f"shipped census heredoc exited {proc.returncode}\n"
+        f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
+    )
+    return proc.stdout.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -330,17 +339,36 @@ def test_census_empty_tasks_root_returns_ok_zero(tmp_path: pathlib.Path) -> None
     )
 
 
-def test_census_nonexistent_tasks_root_returns_empty_string(
+def test_census_empty_inputs_does_not_count_task_citing_path_in_later_section(
     tmp_path: pathlib.Path,
 ) -> None:
-    """Census returns empty string when tasks_root does not exist."""
-    req_file = _write_requirements(tmp_path, "v1.0.0-run-8.md")
-    tasks_root = tmp_path / "nonexistent_tasks"
+    """An empty ## Inputs reads as empty: a path cited only in the next section
+    does not make the task a sibling.
+
+    The task is WORKING, so if the census read past the empty ## Inputs into
+    ## Notes it would count the task and report skip:1.  Reading the section
+    as empty leaves the task out and reports ok:0.
+    """
+    req_file = _write_requirements(tmp_path, "v1.0.0-run-9.md")
+    tasks_root = tmp_path / "tasks"
+    task_dir = _write_task(tasks_root, "TESTER-001-empty-inputs", "WORKING", str(req_file))
+    (task_dir / "README.md").write_text(
+        textwrap.dedent(f"""\
+            # Task: TESTER-001-empty-inputs
+
+            ## Inputs
+
+            ## Notes
+            - {req_file}
+        """),
+        encoding="utf-8",
+    )
 
     result = _run_census(tasks_root, str(req_file))
 
-    assert result == "", (
-        f"Census must return '' when tasks_root does not exist; got {result!r}"
+    assert result == "ok:0", (
+        "A task whose ## Inputs is empty must not be counted even when a later "
+        f"section cites the requirements path; got {result!r}"
     )
 
 
@@ -426,7 +454,7 @@ def _run_close_intake(
     """Invoke close_intake_on_finalize_report in an isolated bash subprocess.
 
     Stubs log() (writes to stdout + log file) and python3 close_item
-    (records to sentinel).  Sources only the wake_common.sh library after
+    (records to sentinel).  Sources only the wake_lifecycle.sh library after
     providing all required stubs for its dependencies.
 
     Args:
@@ -448,7 +476,7 @@ def _run_close_intake(
     log_stub = _build_log_stub(log_file)
 
     # We source only the close_intake_on_finalize_report function from
-    # wake_common.sh by extracting it with sed (avoiding the module-level
+    # wake_lifecycle.sh by extracting it with sed (avoiding the module-level
     # side-effects of sourcing the full file).  The function itself has no
     # external bash-function dependencies beyond log(), which we stub.
     script = textwrap.dedent(f"""\
@@ -465,7 +493,7 @@ def _run_close_intake(
             python3 -m "$_mod" "$@"
         }}
 
-        # Extract and load close_intake_on_finalize_report from wake_common.sh.
+        # Extract and load close_intake_on_finalize_report from wake_lifecycle.sh.
         # We use awk to grab the function body (from the function header to its
         # matching closing brace) so we avoid sourcing the full file's bootstrap
         # side-effects while still exercising the real production function.
@@ -483,7 +511,7 @@ def _run_close_intake(
                     }}
                 }}
             }}
-        ' '{_WAKE_COMMON_LIB}')"
+        ' '{_WAKE_LIFECYCLE_LIB}')"
 
         close_intake_on_finalize_report \
             "{task_id}" \
@@ -766,13 +794,52 @@ def test_non_report_finalize_skips_entire_function(tmp_path: pathlib.Path) -> No
     )
 
 
+# ---------------------------------------------------------------------------
+# Missing tasks root: no census result, no closure
+# ---------------------------------------------------------------------------
+
+
+def test_nonexistent_tasks_root_yields_no_census_and_no_closure(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A tasks root that does not exist produces no census result.
+
+    close_intake_on_finalize_report only runs the census when the tasks root
+    is a directory; otherwise the census result stays empty, the function
+    logs that the tasks root was not found, and close_item is not invoked.
+    """
+    project_root = tmp_path / "project"
+    req_file = _write_requirements(project_root, "v1.0.0-run-8.md")
+    task_readme = _write_task(
+        tmp_path / "readme_only", "TESTER-001-verify", "DONE", str(req_file)
+    ) / "README.md"
+    tasks_root = project_root / "nonexistent_tasks"
+
+    stdout, stderr, rc, sentinel = _run_close_intake(
+        tmp_path, tasks_root, project_root, "TESTER-001-verify", task_readme
+    )
+
+    assert rc == 0, (
+        f"close_intake_on_finalize_report must exit 0; got {rc}\n"
+        f"stdout: {stdout!r}\nstderr: {stderr!r}"
+    )
+    assert not sentinel.exists(), (
+        "close_item must NOT be invoked when the tasks root does not exist.\n"
+        f"stdout: {stdout!r}\nstderr: {stderr!r}"
+    )
+    assert "tasks_root not found" in stdout, (
+        "The skip log line must say the tasks root was not found.\n"
+        f"stdout: {stdout!r}"
+    )
+
+
 # ===========================================================================
 # Bash-level integration tests for sweep_running_intake_census
 #
 # These tests exercise the per-wake self-healing sweep that closes stranded
 # intake items (all sibling tasks terminal but item status still running).
 #
-# sweep_running_intake_census is extracted from wake_common.sh via awk and
+# sweep_running_intake_census is extracted from wake_lifecycle.sh via awk and
 # called with a minimal stub environment:
 #   - log() writes to stdout + log file
 #   - WF_MANIFEST_FINALIZE="report" (pre-set so Guard 1 passes without
@@ -831,10 +898,10 @@ def _run_sweep_census(
       - wf_load_plugin — no-op (WF_MANIFEST_FINALIZE pre-set)
       - pp_requirements_dir — echoes req_dir
       - python3 close_item — records invocations to sentinel file
-      - close_intake_on_finalize_report — sourced from the real wake_common.sh
+      - close_intake_on_finalize_report — sourced from the real wake_lifecycle.sh
 
     Both sweep_running_intake_census and close_intake_on_finalize_report are
-    extracted from wake_common.sh via awk, so the sweep logic remains coupled
+    extracted from wake_lifecycle.sh via awk, so the sweep logic remains coupled
     to the real implementation.
 
     Args:
@@ -860,7 +927,7 @@ def _run_sweep_census(
     req_dir_s = str(req_dir)
     project_root_s = str(project_root)
     tasks_root_s = str(tasks_root)
-    wake_common_s = str(_WAKE_COMMON_LIB)
+    wake_lifecycle_s = str(_WAKE_LIFECYCLE_LIB)
 
     script_parts: list[str] = [
         "#!/usr/bin/env bash\n",
@@ -901,7 +968,7 @@ def _run_sweep_census(
         "                }\n",
         "            }\n",
         "        }\n",
-        f"    ' '{wake_common_s}'\n",
+        f"    ' '{wake_lifecycle_s}'\n",
         "}\n",
         "\n",
         "# Load close_intake_on_finalize_report (dependency of sweep).\n",
@@ -937,8 +1004,7 @@ def test_sweep_closes_stranded_item_when_all_siblings_terminal(
 
     Fixture (the production corpse shape):
       - requirements/v1.0.0-stranded.md  ## Status: running
-      - tasks/TESTER-001-verify/          ## State: DONE
-      - tasks/TESTER-002-companion/       ## State: DONE
+      - two sibling task folders, each  ## State: DONE
       No task is transitioning — the closing moment was missed.
 
     Expected: sweep_running_intake_census invokes close_item for
@@ -1107,7 +1173,7 @@ def test_sweep_no_running_items_logs_none_found(
 
 
 # ===========================================================================
-# BUG-0079: Per-item workflow type resolution and narrated skips
+# Per-item workflow type resolution and narrated skips
 #
 # These tests cover the three new acceptance criteria shapes:
 #   (f) Cfg-less fixture: item has ## Workflow Type: testing-only in the
@@ -1174,8 +1240,7 @@ def _run_sweep_census_with_type_dispatch(
 
     Unlike _run_sweep_census (which pre-sets WF_MANIFEST_FINALIZE globally),
     this helper stubs wf_load_plugin to return different finalize values based
-    on the workflow type argument.  This exercises the per-item lookup code path
-    introduced by the BUG-0079 fix.
+    on the workflow type argument.  This exercises the per-item lookup code path.
 
     Stub dispatch:
       testing-only → WF_MANIFEST_FINALIZE=report (exit 0)
@@ -1184,7 +1249,7 @@ def _run_sweep_census_with_type_dispatch(
       *            → exit 1 (unknown type)
 
     PP_workflow_type is deliberately left unset to simulate a project.cfg that
-    lacks a workflow_type entry (the cfg-less scenario from BUG-0079).
+    lacks a workflow_type entry (the cfg-less scenario).
 
     Args:
         tmp_path:      Pytest tmp_path directory.
@@ -1204,7 +1269,7 @@ def _run_sweep_census_with_type_dispatch(
     req_dir_s = str(req_dir)
     project_root_s = str(project_root)
     tasks_root_s = str(tasks_root)
-    wake_common_s = str(_WAKE_COMMON_LIB)
+    wake_lifecycle_s = str(_WAKE_LIFECYCLE_LIB)
 
     script_parts: list[str] = [
         "#!/usr/bin/env bash\n",
@@ -1252,7 +1317,7 @@ def _run_sweep_census_with_type_dispatch(
         "                }\n",
         "            }\n",
         "        }\n",
-        f"    ' '{wake_common_s}'\n",
+        f"    ' '{wake_lifecycle_s}'\n",
         "}\n",
         "\n",
         'eval "$(extract_fn close_intake_on_finalize_report)"\n',

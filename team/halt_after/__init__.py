@@ -9,8 +9,8 @@
 # package simply re-exports the public API from there.
 #
 # The fully-qualified import path remains:
-#   from team.pgai_agent_kanban.halt_after import parse_token, check_drain, promote
+#   from team.pgai_agent_kanban.halt_after import parse_token, check_drain, promote, rc_gate
 
-from pgai_agent_kanban.halt_after import parse_token, check_drain, promote
+from pgai_agent_kanban.halt_after import parse_token, check_drain, promote, rc_gate
 
-__all__ = ["parse_token", "check_drain", "promote"]
+__all__ = ["parse_token", "check_drain", "promote", "rc_gate"]

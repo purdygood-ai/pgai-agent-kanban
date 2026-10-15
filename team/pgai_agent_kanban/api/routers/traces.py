@@ -79,6 +79,7 @@ from fastapi.responses import JSONResponse
 
 from ..adapter import HTTP_UNPROCESSABLE_ENTITY
 from ..dependencies import warn_unknown_query_params
+from ..validation import has_traversal
 
 __all__ = ["router"]
 
@@ -99,43 +100,6 @@ _VALID_AGENTS: frozenset[str] = frozenset(
 # Filename convention: <YYYYMMDDTHHmmss>-<TASK-KEY>.md
 # The timestamp prefix is exactly 15 characters: 8 digits + "T" + 6 digits.
 _TIMESTAMP_RE = re.compile(r"^(\d{8}T\d{6})-(.+)$")
-
-
-# ---------------------------------------------------------------------------
-# Traversal guard (same logic as logs router)
-# ---------------------------------------------------------------------------
-
-
-def _has_traversal(value: str) -> bool:
-    """Return True when the value contains a path traversal sequence.
-
-    Checks both raw and URL-encoded forms before any filesystem access.
-    A traversal is detected when the value contains:
-      - ".." (dot-dot)
-      - "/" or "\\" (path separator)
-      - URL-encoded variants: "%2F" (slash), "%5C" (backslash), "%2E" (dot)
-      - Null bytes (path confusion)
-
-    This check fires BEFORE any filesystem access for query parameters.
-    It does NOT apply to the {id} path parameter — traversal-shaped ids are
-    simply not in the server's enumeration and resolve to 404.
-    """
-    upper = value.upper()
-    if ".." in value:
-        return True
-    if "/" in value:
-        return True
-    if "\\" in value:
-        return True
-    if "%2F" in upper:
-        return True
-    if "%5C" in upper:
-        return True
-    if "%2E" in upper:
-        return True
-    if "\x00" in value or "%00" in upper:
-        return True
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +331,7 @@ def get_traces_index(
     # -----------------------------------------------------------------------
     project_filter: Optional[str] = None
     if project is not None and project != "":
-        if _has_traversal(project):
+        if has_traversal(project):
             raise HTTPException(
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
                 detail=(
@@ -383,7 +347,7 @@ def get_traces_index(
     # -----------------------------------------------------------------------
     agent_filter: Optional[str] = None
     if agent is not None and agent != "":
-        if _has_traversal(agent):
+        if has_traversal(agent):
             raise HTTPException(
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
                 detail=(

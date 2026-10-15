@@ -1,0 +1,212 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified release candidate `ai_rc/v2.16.1` (HEAD `54b00c7`, worktree\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260911-006-verify-2-16-1`,\ndetached at the RC commit) against\n`projects/pgai-agent-kanban/requirements/v2.16.1-bugfix-bundle-20260911.md`.\nThe RC is a two-item BUG bundle: BUG-0237 (a malformed hygiene allowlist sidecar\nkilled both gated runners before pytest ran) and BUG-0238 (hygiene-lint remedy\ncommands persisted into auto-filed bugs named the ephemeral worktree they were\ngenerated in). Six commits across three tasks changed 6 files: 130 lines of\n`team/scripts/lint_hygiene.py`, 3 lines of\n`team/pgai_agent_kanban/lint/bug_filer.py`, two documentation files, and 234\nlines of new unit tests.\n\nBoth headline fixes work, and I verified both by triggering the failure modes\nrather than by reading the diff. Every one of the six malformed-sidecar shapes\nnow exits 0 with a `SIDECAR-MALFORMED` finding recorded and no suppression\nhonoured from the broken file; the bare lint invocation the gated runners make\nsurvives `set -euo pipefail` against a full copy of the RC tree carrying a\nblank-justification entry; and a bug filed by the aggregate filer from one\nthrowaway checkout carries a remedy command that runs correctly from a second,\nindependent checkout. Both gated runners exit 0 (3805 passed / 3 skipped unit;\n442 passed / 1 skipped integration). The documentation ticket's census edits are\naccurate and internally consistent, including the rollup arithmetic.\n\nTwo defects were found, both narrow and both in the seam where the two fixes\nmeet. The `hygiene-sidecar` finding class this release introduced is routed into\nthe aggregate bug filer without being covered by the sibling ticket's\npath-relativization, so the bug it writes names a deleted directory and carries\na reproduction command the lint rejects — the same defect BUG-0238 was filed to\nkill, reappearing through a path that fix did not cover. A live instance is\nalready sitting `open` in this project's `bugs/` directory. Separately, one\ncomment in `lint_hygiene.py` still describes the exit path the release deleted.\nBoth are filed via Path C-A. Neither prevents the release from being operated,\nand both leave v2.16.1 strictly better than v2.16.0, where the same condition\nkilled verification outright.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "malformed-sidecar abort converted to a recorded finding (BUG-0237)",
+      "heading": "Finding 1: malformed-sidecar abort converted to a recorded finding (BUG-0237)",
+      "level": 3,
+      "body": "**Category:** pass\n\nVerified behaviorally, not structurally. Six malformed-sidecar shapes were\nexercised against the RC's own `lint_hygiene.py`: blank `justification`,\ninvalid JSON, non-list top level, non-object entry, missing `content_hash`, and\nan unreadable file (`chmod 000`). Every one produced **exit 0**, a\n`SIDECAR-MALFORMED` finding in the findings file naming the sidecar, the\noffending entry index, and the reason it was refused, **and** left a real\nprovenance finding reported that the sidecar's own valid entry would have\nsuppressed. That is all three behaviors the ticket's constraints required.\n\nThe production-shape reproduction was run too, because the defect was an\n`errexit` chain-kill and only strict-mode bash surfaces that class. A full copy\nof the RC tree was made under `$PGAI_AGENT_KANBAN_TEMP_DIR` (the live worktree\nwas not mutated), one blank-justification entry was appended to its real\n`team/scripts/hygiene-lint-allowlist.json`, and the gated runners' exact\ninvocation was run under `set -euo pipefail` from the copy's `team/` directory:\n\n```\nbefore lint\nSURVIVED errexit: lint exit=0\n```\n\n9 findings were written to the findings file, one of them the\n`SIDECAR-MALFORMED` record; all 7 of the tree's live suppressions were dropped\nfor that run, which is the \"no suppression from the broken file is honoured\"\nrequirement demonstrated against the real allowlist rather than a fixture.\n\nExit 2 was confirmed to still mean only \"pytest unavailable\" from a runner's\npoint of view: the lint's remaining `return 2` sites are CLI-argument validation\n(`--classes`, `--add-suppression`) that the runners' fixed invocation cannot\nreach.\n\n`python3 team/scripts/lint_gate_census_compliance.py` exits 0 with zero\nfindings — the anchor marker and its Locator Index line were removed together,\nwhich is what the two-way reconciliation requires.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "remedy commands survive the tree that generated them (BUG-0238)",
+      "heading": "Finding 2: remedy commands survive the tree that generated them (BUG-0238)",
+      "level": 3,
+      "body": "**Category:** pass\n\nReproduced the report's own five-step scenario in production geometry: a\nthrowaway checkout `P` holding `team/scripts/lint_hygiene.py` at its real\nrepo-relative location, scanned with `--repo-root .`, findings wrapped into the\ngated-runner schema and run through `pgai_agent_kanban.lint.bug_filer`.\n\n`grep -c \"$P\"` against the filed `BUG-*-hygiene-lint-provenance.md` returns\n**0**. The persisted remedy reads\n\n```\npython3 \"team/scripts/lint_hygiene.py\" --add-suppression \"code/dirty.py\" 2 provenance \"...\" --sidecar \"team/scripts/hygiene-lint-allowlist.json\" --repo-root \".\"\n```\n\nand the `## Remedies` section is now prefixed with the run-from-the-repository-root\ninstruction. Running a generated `--add-suppression` command end-to-end wrote a\nsidecar entry naming the intended file, line, and class.\n\nThe interactive path was checked separately, from the dev-tree root: the lint\nstill prints a usable remedy block whose commands are runnable as printed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "a `hygiene-sidecar` finding files a bug nobody can act on",
+      "heading": "Finding 3: a `hygiene-sidecar` finding files a bug nobody can act on",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a real defect an agent hits, but shipping worsens nothing — see the rubric reasoning below)\n**Regression:** yes (the failing shape does not predate this RC; the `hygiene-sidecar` finding class, and therefore the bug it files, is new in v2.16.1)\n**Integrity Damage:** no\n**Filed As:** BUG-0240 (Path C — autonomous follow-up filing, non-blocking)\n\nThe new `SIDECAR-MALFORMED` finding carries `class=\"hygiene-sidecar\"` and flows\nthrough the gated runners' findings file into the aggregate bug filer\n(`run-unit-tests.sh:654`, `run-integration-tests.sh:586`). The bug the filer\nwrites fails BUG-0238's own acceptance item 1, and fails it through a path that\nticket's fix did not cover.\n\n`_finding_cause()` returns the raw `_SidecarError` message verbatim for this\nlabel, and that message names the *resolved* sidecar path absolutely.\n`_finding_line()` in the filer renders `cause` into both `## Actual` and\n`## Findings`. Measured against a throwaway checkout `P`:\n\n- `BUG-*-hygiene-lint-provenance.md` → `grep -c \"$P\"` = **0** (the fix works)\n- `BUG-*-hygiene-lint-hygiene-sidecar.md` → `grep -c \"$P\"` = **2** (it does not)\n\nSecond half of the same defect: the filer's `## Reproduction` line is built as\n``python3 team/scripts/lint_hygiene.py --classes <cls>``, and `hygiene-sidecar`\nis not a registered scan class:\n\n```\n$ python3 team/scripts/lint_hygiene.py --classes hygiene-sidecar\nlint_hygiene: unknown --classes value(s) ['hygiene-sidecar']; registered classes are ['provenance', 'version-named-test', 'comment-drift']\nEXIT=2\n```\n\nThe one command the bug hands its reader exits 2 and reproduces nothing.\n\n**This is not hypothetical.** `projects/pgai-agent-kanban/bugs/BUG-0239-hygiene-lint-hygiene-sidecar.md`\nwas auto-filed at 2026-09-11T03:34, during CODER-20260911-002's own gated-runner\nreproduction. Its `## Actual` names\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/scratch_sidecar_repro/...`,\nwhich no longer exists (`ls` confirms). It is `## Status: open`, so discovery\nwill bundle it into a future RC and PM will decompose an unactionable ticket for\na sidecar entry that never existed in the shipped tree. That secondary\nconsequence — an agent's scratch reproduction depositing a bug into the live\npipeline — is recorded inside BUG-0240 rather than split into its own filing,\nbecause it has the same single root cause.\n\nCODER-20260911-003's completion note declares this residual honestly and\ncorrectly scopes it out of its own ticket (\"a SIDECAR-MALFORMED finding's\n'cause'/'token' fields still embed the sidecar's absolute path via the\npre-existing `_SidecarError` message\"). That disclosure is why this is a clean\nfollow-up rather than a process failure; it does not make the defect go away.\n\n**Rubric reasoning for `medium` rather than `high`.** Before this RC the same\ncondition killed both gated runners outright and filed nothing at all, so\nshipping v2.16.1 does not move the world backwards on this axis — it moves it\nforward, imperfectly. Chain integrity is not at risk: nothing is corrupted and\nno state can be silently lost; the cost is one unactionable bug in a future\nbundle, which the loop closes by closing it. The fix is small. `Regression` is\nrecorded as `yes` because the observable defect is introduced by this RC's new\ncode path, and per the TESTER field definition that is the honest value even\nthough the underlying `_SidecarError` message text predates the release.",
+      "filed_as": "BUG-0240",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a real defect an agent hits, but shipping worsens nothing — see the rubric reasoning below)",
+        "regression": "yes (the failing shape does not predate this RC; the `hygiene-sidecar` finding class, and therefore the bug it files, is new in v2.16.1)",
+        "filed_as": "BUG-0240 (Path C — autonomous follow-up filing, non-blocking)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "`lint_hygiene.py` still comments an exit path this release deleted",
+      "heading": "Finding 4: `lint_hygiene.py` still comments an exit path this release deleted",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (documentation that lags the code; no runtime effect)\n**Regression:** yes (the comment became false in this RC — the path it names was removed here)\n**Integrity Damage:** no\n**Filed As:** BUG-0241 (Path C)\n\nThe comment above `main()`'s final `return 0`:\n\n```python\n    # Quality-class lint: findings are reported, never a reason to fail a\n    # build. Always exit 0 here -- the only non-zero exit is the\n    # sidecar-malformed path above.\n    return 0\n```\n\nThere is no sidecar-malformed path above it any more. The module docstring's\n\"Exit codes\" section was rewritten correctly in the same commit and now says the\nopposite, so the file contradicts itself. `docs/coding-standards.md` and\n`docs/blocking-site-census.md` are both correct; this comment is the only site\nmissed, and CODER-20260911-002's `## Inputs` named it explicitly as a site the\nticket had to reconcile.\n\nThe hygiene lint's own `comment-drift` class cannot catch this — that class is\ndeliberately narrowed to argument-count claims against an adjacent `def`, as its\ndocstring states.",
+      "filed_as": "BUG-0241",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (documentation that lags the code; no runtime effect)",
+        "regression": "yes (the comment became false in this RC — the path it names was removed here)",
+        "filed_as": "BUG-0241 (Path C)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "documentation ticket (WRITER-20260911-004)",
+      "heading": "Finding 5: documentation ticket (WRITER-20260911-004)",
+      "level": 3,
+      "body": "**Category:** pass\n\nRead against the tree rather than against the brief, which is what the ticket\nrequired. CODER-002 removed the refusal outright, so the WRITER removed census\nrow 57 and its narrative paragraph rather than restating them, folded the\nsidecar case into row 31's trigger column, and rewrote\n`docs/coding-standards.md`'s \"It never blocks\" paragraph to say\n\"without exception\" with the malformed sidecar described as one of the findings\nrather than a case apart. All three statements match the shipped code.\n\nRollup arithmetic checked: \"56 sites, 0 unclassified. 28 BLOCK-WORTHY, 26\nCONVERT, 2 AGENT-RESOLVABLE\" — 28+26+2 = 56, and the previous rollup was 57 with\n3 AGENT-RESOLVABLE. The fenced `CENSUS-LOCATOR-INDEX` block was edited only by\nthe CODER ticket (one line removed); `git diff` for the WRITER commit touches\nonly `.md` files.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "gated test suites",
+      "heading": "Finding 6: gated test suites",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth authoritative gated runners were run from the worktree root with\n`--coverage`:\n\n- `bash team/scripts/run-unit-tests.sh --coverage` → **UNIT_EXIT=0**, 3805\n  passed, 3 skipped, 497.98s\n- `bash team/scripts/run-integration-tests.sh --coverage` → **INTEGRATION_EXIT=0**,\n  442 passed, 1 skipped, 401.28s\n\nThe PASS evidence here is the gated runners' exit codes, not a direct pytest\nline. No test failures, no stale assertions, no pre-existing failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "new test coverage for the RC's changes",
+      "heading": "Finding 7: new test coverage for the RC's changes",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/unit/test_lint_hygiene.py` replaces the stale exit-2 assertion with\nseven tests covering every malformed-sidecar shape plus the\nno-suppression-from-a-broken-file rule.\n`team/tests/unit/test_lint_bug_filer.py` adds\n`test_filed_bug_remedies_omit_the_scan_root_and_run_from_a_fresh_checkout`,\nwhich invokes the real lint through `subprocess` against a synthetic checkout,\nfiles through the real filer, asserts the scan root is absent, then executes the\npersisted remedy from a **second independent checkout** and checks the sidecar\nentry it writes.\n\nOn the Test Fidelity checklist: this is a genuinely high-fidelity test. It\nexercises the real script through a subprocess rather than mocking it, it\nsimulates the installed layout (`team/scripts/lint_hygiene.py` at its real\nrepo-relative location, so the default-repo-root computation is the real one),\nand the second-checkout step proves portability rather than mere relativeness —\na test that re-ran the command in the generating tree would have passed against\nthe pre-fix code. Both CODER notes record hand-confirmation that the new tests\nfail when the fix is reverted.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "structural, compile, and constraint checks",
+      "heading": "Finding 8: structural, compile, and constraint checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Every `.py` in the tree compiles (`python3 -m py_compile`, exit 0) — the\n  requirements doc's second acceptance item.\n- Every `.sh` in the tree passes `bash -n` — the third acceptance item.\n- `python3 team/scripts/lint_gate_census_compliance.py` → exit 0, 0 offenders,\n  34 files checked, 118 anchored sites reconciled.\n- No secrets, credentials, or banned patterns introduced by the diff.\n- The only provenance-shaped tokens in the added lines are two `BUG-0042`\n  occurrences inside deliberate test-fixture strings (synthetic violations the\n  lint is meant to detect); the live hygiene lint does not flag them.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "pre-flight, drift, prerequisite graph",
+      "heading": "Finding 9: pre-flight, drift, prerequisite graph",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Pre-flight merge verification passed: every DONE task with a live feature\n  branch is an ancestor of the RC with unique commits; the three tasks in this\n  RC deleted their branches post-merge, which is normal.\n- Worktree HEAD `54b00c7` == `ai_rc/v2.16.1`; `git status --short` clean;\n  `git stash list` empty.\n- `pp_last_released_version` → `v2.16.0`; `semver_gt v2.16.1 v2.16.0` holds.\n  `release-state.md` `## Last Released` is `v2.16.0`, well-formed; `## Active RC`\n  is `v2.16.1` and the branch exists. No drift.\n- Prerequisite graph is acyclic, every referenced task ID resolves to a real\n  folder, sequence numbers 001–008 do not collide, and the lifecycle bookends\n  are correct (CM-open first, TESTER then CM-release last).\n- Skip-cites-real-bug gate (Step 6.13): no placeholder skip IDs and no cited\n  `BUG-NNNN` missing from `bugs/`. The only grep hits are the lint's own\n  narration text inside archived run logs under `team/tests/artifacts/`.\n- Synthetic release simulation (Step 6.8): skipped with note — the diff touches\n  no release-lifecycle file (`cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`,\n  `project_paths.sh`, or any open/close-cycle script).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

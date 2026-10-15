@@ -47,15 +47,20 @@ VALID_AGENTS="pm coder writer tester cm bug po overwatch"
 # ---------------------------------------------------------------------------
 # Argument parsing (mirrors claude.sh / codex.sh for wake-batch.sh compat)
 # ---------------------------------------------------------------------------
+# shellcheck source=../lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]:-$0}")/../lib/script_common.sh"
 
-_print_usage() {
-  cat >&2 <<USAGE
+# Usage text as data (per lib/script_common.sh's documented convention).
+# This script's usage intentionally prints to stderr on every path (--help's
+# exit 0 included), so the destination is pinned here rather than delegated
+# to print_usage_and_exit (which routes exit 0 to stdout).
+_USAGE_TEXT="$(cat <<USAGE
 Usage: $(basename "$0") --agent=AGENT [--sleep=N] [--max-tasks=N] [--help]
 
 Integration test wake harness.  Not for production use.
 Valid agents: $VALID_AGENTS
 USAGE
-}
+)"
 
 AGENT=""
 SLEEP=0
@@ -69,7 +74,7 @@ fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
-      _print_usage
+      printf '%s\n' "$_USAGE_TEXT" >&2
       exit 0
       ;;
     --agent=*)
@@ -98,7 +103,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "ERROR: unknown option: $1" >&2
-      _print_usage
+      printf '%s\n' "$_USAGE_TEXT" >&2
       exit 1
       ;;
   esac
@@ -106,7 +111,7 @@ done
 
 if [[ -z "$AGENT" ]]; then
   echo "ERROR: --agent is required" >&2
-  _print_usage
+  printf '%s\n' "$_USAGE_TEXT" >&2
   exit 1
 fi
 
@@ -122,11 +127,45 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
+# The synthetic TESTER report's head -- its title and its recommendation
+# section -- lives in a committed markdown fixture beside the other harness
+# scripts (scripts/harness/fixtures/, the same relative place in the dev tree
+# and in an install), so report-format text stays out of this script and
+# the TESTER report parser alone reads it. provider_invoke_agent writes the
+# fixture first and appends this harness's own sections after it.
+_HARNESS_REPORT_HEAD="${SCRIPT_DIR}/../harness/fixtures/synthetic-tester-report-head.md"
+
 # ---------------------------------------------------------------------------
 # Provider preflight stub (no-op — no real CLI to check)
 # ---------------------------------------------------------------------------
 provider_preflight() {
   : # no-op
+}
+
+# ---------------------------------------------------------------------------
+# Simulated-completion status writers, called by provider_invoke_agent.
+# Both go through pgai_agent_kanban.task_status render via pp_run_ops and
+# commit with pgai_atomic_write (each loaded by wake_common.sh, sourced
+# below, before any task is dispatched), so only the named section's body
+# changes: the heading line and the separator before the next section are
+# kept byte-for-byte.
+#
+# _harness_write_state_done <status_file> — set ## State to DONE, appending
+# the section at the end of the file when it is absent.
+# _harness_write_summary <status_file> — set ## Summary to the harness
+# narration; a file without ## Summary is left as it was.
+# ---------------------------------------------------------------------------
+_harness_write_state_done() {
+  local _task_status="$1"
+  pgai_atomic_write "$_task_status" pp_run_ops pgai_agent_kanban.task_status render \
+    "$_task_status" --section=State --body=DONE --append-missing=State
+}
+
+_harness_write_summary() {
+  local _task_status="$1"
+  pgai_atomic_write "$_task_status" pp_run_ops pgai_agent_kanban.task_status render \
+    "$_task_status" --section=Summary \
+    --body="Harness stub: task completed by integration test harness." --skip-missing
 }
 
 # ---------------------------------------------------------------------------
@@ -160,21 +199,7 @@ provider_invoke_agent() {
 
   # Write State=DONE to status.md
   if [[ -f "$_task_status" ]]; then
-    python3 - "$_task_status" <<'PY'
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-text = path.read_text()
-text_new, n = re.subn(
-    r'(^## State\s*\n)(.*?)(\n+##|\Z)',
-    lambda m: m.group(1) + 'DONE' + '\n' + (m.group(3) if m.group(3) else ''),
-    text,
-    flags=re.S | re.M,
-)
-if n == 0:
-    # Try to add State if absent
-    text_new = text + '\n## State\nDONE\n'
-path.write_text(text_new)
-PY
+    _harness_write_state_done "$_task_status"
     echo "[harness] provider_invoke_agent: wrote State=DONE to ${_task_status}" >&2
   else
     echo "[harness] provider_invoke_agent: WARNING: status.md not found at ${_task_status}" >&2
@@ -182,29 +207,15 @@ PY
 
   # Write summary
   if [[ -f "$_task_status" ]]; then
-    python3 - "$_task_status" <<'PY'
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-text = path.read_text()
-text_new, n = re.subn(
-    r'(^## Summary\s*\n)(.*?)(\n+##|\Z)',
-    lambda m: m.group(1) + 'Harness stub: task completed by integration test harness.\n' + (m.group(3) if m.group(3) else ''),
-    text,
-    flags=re.S | re.M,
-)
-if n > 0:
-    path.write_text(text_new)
-PY
+    _harness_write_summary "$_task_status"
   fi
 
-  # Plant a synthetic report artifact for TESTER tasks.
+  # Plant a synthetic report artifact for TESTER tasks: the shared report
+  # head (title and recommendation, read from the committed fixture named by
+  # _HARNESS_REPORT_HEAD) followed by this harness's own sections.
   if [[ "$_subagent" == "tester" && -n "$_artifact_dir" ]]; then
     mkdir -p "$_artifact_dir"
-    cat > "${_artifact_dir}/report.md" <<'REPORT'
-# Verification Report
-
-## Recommendation
-SHIP
+    cat "$_HARNESS_REPORT_HEAD" - > "${_artifact_dir}/report.md" <<'REPORT'
 
 ## Summary
 Integration test harness stub: all acceptance criteria pass in the sandbox fixture.
@@ -235,47 +246,33 @@ setup_project_directories() {
 }
 
 # ---------------------------------------------------------------------------
-# Utility readers: README field extractors.
+# Utility readers: README field extractors -- the first word of the field's
+# value (pgai_agent_kanban.lib.md_fields read, through pp_run_ops), exit 1
+# with no output when the README, the field or its value is missing.
 # (These are defined in claude.sh; duplicated here so harness.sh is
 # self-contained without sourcing the Claude-specific provider script.)
 # ---------------------------------------------------------------------------
 
 get_workflow_type_from_readme() {
-  local readme="${1:-}"
-  python3 - "$readme" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text()
-except Exception:
-    raise SystemExit(1)
-m = re.search(r'^##\s+Workflow Type\s*\n\s*(\S+)', text, re.M)
-if m:
-    print(m.group(1).strip())
-    raise SystemExit(0)
-raise SystemExit(1)
-PY
+  local readme="${1:-}" value
+  value="$(pp_run_ops pgai_agent_kanban.lib.md_fields read "$readme" "Workflow Type" 2>/dev/null)" || return 1
+  value="${value%%[[:space:]]*}"
+  [[ -n "$value" ]] || return 1
+  printf '%s\n' "$value"
 }
 
 get_source_branch_from_readme() {
-  local readme="${1:-}"
-  python3 - "$readme" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text()
-except Exception:
-    raise SystemExit(1)
-m = re.search(r'^##\s+Source Branch\s*\n\s*(\S+)', text, re.M)
-if m:
-    print(m.group(1).strip())
-    raise SystemExit(0)
-raise SystemExit(1)
-PY
+  local readme="${1:-}" value
+  value="$(pp_run_ops pgai_agent_kanban.lib.md_fields read "$readme" "Source Branch" 2>/dev/null)" || return 1
+  value="${value%%[[:space:]]*}"
+  [[ -n "$value" ]] || return 1
+  printf '%s\n' "$value"
 }
 
 # ---------------------------------------------------------------------------
 # Source temp helper (provides pgai_temp_dir used by the worktree stubs
 # and wake_bracket_* helpers).  This is normally sourced by the provider
-# lib (wake_claude_provider.sh); the harness sources it directly.
+# lib (provider_claude.sh); the harness sources it directly.
 # ---------------------------------------------------------------------------
 # shellcheck source=scripts/lib/temp.sh
 source "${SCRIPT_DIR}/../lib/temp.sh"
@@ -286,6 +283,15 @@ source "${SCRIPT_DIR}/../lib/temp.sh"
 # ---------------------------------------------------------------------------
 # shellcheck source=scripts/lib/wake_common.sh
 source "${SCRIPT_DIR}/../lib/wake_common.sh"
+
+# ---------------------------------------------------------------------------
+# Source lock provenance helpers (pgai_lock_acquire/pgai_lock_release).
+# This is normally sourced by lib/wake_driver.sh, whose run_project_chain
+# this harness's own run_project_chain override (below) stands in for; the
+# harness sources it directly since it never sources wake_driver.sh itself.
+# ---------------------------------------------------------------------------
+# shellcheck source=scripts/lib/lock_provenance.sh
+source "${SCRIPT_DIR}/../lib/lock_provenance.sh"
 
 # ---------------------------------------------------------------------------
 # Source worktree helpers (so worktree-related functions are available even
@@ -343,17 +349,13 @@ teardown_task_worktree() {
 # Active provider check: harness must be configured as active provider
 # (prevents accidental execution in production).
 #
-# We read kanban.cfg directly rather than using read_active_provider() because
+# We read kanban.cfg's raw [providers] active value (read_ini, lower-cased)
+# rather than using read_active_provider() because
 # read_active_provider() only recognises claude|codex|gemini and defaults to
 # "claude" for any other value, which would cause this guard to always exit.
 # ---------------------------------------------------------------------------
-_raw_active_provider="$(python3 - "${TEAM_ROOT}/kanban.cfg" <<'PY'
-import sys, configparser
-cfg = configparser.ConfigParser()
-cfg.read(sys.argv[1])
-print(cfg.get("providers", "active", fallback="").strip().lower())
-PY
-2>/dev/null || true)"
+_raw_active_provider="$(read_ini "${TEAM_ROOT}/kanban.cfg" providers active "" 2>/dev/null || true)"
+_raw_active_provider="${_raw_active_provider,,}"
 
 if [[ "$_raw_active_provider" != "harness" ]]; then
   echo "[$(date -Iseconds)] wake-harness(${AGENT}): active-provider is '${_raw_active_provider:-unset}', not 'harness' — this harness is not the active provider; exiting" >&2
@@ -408,14 +410,25 @@ run_project_chain() {
 
   # Per-project repo lock.
   # pp_repo_lock_path is the single source of truth for this path — OVERWATCH
-  # resolves the same lock file via the same helper.
+  # resolves the same lock file via the same helper. pgai_lock_acquire
+  # (lock_provenance.sh) records holder/pid/op/task as part of taking the
+  # lock, mirroring lib/wake_driver.sh's run_project_chain (the real
+  # production call site this harness's own chain override stands in for).
+  # No single task is chosen yet at this point (spans the whole per-project
+  # chain), so task is the explicit literal "none", same as the production
+  # call site.
   local _lock_file
   _lock_file="$(pp_repo_lock_path "$project_name")" || return 0
   local _lock_fd
-  exec {_lock_fd}>"$_lock_file"
-  if ! flock -n "$_lock_fd"; then
-    log "project ${project_name}: another agent holds repo lock, skipping"
-    exec {_lock_fd}>&-
+  local _lock_rc
+  set +e
+  pgai_lock_acquire "$_lock_file" "$AGENT" "$$" "wake-chain:${project_name}" "none" _lock_fd
+  _lock_rc=$?
+  set -e
+  if [[ $_lock_rc -ne 0 ]]; then
+    local _lock_contention_provenance
+    _lock_contention_provenance="$(pgai_lock_read_provenance "$_lock_file")"
+    log "project ${project_name}: repo lock held by $(pgai_lock_describe_provenance "$_lock_contention_provenance") -- skipping"
     return 0
   fi
 
@@ -441,6 +454,10 @@ run_project_chain() {
       log "task ${task_id}: missing README.md; marking BLOCKED"
       ensure_status_file "$task_status"
       set_state "$task_status" "BLOCKED"
+      # block_record_write and its owner-role helper come from block_record.sh,
+      # sourced through wake_common.sh -> wake_bootstrap.sh above.
+      block_record_write "$task_status" missing_readme "$(block_record_owner_role "$task_status" "$AGENT")" \
+        || log "task ${task_id}: WARNING: Block Record not written"
       mark_backlog "$task_id" "B"
       tasks_processed=$((tasks_processed + 1))
       continue
@@ -578,7 +595,7 @@ run_project_chain() {
     fi
   done
 
-  exec {_lock_fd}>&-
+  pgai_lock_release "$_lock_file" "$_lock_fd"
   log "project ${project_name}: harness run complete (${tasks_processed} task(s) processed)"
 }
 

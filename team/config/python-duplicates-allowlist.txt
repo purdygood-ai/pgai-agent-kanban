@@ -1,0 +1,53 @@
+# team/config/python-duplicates-allowlist.txt
+#
+# Ratchet baseline for duplicated Python under team/pgai_agent_kanban,
+# team/scripts and team/pm-agent, read by team/scripts/lint_python_duplicates.py
+# (quality class, never fatal). Format: one
+# "<family>\t<path>\t<symbol>\t<count>" line per finding key, path relative to
+# the repository root. <symbol> is the defining function's dotted qualified
+# name, or for ini-instantiation and state-regex the enclosing function's
+# (<module> at top level). Families and owning modules are documented in the
+# lint's module docstring. A finding whose key is not listed here is reported.
+#
+# Ratchet rule: an entry is lowered or removed when a copy is replaced by an
+# import, and is never raised or added. The lint reports an entry above what
+# it measures so the entry is tightened in the same change; its
+# --emit-allowlist mode prints the measured keys in this format.
+duplicate-body	team/pgai_agent_kanban/dashboard/cron_firings.py	_load_cron_parser	1
+duplicate-body	team/pgai_agent_kanban/dashboard/roster_entries.py	_load_cron_parser	1
+duplicate-body	team/pgai_agent_kanban/deep_verify/freshness.py	_format_elapsed	1
+duplicate-body	team/pgai_agent_kanban/deep_verify/ledger.py	DeepVerifyRecord.from_dict	1
+duplicate-body	team/pgai_agent_kanban/deep_verify/schedule.py	_format_elapsed	1
+duplicate-body	team/pgai_agent_kanban/lib/refusal_ledger.py	RefusalRecord.from_dict	1
+duplicate-body	team/pgai_agent_kanban/overwatch/ledger.py	LedgerEntry.from_dict	1
+duplicate-body	team/pgai_agent_kanban/overwatch/resolution_matrix.py	BlockEvidence.from_dict	1
+duplicate-body	team/pgai_agent_kanban/overwatch/resolution_matrix.py	BlockFacts.facts_key	1
+duplicate-body	team/pgai_agent_kanban/overwatch/resolution_matrix.py	MatrixRow.facts_key	1
+duplicate-body	team/pm-agent/aggregate_tokens.py	all_rc_versions	1
+duplicate-body	team/pm-agent/aggregate_tokens.py	load_tokens_json	1
+duplicate-body	team/pm-agent/aggregate_tokens.py	normalise_version	1
+duplicate-body	team/pm-agent/aggregate_tokens.py	read_rc_version	1
+duplicate-body	team/pm-agent/lib/artifacts.py	_resolve_kanban_root	1
+duplicate-body	team/pm-agent/lib/workflow_loader.py	_kanban_root	1
+duplicate-body	team/scripts/dashboard/generate_window_docs.py	_extract_between_markers	1
+duplicate-body	team/scripts/dashboard/generate_window_docs.py	_replace_between_markers	1
+duplicate-body	team/scripts/generate_measured_pace_docs.py	_extract_between_markers	1
+duplicate-body	team/scripts/generate_measured_pace_docs.py	_replace_between_markers	1
+duplicate-body	team/scripts/generate_operator_verb_docs.py	_extract_between_markers	1
+duplicate-body	team/scripts/generate_operator_verb_docs.py	_replace_between_markers	1
+duplicate-body	team/scripts/lib/metrics_aggregator.py	all_rc_versions	1
+duplicate-body	team/scripts/lib/metrics_aggregator.py	load_tokens_json	1
+duplicate-body	team/scripts/lib/metrics_aggregator.py	normalise_version	1
+duplicate-body	team/scripts/lib/metrics_aggregator.py	read_rc_version	1
+duplicate-body	team/scripts/lint_dashboard_hardcode_colors.py	_mask_comment_lines	1
+duplicate-body	team/scripts/lint_dashboard_network_git_gate.py	_mask_comment_lines	1
+duplicate-body	team/scripts/lint_dual_channel_pair.py	_iter_bash_files	1
+duplicate-body	team/scripts/lint_dual_channel_pair.py	_iter_python_files	1
+duplicate-body	team/scripts/lint_dual_channel_pair.py	_strip_bash_comment	1
+duplicate-body	team/scripts/lint_gate_census_compliance.py	_iter_bash_files	1
+duplicate-body	team/scripts/lint_gate_census_compliance.py	_iter_python_files	1
+duplicate-body	team/scripts/lint_gate_census_compliance.py	_strip_bash_comment	1
+duplicate-body	team/scripts/lint_raw_marker_read.py	_build_causes	1
+duplicate-body	team/scripts/lint_raw_marker_read.py	_mask_comment_lines	1
+duplicate-body	team/scripts/lint_status_writer_bypass.py	_build_causes	1
+duplicate-body	team/scripts/lint_status_writer_bypass.py	_mask_comment_lines	1

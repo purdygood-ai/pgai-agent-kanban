@@ -12,17 +12,57 @@ Want the full tour with bugs, priorities, and multi-release arcs? See
 
 ---
 
+## Just checking the flow still works?
+
+If you don't want the hands-on tour — you only want to know whether the pipeline
+still produces what it produced before — one command runs this same demo end to
+end against a throwaway, self-registering project root. No scratch repo, no
+`create-project.sh`, no `projects.cfg` edit, and nothing read or written under
+your live kanban root:
+
+<!-- doc-lint: skip — team/ is a relative path requiring the repo root as cwd; harness runs from an ephemeral tempdir where team/ does not exist -->
+```bash
+bash team/scripts/harness/helloworld-flow-check.sh
+```
+
+It prints a pass/fail line for each of the decompose, verify, and ship stages.
+Add `--compare "$(mktemp -d)"` to diff the run against the committed golden
+outcomes under `team/tests/fixtures/helloworld-flow/` instead. What that check
+covers — and what it deliberately does not — is in
+[team/TESTING.md](../../TESTING.md).
+
+Everything below is the real hands-on demo: your own scratch repo, your own
+registered project, the chain running on cron. The command above is a fast
+regression check, not a substitute for running it yourself.
+
+---
+
 ## Setup (once)
 
 ### 1. Make a local scratch repo
 
-<!-- doc-lint: skip — mkdir+cd+git init creates a directory that does not exist in the harness tempdir; git init in an ephemeral dir is safe but meaningless in a non-persistent harness run -->
+The chain needs a git repo to build `hello.py` into. The block below refuses
+rather than acts when `~/pgai-helloworld-src` is already inside a git
+repository, and binds every git command to that path with `git -C` instead of
+relying on your current directory — so the empty first commit can only ever
+land in a scratch repo this block created itself, never in whatever checkout
+you were standing in. `git rev-parse --git-dir` succeeds whether a directory
+*is* a repo or merely sits inside one, so the one check covers both shapes.
+
+<!-- doc-lint: skip — multi-line `if` guard; the harness executes fenced commands one line at a time in separate subshells, which would split the refusal check from the commit it protects -->
 ```bash
-mkdir -p ~/pgai-helloworld-src && cd ~/pgai-helloworld-src
-git init
-git commit --allow-empty -m "initial empty commit"
-cd -
+mkdir -p ~/pgai-helloworld-src
+if git -C ~/pgai-helloworld-src rev-parse --git-dir >/dev/null 2>&1; then
+  echo "refusing: ~/pgai-helloworld-src is already inside a git repository"
+  echo "pick a fresh, empty directory for the scratch repo instead"
+else
+  git -C ~/pgai-helloworld-src init
+  git -C ~/pgai-helloworld-src commit --allow-empty -m "initial empty commit"
+fi
 ```
+
+If it refuses, no repo was created — choose another path, change every
+`~/pgai-helloworld-src` in the block to match, and run it again.
 
 ### 2. Create the project
 

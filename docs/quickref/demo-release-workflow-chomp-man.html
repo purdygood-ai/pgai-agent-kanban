@@ -166,8 +166,8 @@
         <dt>v0.3.0</dt><dd>Dragons (the pursuers)</dd>
         <dt>v0.4.0</dt><dd>Power pellets</dd>
         <dt>v0.5.0 → v0.8.0</dt><dd><span style="color:var(--muted)">fruit bonus · sprites · warp tunnels · dragon personalities</span></dd>
-        <dt>BUG-0001</dt><dd><span style="color:var(--muted)">movement requires repeated keypress (should hold-to-move)</span></dd>
-        <dt>PRIORITY-0001</dt><dd><span style="color:var(--muted)">sound effects</span></dd>
+        <dt>BUG-0001 · BUG-0002</dt><dd><span style="color:var(--muted)">movement needs a fresh keypress (should hold-to-move) · no color cue while powered up</span></dd>
+        <dt>PRIORITY-0001 → 0003</dt><dd><span style="color:var(--muted)">scalable 16:9 HD display · sound effects · extra life per two dragons eaten</span></dd>
       </dl>
       <p style="margin-top:10px;">Each is a single Markdown file. The whole demo is dropping these in order and watching the
       releases tag themselves.</p>
@@ -185,7 +185,7 @@
           <h3>Drop the bootstrap requirement</h3>
           <p>Deposit <span class="mono">v0.0.1</span> into the project. <span class="mono">intake.sh</span> routes by filename — the <span class="mono">vX.Y.*</span> prefix sends it to <span class="mono">requirements/</span>.</p>
           <div class="cmd"><span class="lbl">copy · paste</span>scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> \
-  <span class="p">v0.0.1-bootstrap-20260602.md</span></div>
+  <span class="f">--file</span> <span class="p">demos/chomp-man-demo/intake/v0.0.1-bootstrap.md</span></div>
           <p style="font-size:.86rem; color:var(--muted);">On the next cron wake, PM decomposes it and CM opens the RC branch <span class="mono">ai_rc/v0.0.1</span>. From here it's hands-off.</p>
         </div>
       </div>
@@ -195,6 +195,7 @@
         <div class="sc">
           <h3>Watch the RC on the dashboard</h3>
           <p>The <b>main</b> window (0) shows the active RC and last released tag; the <b>visibility</b> window (1) shows the per-agent columns.</p>
+          <p style="font-size:.86rem; color:var(--muted);">The terminal panels on this page are example captures from a reference run. The kanban version in the status bar, the times, task IDs and figures on your own dashboard will differ.</p>
 
           <div class="term">
             <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 0 · main</span></div>
@@ -223,7 +224,7 @@
 <span class="statusbar">0:main* 1:visibility 2:attention 3:git 5:metrics 6:logs 9:terminal
 v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:14:08</span></pre>
           </div>
-          <p class="cap">Window 0 — active RC <span class="yl">ai_rc/v0.1.0</span>, last released <span class="gn">ai_v0.0.1</span>. CODER is mid-implementation.</p>
+          <p class="cap">Example capture · Window 0 — active RC <span class="yl">ai_rc/v0.1.0</span>, last released <span class="gn">ai_v0.0.1</span>. CODER is mid-implementation.</p>
 
           <div class="term">
             <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 1 · visibility</span></div>
@@ -269,7 +270,7 @@ v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:1
               </div>
             </div>
           </div>
-          <p class="cap">Window 1 — the eight-column board: all three intake lanes (BUGS · PRIORITIES · REQUIREMENTS) plus the five agents, each column ruled and left-justified like the live dashboard. Leading squares are project color: <span class="bl">blue</span> = pgai-chomp-man, <span class="og">orange</span> = pgai-three-bears. Text color is status — the CODER task for chomp-man v0.1.0 is <span class="yl">running</span>.</p>
+          <p class="cap">Example capture · Window 1 — the eight-column board: all three intake lanes (BUGS · PRIORITIES · REQUIREMENTS) plus the five agents, each column ruled and left-justified like the live dashboard. Leading squares are project color: <span class="bl">blue</span> = pgai-chomp-man, <span class="og">orange</span> = pgai-three-bears. Text color is status — the CODER task for chomp-man v0.1.0 is <span class="yl">running</span>.</p>
         </div>
       </div>
 
@@ -292,7 +293,7 @@ v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:1
 <span class="statusbar">0:main 1:visibility 2:attention 3:git 5:metrics 6:logs* 9:terminal
 v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:17:13</span></pre>
           </div>
-          <p class="cap">Window 6 — the release chain end to end, finishing with the merge and the <span class="gn">ai_v0.1.0</span> tag. All on the isolated <span class="mono">ai_</span> lane.</p>
+          <p class="cap">Example capture · Window 6 — the release chain end to end, finishing with the merge and the <span class="gn">ai_v0.1.0</span> tag. All on the isolated <span class="mono">ai_</span> lane.</p>
         </div>
       </div>
 
@@ -302,7 +303,7 @@ v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:1
           <h3>Inspect the release</h3>
           <p>The tag and merge are real git. Check them — or inspect the requirement through the operator tool:</p>
           <div class="cmd"><span class="lbl">copy · paste</span><span class="c"># the release is a real git tag on the ai_ lane</span>
-git -C ~/develop/pgai-chomp-man tag -l <span class="a">'ai_v*'</span>
+git -C ~/pgai-chomp-man-src tag -l <span class="a">'ai_v*'</span>
 
 <span class="c"># inspect the requirement's state</span>
 scripts/show.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="f">--key</span> <span class="a">v0.1.0</span></div>
@@ -329,7 +330,7 @@ v0.0.1      20.97    28,665    62,687    3,288,161       350,597       6
 <span class="statusbar">0:main 1:visibility 2:attention 3:git 5:metrics* 6:logs 9:terminal
 v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:18:02</span></pre>
           </div>
-          <p class="cap">Window 5 — wall-time (seconds) and token usage per RC. Same metrics surface as the document workflow.</p>
+          <p class="cap">Example capture · Window 5 — wall-time (seconds) and token usage per RC. Same metrics surface as the document workflow.</p>
         </div>
       </div>
 
@@ -339,14 +340,19 @@ v0.91.0 | PM:auto | <span class="hl">pgai-chomp-man</span> | Sat 2026-06-27T02:1
           <h3>Keep shipping — features, a bug, an enhancement</h3>
           <p>Stack the rest. Features are minors; a bug rides the patch lane; a priority is an enhancement. Same
           <span class="mono">intake.sh</span> for all three — the filename decides the lane.</p>
-          <div class="cmd"><span class="lbl">copy · paste</span><span class="c"># next feature minor (a new RC)</span>
-scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="p">v0.2.0-dots-and-scoring-20260602.md</span>
-
-<span class="c"># a bug — routes to bugs/, ships as the next patch</span>
-scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="p">BUG-0001-movement-requires-repeated-keypress-not-held.md</span>
+          <div class="cmd"><span class="lbl">copy · paste</span><span class="c"># a bug — routes to bugs/, ships as the next patch</span>
+scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> \
+  <span class="f">--file</span> <span class="p">demos/chomp-man-demo/intake/BUG-0001-movement-requires-held-key.md</span>
 
 <span class="c"># an enhancement — routes to priority/, rides into a minor</span>
-scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> <span class="p">PRIORITY-0001-sound-effects.md</span></div>
+scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> \
+  <span class="f">--file</span> <span class="p">demos/chomp-man-demo/intake/PRIORITY-0001-scalable-16x9-hd-display.md</span>
+
+<span class="c"># next feature minor (a new RC)</span>
+scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-chomp-man</span> \
+  <span class="f">--file</span> <span class="p">demos/chomp-man-demo/intake/v0.2.0-dots-and-scoring.md</span>
+
+<span class="c"># the rest follow the same way, in the order demos/chomp-man-demo/README.md lists</span></div>
           <p style="font-size:.86rem; color:var(--muted);">The Active-RC gate serializes them — one RC fully ships (merged + tagged) before the next starts — so you can stack the whole game and walk away.</p>
         </div>
       </div>
@@ -374,7 +380,7 @@ scripts/unwind-rc.sh <span class="f">--project</span> <span class="a">pgai-chomp
         <dt>show … --key v0.1.0</dt><dd>print an RC / bug / priority status</dd>
         <dt>reset … --key v0.2.0</dt><dd>send a version back to BACKLOG to rebuild (HALT first)</dd>
         <dt>close … --key BUG-0001</dt><dd>resolve a bug by hand</dd>
-        <dt>wontdo … --key PRIORITY-0001</dt><dd>abandon an enhancement</dd>
+        <dt>close … --key PRIORITY-0001 --state wont-do</dt><dd>abandon an enhancement</dd>
       </dl>
     </div>
   </section>
@@ -383,7 +389,7 @@ scripts/unwind-rc.sh <span class="f">--project</span> <span class="a">pgai-chomp
 
 <footer>
   pgai-agent-kanban · release-workflow demo · pgai-chomp-man · examples scoped to the managed demo projects ·
-  commands verified against v0.91.x. Pair with the operator cheat sheet for the full command reference.
+  pair with the operator cheat sheet for the full command reference.
 </footer>
 
 </body>

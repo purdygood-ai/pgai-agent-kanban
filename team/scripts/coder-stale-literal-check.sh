@@ -2,9 +2,12 @@
 # team/scripts/coder-stale-literal-check.sh
 #
 # CODER pre-flight: extract literals changed in production code within a git
-# diff range and grep test files for those literals appearing as assertion
-# targets.  Emits a markdown-formatted ## Stale Literal Risks section that a
-# CODER agent can paste directly into status.md.
+# diff range and grep test files for those literals — both as assertion
+# targets in test source, and as bare occurrences in recorded-output fixture
+# directories (captured board renders, wake logs, ship summaries, and other
+# goldens, which hold no assertion syntax to anchor on).  Emits a
+# markdown-formatted ## Stale Literal Risks section that a CODER agent can
+# paste directly into status.md.
 #
 # Usage:
 #   coder-stale-literal-check.sh --diff <range> --project <name> [--help]
@@ -42,6 +45,13 @@
 #     changed-from values), so old values don't generate spurious noise.
 #   - The script sources literal-extraction.sh for the parsing helpers,
 #     keeping the helper independently unit-testable.
+#   - Two distinct search surfaces run per literal, side by side, and report
+#     into the same section: literal_grep_tests (assertion-context matches
+#     in test source) and literal_grep_recorded_output (bare matches in
+#     recorded-output fixture directories — engine-baseline and golden
+#     captures, selected explicitly by location under each test directory,
+#     never by guessing at file content). A recorded golden carries no
+#     assertion syntax, so only the second search can ever see it.
 
 set -euo pipefail
 
@@ -53,22 +63,30 @@ LIB_DIR="${SCRIPT_DIR}/lib"
 
 if [[ ! -f "${LIB_DIR}/literal-extraction.sh" ]]; then
     echo "ERROR: helper library not found: ${LIB_DIR}/literal-extraction.sh" >&2
+    # CONVERT: precondition for this quality-class check -- a missing helper
+    # library means the scan cannot run, not that the tree has a defect.
+    # CENSUS-ANCHOR: coder-stale-literal-check-lib-missing-01
     exit 1
 fi
 
 # shellcheck source=lib/literal-extraction.sh
 source "${LIB_DIR}/literal-extraction.sh"
+# shellcheck source=lib/script_common.sh
+source "${LIB_DIR}/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
-usage() {
-    cat <<'EOF'
+# Usage text as data (per lib/script_common.sh's print_usage_and_exit contract).
+_USAGE_TEXT="$(cat <<'EOF'
 Usage: coder-stale-literal-check.sh --diff <range> --project <name> [--help]
 
 Extract literals changed in production code within a git diff range and grep
-test files for those literals appearing as assertion targets.  Emits a
-markdown-formatted ## Stale Literal Risks section for pasting into status.md.
+test files for those literals — both as assertion targets in test source and
+as bare occurrences in recorded-output fixture directories (captured board
+renders, wake logs, ship summaries, and other goldens, which hold no
+assertion syntax to anchor on).  Emits a markdown-formatted
+## Stale Literal Risks section for pasting into status.md.
 
 Options:
   --diff <range>     Git diff range to inspect.
@@ -93,8 +111,16 @@ False-positive filters (automatically excluded):
 Production-code detection:
   Files matching tests/, test_*.py, *_test.py, *.test.* are excluded from
   literal extraction via git pathspec exclusions.
+
+Search surfaces (both run per literal, reported together):
+  - Test source, constrained to assertion contexts (==, !=, assert,
+    expected, assertEqual, assertIn, assertRegex, in).
+  - Recorded-output fixture directories (fixtures/engine-baseline,
+    fixtures/golden under each test directory) — bare occurrences, no
+    assertion-context constraint, since a captured golden carries no
+    assertion syntax to anchor on.
 EOF
-}
+)"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -121,8 +147,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            usage
-            exit 0
+            print_usage_and_exit 0 "$_USAGE_TEXT"
             ;;
         *)
             echo "ERROR: Unknown argument: $1" >&2
@@ -150,6 +175,9 @@ fi
 # ---------------------------------------------------------------------------
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
     echo "ERROR: not inside a git repository; run from the project dev tree" >&2
+    # CONVERT: precondition for this quality-class check -- outside a git
+    # repo there is no diff range to extract literals from.
+    # CENSUS-ANCHOR: coder-stale-literal-check-not-a-repo-01
     exit 1
 fi
 
@@ -177,6 +205,32 @@ for candidate in "${CANDIDATE_TEST_DIRS[@]}"; do
     if [[ -d "$full_path" ]]; then
         TEST_DIRS+=("$full_path")
     fi
+done
+
+# ---------------------------------------------------------------------------
+# Determine recorded-output fixture directories to scan — a search surface
+# distinct from TEST_DIRS above (see literal-extraction.sh's
+# literal_grep_recorded_output for why a golden needs its own search).
+# ---------------------------------------------------------------------------
+# Recorded-output fixtures are selected by location under each test
+# directory, explicitly, rather than by guessing at file content:
+# "fixtures/engine-baseline" and "fixtures/golden" are the two committed
+# recorded-output conventions already in use in this tree (the same
+# location convention lint_test_anti_patterns.py's golden-comparison check
+# recognizes as `_GOLDEN_DIR`/`_FIXTURE_DIR`).
+CANDIDATE_RECORDED_OUTPUT_SUBDIRS=(
+    "fixtures/engine-baseline"
+    "fixtures/golden"
+)
+
+RECORDED_OUTPUT_DIRS=()
+for test_dir in "${TEST_DIRS[@]}"; do
+    for subdir in "${CANDIDATE_RECORDED_OUTPUT_SUBDIRS[@]}"; do
+        full_path="${test_dir}/${subdir}"
+        if [[ -d "$full_path" ]]; then
+            RECORDED_OUTPUT_DIRS+=("$full_path")
+        fi
+    done
 done
 
 # ---------------------------------------------------------------------------
@@ -219,14 +273,32 @@ if [[ ${#LITERALS[@]} -eq 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Grep test files for each literal in assertion contexts
+# Grep test files for each literal — assertion-context matches in test
+# source, plus bare matches in recorded-output fixture directories.  The two
+# searches are independent (see literal-extraction.sh header); their hits
+# are merged only for reporting, under the same risk entry per literal.
 # ---------------------------------------------------------------------------
 RISKS_FOUND=0
 RISKS_OUTPUT=""
 
-if [[ ${#TEST_DIRS[@]} -gt 0 ]]; then
+if [[ ${#TEST_DIRS[@]} -gt 0 || ${#RECORDED_OUTPUT_DIRS[@]} -gt 0 ]]; then
     for lit in "${LITERALS[@]}"; do
-        matches="$(literal_grep_tests "$lit" "${TEST_DIRS[@]}")"
+        matches=""
+        if [[ ${#TEST_DIRS[@]} -gt 0 ]]; then
+            matches="$(literal_grep_tests "$lit" "${TEST_DIRS[@]}")"
+        fi
+
+        if [[ ${#RECORDED_OUTPUT_DIRS[@]} -gt 0 ]]; then
+            recorded_matches="$(literal_grep_recorded_output "$lit" "${RECORDED_OUTPUT_DIRS[@]}")"
+            if [[ -n "$recorded_matches" ]]; then
+                if [[ -n "$matches" ]]; then
+                    matches="${matches}"$'\n'"${recorded_matches}"
+                else
+                    matches="$recorded_matches"
+                fi
+            fi
+        fi
+
         if [[ -n "$matches" ]]; then
             RISKS_FOUND=1
             risk_entry="$(literal_format_risks "$lit" "$matches")"

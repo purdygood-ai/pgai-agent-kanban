@@ -7,11 +7,11 @@ team/scripts/lib/subagent_deploy.sh's ``ensure_provider_agents_dir``.
 
 WHAT IS TESTED
 --------------
-Before this fix, a missing target directory (``~/.claude/agents/``,
-``~/.codex/agents/``) either required an interactive confirmation
-(install.sh) or was skipped outright without ``--force`` (upgrade.sh) — on
+The guarded defect: a missing target directory (``~/.claude/agents/``,
+``~/.codex/agents/``) that either requires an interactive confirmation
+(install.sh) or is skipped outright without ``--force`` (upgrade.sh) — on
 a fresh machine where the provider CLI has not yet created its config tree,
-this produced a silent no-op: no directory, no wrappers, no error.
+this produces a silent no-op: no directory, no wrappers, no error.
 
 These tests verify the fixed contract for BOTH entry points (install.sh and
 the phase-2 body of team/scripts/upgrade.sh) and BOTH providers (claude,
@@ -29,12 +29,30 @@ A fourth set of tests exercises ``ensure_provider_agents_dir`` directly
 (sourced in isolation) for fast, precise coverage of the narration and
 fail-loud contract without paying for a full script run.
 
+A fifth set covers manifest completeness: every wrapper shipped under
+``subagents/`` (OVERWATCH included) is listed in the manifest, and both
+entry points install the OVERWATCH wrapper byte-identical to its source and
+record it in ``.installed-subagents``.
+
+A sixth set covers where the claude wrappers land: under
+``$CLAUDE_CONFIG_DIR/agents`` when that variable is set (and nothing under
+``$HOME/.claude/agents``), under ``$HOME/.claude/agents`` when it is unset,
+for both entry points; codex wrappers stay under ``$HOME/.codex/agents``.
+
 SANDBOX DESIGN
 ---------------
 install.sh runs directly from the real dev tree (this checkout) against a
-throwaway ``PGAI_AGENT_KANBAN_ROOT_PATH`` and throwaway ``HOME`` — this is
-exactly how a fresh install invocation works, so no synthetic entry-point
-stub is needed.
+throwaway kanban root, throwaway ``HOME`` and a ``CLAUDE_CONFIG_DIR`` inside
+that ``HOME`` — this is exactly how a fresh install invocation works, so no
+synthetic entry-point stub is needed.
+
+Every install and upgrade run gets an environment built by
+``build_scrubbed_env`` rather than inherited, with all five live-install
+variables set or cleared together: ``KANBAN_ROOT``,
+``PGAI_AGENT_KANBAN_ROOT_PATH`` and ``PGAI_AGENT_KANBAN_TEMP_DIR`` point
+into ``tmp_path``; ``PGAI_TASKS_DIR`` and ``PGAI_PROJECT_ROOT`` are absent.
+A direct pytest run from an agent wake or an operator shell therefore never
+hands the real scripts the live install's paths.
 
 upgrade.sh's phase-2 body is invoked directly with ``--phase2
 --phase2-protocol 1 --kanban-root <path>``, bypassing the phase-1
@@ -61,6 +79,8 @@ import subprocess
 import textwrap
 
 import pytest
+
+from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
 # ---------------------------------------------------------------------------
 # Paths to the real scripts (dev tree layout, relative to this test file)
@@ -89,6 +109,10 @@ def _expected_wrapper_count() -> int:
 
 _EXPECTED_WRAPPER_COUNT = _expected_wrapper_count()
 
+# Default for the run helpers' ``claude_config_dir``: point CLAUDE_CONFIG_DIR
+# at ``<home>/.claude``, the layout most tests here assert on.
+_CLAUDE_CONFIG_IN_HOME = object()
+
 
 # ---------------------------------------------------------------------------
 # Shared scaffolding
@@ -109,11 +133,51 @@ def _write_stub_provider_binaries(bin_dir: pathlib.Path) -> None:
         stub.chmod(0o755)
 
 
+def _sandbox_env(
+    *,
+    home: pathlib.Path,
+    kanban_root: pathlib.Path,
+    temp_dir: pathlib.Path,
+    bin_dir: pathlib.Path,
+    claude_config_dir: object,
+) -> dict[str, str]:
+    """Scrubbed subprocess environment for the real install.sh / upgrade.sh.
+
+    Built by ``build_scrubbed_env`` from a fixed set of names, never from
+    ``os.environ``: HOME is *home*, PATH is *bin_dir* ahead of the standard
+    toolchain, and all five live-install variables are set or cleared
+    together — KANBAN_ROOT and PGAI_AGENT_KANBAN_ROOT_PATH are *kanban_root*,
+    PGAI_AGENT_KANBAN_TEMP_DIR is *temp_dir* (created here), and
+    PGAI_TASKS_DIR and PGAI_PROJECT_ROOT are absent, so neither of those
+    pre-resolved paths can outrank the sandboxed roots.
+
+    *claude_config_dir* is ``_CLAUDE_CONFIG_IN_HOME`` (``<home>/.claude``), a
+    path, or ``None`` to leave CLAUDE_CONFIG_DIR out of the environment so
+    the installers fall back to their default.
+    """
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    extra_env = {
+        "KANBAN_ROOT": str(kanban_root),
+        "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
+        "PGAI_AGENT_KANBAN_TEMP_DIR": str(temp_dir),
+    }
+    if claude_config_dir is _CLAUDE_CONFIG_IN_HOME:
+        extra_env["CLAUDE_CONFIG_DIR"] = str(home / ".claude")
+    elif claude_config_dir is not None:
+        extra_env["CLAUDE_CONFIG_DIR"] = str(claude_config_dir)
+    return build_scrubbed_env(
+        home_dir=home,
+        extra_path_dirs=[bin_dir],
+        extra_env=extra_env,
+    )
+
+
 def _run_install(
     tmp_path: pathlib.Path,
     *,
     home: pathlib.Path,
     kanban_root: pathlib.Path,
+    claude_config_dir: object = _CLAUDE_CONFIG_IN_HOME,
 ) -> subprocess.CompletedProcess:
     """Run the real install.sh with both provider-agent flags enabled.
 
@@ -123,13 +187,12 @@ def _run_install(
     bin_dir = tmp_path / "stub_bin"
     _write_stub_provider_binaries(bin_dir)
 
-    env = dict(os.environ)
-    env.update(
-        {
-            "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
-            "HOME": str(home),
-            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
-        }
+    env = _sandbox_env(
+        home=home,
+        kanban_root=kanban_root,
+        temp_dir=tmp_path / "sandbox_tmp",
+        bin_dir=bin_dir,
+        claude_config_dir=claude_config_dir,
     )
 
     return subprocess.run(
@@ -155,6 +218,7 @@ def _run_upgrade_phase2(
     *,
     home: pathlib.Path,
     kanban_root: pathlib.Path,
+    claude_config_dir: object = _CLAUDE_CONFIG_IN_HOME,
 ) -> subprocess.CompletedProcess:
     """Run the real upgrade.sh phase-2 body directly against kanban_root.
 
@@ -167,13 +231,12 @@ def _run_upgrade_phase2(
     _write_stub_provider_binaries(bin_dir)
     kanban_root.mkdir(parents=True, exist_ok=True)
 
-    env = dict(os.environ)
-    env.update(
-        {
-            "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
-            "HOME": str(home),
-            "PATH": f"{bin_dir}:{env.get('PATH', '')}",
-        }
+    env = _sandbox_env(
+        home=home,
+        kanban_root=kanban_root,
+        temp_dir=tmp_path / "sandbox_tmp",
+        bin_dir=bin_dir,
+        claude_config_dir=claude_config_dir,
     )
 
     return subprocess.run(
@@ -200,6 +263,52 @@ def _run_upgrade_phase2(
 
 def _combined_output(result: subprocess.CompletedProcess) -> str:
     return f"{result.stdout}\n{result.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Sandbox environment — no live-install path reaches the real scripts
+# ---------------------------------------------------------------------------
+
+_LIVE_INSTALL_ENV_NAMES = (
+    "KANBAN_ROOT",
+    "PGAI_AGENT_KANBAN_ROOT_PATH",
+    "PGAI_AGENT_KANBAN_TEMP_DIR",
+    "PGAI_TASKS_DIR",
+    "PGAI_PROJECT_ROOT",
+)
+
+
+def test_sandbox_env_carries_no_inherited_live_install_path(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All five live-install names set in the parent never reach the child.
+
+    The parent environment points every live-install variable at a sentinel
+    path; the sandbox environment must carry that sentinel in no value, must
+    point the two roots and the temp directory into ``tmp_path``, and must
+    leave PGAI_TASKS_DIR and PGAI_PROJECT_ROOT absent.
+    """
+    sentinel = "/nonexistent/live-install-sentinel"
+    for name in _LIVE_INSTALL_ENV_NAMES:
+        monkeypatch.setenv(name, f"{sentinel}/{name.lower()}")
+
+    kanban_root = tmp_path / "kanban_root"
+    temp_dir = tmp_path / "sandbox_tmp"
+    env = _sandbox_env(
+        home=tmp_path / "home",
+        kanban_root=kanban_root,
+        temp_dir=temp_dir,
+        bin_dir=tmp_path / "stub_bin",
+        claude_config_dir=_CLAUDE_CONFIG_IN_HOME,
+    )
+
+    leaked = {name: value for name, value in env.items() if sentinel in value}
+    assert leaked == {}, f"inherited live-install paths reached the sandbox: {leaked}"
+    assert env["KANBAN_ROOT"] == str(kanban_root)
+    assert env["PGAI_AGENT_KANBAN_ROOT_PATH"] == str(kanban_root)
+    assert env["PGAI_AGENT_KANBAN_TEMP_DIR"] == str(temp_dir)
+    assert "PGAI_TASKS_DIR" not in env
+    assert "PGAI_PROJECT_ROOT" not in env
 
 
 # ---------------------------------------------------------------------------
@@ -513,3 +622,226 @@ def test_ensure_provider_agents_dir_fails_loud_on_unwritable_parent(
     assert "RC=1" in result.stdout, result.stdout + result.stderr
     assert f"Failed to create provider agents directory: {agents_dir}" in result.stderr
     assert not agents_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# Manifest completeness — every shipped wrapper, OVERWATCH included
+# ---------------------------------------------------------------------------
+
+_REAL_SUBAGENTS_DIR = _REPO_ROOT / "subagents"
+_OVERWATCH_SRC = _REAL_SUBAGENTS_DIR / "overwatch.md"
+
+
+def _manifest_names() -> list[str]:
+    """Non-comment, non-blank names listed in the real subagent manifest."""
+    names = [
+        ln.split("#", 1)[0].strip()
+        for ln in _REAL_MANIFEST.read_text(encoding="utf-8").splitlines()
+    ]
+    return [n for n in names if n]
+
+
+def _installed_subagents_state(kanban_root: pathlib.Path) -> list[str]:
+    """Names recorded in the root's .installed-subagents state file."""
+    state = kanban_root / ".installed-subagents"
+    assert state.is_file(), f".installed-subagents was not written under {kanban_root}"
+    names = [
+        ln.split("#", 1)[0].strip()
+        for ln in state.read_text(encoding="utf-8").splitlines()
+    ]
+    return [n for n in names if n]
+
+
+def test_manifest_lists_every_shipped_subagent_wrapper() -> None:
+    """Every wrapper under subagents/ is installed, so every one is listed.
+
+    The wake dispatches each of these wrappers by name; one missing from the
+    manifest is never installed or refreshed by install.sh or upgrade.sh.
+    """
+    # Intentional pattern-scan: every current and future subagents/*.md is a
+    # dispatched wrapper and must be in the manifest the installers read.
+    shipped = sorted(p.stem for p in _REAL_SUBAGENTS_DIR.glob("*.md"))
+    listed = _manifest_names()
+    missing = [name for name in shipped if name not in listed]
+    assert not missing, (
+        f"wrappers shipped under {_REAL_SUBAGENTS_DIR} but absent from "
+        f"{_REAL_MANIFEST}: {missing}"
+    )
+    assert "overwatch" in listed, f"overwatch must be listed in {_REAL_MANIFEST}"
+
+
+@pytest.mark.skipif(
+    not _REAL_INSTALL_SH.exists() or not _OVERWATCH_SRC.exists(),
+    reason="Real install.sh or subagents/overwatch.md not found; skipping.",
+)
+def test_install_deploys_overwatch_wrapper_identical_to_source_and_tracks_it(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A fixture install writes agents/overwatch.md byte-identical to its source.
+
+    The install runs into a sandbox root with a temporary HOME and
+    CLAUDE_CONFIG_DIR, and records overwatch in .installed-subagents.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    kanban_root = tmp_path / "kanban_root"
+
+    result = _run_install(tmp_path, home=home, kanban_root=kanban_root)
+    output = _combined_output(result)
+    assert result.returncode == 0, f"install.sh failed:\n{output}"
+
+    deployed = home / ".claude" / "agents" / "overwatch.md"
+    assert deployed.is_file(), f"overwatch wrapper not deployed:\n{output}"
+    assert deployed.read_bytes() == _OVERWATCH_SRC.read_bytes(), (
+        f"{deployed} differs from {_OVERWATCH_SRC}"
+    )
+    assert "overwatch" in _installed_subagents_state(kanban_root)
+
+
+@pytest.mark.skipif(
+    not _REAL_UPGRADE_SH.exists() or not _OVERWATCH_SRC.exists(),
+    reason="Real upgrade.sh or subagents/overwatch.md not found; skipping.",
+)
+def test_upgrade_add_claude_agents_deploys_overwatch_wrapper_and_tracks_it(
+    tmp_path: pathlib.Path,
+) -> None:
+    """upgrade.sh --add-claude-agents installs and tracks overwatch too."""
+    home = tmp_path / "home"
+    home.mkdir()
+    kanban_root = tmp_path / "kanban_root"
+
+    result = _run_upgrade_phase2(tmp_path, home=home, kanban_root=kanban_root)
+    output = _combined_output(result)
+    assert result.returncode == 0, f"upgrade.sh --phase2 failed:\n{output}"
+
+    deployed = home / ".claude" / "agents" / "overwatch.md"
+    assert deployed.is_file(), f"overwatch wrapper not deployed:\n{output}"
+    assert deployed.read_bytes() == _OVERWATCH_SRC.read_bytes(), (
+        f"{deployed} differs from {_OVERWATCH_SRC}"
+    )
+    assert "overwatch" in _installed_subagents_state(kanban_root)
+
+
+# ---------------------------------------------------------------------------
+# Claude wrapper destination — CLAUDE_CONFIG_DIR set or unset
+# ---------------------------------------------------------------------------
+
+_ENTRY_POINTS = {
+    "install": (_REAL_INSTALL_SH, _run_install),
+    "upgrade": (_REAL_UPGRADE_SH, _run_upgrade_phase2),
+}
+
+
+def _assert_every_manifest_wrapper_in(agents_dir: pathlib.Path, output: str) -> None:
+    for name in _manifest_names():
+        assert (agents_dir / f"{name}.md").is_file(), (
+            f"missing wrapper {name}.md under {agents_dir}:\n{output}"
+        )
+
+
+@pytest.mark.parametrize("entry_point", sorted(_ENTRY_POINTS))
+def test_claude_wrappers_land_in_claude_config_dir_when_set(
+    tmp_path: pathlib.Path,
+    entry_point: str,
+) -> None:
+    """With CLAUDE_CONFIG_DIR outside HOME, claude wrappers go there only.
+
+    Every manifest wrapper lands in ``$CLAUDE_CONFIG_DIR/agents`` and
+    nothing is written under ``$HOME/.claude``; codex wrappers still land
+    in ``$HOME/.codex/agents``.
+    """
+    script, run = _ENTRY_POINTS[entry_point]
+    if not script.exists():
+        pytest.skip(f"{script} not found")
+    home = tmp_path / "home"
+    home.mkdir()
+    claude_config_dir = tmp_path / "claude_config"
+    kanban_root = tmp_path / "kanban_root"
+
+    result = run(
+        tmp_path,
+        home=home,
+        kanban_root=kanban_root,
+        claude_config_dir=claude_config_dir,
+    )
+    output = _combined_output(result)
+    assert result.returncode == 0, f"{entry_point} failed:\n{output}"
+
+    claude_agents = claude_config_dir / "agents"
+    assert f"created {claude_agents}" in output, output
+    _assert_every_manifest_wrapper_in(claude_agents, output)
+    assert not (home / ".claude").exists(), (
+        f"nothing may be written under {home / '.claude'} when "
+        f"CLAUDE_CONFIG_DIR is set:\n{output}"
+    )
+    _assert_every_manifest_wrapper_in(home / ".codex" / "agents", output)
+
+
+@pytest.mark.parametrize("entry_point", sorted(_ENTRY_POINTS))
+def test_claude_wrappers_land_in_home_dot_claude_when_config_dir_unset(
+    tmp_path: pathlib.Path,
+    entry_point: str,
+) -> None:
+    """With CLAUDE_CONFIG_DIR unset, claude wrappers go to ``$HOME/.claude/agents``."""
+    script, run = _ENTRY_POINTS[entry_point]
+    if not script.exists():
+        pytest.skip(f"{script} not found")
+    home = tmp_path / "home"
+    home.mkdir()
+    kanban_root = tmp_path / "kanban_root"
+
+    result = run(tmp_path, home=home, kanban_root=kanban_root, claude_config_dir=None)
+    output = _combined_output(result)
+    assert result.returncode == 0, f"{entry_point} failed:\n{output}"
+
+    _assert_every_manifest_wrapper_in(home / ".claude" / "agents", output)
+
+
+def _run_provider_agents_dir(
+    provider: str, *, home: pathlib.Path, claude_config_dir: str | None
+) -> str:
+    """Source subagent_deploy.sh in isolation and print provider_agents_dir."""
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+    env.pop("CLAUDE_CONFIG_DIR", None)
+    if claude_config_dir is not None:
+        env["CLAUDE_CONFIG_DIR"] = claude_config_dir
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'set -u; source "{_REAL_SUBAGENT_DEPLOY_SH}"; provider_agents_dir "{provider}"',
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+@pytest.mark.skipif(
+    not _REAL_SUBAGENT_DEPLOY_SH.exists(),
+    reason=f"subagent_deploy.sh not found at {_REAL_SUBAGENT_DEPLOY_SH}; skipping.",
+)
+@pytest.mark.parametrize(
+    "provider,claude_config_dir,expected",
+    [
+        ("claude", "/cfg/claude", "/cfg/claude/agents"),
+        ("claude", None, "{home}/.claude/agents"),
+        ("claude", "", "{home}/.claude/agents"),
+        ("codex", "/cfg/claude", "{home}/.codex/agents"),
+        ("codex", None, "{home}/.codex/agents"),
+    ],
+)
+def test_provider_agents_dir_resolution(
+    tmp_path: pathlib.Path,
+    provider: str,
+    claude_config_dir: str | None,
+    expected: str,
+) -> None:
+    """claude honours a non-empty CLAUDE_CONFIG_DIR; other providers use ``$HOME/.<provider>``."""
+    home = tmp_path / "home"
+    got = _run_provider_agents_dir(provider, home=home, claude_config_dir=claude_config_dir)
+    assert got == expected.format(home=home), got

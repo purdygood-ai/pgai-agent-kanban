@@ -1,10 +1,11 @@
 """
 test_transient_retry_record.py
 ===============================
-Behavioral fixtures for BUG-0107: unify transient retry state into one
+Behavioral fixtures unifying transient retry state into one
 durable machine-readable record.
 
-Prior to this fix, transient-retry state had two uncoordinated authorities:
+The defect shape guarded here: transient-retry state split across two
+uncoordinated authorities:
   - wake's prose "retry N/M" embedded in ## Blocked Reason, erased by
     promote_blocked_to_backlog on every BACKLOG promotion.
   - OVERWATCH's separate ## Transient Requeue Count field with its own
@@ -14,16 +15,17 @@ at exactly the cap, while the recheck path only promoted while
 `retry_count < cap`) could leave a task BLOCKED + Needs Human=no forever —
 a limbo state with no path back to BACKLOG and no human escalation.
 
-This module exercises the fix directly against the real production
-functions in wake_common.sh (handle_working_after_exit,
-promote_blocked_to_backlog) and the shared durable-record substrate in
-overwatch_protocol.sh (transient_retry_field / transient_retry_write /
-transient_retry_limit), extracted via the same awk brace-matching pattern
-test_census_closure.py established — this avoids the heavy top-level
-bootstrap wake_common.sh performs when fully sourced, while still exercising
-the genuine production function bodies (not a Python reimplementation).
+This module exercises the unified record directly against the real production
+functions in wake_lifecycle.sh (handle_working_after_exit) and
+wake_task_state.sh (promote_blocked_to_backlog), and the shared
+durable-record substrate in overwatch_protocol.sh (transient_retry_field /
+transient_retry_write / transient_retry_limit), extracted via the same awk
+brace-matching pattern test_census_closure.py established — this avoids the
+heavy top-level bootstrap wake_common.sh performs when fully sourced, while
+still exercising the genuine production function bodies (not a Python
+reimplementation).
 
-Fixtures exercised (mirrors the task's Acceptance Criteria):
+Fixtures exercised:
   (A) Four consecutive transient failures across separate "wake invocations"
       (four independent calls to handle_working_after_exit against the same
       status.md) drive retry_count to the ceiling monotonically — never
@@ -33,13 +35,17 @@ Fixtures exercised (mirrors the task's Acceptance Criteria):
       ## Blocked Reason to "none".
   (C) Exactly-at-cap is BLOCKED + Needs Human=yes — never a limbo state
       (BLOCKED + Needs Human=no with no further path back to BACKLOG).
+  (E) Under LC_ALL=C the stored signature is cut to 80 characters, never
+      mid-character, so ## Transient Retry and ## Blocked Reason stay valid
+      UTF-8; an ASCII signature is still cut to exactly 80.
 
 Naming: function names describe behavior under test, never bug IDs or task
-IDs (SOP.md "Test Authoring Guidelines", Anti-pattern 6).
+IDs (roles/TESTER.md "Test Authoring Guidelines", Anti-pattern 6).
 """
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import subprocess
@@ -53,22 +59,43 @@ from tests.fixtures.log_stub import make_log_stub_fragment
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
 
-_WAKE_COMMON_LIB = pathlib.Path("scripts/lib/wake_common.sh")
+# normalize_status_file / set_state / set_block / promote_blocked_to_backlog
+# live in this stage file (v2.9.20-engine-decomposition);
+# handle_working_after_exit lives in wake_lifecycle.sh (same decomposition)
+# but calls those, so extraction must span both.
+_WAKE_TASK_STATE_LIB = pathlib.Path("scripts/lib/wake_task_state.sh")
+_WAKE_TASK_TRANSITION_LIB = pathlib.Path("scripts/lib/wake_task_transition.sh")
+_WAKE_LIFECYCLE_LIB = pathlib.Path("scripts/lib/wake_lifecycle.sh")
 _OVERWATCH_PROTOCOL_LIB = pathlib.Path("scripts/lib/overwatch_protocol.sh")
+
+# Real, checked-in team/scripts/ directory (holds error_contract.sh and
+# temp.sh — handle_working_after_exit now routes its BLOCKED transition
+# through transition_task_state, which calls pgai_emit_error_contract and
+# pgai_mktemp). This file lives at team/tests/unit/, so three parents up is
+# team/.
+_REAL_REPO_TEAM_SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "scripts"
 
 
 # ---------------------------------------------------------------------------
 # Function extraction (mirrors test_census_closure.py's pattern): pull named
-# top-level function bodies out of wake_common.sh via awk brace-matching, so
-# tests exercise the real production functions without paying for
-# wake_common.sh's full top-level bootstrap (which requires AGENT, TEAM_ROOT,
-# SCRIPT_DIR, provider_invoke_agent, and a real kanban.cfg on disk).
+# top-level function bodies out of wake_task_state.sh / wake_lifecycle.sh via
+# awk brace-matching, so tests exercise the real production functions
+# without paying for wake_common.sh's full top-level bootstrap (which
+# requires AGENT, TEAM_ROOT, SCRIPT_DIR, provider_invoke_agent, and a real
+# kanban.cfg on disk).
 # ---------------------------------------------------------------------------
 
 
 def _extract_functions_snippet(func_names: list[str]) -> str:
     """Return a bash snippet that extracts and loads the named top-level
-    functions from wake_common.sh via awk brace-counting.
+    functions via awk brace-counting.
+
+    Searches wake_task_state.sh, wake_task_transition.sh, and
+    wake_lifecycle.sh (in that order). awk's
+    found/depth state is per-function and closes on the function's own
+    closing brace, so scanning multiple files in one invocation is safe: a
+    function fully defined in one file never leaks state across the file
+    boundary.
 
     Args:
         func_names: function names to extract, e.g. ["set_state", "set_block"].
@@ -92,7 +119,7 @@ def _extract_functions_snippet(func_names: list[str]) -> str:
                     }}
                 }}
             }}
-        ' '{_WAKE_COMMON_LIB}')"
+        ' '{_WAKE_TASK_STATE_LIB}' '{_WAKE_TASK_TRANSITION_LIB}' '{_WAKE_LIFECYCLE_LIB}')"
     """)
 
 
@@ -143,6 +170,15 @@ def _build_status_file(tmp_path: pathlib.Path, task_id: str) -> pathlib.Path:
     return status_file
 
 
+def _build_backlog_file(tmp_path: pathlib.Path, task_id: str, marker: str = "A") -> pathlib.Path:
+    """Write a minimal queue file with task_id marked, as transition_task_state
+    (routed through by handle_working_after_exit) expects to find and rewrite.
+    """
+    backlog_file = tmp_path / "coder_backlog.md"
+    backlog_file.write_text(f"# Coder Backlog\n\n- [{marker}] {task_id}\n", encoding="utf-8")
+    return backlog_file
+
+
 def _write_transient_log(tmp_path: pathlib.Path, name: str, signature: str) -> pathlib.Path:
     """Write a synthetic agent log file whose tail contains a transient signature."""
     log_file = tmp_path / name
@@ -153,22 +189,60 @@ def _write_transient_log(tmp_path: pathlib.Path, name: str, signature: str) -> p
     return log_file
 
 
-def _script_header(log_file: pathlib.Path, extra_functions: list[str] | None = None) -> str:
+def _script_header(
+    log_file: pathlib.Path,
+    extra_functions: list[str] | None = None,
+    temp_dir: pathlib.Path | None = None,
+    backlog_file: pathlib.Path | None = None,
+) -> str:
     """Bash header shared by every test in this module.
 
     Sources the real overwatch_protocol.sh (transient_retry_field /
-    transient_retry_write / transient_retry_limit — BUG-0107's shared
-    substrate), the faithful log() stub, and the real
-    normalize_status_file/set_state/set_block/handle_working_after_exit
-    (plus any extra_functions requested) extracted from wake_common.sh.
+    transient_retry_write / transient_retry_limit — the durable retry-record
+    substrate), the real error_contract.sh / temp.sh (handle_working_after_exit
+    routes its BLOCKED transition through transition_task_state, which calls
+    pgai_emit_error_contract and pgai_mktemp), the faithful log() stub, and the
+    real normalize_status_file / set_state / set_block / mark_backlog /
+    transition_task_state (wake_task_state.sh) / handle_working_after_exit
+    (wake_lifecycle.sh) (plus any extra_functions requested) extracted from
+    their respective stage files.
+
+    temp_dir, when given, is exported as PGAI_AGENT_KANBAN_TEMP_DIR so
+    transition_task_state's scratch-file snapshots land under an isolated
+    per-test directory rather than falling through temp.sh's install-wide
+    resolution chain.
+
+    backlog_file, when given, is exported as BACKLOG so transition_task_state
+    has a queue file to rewrite — every real caller always has one; tests
+    that call handle_working_after_exit must supply one too now that its
+    BLOCKED transition writes the queue marker as well as ## State.
     """
-    funcs = ["normalize_status_file", "set_state", "set_block", "handle_working_after_exit"]
+    funcs = [
+        "normalize_status_file",
+        "set_state",
+        "set_block",
+        "mark_backlog",
+        "transition_task_state",
+        "_wake_transition_marker_landed",
+        "_wake_transition_restore_state",
+        "_wake_transition_arm",
+        "_wake_transition_disarm",
+        "_wake_transition_on_signal",
+        "handle_working_after_exit",
+    ]
     if extra_functions:
         funcs += [f for f in extra_functions if f not in funcs]
+    temp_dir_export = f'export PGAI_AGENT_KANBAN_TEMP_DIR="{temp_dir}"' if temp_dir else ""
+    backlog_export = f'BACKLOG="{backlog_file}"' if backlog_file else ""
     return textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
+        {temp_dir_export}
         source {_OVERWATCH_PROTOCOL_LIB}
+        source "{_REAL_REPO_TEAM_SCRIPTS_DIR}/lib/error_contract.sh"
+        source "{_REAL_REPO_TEAM_SCRIPTS_DIR}/lib/atomic_write.sh"
+        source "{_REAL_REPO_TEAM_SCRIPTS_DIR}/lib/temp.sh"
+        {backlog_export}
 
         {make_log_stub_fragment(log_file)}
 
@@ -220,7 +294,8 @@ def test_four_consecutive_transient_failures_reach_ceiling_and_escalate(
     task_id = "CODER-20260101-010-fixture-a"
     status_file = _build_status_file(tmp_path, task_id)
     log_file = tmp_path / "wake.log"
-    header = _script_header(log_file)
+    backlog_file = _build_backlog_file(tmp_path, task_id)
+    header = _script_header(log_file, temp_dir=tmp_path / "kanban_temp", backlog_file=backlog_file)
 
     observed_counts: list[int] = []
     observed_needs_human: list[str] = []
@@ -242,6 +317,10 @@ def test_four_consecutive_transient_failures_reach_ceiling_and_escalate(
         status_text = _read(status_file)
         assert _field(status_text, "State") == "BLOCKED", (
             f"invocation {i}: State should be BLOCKED\n{status_text}"
+        )
+        assert "[B]" in backlog_file.read_text(encoding="utf-8"), (
+            f"invocation {i}: queue marker should read [B] alongside ## State=BLOCKED\n"
+            f"{backlog_file.read_text(encoding='utf-8')}"
         )
         count = _record_field(status_text, "retry_count")
         assert count is not None, f"invocation {i}: retry_count missing\n{status_text}"
@@ -268,13 +347,19 @@ def test_backlog_promotion_preserves_transient_retry_record(tmp_path: pathlib.Pa
     """promote_blocked_to_backlog resets ## Blocked Reason to "none" (existing
     behavior, unaffected) but must NOT erase the durable ## Transient Retry
     record — the record is what makes retry counting survive BACKLOG
-    promotion (BUG-0107's core fix; before this, the count lived only in
-    ## Blocked Reason prose and was wiped on every promotion).
+    promotion (a count kept only in ## Blocked Reason prose is
+    wiped on every promotion).
     """
     task_id = "CODER-20260101-011-fixture-b"
     status_file = _build_status_file(tmp_path, task_id)
     log_file = tmp_path / "wake.log"
-    header = _script_header(log_file, extra_functions=["promote_blocked_to_backlog"])
+    backlog_file = _build_backlog_file(tmp_path, task_id)
+    header = _script_header(
+        log_file,
+        extra_functions=["_promote_mark_pending", "promote_blocked_to_backlog"],
+        temp_dir=tmp_path / "kanban_temp",
+        backlog_file=backlog_file,
+    )
 
     agent_log = _write_transient_log(tmp_path, "agent.log", "529 Overloaded")
 
@@ -293,9 +378,11 @@ def test_backlog_promotion_preserves_transient_retry_record(tmp_path: pathlib.Pa
         "Blocked Reason should carry a human-readable narrative before promotion"
     )
 
-    # Build a minimal BACKLOG queue file with this task marked [B], as
-    # promote_blocked_to_backlog expects.
-    backlog_file = tmp_path / "coder_backlog.md"
+    # Reset the queue file to a clean [B] entry, as promote_blocked_to_backlog
+    # expects — independent of whatever marker the classification step above
+    # left (handle_working_after_exit's own BLOCKED transition already wrote
+    # [B] here too, but this test's subject is the promotion step, not the
+    # classification step's marker write).
     backlog_file.write_text(f"# Coder Backlog\n\n- [B] {task_id}\n", encoding="utf-8")
 
     promote_script = header + textwrap.dedent(f"""\
@@ -316,8 +403,8 @@ def test_backlog_promotion_preserves_transient_retry_record(tmp_path: pathlib.Pa
     # But the durable retry record must survive, byte-for-byte on the count.
     post_count = _record_field(post_promotion_text, "retry_count")
     assert post_count == "1", (
-        f"Durable ## Transient Retry record must survive BACKLOG promotion "
-        f"(BUG-0107); expected retry_count=1, got {post_count!r}\n{post_promotion_text}"
+        f"Durable ## Transient Retry record must survive BACKLOG promotion; "
+        f"expected retry_count=1, got {post_count!r}\n{post_promotion_text}"
     )
     assert _record_field(post_promotion_text, "reason_code") == "transient_api_error", (
         f"reason_code should survive promotion unchanged\n{post_promotion_text}"
@@ -339,7 +426,7 @@ def test_exactly_at_cap_is_blocked_and_needs_human_no_limbo(tmp_path: pathlib.Pa
     """A task whose retry_count is already exactly at the ceiling BEFORE this
     invocation (simulating a task that was somehow re-classified once more at
     the boundary) is escalated to Needs Human=yes on this invocation, not left
-    at Needs Human=no. This is the literal off-by-one BUG-0107 fixed: the old
+    at Needs Human=no. This is the literal off-by-one this fixed: the old
     code used `retry_count <= cap` (allowing Needs Human=no AT the cap) while
     the recheck path used `retry_count < cap` (refusing to promote AT the
     cap) — the two disagreed exactly at the boundary, producing a limbo state
@@ -364,7 +451,8 @@ def test_exactly_at_cap_is_blocked_and_needs_human_no_limbo(tmp_path: pathlib.Pa
     )
 
     log_file = tmp_path / "wake.log"
-    header = _script_header(log_file)
+    backlog_file = _build_backlog_file(tmp_path, task_id)
+    header = _script_header(log_file, temp_dir=tmp_path / "kanban_temp", backlog_file=backlog_file)
     agent_log = _write_transient_log(tmp_path, "agent.log", "API Error: 503 Service Unavailable")
 
     script = header + textwrap.dedent(f"""\
@@ -386,7 +474,7 @@ def test_exactly_at_cap_is_blocked_and_needs_human_no_limbo(tmp_path: pathlib.Pa
 
 # ---------------------------------------------------------------------------
 # (D) Transient signature detection survives a pipe-buffer-exceeding tail
-#     window deterministically (BUG-0038's rapid-fire increment race).
+#     window deterministically (a rapid-fire increment race).
 # ---------------------------------------------------------------------------
 
 
@@ -396,7 +484,7 @@ def _write_transient_log_exceeding_pipe_buffer(tmp_path: pathlib.Path, name: str
     transient signature on the FIRST of those 50 lines.
 
     This deterministically (not load-dependently) reproduces the exact race
-    class behind BUG-0038: `handle_working_after_exit` used to detect the
+    class: `handle_working_after_exit` used to detect the
     signature via `echo "$_tail_lines" | grep -qiE "$_DETECT_RE"`. Piping
     into `grep -q` forks a separate writer (echo) whose output grep may not
     fully drain — `grep -q` exits the instant it finds a match, which here
@@ -409,7 +497,7 @@ def _write_transient_log_exceeding_pipe_buffer(tmp_path: pathlib.Path, name: str
     the tail plainly contains one. A payload sized past the pipe buffer
     forces this outcome on every run, independent of system load or
     scheduling luck (whereas a short payload only races intermittently under
-    contention — see the ~0.8%-under-load figure recorded in the fix commit).
+    contention, roughly 0.8% of runs under load).
     """
     lines = [signature]
     lines += [f"filler line {i} " + ("padding " * 400) for i in range(49)]
@@ -423,18 +511,19 @@ def test_transient_signature_detected_when_tail_window_exceeds_pipe_buffer(
 ) -> None:
     """A transient signature on the first line of a large (>64KB) tail-50
     window is detected and increments retry_count, exactly as a short-log
-    signature would. Before the fix, this scenario deterministically failed:
-    the early-match-then-large-remaining-write shape guarantees the pipe
-    write races grep's early exit under `set -o pipefail`, so the pre-fix
-    `echo | grep -q` detection silently reported no match on every run
-    (not just intermittently) and the task fell through to the generic
+    signature would. Against `echo | grep -q` detection this scenario fails
+    deterministically: the early-match-then-large-remaining-write shape
+    guarantees the pipe write races grep's early exit under
+    `set -o pipefail`, so that detection silently reports no match on every
+    run (not just intermittently) and the task falls through to the generic
     "agent exited without updating state" branch instead of the transient
     retry path — dropping the retry_count increment entirely.
     """
     task_id = "CODER-20260101-013-fixture-d"
     status_file = _build_status_file(tmp_path, task_id)
     log_file = tmp_path / "wake.log"
-    header = _script_header(log_file)
+    backlog_file = _build_backlog_file(tmp_path, task_id)
+    header = _script_header(log_file, temp_dir=tmp_path / "kanban_temp", backlog_file=backlog_file)
     agent_log = _write_transient_log_exceeding_pipe_buffer(
         tmp_path, "agent-big.log", "API Error: 503 Service Unavailable"
     )
@@ -462,3 +551,132 @@ def test_transient_signature_detected_when_tail_window_exceeds_pipe_buffer(
     assert _field(status_text, "Needs Human").lower() == "no", (
         f"first transient failure (retry 1/4) must stay Needs Human=no\n{status_text}"
     )
+
+
+# ---------------------------------------------------------------------------
+# (E) The stored signature is cut by character under cron's C locale, so
+#     ## Transient Retry and ## Blocked Reason stay valid UTF-8, and an
+#     ASCII signature is still capped at 80 characters.
+# ---------------------------------------------------------------------------
+
+
+def _run_c_locale(script: str) -> subprocess.CompletedProcess:
+    """Run *script* with LC_ALL=C, as cron does when it sets no locale.
+
+    PYTHONPATH and KANBAN_ROOT are dropped so pp_run_ops resolves the
+    package from this tree.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in ("KANBAN_ROOT", "PYTHONPATH", "LANG", "LC_CTYPE")}
+    env["LC_ALL"] = "C"
+    return subprocess.run(["bash", "-c", script], capture_output=True, env=env, timeout=60)
+
+
+def _transient_under_c_locale(tmp_path: pathlib.Path, task_id: str, signature: str) -> str:
+    """Run one transient-error handle_working_after_exit under LC_ALL=C.
+
+    Returns the resulting status.md decoded as strict UTF-8 (a decode error
+    fails the calling test).
+    """
+    status_file = _build_status_file(tmp_path, task_id)
+    backlog_file = _build_backlog_file(tmp_path, task_id)
+    header = _script_header(tmp_path / "wake.log", temp_dir=tmp_path / "kanban_temp", backlog_file=backlog_file)
+    agent_log = _write_transient_log(tmp_path, "agent.log", signature)
+    script = header + textwrap.dedent(f"""\
+        export TRANSIENT_RETRY_CAP=4
+        handle_working_after_exit "{task_id}" "{status_file}" "{agent_log}" 1
+    """)
+    result = _run_c_locale(script)
+    assert result.returncode == 0, f"invocation failed\nstderr={result.stderr.decode('utf-8', 'replace')}"
+    return status_file.read_bytes().decode("utf-8")
+
+
+def test_multibyte_80th_signature_character_is_stored_as_valid_utf8_under_c_locale(
+    tmp_path: pathlib.Path,
+) -> None:
+    """15 ASCII characters + 64 'x' put an em dash at character 80, whose
+    first byte is byte 80: the exact cut a byte-counting `cut -c1-80` makes
+    under LC_ALL=C. The stored signature keeps the em dash whole."""
+    signature = "API Error: 529 " + "x" * 64 + "—tail"
+    status_text = _transient_under_c_locale(tmp_path, "CODER-20260101-014-fixture-e", signature)
+
+    assert _record_field(status_text, "last_error") == signature[:80], (
+        f"last_error must be the first 80 characters, em dash whole\n{status_text}"
+    )
+    assert f"TRANSIENT API ERROR — {signature[:80]} — safe to retry" in _field(
+        status_text, "Blocked Reason"
+    ), f"## Blocked Reason must carry the whole 80-character signature\n{status_text}"
+
+
+def test_ascii_signature_longer_than_80_characters_is_stored_truncated_to_80(
+    tmp_path: pathlib.Path,
+) -> None:
+    signature = "API Error: 503 " + "y" * 120
+    status_text = _transient_under_c_locale(tmp_path, "CODER-20260101-015-fixture-e", signature)
+
+    assert _record_field(status_text, "last_error") == signature[:80], (
+        f"an ASCII signature is still capped at exactly 80 characters\n{status_text}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# (F) The extraction pattern keeps the whole signature line under the plain
+#     /usr/bin/grep cron runs with: a letter "n" inside the error text does
+#     not end the match.
+# ---------------------------------------------------------------------------
+
+_SYSTEM_GREP = pathlib.Path("/usr/bin/grep")
+
+
+def _real_extract_re() -> str:
+    """Return the literal `_EXTRACT_RE` value from wake_lifecycle.sh."""
+    text = _WAKE_LIFECYCLE_LIB.read_text(encoding="utf-8")
+    match = re.search(r"^\s*local _EXTRACT_RE='([^']*)'\s*$", text, flags=re.M)
+    assert match, f"no `local _EXTRACT_RE='...'` line found in {_WAKE_LIFECYCLE_LIB}"
+    return match.group(1)
+
+
+def _extract_like_cron(line: str) -> str:
+    """Run the real extraction pipeline on *line* the way a cron wake does.
+
+    grep runs as /usr/bin/grep under `env -i` (no locale, no aliases, no
+    PATH-shadowing grep), keeps the last match as handle_working_after_exit
+    does, and the result is capped through the same `clip --chars 80` CLI.
+    """
+    grep = subprocess.run(
+        ["env", "-i", str(_SYSTEM_GREP), "-iEo", _real_extract_re()],
+        input=line + "\n",
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert grep.returncode == 0, f"grep found no signature in {line!r}: {grep.stderr}"
+    last = grep.stdout.splitlines()[-1]
+    clip = subprocess.run(
+        ["python3", "-m", "pgai_agent_kanban.task_status", "clip", "--chars", "80"],
+        input=last,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert clip.returncode == 0, clip.stderr
+    return clip.stdout.rstrip("\n")
+
+
+@pytest.mark.skipif(not _SYSTEM_GREP.exists(), reason="/usr/bin/grep is the grep cron runs; absent on this host")
+@pytest.mark.parametrize(
+    "line",
+    [
+        "API Error: 503 Service Unavailable",
+        "rate_limit_error: Number of requests exceeded",
+    ],
+)
+def test_extracted_signature_keeps_text_past_the_letter_n(line: str) -> None:
+    assert _extract_like_cron(line) == line, (
+        "the stored signature must be the whole matched line, not cut at the first 'n'"
+    )
+
+
+@pytest.mark.skipif(not _SYSTEM_GREP.exists(), reason="/usr/bin/grep is the grep cron runs; absent on this host")
+def test_extracted_signature_is_capped_at_80_characters() -> None:
+    line = "rate_limit_error: Number of requests exceeded; " + "n" * 100
+    assert _extract_like_cron(line) == line[:80]

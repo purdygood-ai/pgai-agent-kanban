@@ -18,14 +18,31 @@ tags, but nothing is ever pushed to a remote.
 ### 1. Make a local scratch repo for the game
 
 The release workflow ships real software, so it needs a git repo to build into.
-Create an empty local one (no remote):
+Create an empty local one (no remote).
 
+The block below refuses rather than acts when `~/pgai-chomp-man-src` is already
+inside a git repository, and every git command in it is bound to that path with
+`git -C` instead of relying on your current directory. That is deliberate: the
+empty first commit is only ever wanted in a brand-new scratch repo, and an
+unguarded version of this step lands it in whatever checkout you happened to be
+standing in. `git rev-parse --git-dir` succeeds whether a directory *is* a repo
+or merely sits inside one, so the single check catches both shapes — the same
+refusal the project's own test harness makes when it builds a throwaway repo.
+
+<!-- doc-lint: skip — multi-line `if` guard; the harness executes fenced commands one line at a time in separate subshells, which would split the refusal check from the commit it protects -->
 ```bash
-mkdir -p ~/pgai-chomp-man-src && cd ~/pgai-chomp-man-src
-git init
-git commit --allow-empty -m "initial empty commit"
-cd -
+mkdir -p ~/pgai-chomp-man-src
+if git -C ~/pgai-chomp-man-src rev-parse --git-dir >/dev/null 2>&1; then
+  echo "refusing: ~/pgai-chomp-man-src is already inside a git repository"
+  echo "pick a fresh, empty directory for the scratch repo instead"
+else
+  git -C ~/pgai-chomp-man-src init
+  git -C ~/pgai-chomp-man-src commit --allow-empty -m "initial empty commit"
+fi
 ```
+
+If it refuses, no repo was created — choose another path, change every
+`~/pgai-chomp-man-src` in the block to match, and run it again.
 
 ### 2. Create the project
 
@@ -70,7 +87,7 @@ not have these exact issues — that's fine. The point is to show *how* you feed
 fix or an enhancement back to the chain. Deposit them where shown; if your build
 already does the right thing, the chain will handle it gracefully.
 
-### 1. Bootstrap (v0.0.1)
+### 1. Bootstrap — v0.0.1
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
@@ -78,7 +95,7 @@ scripts/intake.sh --project pgai-chomp-man \
 ```
 Sets up the project skeleton. First release.
 
-### 2. Screen and movement (v0.1.0)
+### 2. Screen and movement — v0.1.0
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
@@ -109,7 +126,7 @@ An **enhancement** (not a bug): make the display scale to a 16:9 HD window. This
 shows how you prioritize an improvement in — same `intake.sh`, the `PRIORITY-`
 prefix routes it to the priority lane.
 
-### 5. Dots and scoring (v0.2.0)
+### 5. Dots and scoring — v0.2.0
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
@@ -126,7 +143,7 @@ scripts/intake.sh --project pgai-chomp-man \
 With eating and scoring in place, add sound. Another enhancement through the
 priority lane.
 
-### 7. Dragons (v0.3.0)
+### 7. Dragons — v0.3.0
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
@@ -134,7 +151,7 @@ scripts/intake.sh --project pgai-chomp-man \
 ```
 The enemies (dragons) arrive and chase Chomp-Man.
 
-### 8. Power pellets (v0.4.0)
+### 8. Power pellets — v0.4.0
 <!-- doc-lint: skip — scripts/ is a relative path requiring $KANBAN_ROOT as cwd; harness runs from an ephemeral tempdir where scripts/ does not exist -->
 ```bash
 scripts/intake.sh --project pgai-chomp-man \
@@ -191,6 +208,22 @@ dragon personalities — the finishing touches.
 Inspect any item with `scripts/show.sh --project pgai-chomp-man --key <KEY>`
 (e.g. `--key BUG-0001` or `--key v0.4.0`), and watch overall progress on the
 dashboard or with `scripts/kanban-status.sh`.
+
+---
+
+## Walkthroughs
+
+Two step-by-step guides take the demo further. Each says what to run and
+what you should see at every step.
+
+- **[One release candidate, end to end](release-rc-walkthrough.md)** —
+  follow a single RC from `intake.sh` to its `ai_v` tag, with a check for
+  each stage: PM decomposition, the RC branch, CODER's commits, TESTER's
+  verification, and CM's squash, tag and release notes.
+- **[Your own workflow type](custom-workflow-walkthrough.md)** — write a
+  small read-only, report-only workflow plugin on your live install,
+  validate it, point `pgai-chomp-man` at it, and watch the pipeline route a
+  labelled requirement through it.
 
 When you're done, remove the project (`scripts/remove-project.sh --project
 pgai-chomp-man`) and delete `~/pgai-chomp-man-src` — it was entirely local.

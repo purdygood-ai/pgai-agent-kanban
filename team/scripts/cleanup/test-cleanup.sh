@@ -11,14 +11,43 @@
 #   bash team/scripts/cleanup/test-cleanup.sh          # dry-run: list what would be removed
 #   bash team/scripts/cleanup/test-cleanup.sh --delete  # actually remove them
 #
-# Exit code: 0 always (informational output only).
+# Options:
+#   --delete    Remove the stale directories (default: dry run, list only).
+#   --help, -h  Print this usage and exit 0 without scanning or removing anything.
+#
+# Exit codes:
+#   0 — scan finished (informational output only), or --help
+#   1 — unknown argument; nothing is scanned or removed
 
 set -euo pipefail
 
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+# shellcheck source=../lib/error_contract.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/error_contract.sh"
+
 DRY_RUN=true
-if [[ "${1:-}" == "--delete" ]]; then
-    DRY_RUN=false
-fi
+for arg in "$@"; do
+    case "$arg" in
+        --help|-h)
+            header_help_print "${BASH_SOURCE[0]}"
+            exit 0
+            ;;
+        --delete)
+            DRY_RUN=false
+            ;;
+        *)
+            # BLOCK-WORTHY: an argument this script does not define (a
+            # mistyped --delete, say) may mean the operator expected a
+            # different run than the default dry run; refused before
+            # anything is scanned or removed rather than ignored.
+            pgai_emit_error_contract "test_cleanup.unknown_argument" \
+                "test-cleanup.sh: unknown argument '$arg'. Usage: test-cleanup.sh [--delete]. Accepted: --delete, --help. Nothing was scanned or removed." \
+                "bash $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test-cleanup.sh"
+            exit 1
+            ;;
+    esac
+done
 
 STALE_DIRS=$(find /tmp -maxdepth 1 -type d -name 'tmp.*' -mmin +60 2>/dev/null || true)
 

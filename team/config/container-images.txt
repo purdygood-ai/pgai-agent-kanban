@@ -1,0 +1,17 @@
+# team/config/container-images.txt
+#
+# The supported container image flavors: the one declared list the
+# container-tier harnesses build from. Each entry names a directory under
+# docker/ whose Dockerfile is a supported image. A directory under docker/
+# that is not named here is never built by any harness, so an experiment
+# left in docker/ cannot join a sweep by accident.
+#
+# Readers: team/tests/fixtures/container_images.py (load_container_images).
+# The cold-build lane (team/tests/cold/test_docker_cold_build.py, run by
+# team/scripts/run-cold-build-tests.sh) builds exactly this list.
+#
+# Format: one flavor name per line. Blank lines and lines starting with
+# '#' are ignored; surrounding whitespace is stripped.
+
+debian
+rocky9

@@ -2,19 +2,18 @@
 """
 scan_attention.py — Standalone attention scanners for the pgai kanban dashboard.
 
-This module is an as-is extraction of two inline Python heredoc blocks
-previously embedded in team/scripts/dashboard/attention.sh:
+team/scripts/dashboard/attention.sh calls these scanners:
 
-  1. Blocked-tasks scanner (lines 214–341): scans task directories for
+  1. Blocked-tasks scanner: scans task directories for
      tasks whose status.md contains ``state: BLOCKED`` and prints a
      formatted summary.
 
-  2. Quarantine alerts scanner (lines 353–494): scans project directories
-     for files approaching or already in quarantine (.rejected/).
+  2. Quarantine alerts scanner: scans project directories
+     for files approaching quarantine and files already quarantined
+     (the project's rejected/ and the legacy <intake>/.rejected/ dirs).
 
-The scanning logic is preserved exactly — do NOT change output format,
-ANSI codes, Unicode characters, indentation, or spacing without filing a
-separate bug.  Any quirks in the original are intentionally kept.
+The output is a contract — do NOT change output format, ANSI codes,
+Unicode characters, indentation, or spacing without filing a separate bug.
 
 Additionally:
 
@@ -79,6 +78,27 @@ import sys
 import time
 from datetime import datetime
 
+# Run by file path (``python3 .../scan_attention.py``) or loaded from a file
+# outside its package, this module has no parent package and the interpreter
+# puts only its own directory on sys.path, so the package imports below would
+# not resolve. Put this file's own package root -- the directory holding the
+# pgai_agent_kanban/ this file sits in -- at the front of sys.path so the
+# imports resolve from the same tree, never another. Imported as a package
+# member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.cm.read_state_field import read_release_state_field  # noqa: E402
+from pgai_agent_kanban.dashboard._rejected import (  # noqa: E402
+    INTAKE_DIRS,
+    UNKNOWN_ORIGIN,
+    quarantined_files,
+)
+from pgai_agent_kanban.dashboard.rejected_listing import RECOVER_HINT  # noqa: E402
+from pgai_agent_kanban.task_status import section_lines, section_value  # noqa: E402
+
 # Rejected-task sidecar parser (read_reason_sidecar), imported lazily below.
 # Import is deferred inside scan_rejected so the module remains importable even
 # when the kanban package root is not on sys.path at import time; the function
@@ -106,38 +126,12 @@ def _get_read_reason_sidecar():
 # ---------------------------------------------------------------------------
 
 def _read_field(text: str, heading: str) -> str:
-    """Return first non-blank content line after '## heading'."""
-    pat = re.compile(r'^\s*##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return ""
-    rest = text[m.end():]
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            return stripped
-    return ""
+    """Return the value of the '## heading' section (task_status.section_value)."""
+    return section_value(text, heading)
 
 
-def _read_section(text: str, heading: str, max_lines: int = 5) -> list[str]:
-    """Return up to max_lines non-blank content lines from a ## section."""
-    pat = re.compile(r'^\s*##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return []
-    rest = text[m.end():]
-    lines = []
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            lines.append(stripped)
-            if len(lines) >= max_lines:
-                break
-    return lines
+# The earlier name of task_status.section_lines, kept for existing importers.
+_read_section = section_lines
 
 
 def _format_elapsed(secs: int) -> str:
@@ -175,8 +169,7 @@ def _is_transient_blocked(status_text: str) -> bool:
 def scan_blocked_tasks(tasks_root: str, use_color: bool) -> None:
     """Scan task directories for BLOCKED state and print formatted output.
 
-    Produces identical output to the ``PYEOF`` heredoc block in
-    team/scripts/dashboard/attention.sh (lines 214–341).
+    Called by team/scripts/dashboard/attention.sh's blocked-tasks section.
 
     Transient API error blocks are rendered in their own section
     by scan_transient_tasks; this function excludes them so they do not appear
@@ -237,10 +230,10 @@ def scan_blocked_tasks(tasks_root: str, use_color: bool) -> None:
                 elapsed_str = ""
 
             # Extract reason and next step
-            reason_lines = _read_section(status_text, "Blocked Reason", max_lines=5)
+            reason_lines = section_lines(status_text, "Blocked Reason", max_lines=5)
             if not reason_lines:
-                reason_lines = _read_section(status_text, "Blockers", max_lines=5)
-            next_step_lines = _read_section(status_text, "Next Recommended Step", max_lines=5)
+                reason_lines = section_lines(status_text, "Blockers", max_lines=5)
+            next_step_lines = section_lines(status_text, "Next Recommended Step", max_lines=5)
 
             # Render the blocked task block
             print(f"\n{ARROW} {C_RED}{C_BOLD}{task_id}{RESET}")
@@ -321,9 +314,9 @@ def scan_transient_tasks(tasks_root: str, use_color: bool) -> None:
                 elapsed_str = ""
 
             # Extract reason
-            reason_lines = _read_section(status_text, "Blocked Reason", max_lines=3)
+            reason_lines = section_lines(status_text, "Blocked Reason", max_lines=3)
             if not reason_lines:
-                reason_lines = _read_section(status_text, "Blockers", max_lines=3)
+                reason_lines = section_lines(status_text, "Blockers", max_lines=3)
 
             # Render the transient task block
             print(f"\n{ARROW} {C_CYAN}{C_BOLD}{task_id}{RESET}")
@@ -348,7 +341,7 @@ def scan_transient_tasks(tasks_root: str, use_color: bool) -> None:
 def _iter_projects(kanban_root: pathlib.Path):
     """Yield (project_name, project_root) for all registered projects.
 
-    Supports the v0.18+ projects/ layout.  Falls back to treating the kanban
+    Reads the projects/ layout.  Falls back to treating the kanban
     root itself as the single project root when projects/ does not exist.
     """
     projects_dir = kanban_root / "projects"
@@ -393,24 +386,23 @@ def _scan_state_file(state_file: pathlib.Path, threshold: int) -> list[tuple[str
     return results
 
 
-def _scan_rejected_dir(rejected_dir: pathlib.Path) -> list[str]:
-    """Return sorted list of filenames already in .rejected/."""
-    if not rejected_dir.is_dir():
-        return []
-    try:
-        return sorted(
-            e.name for e in rejected_dir.iterdir()
-            if e.is_file() and not e.name.startswith(".")
-        )
-    except OSError:
-        return []
-
-
 def scan_quarantine(kanban_root: str, use_color: bool, threshold: int) -> None:
     """Scan project directories for quarantine alerts and print formatted output.
 
-    Produces identical output to the ``QPYEOF`` heredoc block in
-    team/scripts/dashboard/attention.sh (lines 353–494).
+    Called by team/scripts/dashboard/attention.sh's quarantine section.
+
+    Per project, one group per intake directory -- ``priority``, ``bugs``,
+    ``requirements``, then ``rejected`` for files whose origin cannot be
+    told -- shows up to two blocks:
+
+    - a warning block: files the discovery state file counts as rejected
+      fewer than *threshold* times (``priority`` and ``bugs`` only);
+    - a terminal block: files already quarantined, as
+      ``dashboard._rejected.quarantined_files`` finds them in the project's
+      ``rejected/`` directory and the legacy ``<intake>/.rejected/``
+      directories, grouped by the intake directory each came from, closed
+      by a ``Recover:`` line in the flag form ``recover-rejected.sh``
+      accepts (``rejected_listing.RECOVER_HINT`` with the project named).
 
     Args:
         kanban_root:  Path to the kanban root directory.
@@ -449,13 +441,17 @@ def scan_quarantine(kanban_root: str, use_color: bool, threshold: int) -> None:
                 warn_by_dir["bugs"].append((fname, count, reason))
             # Unknown prefix: silently skip (forward compat).
 
-        # Read terminal (already quarantined) files from each .rejected/ dir.
-        for subdir_name in ("priority", "bugs"):
-            subdir = proj_root / subdir_name
-            rejected_dir = subdir / ".rejected"
+        # Terminal (already quarantined) files from the shared lookup: the
+        # project's rejected/ directory and the legacy <intake>/.rejected/
+        # dirs, bucketed by the intake directory each file came from.
+        terminals_by_dir: dict[str, list[str]] = {}
+        for quarantined in quarantined_files(proj_root, proj_root / "rejected"):
+            terminals_by_dir.setdefault(quarantined.origin, []).append(quarantined.name)
+        recover_hint = RECOVER_HINT.replace("<name>", proj_name)
 
-            warnings = warn_by_dir[subdir_name]
-            terminals = _scan_rejected_dir(rejected_dir)
+        for subdir_name in (*INTAKE_DIRS, UNKNOWN_ORIGIN):
+            warnings = warn_by_dir.get(subdir_name, [])
+            terminals = sorted(terminals_by_dir.get(subdir_name, []))
 
             if not warnings and not terminals:
                 continue
@@ -481,10 +477,7 @@ def scan_quarantine(kanban_root: str, use_color: bool, threshold: int) -> None:
                 )
                 for fname in terminals:
                     print(f"      {fname}")
-                print(
-                    f"      {C_DIM}Recover: "
-                    f"scripts/recover-rejected.sh {proj_name} <filename>{RESET}"
-                )
+                print(f"      {C_DIM}Recover: {recover_hint}{RESET}")
 
     if not found_any:
         print(f"\n  {C_DIM}(no quarantine alerts){RESET}")
@@ -590,7 +583,7 @@ def scan_rejected(kanban_root: str, use_color: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Stale WORKING tasks scanner (D4, v0.64.0)
+# Stale WORKING tasks scanner
 # ---------------------------------------------------------------------------
 
 def scan_stale_working_tasks(
@@ -668,7 +661,7 @@ def scan_stale_working_tasks(
             started_at = datetime.fromtimestamp(mtime).strftime("%H:%M:%S")
 
             # Extract summary and role for context.
-            summary_lines = _read_section(status_text, "Summary", max_lines=2)
+            summary_lines = section_lines(status_text, "Summary", max_lines=2)
             role = _read_field(status_text, "Role") or ""
 
             role_str = f" [{role}]" if role else ""
@@ -825,6 +818,110 @@ _OVERWATCH_NEEDS_HUMAN_ACTIONS = frozenset({
 })
 
 
+# ---------------------------------------------------------------------------
+# In-progress resolution marker / Decision-event readers.
+#
+# A silent recovery is indistinguishable from a system that quietly did
+# something wrong: while OVERWATCH's three-lane resolution stage
+# (pgai_agent_kanban.overwatch.resolution_stage) is actively running Lane
+# A's recovery drill or Lane B's force-ship, it writes an in-progress
+# marker at <project_root>/overwatch/resolving.md
+# (resolution_stage.write_resolving_marker) and removes it once the
+# outcome is recorded (clear_resolving_marker). The lane verdict
+# (pgai_agent_kanban.ops.verdict, behind why.sh and GET /verdicts) reads the
+# identical file, so why.sh and this attention window can never disagree
+# about whether a lane is currently resolving.
+# ---------------------------------------------------------------------------
+
+
+def _read_resolving_marker(proj_root: pathlib.Path) -> dict | None:
+    """Return {"lane", "attempt", "version", "started_at"} from
+    <proj_root>/overwatch/resolving.md, or None when the marker is absent
+    or malformed (missing a required field). Never raises: a read error is
+    treated identically to "no marker" — the attention window must not
+    crash a live dashboard render over a transient/partial write.
+    """
+    marker = proj_root / "overwatch" / "resolving.md"
+    if not marker.is_file():
+        return None
+    try:
+        text = marker.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or ":" not in line:
+            continue
+        key, _, val = line.partition(":")
+        fields[key.strip()] = val.strip()
+
+    lane = fields.get("lane")
+    attempt = fields.get("attempt")
+    version = fields.get("version")
+    if not (lane and attempt and version):
+        return None
+    return {"lane": lane, "attempt": attempt, "version": version, "started_at": fields.get("started_at", "")}
+
+
+_OVERWATCH_DECISION_BLOCK_RE = re.compile(
+    r"^## OVERWATCH Decision\n(.*?)(?=\n## |\Z)", re.DOTALL | re.MULTILINE
+)
+_OVERWATCH_DECISION_FIELD_RE = {
+    "lane": re.compile(r"^Lane:\s*(.*)$", re.MULTILINE),
+    "version": re.compile(r"^Version:\s*(.*)$", re.MULTILINE),
+    "outcome": re.compile(r"^Outcome:\s*(.*)$", re.MULTILINE),
+    "timestamp": re.compile(r"^Timestamp:\s*(.*)$", re.MULTILINE),
+}
+
+
+def _read_last_overwatch_decision(release_state_path: pathlib.Path) -> dict | None:
+    """Return {"lane", "version", "outcome", "timestamp"} for the LAST
+    "## OVERWATCH Decision" event block in *release_state_path*
+    (release-state.md is append-only, so the last occurrence is the most
+    recent decision -- resolution_stage.write_decision_event's own
+    contract). Returns None when the file is absent, unreadable, or
+    carries no such block.
+    """
+    if not release_state_path.is_file():
+        return None
+    try:
+        text = release_state_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+    blocks = _OVERWATCH_DECISION_BLOCK_RE.findall(text)
+    if not blocks:
+        return None
+    last = blocks[-1]
+
+    result: dict[str, str] = {}
+    for name, pattern in _OVERWATCH_DECISION_FIELD_RE.items():
+        m = pattern.search(last)
+        result[name] = m.group(1).strip() if m else ""
+    return result
+
+
+def _read_active_rc(release_state_path: pathlib.Path) -> str:
+    """Return the "## Active RC" field's value, or "" when absent/unreadable.
+    Used as the staleness guard: a Decision event is only surfaced when its
+    own Version still matches the project's current Active RC — the same
+    guard the lane verdict (pgai_agent_kanban.ops.verdict) applies, so the
+    two surfaces agree on when a decision is still "live" versus superseded.
+
+    Read through ``cm.read_state_field.read_release_state_field``; a field
+    the loader refuses (missing heading, empty, not ``none``/vX.Y.Z) reads
+    as "", exactly as an absent file does.
+    """
+    if not release_state_path.is_file():
+        return ""
+    try:
+        return read_release_state_field(str(release_state_path), "Active RC")
+    except (OSError, ValueError):
+        return ""
+
+
 def _parse_overwatch_action_log(
     log_path: pathlib.Path,
     max_entries: int,
@@ -912,6 +1009,26 @@ def scan_overwatch_section(
     Only TRANSIENT and needs-human entries are rendered; info entries
     (sweep-start, sweep-end, check-ok) are suppressed in the display.
 
+    Also renders, per project, at most one of:
+
+      - a "resolving" entry when OVERWATCH's three-lane resolution stage is
+        actively running (an in-progress marker at
+        ``<project_root>/overwatch/resolving.md`` — see
+        ``_read_resolving_marker``), visually distinct from both TRANSIENT
+        and needs-human so an in-progress autonomous recovery is never
+        mistaken for a block still waiting on a human; or
+      - a "decision" entry summarising the most recent "## OVERWATCH
+        Decision" event in release-state.md, shown only while that
+        decision's own Version still matches the project's current Active
+        RC (the same staleness guard pgai_agent_kanban.ops.verdict applies)
+        and only when the project's ship-policy HALT is still present (a
+        Decision recorded against a HALT that has since cleared has
+        nothing left for the operator to act on here).
+
+    A "resolving" entry always takes priority over a "decision" entry for
+    the same project — an in-progress attempt must never be shadowed by a
+    stale prior decision.
+
     When no OVERWATCH data exists for any project, emits a "(no recent
     OVERWATCH activity)" message so the section is always present.
 
@@ -922,7 +1039,9 @@ def scan_overwatch_section(
     """
     kanban_root_path = pathlib.Path(kanban_root)
 
-    # ANSI codes — cyan for TRANSIENT (retryable), red for needs-human (alarm).
+    # ANSI codes — cyan for TRANSIENT (retryable) and for the in-progress
+    # resolving state, red for needs-human (alarm), plain bold for a
+    # completed decision (informational, not an alarm).
     RESET  = "\033[0m"    if use_color else ""
     C_RED  = "\033[0;31m" if use_color else ""
     C_CYAN = "\033[0;36m" if use_color else ""
@@ -934,18 +1053,46 @@ def scan_overwatch_section(
     found_any = False
 
     for proj_name, proj_root in _iter_projects(kanban_root_path):
+        release_state_path = proj_root / "release-state.md"
+
+        resolving = _read_resolving_marker(proj_root)
+        decision = None
+        if not resolving and (proj_root / "HALT").is_file():
+            candidate = _read_last_overwatch_decision(release_state_path)
+            if candidate and candidate.get("version") == _read_active_rc(release_state_path):
+                decision = candidate
+
         log_path = proj_root / "overwatch" / "actions.log"
         entries = _parse_overwatch_action_log(log_path, max_entries)
 
         # Keep only TRANSIENT and needs-human entries for display.
         visible = [e for e in entries if e["type"] in ("TRANSIENT", "needs-human")]
-        if not visible:
+        if not (resolving or decision or visible):
             continue
 
         found_any = True
 
         proj_upper = proj_name.upper().replace("-", "_")
         print(f"\n  {C_BOLD}{proj_upper}{RESET}")
+
+        if resolving:
+            arrow = "⟳" if use_color else ">"  # matches the TRANSIENT arrow style
+            print(f"\n  {arrow} {C_CYAN}{C_BOLD}resolving{RESET}  {C_DIM}{resolving.get('started_at', '')}{RESET}")
+            print(
+                f"    OVERWATCH resolving (lane {resolving['lane']}, "
+                f"attempt {resolving['attempt']}) for {resolving['version']}"
+            )
+            print("")
+        elif decision:
+            check = "✓" if use_color else "*"
+            outcome = decision.get("outcome", "")
+            if len(outcome) > 160:
+                outcome = outcome[:160] + "…"
+            print(f"\n  {check} {C_CYAN}{C_BOLD}decision{RESET}  {C_DIM}{decision.get('timestamp', '')}{RESET}")
+            print(f"    OVERWATCH Decision recorded (lane {decision['lane']}, {decision['version']})")
+            if outcome:
+                print(f"    {C_YEL}outcome:{RESET} {outcome}")
+            print("")
 
         for entry in visible:
             ts       = entry["timestamp"]
@@ -1075,7 +1222,7 @@ def main() -> None:
         help="Disable ANSI color output.",
     )
 
-    # --- stale-working-tasks subcommand (D4, v0.64.0) ---
+    # --- stale-working-tasks subcommand ---
     p_stale = subparsers.add_parser(
         "stale-working-tasks",
         help=(

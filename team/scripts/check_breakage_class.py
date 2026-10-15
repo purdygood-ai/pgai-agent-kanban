@@ -375,6 +375,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the breakage-class check over the team tree and print each failure.
+
+    Exit codes: 0 no breakage-class failure; 1 one or more (syntax errors,
+    compile failures, unresolved first-party imports), listed on stdout;
+    2 usage error, such as a ``--team-dir`` that does not exist.
+    """
     args = _parse_args(argv)
 
     if args.team_dir:

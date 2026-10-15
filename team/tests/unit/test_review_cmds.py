@@ -346,7 +346,7 @@ class TestApprovalsReviewCmdsField:
         monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(sandbox_root))
         monkeypatch.setenv("KANBAN_ROOT", str(sandbox_root))
 
-        cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=_TEAM_DIR)
+        cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=sandbox_root)
         return TestClient(create_app(cfg=cfg), raise_server_exceptions=True)
 
     def test_review_cmds_field_present(
@@ -469,7 +469,7 @@ class TestReviewCmdsJsonVsWindow14:
         monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(sandbox_root))
         monkeypatch.setenv("KANBAN_ROOT", str(sandbox_root))
 
-        cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=_TEAM_DIR)
+        cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=sandbox_root)
         return TestClient(create_app(cfg=cfg), raise_server_exceptions=True)
 
     def test_review_cmds_same_in_json_and_window14(
@@ -547,29 +547,40 @@ class TestReviewCmdsJsonVsWindow14:
 
 
 class TestIcdLifecycle:
-    """ICD version 1.3.0 lifecycle: version file, artifact, baselines, freeze."""
+    """ICD version 1.18.5 lifecycle: version file, artifact, baselines, freeze."""
 
-    def test_icd_version_file_is_1_3_0(self) -> None:
-        """docs/api/ICD_VERSION contains exactly '1.3.0\\n'."""
+    def test_icd_version_file_is_1_18_5(self) -> None:
+        """docs/api/ICD_VERSION contains exactly '1.18.5\\n'.
+
+        Note: When the ICD version is bumped in a future RC, update this
+        assertion to the new version. This bump (1.18.4 -> 1.18.5) is a
+        description-only patch bump: GET /verify-rc-state documents the
+        in-process call to ops.rc_state.verify_rc_state, and GET /board names
+        both quarantine locations. No route was added or removed and no
+        request or response field changed.
+        """
         icd_version_file = _DEV_TREE_ROOT / "docs" / "api" / "ICD_VERSION"
         assert icd_version_file.exists(), (
             f"ICD_VERSION not found at {icd_version_file}"
         )
         raw = icd_version_file.read_bytes()
-        assert raw == b"1.3.0\n", (
-            f"ICD_VERSION content is {raw!r}; expected b'1.3.0\\n'."
+        assert raw == b"1.18.5\n", (
+            f"ICD_VERSION content is {raw!r}; expected b'1.18.5\\n'."
         )
 
-    def test_icd_json_info_version_is_1_3_0(self) -> None:
-        """docs/api/icd.json info.version is '1.3.0'."""
+    def test_icd_json_info_version_is_1_18_5(self) -> None:
+        """docs/api/icd.json info.version is '1.18.5'."""
         assert _ICD_JSON.exists(), f"icd.json not found at {_ICD_JSON}"
         artifact = json.loads(_ICD_JSON.read_text(encoding="utf-8"))
         version = artifact.get("info", {}).get("version")
-        assert version == "1.3.0", (
-            f"icd.json info.version is {version!r}; expected '1.3.0'."
+        assert version == "1.18.5", (
+            f"icd.json info.version is {version!r}; expected '1.18.5'."
         )
 
-    @pytest.mark.parametrize("version", ["1.0.0", "1.1.0", "1.2.0", "1.3.0"])
+    @pytest.mark.parametrize(
+        "version",
+        ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.13.1", "1.14.0", "1.15.0", "1.16.0", "1.16.1", "1.17.0", "1.17.1", "1.18.0", "1.18.1", "1.18.2", "1.18.3", "1.18.4", "1.18.5"],
+    )
     def test_supported_contains_version(self, version: str) -> None:
         """docs/api/baselines/SUPPORTED lists every frozen ICD version (backward compat preserved)."""
         supported = _BASELINES_DIR / "SUPPORTED"
@@ -586,8 +597,31 @@ class TestIcdLifecycle:
             ("1.0.0", "The 1.0.0 baseline must be preserved — it proves backward compatibility."),
             ("1.1.0", "The 1.1.0 baseline must be preserved — it proves backward compatibility."),
             ("1.2.0", "The 1.2.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.3.0", "The 1.3.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.4.0", "The 1.4.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.5.0", "The 1.5.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.6.0", "The 1.6.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.7.0", "The 1.7.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.8.0", "The 1.8.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.9.0", "The 1.9.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.10.0", "The 1.10.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.11.0", "The 1.11.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.12.0", "The 1.12.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.13.0", "The 1.13.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.13.1", "The 1.13.1 baseline must be preserved — it proves backward compatibility."),
+            ("1.14.0", "The 1.14.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.15.0", "The 1.15.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.16.0", "The 1.16.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.16.1", "The 1.16.1 baseline must be preserved — it proves backward compatibility."),
+            ("1.17.0", "The 1.17.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.17.1", "The 1.17.1 baseline must be preserved — it proves backward compatibility."),
+            ("1.18.0", "The 1.18.0 baseline must be preserved — it proves backward compatibility."),
+            ("1.18.1", "The 1.18.1 baseline must be preserved — it proves backward compatibility."),
+            ("1.18.2", "The 1.18.2 baseline must be preserved — it proves backward compatibility."),
+            ("1.18.3", "The 1.18.3 baseline must be preserved — it proves backward compatibility."),
+            ("1.18.4", "The 1.18.4 baseline must be preserved — it proves backward compatibility."),
             (
-                "1.3.0",
+                "1.18.5",
                 "The file must be created as a byte-identical copy of docs/api/icd.json.",
             ),
         ],
@@ -599,18 +633,27 @@ class TestIcdLifecycle:
             f"Baseline icd-v{version}.json not found at {baseline}.\n{extra_context}"
         )
 
-    def test_icd_v1_3_0_baseline_byte_identical_to_icd_json(self) -> None:
-        """docs/api/baselines/icd-v1.3.0.json is byte-identical to docs/api/icd.json."""
-        baseline = _BASELINES_DIR / "icd-v1.3.0.json"
-        assert baseline.exists(), f"Baseline icd-v1.3.0.json not found at {baseline}"
+    def test_icd_v1_18_5_baseline_byte_identical_to_icd_json(self) -> None:
+        """docs/api/baselines/icd-v1.18.5.json is byte-identical to docs/api/icd.json.
+
+        Note: this test asserts the invariant for whichever version is
+        CURRENT (1.18.5, the in-process call described on GET /verify-rc-state
+        and both quarantine locations on GET /board). A
+        future version bump renames this test and repoints it at the new
+        current version -- the prior version's baseline (icd-v1.18.4.json)
+        remains frozen and untouched, proven by test_icd_baseline_exists
+        above.
+        """
+        baseline = _BASELINES_DIR / "icd-v1.18.5.json"
+        assert baseline.exists(), f"Baseline icd-v1.18.5.json not found at {baseline}"
 
         current_bytes = _ICD_JSON.read_bytes()
         baseline_bytes = baseline.read_bytes()
         assert current_bytes == baseline_bytes, (
-            "icd-v1.3.0.json is NOT byte-identical to docs/api/icd.json.\n"
+            "icd-v1.18.5.json is NOT byte-identical to docs/api/icd.json.\n"
             f"icd.json size: {len(current_bytes)} bytes\n"
-            f"icd-v1.3.0.json size: {len(baseline_bytes)} bytes\n"
-            "Create the baseline with: cp docs/api/icd.json docs/api/baselines/icd-v1.3.0.json"
+            f"icd-v1.18.5.json size: {len(baseline_bytes)} bytes\n"
+            "Create the baseline with: cp docs/api/icd.json docs/api/baselines/icd-v1.18.5.json"
         )
 
 

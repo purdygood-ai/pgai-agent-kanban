@@ -1,0 +1,37 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "I verified RC `ai_rc/v2.32.10` (HEAD 8a46d0f7, branched from `ai_main` 1b4dba6b) against `requirements/v2.32.10-bugfix-bundle-20261009.md`, a discovery bundle of BUG-0629 (OVERWATCH's TESTER-report finding parser used its own heading rule) and BUG-0630 (the four release-path report readers each read finding field lines by a different rule). Three merges landed: CODER-20261009-002, CODER-20261009-003 and WRITER-20261009-004, touching 10 files.\n\nBoth gated runners exited 0: unit 10709 passed / 41 skipped, integration 959 passed / 1 skipped. Every acceptance bullet in both bundled bugs was re-run and met:\n- BUG-0629's reproduction now prints `1 1 False`.\n- 94 installed reports split identically under OVERWATCH's parser and the shared splitter.\n- BUG-0630's reproduction now prints `SHIP-KNOWN-ISSUE`, `1`, `1` for every looser field shape. On an `ai_main` export it prints `0`/`0`, which is the original failure, reproduced.\n- 93 installed reports give byte-identical output from all readers on the RC and on ai_main.\n\nOne defect was found and filed. OVERWATCH's parser still reads its Filed As and Regression lines with its own stricter pattern, so it misreads annotated or backticked values. A new docstring sentence says every reader shares the field rule. The behavior is pre-existing (identical on ai_main), but the overclaiming sentence is new. A second item is lint-only: the unit runner's sentinel-leak check reported a `HALT-AFTER` that appeared on the live project root during the run. Its origin is undetermined, most likely an operator arm. It is filed as a lint-class bug and does not move the recommendation.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "OVERWATCH's finding parser reads Filed As and Regression with its own pattern, despite a new \"every reader shares\" docstring",
+      "heading": "Finding 1: OVERWATCH's finding parser reads Filed As and Regression with its own pattern, despite a new \"every reader shares\" docstring",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to OVERWATCH's resolution stage; pre-existing behaviour)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0631 (Path C-A: filed as BUG — code defect)\n\nPath C means autonomous follow-up filing, which is non-blocking.\n\nThe defect is in `parse_tester_report_findings` (`team/pgai_agent_kanban/overwatch/resolution_matrix.py`). It now splits blocks with the shared `finding_sections`, which is correct. Inside each block it still reads fields with `_FILED_AS_RE` and `_REGRESSION_RE`, which strip only `*`. The release path's shared reader (`stop_bug_files.field_value` / `field_first_word` / `filed_as_bug_id`) also strips backticks, allows any whitespace between label words, and reads a rating as its first word.\n\nMeasured on the RC, with identical results on an ai_main export:\n- `**Regression:** Yes (introduced here)` reads as `None` to OVERWATCH and `yes` to the release path. Lane A's `find_regression_source_finding` needs `regression is True`.\n- `` **Regression:** `yes` `` reads as `None` and `yes`.\n- `` **Filed As:** `none` `` and `Filed As: none (not filed)` both count as filed (`findings_all_filed` is True). This is fail-open: that fact feeds the only shipped resolution-matrix row, `findings_all_filed: true` → CANCEL-AND-REBUNDLE.\n\nIn the install, 8 real findings, all in my-app TESTER reports from 2026-09-03, carry an annotated `**Regression:** yes|no (...)` line that OVERWATCH reads as None. `kanban.cfg` has `overwatch_resolve = true`, so this path is live.\n\nThe new `field_value` docstring sentence, \"the one field-line rule every reader of a TESTER report's finding fields shares\", is not true of the tree. The module docstring and TESTER.md Step 9 state the exception correctly. The behavior was explicitly outside BUG-0629's scope (\"the callers' field reading can stay\"), so this is not a failure of either bundled fix. It is a remaining divergence, and one new overclaiming sentence, worth folding into the next iteration.\n\nReproduction: see BUG-0631, step 2. It prints `None True yes`, and I confirmed that on the RC.",
+      "filed_as": "BUG-0631",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to OVERWATCH's resolution stage; pre-existing behaviour)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0631 (Path C-A: filed as BUG — code defect)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

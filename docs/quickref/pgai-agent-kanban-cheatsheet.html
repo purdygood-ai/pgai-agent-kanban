@@ -116,7 +116,7 @@
 <header class="mast">
   <h1><span class="mono">pgai-agent-kanban</span></h1>
   <span class="tag">Operator quick reference — autonomous multi-agent build kanban</span>
-  <span class="ver">v0.91.x · commands · states · procedure</span>
+  <span class="ver">commands · states · procedure</span>
 </header>
 
 <div class="wrap">
@@ -133,8 +133,8 @@
       <p class="desc">Print an item's status / details. Read-only.</p>
       <div class="cmd">reset <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span> <span class="f">[--keep-artifacts]</span></div>
       <p class="desc">Task <span class="arrow">→</span> BACKLOG + unchecked marker, blockers cleared. Requirement <span class="arrow">→</span> clears materialize marker (PM re-decomposes). Intake <span class="arrow">→</span> re-opened. <span class="warn">Refuses a WORKING task.</span></p>
-      <div class="cmd">close <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span> <span class="f">[--state</span> <span class="a">done|wont-do|superseded]</span> <span class="f">[--note</span> <span class="a">…]</span> <span class="f">[--dry-run]</span></div>
-      <p class="desc">Intake item <span class="arrow">→</span> sets terminal Status (default <code>done</code>). Agent task <span class="arrow">→</span> always closed as <b>DONE</b> (<code>--state</code> is intake-only). Marker <span class="arrow">→</span> <span class="mono">[x]</span>.</p>
+      <div class="cmd">close <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span> <span class="f">[--state</span> <span class="a">done|wont-do]</span> <span class="f">[--note</span> <span class="a">…]</span> <span class="f">[--dry-run]</span></div>
+      <p class="desc">Intake item <span class="arrow">→</span> sets terminal Status (default <code>done</code>). Agent task <span class="arrow">→</span> always closed as <b>DONE</b> (<code>--state</code> is intake-only). Marker <span class="arrow">→</span> <span class="mono">[x]</span>. <span class="warn">Refuses any other <code>--state</code> (<code>close.invalid_state</code>), nothing written.</span></p>
       <div class="cmd">wontdo <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span></div>
       <p class="desc">Set <b>WONT-DO</b> + marker <span class="mono">[x]</span>. The honest "abandon" verb.</p>
       <div class="cmd">delete <span class="f">--project</span> <span class="a">&lt;name&gt;</span> <span class="f">--key</span> <span class="a">&lt;key&gt;</span> <span class="f">[--force] [--dry-run]</span></div>
@@ -307,7 +307,7 @@ import-kanban-config <span class="f">--file</span> <span class="a">&lt;archive&g
       <ol class="tight" style="padding-left:18px;">
         <li>DIRECTIVES.md <span class="muted">— top rules</span></li>
         <li>OVERVIEW.md <span class="muted">— autonomy principle</span></li>
-        <li>SOP.md <span class="muted">— how the kanban operates</span></li>
+        <li>SOP-core.md <span class="muted">— the shared law</span></li>
         <li>README.md <span class="muted">— entry point</span></li>
         <li>roles/&lt;ROLE&gt;.md</li>
         <li>task README.md</li>
@@ -345,7 +345,7 @@ import-kanban-config <span class="f">--file</span> <span class="a">&lt;archive&g
 </div>
 
 <footer>
-  pgai-agent-kanban operator cheat sheet · commands &amp; contracts verified against v0.91.x · pair with the Operator Commands reference (<span class="mono">docs/operator-commands.md</span>) for full detail.
+  pgai-agent-kanban operator cheat sheet · pair with the Operator Commands reference (<span class="mono">docs/operator-commands.md</span>) for full detail.
 </footer>
 
 </body>

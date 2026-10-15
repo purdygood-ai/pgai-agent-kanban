@@ -17,8 +17,15 @@ Plan JSON schema (per task):
     title               str
     role                "CODER" or "WRITER"
     assigned_agent      str (optional) — e.g. "coder", "writer". Overrides role-based routing.
-    working_directory   str — absolute path, "local-development-only", or "none"
-    git_repo            str — repo URL or "none"
+    working_directory   str — absolute path, "local-development-only", or "none".
+                              A task the wake runs in an isolated worktree
+                              (CODER/WRITER/TESTER in a git workflow) renders
+                              "(assigned at dispatch — isolated worktree)"
+                              in its README instead.
+    git_repo            str — repo URL or "none". In a git workflow the README
+                              renders the project.cfg git_repo_url when
+                              push_to_remote is not false, else
+                              "local (no remote in use)" — never "none".
     source_branch       str — typically "main" or "rc/<version>", or "none" if no git
     goal                str
     inputs              list[str]
@@ -26,7 +33,10 @@ Plan JSON schema (per task):
     required_output     str
     constraints         list[str]
     acceptance_criteria list[str]
-    depends_on          list[int] — sequence numbers of prerequisite tasks
+    depends_on          list[int] — sequence numbers of prerequisite tasks. Before any
+                                  folder is written the assembled graph is checked: a
+                                  self-reference, a dependency cycle, or an entry naming
+                                  no task's sequence exits 1 naming the tasks involved.
     notes               str
 
 Top-level plan fields:
@@ -39,7 +49,12 @@ Top-level plan fields:
                                   (workflow_type="feature"; falls back to active RC if unset)
     test_required           str — "true" (default) or "false"; controls TESTER task injection
     parent_branch           str — branch the shared feature branch is created from (default: "main")
-    target_version          str — semver version, or "none"
+    target_version          str — explicit semver version (vX.Y.Z), or "none". Discovery
+                                  resolves an auto/next-patch/empty ## Target Version and
+                                  writes it into the requirements file before PM runs, so
+                                  the materializer never resolves one: "auto" and
+                                  "next-patch" are refused (exit 1, nothing written), and
+                                  so is an empty/absent value on a release-shaped workflow.
     human_approval_required str — "required" or "auto" (default)
     requirements_path       str — absolute path of the requirements doc (optional)
     sections                list[str] — for workflow_type=document: explicit section names used to
@@ -59,7 +74,11 @@ The materializer:
 - Assigns final task IDs (AGENT-YYYYMMDD-SEQ-slug)
 - Resolves depends_on sequence numbers to full task IDs
 - Generates feature_branch as "feature/<task-id>"
-- Writes the README and status files
+- Writes the README and status files; prose fields (Goal, Required Output,
+  Constraints, Acceptance Criteria, Notes) name RC branches in the project's
+  prefixed form (a bare "rc/vX.Y.Z" becomes "<branch_prefix>rc/vX.Y.Z")
+- Applies the targeted-test acceptance policy (lib/acceptance_policy.py) to
+  plan-authored CODER and WRITER tickets
 - Appends task IDs to per-agent queue files based on assigned_agent or role:
     CODER -> tasks/queues/coder_backlog.md
     WRITER -> tasks/queues/writer_backlog.md
@@ -162,11 +181,18 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.config import get_config
 from lib.workflow_loader import load_workflow, WorkflowError
+from lib.acceptance_policy import apply_acceptance_policy, format_policy_notes
 
 # pgai_agent_kanban package lives one level up from pm-agent/ (i.e. under team/).
 # Insert team/ onto sys.path so the import works from any caller working directory.
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from pgai_agent_kanban.lib import ini as _ini
+from pgai_agent_kanban.lib import project_cfg as _project_cfg
+from pgai_agent_kanban.cm.read_state_field import (
+    read_release_state_field as _read_release_state_field,
+)
 from pgai_agent_kanban.lib.terminal_states import is_terminal as _bundle_is_terminal
+from pgai_agent_kanban.lib.error_contract import emit_error_contract as _emit_error_contract
 
 
 # ---------------------------------------------------------------------------
@@ -175,13 +201,16 @@ from pgai_agent_kanban.lib.terminal_states import is_terminal as _bundle_is_term
 
 
 def _resolve_dev_tree_path(team_root: str) -> str:
-    """Resolve the dev tree path using env-then-config-then-fail precedence.
+    """Resolve the dev tree path: project config, environment, kanban.cfg, else fail.
 
     Resolution order (first non-empty value wins):
 
-      1. ``PGAI_DEV_TREE_PATH`` environment variable — the canonical runtime override.
-      2. ``dev_tree_path`` key in ``project.cfg`` (or ``PROJECT.cfg``) found
-         directly under *team_root*.
+      1. ``dev_tree_path`` key in ``project.cfg`` (or ``PROJECT.cfg``) found
+         directly under *team_root* — the project's own repository always
+         wins, so a materialization never reads another project's tree.
+      2. ``PGAI_DEV_TREE_PATH`` environment variable. The wake and
+         ``pm-agent.sh`` export it globally as the framework's own dev tree,
+         so it is only a fallback for a project that names no tree of its own.
       3. ``dev_tree_path`` key under the ``[paths]`` section of ``kanban.cfg`` found
          directly under *team_root* (single-project layout) or under the directory
          named by the ``PGAI_AGENT_KANBAN_ROOT_PATH`` environment variable (multi-project
@@ -207,12 +236,7 @@ def _resolve_dev_tree_path(team_root: str) -> str:
         When the path cannot be resolved from any source.
     """
 
-    # --- 1. Environment variable (highest precedence) -------------------------
-    env_val = (os.environ.get("PGAI_DEV_TREE_PATH") or "").strip()
-    if env_val:
-        return env_val
-
-    # --- 2. project.cfg / PROJECT.cfg -----------------------------------------
+    # --- 1. project.cfg / PROJECT.cfg (highest precedence) ---------------------
     root = Path(team_root)
     _new_cfg = root / "project.cfg"
     _old_cfg = root / "PROJECT.cfg"
@@ -226,6 +250,11 @@ def _resolve_dev_tree_path(team_root: str) -> str:
                 val = stripped.split("=", 1)[1].strip().strip("'\"").strip()
                 if val:
                     return val
+
+    # --- 2. Environment variable ----------------------------------------------
+    env_val = (os.environ.get("PGAI_DEV_TREE_PATH") or "").strip()
+    if env_val:
+        return env_val
 
     # --- 3. kanban.cfg [paths] dev_tree_path ----------------------------------
     # Try team_root/kanban.cfg first (single-project layout), then the
@@ -255,9 +284,9 @@ def _resolve_dev_tree_path(team_root: str) -> str:
 
     # --- 4. Fail loudly -------------------------------------------------------
     print(
-        "ERROR: dev tree path could not be resolved — set PGAI_DEV_TREE_PATH "
-        "or configure dev_tree_path in project.cfg ([project] section) or "
-        "kanban.cfg ([paths] section).",
+        "ERROR: dev tree path could not be resolved — configure dev_tree_path "
+        "in project.cfg ([project] section), set PGAI_DEV_TREE_PATH, or "
+        "configure dev_tree_path in kanban.cfg ([paths] section).",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -267,8 +296,12 @@ def _resolve_dev_tree_path(team_root: str) -> str:
 # Auto-version sentinel constants and helpers
 # ---------------------------------------------------------------------------
 
-# Target Version field values that mean "compute the next available patch slot
-# at runtime."  Comparison is done case-insensitively after stripping whitespace.
+# Target Version field values that ask for "the next available patch slot".
+# Discovery resolves them, under the repo lock, and writes the explicit version
+# into the requirements file before PM runs; the materializer never resolves a
+# version itself and refuses a plan that still carries one of these (see
+# refuse_non_explicit_target_version).  Comparison is done case-insensitively
+# after stripping whitespace.
 _AUTO_VERSION_SENTINELS = frozenset({"auto", "next-patch", ""})
 
 
@@ -288,120 +321,77 @@ def _is_auto_sentinel(declared: str) -> bool:
     return declared.strip().lower() in _AUTO_VERSION_SENTINELS
 
 
-def _compute_next_patch_py(team_root: str, requirements_path_str: str = "none") -> str:
-    """Compute the next available patch version slot.
+def refuse_non_explicit_target_version(raw: str, release_shaped: bool,
+                                       plan_path: str, team_root: str,
+                                       requirements_path: str = "none") -> str:
+    """Return the plan's effective target version, or refuse a non-explicit one.
 
-    Python equivalent of the ``discovery_compute_next_patch`` shell helper in
-    ``team/scripts/lib/discovery.sh``.  The same three collision sources are
-    checked in the same order:
+    The version is resolved once, by discovery, which writes it into the
+    requirements file's ``## Target Version`` before PM runs; a plan reaching
+    the materializer with a sentinel means that write was skipped or PM did
+    not copy the value. Resolving it again here would read a different view
+    of the tags than discovery did, so the materializer refuses instead.
 
-      1. A ``vX.Y.Z*.md`` file already exists in ``requirements/``
-      2. A ``.materialized.*vX.Y.Z*`` marker exists under ``tasks/queues/plans/``
-      3. A ``vX.Y.Z`` git tag exists in the dev tree (local or origin)
+      - ``none`` (any case) is returned as ``"none"`` unchanged.
+      - An explicit value is returned stripped.
+      - ``auto`` / ``next-patch`` are refused on every workflow.
+      - Empty or absent is refused on a release-shaped workflow (one that
+        injects CM bookends, which name the RC after the version) and reads
+        as ``"none"`` everywhere else.
 
-    The dev tree path is resolved via :func:`_resolve_dev_tree_path` using the
-    env-then-config-then-fail precedence (PGAI_DEV_TREE_PATH > project.cfg >
-    kanban.cfg > fail loudly).  No hardcoded path fallback is used.
+    The refusal is dual-channel on stderr and exits 1 before any task folder
+    is written.
 
     Parameters
     ----------
-    team_root:
-        Absolute path to the project root (i.e. the directory that contains
-        ``requirements/``, ``tasks/``, and ``project.cfg``).
-    requirements_path_str:
-        Absolute path of the *current* requirements file being materialized,
-        as a string.  When provided (not ``'none'``), the file's own path is
-        excluded from collision check #1 so a file can materialise itself
-        without falsely colliding with its own presence on disk.
-
-    Returns
-    -------
-    str
-        The chosen version string, e.g. ``"v0.21.12"``.
+    raw:
+        The plan's ``target_version`` value (``""`` when absent).
+    release_shaped:
+        Whether this materialization injects CM release-lifecycle bookends.
+    plan_path, team_root, requirements_path:
+        Interpolated into the remedy so it can be run as printed.
     """
-    import glob
-    import subprocess
+    value = ("" if raw is None else str(raw)).strip()
+    if value.lower() == "none":
+        return "none"
+    if not _is_auto_sentinel(value):
+        return value
+    if not value and not release_shaped:
+        print(
+            "[pm-materialize] Target version: none (plan carries no target_version; "
+            "workflow injects no release bookends)",
+            file=sys.stderr,
+        )
+        return "none"
 
-    root = Path(team_root)
-    requirements_dir = root / "requirements"
-    plans_dir = root / "tasks" / "queues" / "plans"
-
-    # --- Resolve the dev tree path -------------------------------------------
-    dev_tree = _resolve_dev_tree_path(team_root)
-
-    # --- Determine last_released via git tags on origin/main -----------------
-    last_released = "v0.0.0"
-    dev_tree_path = Path(dev_tree)
-    if dev_tree_path.is_dir() and (dev_tree_path / ".git").exists():
-        try:
-            result = subprocess.run(
-                ["git", "-C", dev_tree, "tag", "--merged", "origin/main"],
-                capture_output=True, text=True, timeout=15,
-            )
-            if result.returncode == 0:
-                tags = [
-                    t for t in result.stdout.splitlines()
-                    if re.match(r'^v\d+\.\d+\.\d+$', t.strip())
-                ]
-                if tags:
-                    tags.sort(key=lambda v: tuple(int(x) for x in v.lstrip("v").split(".")))
-                    last_released = tags[-1]
-        except Exception:
-            pass  # Fall back to v0.0.0 on any error
-
-    # Parse X.Y.Z from last_released
-    clean = last_released.lstrip("v")
-    parts = clean.split(".")
-    while len(parts) < 3:
-        parts.append("0")
-    try:
-        x, y, z = int(parts[0]), int(parts[1]), int(parts[2])
-    except (ValueError, IndexError):
-        x, y, z = 0, 0, 0
-
-    # Exclude the current requirements file from collision check #1
-    exclude_path = ""
-    if requirements_path_str and requirements_path_str.lower() != "none":
-        exclude_path = str(Path(requirements_path_str).resolve())
-
-    # Bump-around loop — mirrors the shell helper's three-source collision check
-    while True:
-        z += 1
-        candidate = f"v{x}.{y}.{z}"
-
-        # Source 1: drafted file in requirements/
-        if requirements_dir.is_dir():
-            matches = glob.glob(str(requirements_dir / f"{candidate}*.md"))
-            if any(str(Path(m).resolve()) != exclude_path for m in matches):
-                continue
-
-        # Source 2: materialized marker in tasks/queues/plans/
-        if plans_dir.is_dir():
-            if glob.glob(str(plans_dir / f".materialized.*{candidate}*")):
-                continue
-
-        # Source 3: git tag in the dev tree
-        if dev_tree_path.is_dir() and (dev_tree_path / ".git").exists():
-            try:
-                # Check local tags
-                result = subprocess.run(
-                    ["git", "-C", dev_tree, "tag", "-l", candidate],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    continue
-                # Check origin tags
-                result = subprocess.run(
-                    ["git", "-C", dev_tree, "ls-remote", "--tags", "origin",
-                     f"refs/tags/{candidate}"],
-                    capture_output=True, text=True, timeout=10,
-                )
-                if result.returncode == 0 and f"refs/tags/{candidate}" in result.stdout:
-                    continue
-            except Exception:
-                pass  # If git check fails, assume slot is free
-
-        return candidate
+    shown = value if value else "(absent)"
+    script = Path(__file__).resolve()
+    rerun = f"python3 {script} {plan_path} --team-root {team_root}"
+    if requirements_path and requirements_path.lower() != "none":
+        remedy = (
+            f"Copy the version discovery wrote into the requirements file "
+            f"(grep -A2 '^## Target Version' {requirements_path}) into "
+            f"target_version in {plan_path}, then re-run: {rerun}"
+        )
+    else:
+        remedy = (
+            f"Set target_version in {plan_path} to an explicit version, for "
+            f"example v1.0.1, then re-run: {rerun}"
+        )
+    # BLOCK-WORTHY: a release plan without an explicit version would write an
+    # RC whose bookends name a version open-rc refuses, so the chain could
+    # never open or close it; nothing has been written when this fires.
+    _emit_error_contract(
+        "materialize.target-version-not-explicit",
+        f"pm_materialize refused {plan_path}: target_version {shown} is not an "
+        f"explicit version (expected vX.Y.Z). The materializer never resolves "
+        f"a version itself; discovery writes the resolved one into the "
+        f"requirements file's ## Target Version before PM runs. No task folder "
+        f"was written.",
+        remedy,
+    )
+    # CENSUS-ANCHOR: pm-materialize-01
+    sys.exit(1)
 
 
 def _derive_artifact_name(requirements_path_str: str) -> str:
@@ -491,42 +481,6 @@ def _resolve_source_documents(source_slugs: list, artifacts_dir: "Path | None",
             resolved.append(str(matches[0]))
 
     return resolved, unresolved
-
-
-def resolve_target_version(declared: str, team_root: str,
-                            requirements_path_str: str = "none") -> tuple:
-    """Resolve the effective target version for a requirements file.
-
-    When *declared* is an auto-sentinel (``'auto'``, ``'next-patch'``, empty,
-    or ``None``), the next available patch slot is computed at runtime via
-    ``_compute_next_patch_py`` and ``(resolved, True)`` is returned so the
-    caller knows to emit a log line.
-
-    When *declared* is an explicit ``vX.Y.Z`` value, it is returned verbatim
-    and ``(declared, False)`` is returned.
-
-    Parameters
-    ----------
-    declared:
-        Raw ``## Target Version`` value from the requirements doc (or ``None``
-        / empty if the field is absent).
-    team_root:
-        Absolute path to the project root.
-    requirements_path_str:
-        Absolute path of the requirements file (passed through to
-        ``_compute_next_patch_py`` to exclude it from collision check #1).
-
-    Returns
-    -------
-    tuple[str, bool]
-        ``(version_str, was_auto_resolved)``
-    """
-    if _is_auto_sentinel(declared):
-        computed = _compute_next_patch_py(team_root, requirements_path_str)
-        return computed, True
-
-    # Explicit version — return as-is; bump-around is handled by CM/discovery
-    return declared.strip(), False
 
 
 # ---------------------------------------------------------------------------
@@ -756,11 +710,11 @@ def format_checklist(items):
 def get_next_sequence(tasks_root, owner, date_str):
     """Find the next available sequence number for a given date.
 
-    Scans all task folder names matching the new format
+    Scans all task folder names matching the task-ID format
     (ROLE-DATE-NNN-slug) and returns max_found + 1.
 
-    The ``owner`` parameter is accepted but no longer used — the new format
-    has no owner prefix.
+    The ``owner`` parameter is accepted and ignored: task folder names
+    carry no owner prefix.
     """
     tasks_path = Path(tasks_root)
     if not tasks_path.is_dir():
@@ -834,22 +788,54 @@ def assign_task_ids(tasks, owner, tasks_root):
     return date_str, start_seq
 
 
+def _sequence_key(value):
+    """Return a comparable key for a plan ``sequence`` / ``depends_on`` entry.
+
+    PM emits integers, but a quoted ``"2"`` or ``" 2 "`` means the same task,
+    so anything that reads as a whole number compares as that int; any other
+    value compares as its stripped string.
+    """
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    try:
+        return int(text)
+    except ValueError:
+        return text
+
+
 def resolve_prerequisites(tasks):
     """Convert each task's depends_on (sequence numbers) to a list of full task IDs.
 
     Merges newly resolved IDs with any existing entries already in
     prerequisite_ids (e.g. CM-open injected by inject_cm_bookends), so that
     bookend dependencies are preserved after resolution.
+
+    A ``depends_on`` entry naming a sequence no task in *tasks* carries is not
+    dropped silently: it is returned, so the caller can refuse the plan
+    (``validate_task_graph``) rather than let the dependent task run early.
+
+    Returns
+    -------
+    list[tuple[str, object]]
+        ``(task_id, depends_on_entry)`` for every unresolvable entry, in task
+        order; empty when every entry resolved.
     """
-    seq_to_id = {t.get("sequence"): t.get("task_id") for t in tasks}
+    seq_to_id = {_sequence_key(t.get("sequence")): t.get("task_id") for t in tasks
+                 if t.get("sequence") is not None}
+    unresolved = []
 
     for task in tasks:
         deps = task.get("depends_on", []) or []
         resolved = []
         for dep_seq in deps:
-            tid = seq_to_id.get(dep_seq)
+            tid = seq_to_id.get(_sequence_key(dep_seq))
             if tid:
                 resolved.append(tid)
+            else:
+                unresolved.append((task.get("task_id") or f"seq={task.get('sequence')}", dep_seq))
 
         # Merge: keep existing prereqs already set (e.g. CM-open from inject),
         # then append any newly resolved ones not already present.
@@ -860,6 +846,8 @@ def resolve_prerequisites(tasks):
                 merged.append(tid)
         task["prerequisite_ids"] = merged
 
+    return unresolved
+
 
 def normalize_workspace_value(value):
     """Normalize a working_directory or git_repo field to a clean string."""
@@ -869,6 +857,114 @@ def normalize_workspace_value(value):
     if not s:
         return "none"
     return s
+
+
+# ---------------------------------------------------------------------------
+# README field rendering — Working Directory, Git Repo and branch prose.
+#
+# The rendered README must agree with what the wake dispatch does with the
+# task.  These helpers decide the README *text* only; the internal plan
+# fields (task["working_directory"], task["git_repo"]) keep their plan
+# values, because feature-branch generation and the source-ref guard read
+# them.
+# ---------------------------------------------------------------------------
+
+#: ``## Working Directory`` for a task the wake runs in an isolated worktree.
+#: The worktree path is created at dispatch and named in the dispatch prompt,
+#: so no truthful path exists at materialize time.
+WORKTREE_WORKING_DIRECTORY = "(assigned at dispatch — isolated worktree)"
+
+#: ``## Git Repo`` for a git-workflow task in a project that uses no remote:
+#: ``git_repo_url`` is empty or ``push_to_remote = false``.  The local
+#: repository and the branch-and-merge law still apply.
+LOCAL_GIT_REPO = "local (no remote in use)"
+
+#: Dispatch agents the wake runs in an isolated worktree when the workflow's
+#: git_mode is not "none": CODER/WRITER on a feature-branch worktree, TESTER
+#: on a detached one (wd_setup_task_worktree, wake_driver_worktree.sh).
+_WORKTREE_DISPATCH_AGENTS = frozenset({"CODER", "WRITER", "TESTER"})
+
+#: git_mode values that make a workflow a git workflow.  The wake's plugin
+#: loader accepts exactly none|ro|rw; anything else never dispatches.
+_GIT_WORKFLOW_MODES = frozenset({"rw", "ro"})
+
+#: A bare RC branch in prose: "rc/v" not glued to a preceding branch-name
+#: character (so "ai_rc/v1.2.3", "x-rc/v1" and "src/v..." never match, and a
+#: prefixed branch is never prefixed twice) and not the start of an ordinary
+#: word ("rc/version", "rc/vendor").  Matches "rc/v1.2.3", "rc/vX.Y.Z",
+#: "rc/v<version>", "rc/v{version}" and "refs/heads/rc/v1.2.3".
+_BARE_RC_BRANCH_RE = re.compile(r"(?<![A-Za-z0-9_-])rc/v(?![a-z]{2})")
+
+
+def _dispatch_agent(task):
+    """Return the agent the wake dispatches *task* to, upper-cased.
+
+    Mirrors wake_driver_prep.sh: ``## Assigned Agent`` when set, else
+    ``## Role``.
+    """
+    return (task.get("assigned_agent") or task.get("role") or "CODER").strip().upper()
+
+
+def _workflow_uses_git(wf_caps):
+    """Return True when the workflow capabilities declare git_mode rw or ro.
+
+    ``None`` or an empty dict (manifest not found) is not a git workflow for
+    rendering purposes: the wake refuses to dispatch a task whose plugin
+    does not load, so the materializer keeps the plan's own values there.
+    """
+    if not wf_caps:
+        return False
+    return (wf_caps.get("git_mode") or "").strip().lower() in _GIT_WORKFLOW_MODES
+
+
+def is_worktree_dispatched(task, wf_caps):
+    """Return True when the wake runs *task* in an isolated git worktree.
+
+    That is a CODER, WRITER or TESTER dispatch agent in a workflow whose
+    git_mode is rw or ro.  CM, PM, PO and HUMAN tasks never get one.
+    """
+    return _dispatch_agent(task) in _WORKTREE_DISPATCH_AGENTS and _workflow_uses_git(wf_caps)
+
+
+def render_git_repo_field(team_root):
+    """Return the ``## Git Repo`` text for a git-workflow task in *team_root*.
+
+    The configured ``[project] git_repo_url`` when it is set and
+    ``push_to_remote`` is not ``false``; otherwise ``LOCAL_GIT_REPO``.  Never
+    ``"none"``: a git workflow always has the local repository.
+
+    ``push_to_remote`` is read by the push-decision rule
+    (``pgai_agent_kanban.lib.push_decision``): only the exact value ``false``,
+    one surrounding double quote stripped, means no push; absent or any other
+    value means push.  ``project.cfg`` is preferred over a legacy
+    ``PROJECT.cfg``; with neither, the project has no remote configured.
+    """
+    cfg_file = _project_cfg.project_cfg_file(Path(team_root))
+    if cfg_file is None:
+        return LOCAL_GIT_REPO
+    url = _project_cfg.strip_one_quote_each_side(
+        _project_cfg.read_cfg_key(cfg_file, "project", "git_repo_url").strip(), "\"'"
+    ).strip()
+    push = _project_cfg.strip_one_quote_each_side(
+        _project_cfg.read_cfg_key(cfg_file, "project", "push_to_remote"), '"'
+    )
+    if url and push != "false":
+        return url
+    return LOCAL_GIT_REPO
+
+
+def prefix_bare_rc_branches(text, branch_prefix):
+    """Rewrite every bare ``rc/v...`` RC branch in *text* to the prefixed form.
+
+    ``rc/v1.2.3`` becomes ``<branch_prefix>rc/v1.2.3``.  An already-prefixed
+    branch is left alone, so the rewrite never doubles a prefix.  With an
+    empty *branch_prefix* (or non-string *text*) the input is returned
+    unchanged.
+    """
+    if not branch_prefix or not isinstance(text, str):
+        return text
+    replacement = f"{branch_prefix}rc/v"
+    return _BARE_RC_BRANCH_RE.sub(lambda _m: replacement, text)
 
 
 _RECOGNIZED_MODEL_ALIASES = {"opus", "sonnet", "haiku"}
@@ -910,22 +1006,17 @@ def validate_model_override(value):
 def get_active_rc(team_root):
     """Return the active RC version (e.g. 'v0.4.0') or None.
 
-    Reads team/release-state.md. Tolerant of missing file or missing field.
+    Reads <team_root>/release-state.md through the one release-state reader
+    (``cm.read_state_field.read_release_state_field``). A missing file reads
+    as no active RC. A present field the schema refuses -- missing heading,
+    empty value, anything but ``none`` or vX.Y.Z -- raises
+    ``ReleaseStateValidationError`` rather than naming a branch from a value
+    that is not a version.
     """
-    rs = Path(team_root) / "release-state.md"
-    if not rs.is_file():
-        return None
-    text = rs.read_text()
-    # Find the line "## Active RC" then read the next non-blank non-comment line
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if line.strip() == "## Active RC":
-            for follow in lines[i + 1:]:
-                v = follow.strip()
-                if v and not v.startswith("#"):
-                    return None if v == "none" else v
-            break
-    return None
+    active = _read_release_state_field(
+        str(Path(team_root) / "release-state.md"), "Active RC"
+    )
+    return None if active == "none" else active
 
 
 def _resolve_branch_prefix(team_root):
@@ -1165,16 +1256,24 @@ def determine_source_branch(task, team_root, workflow_type=None, target_version=
          per-task source_branch for tasks that should target the RC (CODER,
          WRITER, TESTER, CM-release).  ``branch_prefix`` is read from
          ``project.cfg [project] branch_prefix`` (default empty).
-         The CM-open bookend is a special case: it branches from main because
-         the RC branch is what it CREATES.
-      2. Default to "main" if no target_version (defensive fallback)
+         The CM-open bookend is a special case: it branches from the
+         prefixed mainline because the RC branch is what it CREATES.
+      2. Default to the prefixed mainline ``<branch_prefix>main`` if no
+         target_version (defensive fallback).
 
     For non-release workflows (feature, etc.):
       1. Explicit task["source_branch"] from PM (highest priority)
       2. Active RC from release-state.md — returned as
          ``<branch_prefix>rc/<active>`` so the README matches the real branch
          name created by the prefix-aware shell layer.
-      3. Default to "main"
+      3. Default to the prefixed mainline ``<branch_prefix>main``.
+
+    Every value returned is a real branch name: the mainline is
+    ``<branch_prefix>main`` — ``ai_main`` under ``branch_prefix = ai_``, plain
+    ``main`` when the prefix is empty — the same canonical spelling
+    _validate_and_normalize_parent_branch accepts and the shell layer's
+    pp_prefix_branch produces. Readers of ``## Source Branch`` still tolerate
+    a bare ``main`` on tickets written before the prefix was applied here.
 
     For release workflows, the RC branch ALWAYS wins for
     work tasks. PM populates per-task source_branch as its
@@ -1184,16 +1283,18 @@ def determine_source_branch(task, team_root, workflow_type=None, target_version=
     leaving the RC empty at ship time.
 
     The CM-open task is identified by cm_operation == "open-rc" and is excluded
-    from the RC override — it branches from main because that is the single base
-    branch from which all RCs are created.  branch_prefix does NOT affect the
-    CM-open source; the parent_branch name for CM-open is determined elsewhere.
+    from the RC override — it branches from the prefixed mainline because that
+    is the single base branch from which all RCs are created, so branch_prefix
+    applies to its source exactly as it does to every other branch.
     """
     # Resolve branch_prefix once; empty string means "no prefix" (default).
     prefix = _resolve_branch_prefix(team_root)
+    mainline = f"{prefix}main"
 
     # For release workflow: <prefix>rc/<target_version> wins for work tasks.
     if (workflow_type or "").strip().lower() == "release":
-        # CM-open is the bookend that CREATES the RC branch — it must source from main.
+        # CM-open is the bookend that CREATES the RC branch — it must source
+        # from the prefixed mainline.
         cm_op = (task.get("cm_operation") or "").strip().lower()
         is_cm_open = cm_op == "open-rc"
 
@@ -1204,8 +1305,8 @@ def determine_source_branch(task, team_root, workflow_type=None, target_version=
                 base = f"rc/{tv}" if tv.startswith("v") else f"rc/v{tv}"
                 return f"{prefix}{base}"
 
-        # CM-open task or no target_version: source from main.
-        return "main"
+        # CM-open task or no target_version: source from the prefixed mainline.
+        return mainline
 
     # Non-release workflows: honor explicit per-task source_branch first.
     sb = (task.get("source_branch") or "").strip()
@@ -1214,7 +1315,7 @@ def determine_source_branch(task, team_root, workflow_type=None, target_version=
     active = get_active_rc(team_root)
     if active:
         return f"{prefix}rc/{active}"
-    return "main"
+    return mainline
 
 
 # Roles that require an isolated git worktree at dispatch time.
@@ -1433,8 +1534,8 @@ def compute_plan_hash(plan_content: str) -> str:
     Example marker file contents:
         timestamp: 2026-04-28T12:34:56Z
         task_ids:
-          CODER-20260428-001-my-task
-          CODER-20260428-002-other-task
+          CODER-YYYYMMDD-001-my-task
+          CODER-YYYYMMDD-002-other-task
     """
     return hashlib.sha256(plan_content.encode("utf-8")).hexdigest()
 
@@ -1485,9 +1586,9 @@ def collect_existing_role_slugs(tasks_root: Path) -> set:
     Accepts the current format (ROLE-YYYYMMDD-NNN-slug).
 
     Examples:
-        CODER-20260518-001-my-task     -> ("CODER", "my-task")
-        WRITER-20260518-002-doc-update -> ("WRITER", "doc-update")
-        CM-20260518-003-open-rc-0-26-0 -> ("CM", "open-rc-0-26-0")
+        CODER-YYYYMMDD-001-my-task     -> ("CODER", "my-task")
+        WRITER-YYYYMMDD-002-doc-update -> ("WRITER", "doc-update")
+        CM-YYYYMMDD-003-open-rc-0-26-0 -> ("CM", "open-rc-0-26-0")
 
     Returns a set of (role_upper, slug) tuples for all parseable task folders.
     Only folders matching the expected format are included; malformed names are
@@ -1912,9 +2013,51 @@ def validate_team_root(team_root_path):
     return True
 
 
+def apply_targeted_test_policy(task, task_id, role, acceptance_criteria, constraints, notes):
+    """Apply the targeted-test acceptance policy to one ticket being emitted.
+
+    Returns ``(acceptance_criteria, constraints, notes)`` to render. CODER and
+    WRITER tickets have every full gated-runner invocation rewritten to a
+    targeted ``--files`` run, carry the fixed targeted-test constraint, and
+    end their acceptance criteria with the fixed pre-merge criterion (see
+    lib/acceptance_policy.py). Each rewrite is narrated on stderr and
+    recorded in the returned notes; placing the pre-merge criterion is not
+    a rewrite and is neither narrated nor noted.
+
+    Materializer-injected tickets (``_synthetic``: CM bookends, TESTER verify,
+    the feature-workflow branch setup, document-pipeline steps) are returned
+    unchanged, as are TESTER, CM and HUMAN tickets, so their READMEs render
+    byte-identically to output without the policy.
+    """
+    if task.get("_synthetic"):
+        return acceptance_criteria, constraints, notes
+
+    result = apply_acceptance_policy(role, acceptance_criteria, constraints)
+    for rw in result.rewrites:
+        action = (
+            "dropped a duplicate full-runner" if rw.merged
+            else "rewrote full-runner"
+        )
+        print(
+            f"[pm-materialize] acceptance-policy: {task_id}: {action} {rw.field} "
+            f"to a targeted --files run: {rw.original!r}",
+            file=sys.stderr,
+        )
+
+    policy_notes = format_policy_notes(result)
+    if policy_notes:
+        existing = (notes or "").strip()
+        if existing and existing.lower() != "none":
+            notes = f"{existing}\n\n{policy_notes}"
+        else:
+            notes = policy_notes
+
+    return result.acceptance_criteria, result.constraints, notes
+
+
 def create_task_folder(task, team_root, dry_run=False, release_version="none", requirements_path="none",
                        existing_role_slugs=None, workflow_type="release", tasks_root=None,
-                       recycle_map=None):
+                       recycle_map=None, wf_caps=None):
     """Create a single task folder with README.md and status.md.
 
     requirements_path: absolute path of the plan's requirements doc. When set
@@ -1934,6 +2077,22 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     any Option A recycle decision is recorded here.  Callers should pass
     apply_rename_map_globally(tasks_root, recycle_map) after all create_task_folder
     calls to propagate renames across prerequisite references.
+
+    wf_caps: the workflow plugin's capabilities dict
+    (``load_workflow_capabilities(workflow_type)``).  It decides how the
+    README's ``## Working Directory`` and ``## Git Repo`` render:
+
+      - git workflow (git_mode rw or ro): ``## Git Repo`` is
+        ``render_git_repo_field(team_root)`` — the configured URL, or
+        ``LOCAL_GIT_REPO``; and a task the wake runs in an isolated worktree
+        (``is_worktree_dispatched``) gets ``WORKTREE_WORKING_DIRECTORY``.
+      - ``None``, an empty dict, or git_mode none: both fields render the
+        plan's own values, as before.
+
+    Whatever wf_caps says, the prose fields (Goal, Required Output,
+    Constraints, Acceptance Criteria, Notes) have bare ``rc/v...`` branches
+    rewritten to the project's prefixed form (``prefix_bare_rc_branches``);
+    ``## Source Branch`` is resolved by ``determine_source_branch`` alone.
     """
     # tasks_root is required — no environment variable fallback is used.
     if tasks_root is None:
@@ -1954,6 +2113,21 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     acceptance_criteria = task.get("acceptance_criteria", [])
     notes = task.get("notes", "none")
 
+    acceptance_criteria, constraints, notes = apply_targeted_test_policy(
+        task, task_id, role, acceptance_criteria, constraints, notes
+    )
+
+    # Prose names RC branches the way the repository does: a bare
+    # "rc/vX.Y.Z" contradicts a prefixed ## Source Branch.
+    _branch_prefix = _resolve_branch_prefix(team_root)
+    goal = prefix_bare_rc_branches(goal, _branch_prefix)
+    required_output = prefix_bare_rc_branches(required_output, _branch_prefix)
+    constraints = [prefix_bare_rc_branches(c, _branch_prefix) for c in (constraints or [])]
+    acceptance_criteria = [
+        prefix_bare_rc_branches(c, _branch_prefix) for c in (acceptance_criteria or [])
+    ]
+    notes = prefix_bare_rc_branches(notes, _branch_prefix)
+
     # Prepend requirements_path to inputs when provided, so every task knows
     # which requirements doc it derives from.
     if requirements_path and requirements_path.lower() != "none":
@@ -1963,17 +2137,20 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     working_directory = normalize_workspace_value(task.get("working_directory"))
     git_repo = normalize_workspace_value(task.get("git_repo"))
     feature_branch = normalize_workspace_value(task.get("feature_branch"))
+    worktree_dispatched = is_worktree_dispatched(task, wf_caps)
 
     # Defense in depth: if a worker task's working_directory resolves to the
     # live install (KANBAN_ROOT), this is a self-build with no dev tree
     # specified. Workers will edit the live install instead of git-tracked
     # source. Override to the dev tree path and warn.
     #
-    # Skip this check for non-worker roles (PM, TESTER) and for tasks with no
+    # Skip this check for non-worker roles (PM, TESTER), for tasks with no
     # git_repo (which are file-workflow tasks that legitimately operate in the
-    # task artifacts directory).
+    # task artifacts directory), and for worktree-dispatched tasks, whose
+    # README names no path at all.
     if (
-        role.upper() in ("CODER", "WRITER")
+        not worktree_dispatched
+        and role.upper() in ("CODER", "WRITER")
         and git_repo.lower() != "none"
         and working_directory.lower() not in ("none", "local-development-only", "")
     ):
@@ -2049,6 +2226,12 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     participant_map = {"CLAUDE": "Claude", "HUMAN": "Human"}
     participant = participant_map.get(owner, owner)
 
+    # README text for the two workspace fields (the plan values above stay
+    # untouched for everything else that reads them).
+    if worktree_dispatched:
+        working_directory = WORKTREE_WORKING_DIRECTORY
+    git_repo_field = render_git_repo_field(team_root) if _workflow_uses_git(wf_caps) else git_repo
+
     readme_content = TASK_README_TEMPLATE.format(
         title=title,
         task_id=task_id,
@@ -2056,7 +2239,7 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
         role=role,
         assigned_agent=assigned_agent if assigned_agent else "none",
         working_directory=working_directory,
-        git_repo=git_repo,
+        git_repo=git_repo_field,
         source_branch=source_branch,
         feature_branch=feature_branch,
         workflow_type=workflow_type if workflow_type else "release",
@@ -2440,7 +2623,13 @@ def update_backlog(tasks, team_root, dry_run=False):
 
 
 def topological_order(tasks):
-    """Order tasks so dependencies are respected."""
+    """Order tasks so dependencies are respected.
+
+    Tasks left over because of a cycle or a ``depends_on`` naming no task are
+    appended in plan order after a narration line; ``validate_task_graph``
+    then refuses the plan before any folder is written, so the leftovers are
+    never materialized.
+    """
     ordered = []
     remaining = list(tasks)
     resolved = set()
@@ -2450,12 +2639,12 @@ def topological_order(tasks):
     while remaining and iteration < max_iterations:
         iteration += 1
         for task in list(remaining):
-            deps = set(task.get("depends_on", []) or [])
+            deps = {_sequence_key(d) for d in (task.get("depends_on", []) or [])}
             if deps.issubset(resolved):
                 ordered.append(task)
                 seq = task.get("sequence")
                 if seq is not None:
-                    resolved.add(seq)
+                    resolved.add(_sequence_key(seq))
                 remaining.remove(task)
 
     if remaining:
@@ -2465,6 +2654,101 @@ def topological_order(tasks):
         ordered.extend(remaining)
 
     return ordered
+
+
+def _dependency_cycles(tasks):
+    """Return every dependency cycle among *tasks* as a list of task-ID lists.
+
+    Edges are ``prerequisite_ids`` entries that name another task in *tasks*
+    (an ID outside the batch is not part of this graph). Each strongly
+    connected component with more than one member is a cycle; a task listing
+    itself is reported by ``validate_task_graph`` as a self-reference instead.
+    Members are listed in *tasks* order, cycles in order of their first member.
+    """
+    ids = [t.get("task_id") for t in tasks if t.get("task_id")]
+    known = set(ids)
+    edges = {
+        t["task_id"]: [p for p in (t.get("prerequisite_ids") or [])
+                       if p in known and p != t["task_id"]]
+        for t in tasks if t.get("task_id")
+    }
+    position = {tid: i for i, tid in enumerate(ids)}
+
+    # Tarjan's algorithm, iterative so a long chain cannot hit the recursion limit.
+    index_of, low, on_stack, stack, components = {}, {}, set(), [], []
+    counter = 0
+    for root in ids:
+        if root in index_of:
+            continue
+        work = [(root, iter(edges[root]))]
+        index_of[root] = low[root] = counter
+        counter += 1
+        stack.append(root)
+        on_stack.add(root)
+        while work:
+            node, children = work[-1]
+            advanced = False
+            for child in children:
+                if child not in index_of:
+                    index_of[child] = low[child] = counter
+                    counter += 1
+                    stack.append(child)
+                    on_stack.add(child)
+                    work.append((child, iter(edges[child])))
+                    advanced = True
+                    break
+                if child in on_stack:
+                    low[node] = min(low[node], index_of[child])
+            if advanced:
+                continue
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[node])
+            if low[node] == index_of[node]:
+                component = []
+                while True:
+                    member = stack.pop()
+                    on_stack.discard(member)
+                    component.append(member)
+                    if member == node:
+                        break
+                if len(component) > 1:
+                    components.append(sorted(component, key=position.get))
+    components.sort(key=lambda c: position[c[0]])
+    return components
+
+
+def validate_task_graph(tasks, unresolved_depends_on=()):
+    """Return one plain-language line per defect in the assembled task graph.
+
+    Checked on the final task list, after dedupe and before any folder is
+    written:
+
+      - self-reference: a task whose ``prerequisite_ids`` lists its own ID —
+        the prerequisite gate could never promote it;
+      - cycle: tasks that wait on each other, so none of them can start;
+      - unresolved ``depends_on``: an entry naming a sequence no task carries
+        (``resolve_prerequisites`` returns these), which would let the task
+        run before the work it meant to wait for.
+
+    An empty list means the graph is sound.
+    """
+    problems = []
+    for task in tasks:
+        tid = task.get("task_id")
+        if tid and tid in (task.get("prerequisite_ids") or []):
+            problems.append(f"self-reference: {tid} lists itself as a prerequisite")
+    for cycle in _dependency_cycles(tasks):
+        problems.append(
+            "cycle: " + ", ".join(cycle) + " wait on each other, so none can start"
+        )
+    for tid, dep in unresolved_depends_on:
+        problems.append(
+            f"unresolved depends_on: {tid} depends on sequence {dep!r}, "
+            f"which no task in the plan carries"
+        )
+    return problems
 
 
 def build_cm_task_ids(version, start_seq, date_str):
@@ -2754,8 +3038,8 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
             "git_repo": git_repo if git_repo else "none",
             "source_branch": "none",
             "feature_branch": "none",
-            "goal": f"Verify the release candidate {target_version} against its requirements document. "
-                    f"Produce a verification report and either pass the RC or flag gaps for human review.",
+            "goal": f"Verify the release candidate {target_version} against its requirements document "
+                    f"and write the verification report; file any gaps or bugs found via Path C.",
             "inputs": list(feature_task_ids),
             "context_paths": [],
             "required_output": (
@@ -2841,7 +3125,7 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
         "context_paths": [],
         "required_output": f"Release {target_version} published.",
         "constraints": ["cm_operation: release"],
-        "acceptance_criteria": [f"Release {target_version} has been tagged and published."],
+        "acceptance_criteria": [f"Release {target_version} has been tagged on the prefixed main branch, and pushed to origin when the project's push_to_remote is true."],
         "depends_on": [],
         "prerequisite_ids": cm_release_prereqs,
         "notes": f"Automated CM task. cm_operation=release target_version={target_version}",
@@ -2996,10 +3280,8 @@ def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner,
     # --- WRITER section-draft tasks (one per section) ---
     # Section strategy: operator-defined sections (plan-level 'sections' list).
     # Each section name from the plan becomes one WRITER ticket. This is the
-    # operator-defined-sections fallback; runtime-foreach (where sections are
-    # derived from outline.md at materialize time) is deferred to a later
-    # iteration because it requires wake-script changes outside this ticket's
-    # scope.
+    # operator-defined-sections path; sections are never derived from
+    # outline.md at materialize time.
     section_draft_ids = []
     section_draft_tasks = []
     for section_name in sections:
@@ -3265,8 +3547,6 @@ def load_workflow_capabilities(workflow_type: str, kanban_root=None) -> dict:
         Capabilities dict (keys: git_mode, finalize, agents, version_semantics).
         Empty dict when the manifest cannot be read.
     """
-    import configparser as _configparser
-
     if kanban_root is None:
         kanban_root = (
             os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
@@ -3284,10 +3564,9 @@ def load_workflow_capabilities(workflow_type: str, kanban_root=None) -> dict:
     if cfg_path is None:
         return {}
 
-    parser = _configparser.ConfigParser()
     try:
-        parser.read(str(cfg_path), encoding="utf-8")
-    except _configparser.Error:
+        parser = _ini.load(cfg_path)
+    except _ini.IniError:
         return {}
 
     caps = {}
@@ -3296,7 +3575,7 @@ def load_workflow_capabilities(workflow_type: str, kanban_root=None) -> dict:
         for key in ("git_mode", "finalize", "agents", "version_semantics"):
             try:
                 caps[key] = parser.get(_SECTION, key).strip()
-            except _configparser.NoOptionError:
+            except _ini.NoOptionError:
                 caps[key] = ""
     else:
         # Section missing — return empty dict (manifest is malformed or pre-schema)
@@ -3321,7 +3600,7 @@ def _workflow_requires_cm_bookends(caps: dict) -> bool:
     caps:
         Capabilities dict from :func:`load_workflow_capabilities`.
         Empty dict means "manifest not found" — handled as conservative
-        fallback (emit bookends, same as before the fix).
+        fallback (emit bookends).
 
     Returns
     -------
@@ -3330,7 +3609,7 @@ def _workflow_requires_cm_bookends(caps: dict) -> bool:
         False — the workflow does not require CM bookend tasks.
     """
     if not caps:
-        # No manifest found — fall back to the old behavior (emit bookends).
+        # No manifest found — fall back conservatively (emit bookends).
         return True
     git_mode = caps.get("git_mode", "").strip().lower()
     finalize = caps.get("finalize", "").strip().lower()
@@ -3506,7 +3785,7 @@ def inject_simple_tester_task(tasks: list, date_str: str, base_seq: int,
 def load_project_git_repo_url(team_root):
     """Return the git_repo_url from project.cfg [project] section, or '' if absent.
 
-    Reads ``<team_root>/project.cfg`` using ``configparser``.  Returns the
+    Reads ``<team_root>/project.cfg`` via ``pgai_agent_kanban.lib.ini``.  Returns the
     stripped ``git_repo_url`` value when found, or an empty string when:
 
     - the file does not exist
@@ -3528,20 +3807,7 @@ def load_project_git_repo_url(team_root):
     str
         The ``git_repo_url`` value, stripped; empty string when absent.
     """
-    import configparser as _configparser
-    cfg_path = Path(team_root) / "project.cfg"
-    if not cfg_path.is_file():
-        return ""
-    parser = _configparser.ConfigParser()
-    try:
-        parser.read(str(cfg_path), encoding="utf-8")
-    except _configparser.Error:
-        return ""
-    try:
-        value = parser.get("project", "git_repo_url").strip()
-    except (_configparser.NoSectionError, _configparser.NoOptionError):
-        return ""
-    return value
+    return _ini.get_value(Path(team_root) / "project.cfg", "project", "git_repo_url")
 
 
 def apply_git_repo_override(tasks, canonical_url, dry_run=False):
@@ -3549,8 +3815,11 @@ def apply_git_repo_override(tasks, canonical_url, dry_run=False):
 
     PM occasionally hallucinates or omits the git_repo_url when building the
     plan JSON.  This function replaces every task's ``git_repo`` field with the
-    value read from ``project.cfg [project] git_repo_url`` so that rendered
-    README ## Git Repo lines are always correct, regardless of what PM emitted.
+    value read from ``project.cfg [project] git_repo_url`` so that the
+    feature-branch and source-ref decisions that read ``git_repo`` are always
+    made against the real repository, regardless of what PM emitted.  (In a
+    git workflow the README's ## Git Repo text comes from
+    ``render_git_repo_field``; outside one it is this field's value.)
 
     Rules:
     - Only fires when ``canonical_url`` is non-empty.
@@ -3633,8 +3902,8 @@ def evaluate_when_predicate(predicate, foreach_produced_items, workflow_agents,
     workflow_agents:
         Dict mapping agent purpose labels to role strings from the
         workflow YAML ``agents:`` block (e.g. ``{'primary': 'WRITER',
-        'manage': 'CM'}``).  No longer consulted for
-        ``review_agent_configured``; kept for forward-compat callers.
+        'manage': 'CM'}``).  Not consulted for
+        ``review_agent_configured``; accepted for callers that pass it.
     project_cfg_path:
         Optional path to the project's ``project.cfg`` file.  When
         provided, the ``review_agent_configured`` predicate reads the
@@ -4423,11 +4692,23 @@ def dedupe_materialization_tasks(tasks: list, emit_cm_bookends: bool = True) -> 
 
     Tasks that are skipped may have been depended on by other (kept) tasks
     via ``prerequisite_ids`` (populated earlier by ``resolve_prerequisites``
-    or by the synthetic-task injectors). Every reference to a skipped task's
-    ``task_id`` in a kept task's ``prerequisite_ids`` is rewritten to point
-    at the surviving task with the same identity, so the dependency graph
-    stays consistent after duplicates are removed. Duplicate prerequisite
-    IDs introduced by this rewrite are collapsed while preserving order.
+    or by the synthetic-task injectors). A kept task's references to a
+    skipped task are rewritten so the dependency graph stays consistent
+    after duplicates are removed:
+
+      - A work task's reference is pointed at the surviving task with the
+        same identity.
+      - A synthetic task's reference to a skipped chain-closer duplicate is
+        dropped, not redirected. The injected closers list every plan task
+        (a PM-emitted TESTER or CM-release among them), and their order
+        among themselves is fixed by injection, so redirecting would make
+        the injected TESTER wait on itself or on CM-release. The same holds
+        for the IDs in a synthetic task's ``inputs``.
+      - No redirect ever leaves a task listing itself (a self-reference the
+        plan itself carried is left for ``validate_task_graph`` to refuse).
+
+    Duplicate prerequisite IDs introduced by this rewrite are collapsed
+    while preserving order.
 
     On the golden path (no duplicate emissions) every group has exactly one
     member, every task is kept, no rewrite occurs, and the returned list is
@@ -4467,9 +4748,10 @@ def dedupe_materialization_tasks(tasks: list, emit_cm_bookends: bool = True) -> 
 
     skip_ids = set()   # id(task) for python-object-identity skip lookup
     id_remap: dict = {}  # skipped task_id -> surviving (winner) task_id
+    closer_dup_ids = set()  # skipped task_ids that duplicated a chain closer
     narrations: list = []
 
-    def _record_group(group: list, winner) -> None:
+    def _record_group(group: list, winner, closer: bool = False) -> None:
         for task in group:
             if task is winner:
                 continue
@@ -4482,13 +4764,15 @@ def dedupe_materialization_tasks(tasks: list, emit_cm_bookends: bool = True) -> 
             dup_id = task.get("task_id")
             if dup_id:
                 id_remap[dup_id] = winner.get("task_id")
+                if closer:
+                    closer_dup_ids.add(dup_id)
 
     for group in closer_groups.values():
         if len(group) == 1:
             continue
         synthetic_entries = [t for t in group if t.get("_synthetic")]
         winner = synthetic_entries[0] if synthetic_entries else group[0]
-        _record_group(group, winner)
+        _record_group(group, winner, closer=True)
 
     for group in worker_groups.values():
         if len(group) == 1:
@@ -4498,22 +4782,49 @@ def dedupe_materialization_tasks(tasks: list, emit_cm_bookends: bool = True) -> 
 
     kept_tasks = [task for task in tasks if id(task) not in skip_ids]
 
-    if id_remap:
-        for task in kept_tasks:
-            prereqs = task.get("prerequisite_ids") or []
-            if not prereqs:
-                continue
+    def _rewrite(task: dict, pid):
+        """Return what *pid* becomes in *task* after dedupe, or None to drop it."""
+        if task.get("_synthetic") and pid in closer_dup_ids:
+            return None
+        mapped = id_remap.get(pid, pid)
+        # Drop only a self-reference the remap created; one the plan already
+        # carried is left for validate_task_graph to refuse.
+        return None if (mapped != pid and mapped == task.get("task_id")) else mapped
+
+    for task in kept_tasks:
+        prereqs = task.get("prerequisite_ids") or []
+        if prereqs and id_remap:
             rewritten: list = []
             for pid in prereqs:
-                mapped = id_remap.get(pid, pid)
-                if mapped not in rewritten:
+                mapped = _rewrite(task, pid)
+                if mapped is not None and mapped not in rewritten:
                     rewritten.append(mapped)
             task["prerequisite_ids"] = rewritten
+        inputs = task.get("inputs")
+        if id_remap and task.get("_synthetic") and isinstance(inputs, list):
+            new_inputs: list = []
+            for item in inputs:
+                if item in id_remap:
+                    item = _rewrite(task, item)
+                    if item is None or item in new_inputs:
+                        continue
+                new_inputs.append(item)
+            task["inputs"] = new_inputs
 
     return kept_tasks, narrations, len(narrations)
 
 
 def main():
+    """Run the materializer CLI: turn a PM plan JSON into task folders and queue lines.
+
+    ``PLAN_FILE [--team-root ROOT] [--owner NAME] [--dry-run]
+    [--requirements-path PATH]``. Exit codes: 0 materialized, or nothing to do
+    (an empty plan, or a requirements bundle already in a terminal state);
+    1 a materialization failure (missing plan file, invalid plan, unresolvable
+    source branch, ...), named on stderr; 2 the plan was already materialized
+    (an idempotent no-op the wake logs as INFO) or argparse rejected the
+    arguments.
+    """
     parser = argparse.ArgumentParser(description="Materialize a task plan into kanban folders")
     parser.add_argument("plan_file", help="Path to plan JSON from pm subagent")
     parser.add_argument("--team-root", default=None, help="Override kanban root path")
@@ -4686,9 +4997,8 @@ def main():
     # The CLI value makes the path available independent of the plan JSON so it
     # cannot be silently lost when PM omits the field (document workflows need
     # this to avoid WRITER running without context).
-    # Read this BEFORE resolving target_version so the path can be passed to
-    # _compute_next_patch_py to exclude the requirements file itself from the
-    # collision check (a file cannot collide with its own version slot).
+    # Read this BEFORE checking target_version so a refusal's remedy can name
+    # the requirements file whose ## Target Version holds the explicit value.
     _cli_req_path = (getattr(args, "requirements_path", None) or "").strip()
     _plan_req_path = (plan.get("requirements_path") or "").strip()
     if _cli_req_path:
@@ -4730,40 +5040,6 @@ def main():
                         file=sys.stderr,
                     )
                     sys.exit(0)
-
-    # Read target_version from the plan (propagated from ## Target Version in the
-    # requirements doc).  Falls back to "none" if missing or blank.
-    #
-    # Auto-sentinel handling: if the requirements doc declared Target Version as
-    # 'auto', 'next-patch', empty string, or omitted the field entirely, the PM
-    # subagent propagates that sentinel value into the plan JSON.  The materializer
-    # resolves it to the next available patch slot at materialization time using
-    # _compute_next_patch_py (the Python equivalent of discovery_compute_next_patch).
-    # A log line is emitted recording the computed version and the source file path.
-    _raw_target_version = (plan.get("target_version") or "").strip()
-    if _raw_target_version.lower() == "none":
-        # PM explicitly set "none" — treat as a missing/auto sentinel for
-        # framework-authored plans, but preserve "none" semantics for the
-        # existing release-workflow "unversioned" fallback path below.
-        # We leave it as "none" here; inject_cm_bookends will warn and use
-        # "unversioned".
-        target_version = "none"
-        print(f"[pm-materialize] Target version: {target_version}", file=sys.stderr)
-    elif _is_auto_sentinel(_raw_target_version):
-        # Auto-sentinel: resolve to the next available patch slot.
-        target_version, _was_auto = resolve_target_version(
-            _raw_target_version, team_root, requirements_path
-        )
-        print(
-            f"[pm-materialize] Target version: {target_version} "
-            f"(auto-resolved from sentinel '{_raw_target_version}'; "
-            f"source: {requirements_path})",
-            file=sys.stderr,
-        )
-    else:
-        # Explicit vX.Y.Z — honour verbatim; bump-around handles collisions via CM.
-        target_version = _raw_target_version
-        print(f"[pm-materialize] Target version: {target_version}", file=sys.stderr)
 
     # Read human_approval_required from the plan.
     # Valid values: 'required' (inject HUMAN-APPROVE gate) or 'auto' (skip it).
@@ -4852,6 +5128,25 @@ def main():
             f"workflow_type '{workflow_type}'; defaulting to release-shaped behavior.",
             file=sys.stderr,
         )
+
+    # Read target_version from the plan (PM copies it from ## Target Version in
+    # the requirements doc). Discovery has already resolved any auto-sentinel
+    # there and written the explicit version, so the plan must carry an
+    # explicit value; refuse_non_explicit_target_version refuses a sentinel
+    # before anything is written. Release-shaped means the bookend branch
+    # below will inject CM-open/CM-release, which are named after the version.
+    _release_shaped = (
+        workflow_type not in ("document", "feature")
+        and _workflow_requires_cm_bookends(_wf_caps)
+    )
+    target_version = refuse_non_explicit_target_version(
+        plan.get("target_version") or "",
+        release_shaped=_release_shaped,
+        plan_path=str(plan_path.resolve()),
+        team_root=team_root,
+        requirements_path=requirements_path,
+    )
+    print(f"[pm-materialize] Target version: {target_version}", file=sys.stderr)
 
     # Read source_branch (required for feature workflows).
     # Falls back to active RC from release-state.md when not set in the plan.
@@ -5273,7 +5568,8 @@ def main():
     ordered_features = topological_order(feature_tasks)
 
     # Step 5: resolve prerequisite sequence numbers to task IDs for work tasks.
-    resolve_prerequisites(ordered_features)
+    # Unresolvable depends_on entries are kept for the graph check below.
+    _unresolved_depends_on = resolve_prerequisites(ordered_features)
 
     # Final ordered list depends on workflow type.
     if workflow_type == "document":
@@ -5315,6 +5611,28 @@ def main():
         f"({_pre_dedupe_count} emitted -> {len(ordered_tasks)} kept) in this materialization.",
         file=sys.stderr,
     )
+
+    # Step 3c: fail-closed graph check on the final task list, before any
+    # folder is written. A self-reference or a cycle can never be promoted
+    # out of WAITING, and an unresolved depends_on lets a task run before the
+    # work it waits for; either way the RC could never close cleanly.
+    _graph_problems = validate_task_graph(ordered_tasks, _unresolved_depends_on)
+    if _graph_problems:
+        _plan_abs = plan_path.resolve()
+        # BLOCK-WORTHY: writing this graph would leave tasks that can never
+        # leave WAITING (or that run out of order) and an RC that can never
+        # close; nothing has been written when this fires.
+        _emit_error_contract(
+            "materialize.task-graph-invalid",
+            f"pm_materialize refused {_plan_abs}: the task graph has "
+            f"{len(_graph_problems)} defect(s) — " + "; ".join(_graph_problems)
+            + ". No task folder was written.",
+            f"Fix depends_on in {_plan_abs} so every entry names another task's "
+            f"sequence and no tasks wait on each other, then re-run: python3 "
+            f"{Path(__file__).resolve()} {_plan_abs} --team-root {team_root}",
+        )
+        # CENSUS-ANCHOR: pm-materialize-02
+        sys.exit(1)
 
     # Step 4a: default-fill plan-level source_branch onto every ticket that lacks one.
     # This ensures tickets emitted by PM without an explicit source_branch (including
@@ -5406,6 +5724,7 @@ def main():
                 workflow_type=workflow_type,
                 tasks_root=str(tasks_root),
                 recycle_map=recycle_map,
+                wf_caps=_wf_caps,
             )
             if task_id is None:
                 # Option B: collision blocked this task — no folder, no queue entry.

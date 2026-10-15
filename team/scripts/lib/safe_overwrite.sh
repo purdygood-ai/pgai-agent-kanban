@@ -53,15 +53,21 @@
 #     Returns 2 if no crontab is currently set (nothing to back up).
 #     Stdout carries the status message; stderr carries errors.
 #
-#   safe_overwrite_crontab <new_template> [force_overwrite]
+#   safe_overwrite_crontab <new_template> [force_overwrite] [managed_root]
 #     Handles all three crontab states with prompts and backup:
 #       (a) No existing crontab   — install prompt, default Y.
-#       (b) PGAI entries present  — upgrade prompt, default N (conservative);
-#             if force_overwrite="true", skips prompt and applies unconditionally.
-#       (c) Non-PGAI entries only — replace prompt, default N (conservative);
-#             if force_overwrite="true", skips prompt and applies unconditionally.
+#       (b) PGAI entries present  — upgrade prompt, default N (conservative).
+#       (c) Non-PGAI entries only — replace prompt, default N (conservative).
+#     With force_overwrite="true" (an explicit tier) there is no prompt and
+#     nothing is replaced wholesale: only kanban-managed lines are rewritten
+#     (see merge_kanban_crontab) and every other line is kept.
 #     Backs up the existing crontab before any modification.
 #     On decline, prints recovery instructions.
+#
+#   merge_kanban_crontab <new_template> [managed_root]
+#     Reads the current crontab on stdin and prints it with its kanban-managed
+#     lines replaced by <new_template> wrapped in a marked block. Every line
+#     that is not kanban-managed is kept, in its original order.
 #
 #     No-TTY / non-interactive confirm gate:
 #       When there is no controlling TTY AND the caller has not set
@@ -358,9 +364,113 @@ backup_current_crontab() {
 }
 
 # ---------------------------------------------------------------------------
-# safe_overwrite_crontab <new_template> [force_overwrite]
+# merge_kanban_crontab <new_template> [managed_root] [commentary_file...]
+#
+# Reads the current crontab on stdin and prints the crontab to install on
+# stdout: every line that is not kanban-managed, in its original order,
+# followed by <new_template> wrapped in a marked block.
+#
+# A line is kanban-managed when it is
+#   - inside a marked block written for the same <managed_root>:
+#       # BEGIN pgai-agent-kanban managed block: <managed_root>
+#       ...
+#       # END pgai-agent-kanban managed block: <managed_root>
+#     (markers are matched ignoring case and runs of whitespace; with no
+#     <managed_root> the markers carry no ": <root>" suffix),
+#   - a line naming <managed_root> as a path (followed by "/", whitespace,
+#     a quote, ";" or end of line) -- the wake, cleanup and env lines an
+#     unmarked crontab from an earlier install carries,
+#   - a comment line identical to a comment line of <new_template> or of
+#     any <commentary_file> (the other shipped tier templates), or a
+#     "# Tier: small|medium|large" header -- the commentary an unmarked
+#     earlier install wrote around those lines.
+# Everything else -- the operator's own jobs, MAILTO/PATH assignments, a
+# block written for a different install root -- is kept. Runs of blank
+# lines in the kept part collapse to one. The output is the same on a
+# second run over its own result.
+#
+# Returns 0 on success; 3 when a BEGIN marker for <managed_root> has no
+# matching END marker (nothing is printed: guessing where the block ends
+# could drop the operator's lines, so the caller must refuse).
+# ---------------------------------------------------------------------------
+merge_kanban_crontab() {
+    local new_template="$1"
+    local managed_root="${2:-}"
+    shift 2 2>/dev/null || shift $#
+    local commentary_files
+    commentary_files="$(printf '%s\n' "$@")"
+    local begin_marker="# BEGIN pgai-agent-kanban managed block"
+    local end_marker="# END pgai-agent-kanban managed block"
+    if [[ -n "$managed_root" ]]; then
+        begin_marker+=": ${managed_root}"
+        end_marker+=": ${managed_root}"
+    fi
+
+    awk -v root="$managed_root" -v begin_marker="$begin_marker" \
+        -v end_marker="$end_marker" -v template="$new_template" \
+        -v commentary_files="$commentary_files" '
+        function norm(s) {
+            gsub(/[ \t]+/, " ", s); sub(/^ /, "", s); sub(/ $/, "", s)
+            return tolower(s)
+        }
+        function names_root(line,    i, rest, next_char) {
+            if (root == "") return 0
+            rest = line
+            while ((i = index(rest, root)) > 0) {
+                next_char = substr(rest, i + length(root), 1)
+                if (next_char == "" || next_char ~ /[\/ \t"\047;]/) return 1
+                rest = substr(rest, i + 1)
+            }
+            return 0
+        }
+        BEGIN {
+            norm_begin = norm(begin_marker); norm_end = norm(end_marker)
+            while ((getline tline < template) > 0) {
+                template_lines[++template_count] = tline
+                if (tline ~ /^[ \t]*#/) template_comments[norm(tline)] = 1
+            }
+            close(template)
+            file_count = split(commentary_files, extra_files, "\n")
+            for (f = 1; f <= file_count; f++) {
+                if (extra_files[f] == "") continue
+                while ((getline tline < extra_files[f]) > 0)
+                    if (tline ~ /^[ \t]*#/) template_comments[norm(tline)] = 1
+                close(extra_files[f])
+            }
+        }
+        {
+            n = norm($0)
+            if (in_block) { if (n == norm_end) in_block = 0; next }
+            if (n == norm_begin) { in_block = 1; next }
+            if (names_root($0)) next
+            if (n ~ /^#/ && (n in template_comments)) next
+            if (n ~ /^# ?tier: ?(small|medium|large)$/) next
+            kept[++kept_count] = $0
+        }
+        END {
+            if (in_block) exit 3
+            printed = 0; pending_blank = 0
+            for (i = 1; i <= kept_count; i++) {
+                if (kept[i] ~ /^[ \t]*$/) { if (printed) pending_blank = 1; continue }
+                if (pending_blank) { print ""; pending_blank = 0 }
+                print kept[i]; printed = 1
+            }
+            if (printed) print ""
+            print begin_marker
+            for (i = 1; i <= template_count; i++) print template_lines[i]
+            print end_marker
+        }'
+}
+
+# ---------------------------------------------------------------------------
+# safe_overwrite_crontab <new_template> [force_overwrite] [managed_root]
 #
 # Handle all three crontab states with prompts, backup, and recovery instructions:
+#
+#   Forced (force_overwrite=true -- an explicit tier), any state:
+#         - No prompt.  The current crontab is backed up (when non-empty),
+#           then merge_kanban_crontab rewrites only the kanban-managed lines
+#           for <managed_root>; every other line is kept.
 #
 #   (a) No existing crontab (or empty):
 #         - "No existing crontab found."
@@ -371,31 +481,38 @@ backup_current_crontab() {
 #   (b) Existing crontab with PGAI entries (wake-batch.sh lines):
 #         - Show matching PGAI lines (up to 10).
 #         - Derive backup path; announce it.
-#         - If force_overwrite=true: skip prompt, proceed with backup+replace.
-#         - Otherwise: "Replace with new template? [y/N]"  (default N — conservative)
-#         - On yes / force: backup, then crontab "$new_template".
+#         - "Replace with new template? [y/N]"  (default N — conservative)
+#         - On yes: backup, then crontab "$new_template".
 #         - On no:  print multi-step manual command, return 2.
 #
 #   (c) Existing crontab with no PGAI entries:
 #         - Show first 5 lines of existing crontab.
 #         - Warn that replacing will discard non-PGAI entries.
 #         - Derive backup path; announce it.
-#         - If force_overwrite=true: skip prompt, proceed with backup+replace.
-#         - Otherwise: "Replace? (will REPLACE non-PGAI entries) [y/N]"  (default N)
-#         - On yes / force: backup, then crontab "$new_template".
+#         - "Replace? (will REPLACE non-PGAI entries) [y/N]"  (default N)
+#         - On yes: backup, then crontab "$new_template".
 #         - On no:  print manual merge instructions, return 2.
 #
 # Arguments:
 #   $1  new_template    — path to the new crontab template file to install
-#   $2  force_overwrite — optional; set to "true" to skip interactive prompts in
-#                         cases (b) and (c) and apply the new template unconditionally
-#                         (after backup).  Intended for --tier CLI invocations where
-#                         the operator has explicitly selected a tier and expects it
-#                         to be applied regardless of what the existing crontab contains.
+#   $2  force_overwrite — optional; "true" skips the prompts and applies the
+#                         template by merge (see Forced above).  Intended for an
+#                         explicit --wake-tier, where the operator has chosen a
+#                         tier and expects it applied without losing their own
+#                         cron jobs.
+#   $3  managed_root    — optional; the install root whose lines are
+#                         kanban-managed (see merge_kanban_crontab).  Without
+#                         it only a marked block with no root suffix is
+#                         treated as managed.
+#   $4… commentary_file — optional; passed through to merge_kanban_crontab
+#                         (the shipped tier templates, so commentary an
+#                         unmarked earlier install of another tier wrote is
+#                         recognised as kanban-managed).
 #
 # Return codes:
 #   0  success (crontab installed, updated, or operator chose to skip cleanly)
-#   1  backup failure (aborts — does NOT install the new crontab)
+#   1  backup failure, or an unterminated managed block (aborts — does NOT
+#      install the new crontab)
 #   2  operator declined (recovery instructions printed)
 # ---------------------------------------------------------------------------
 safe_overwrite_crontab() {
@@ -407,6 +524,8 @@ safe_overwrite_crontab() {
     #   Interactive (TTY-attached) runs are not affected by this gate.
     local new_template="$1"
     local force_overwrite="${2:-false}"
+    local managed_root="${3:-}"
+    local -a commentary_files=("${@:4}")
 
     if [[ -z "$new_template" ]]; then
         printf 'safe_overwrite.sh: safe_overwrite_crontab requires a <new_template> argument\n' >&2
@@ -437,6 +556,49 @@ safe_overwrite_crontab() {
     local current_crontab
     current_crontab="$(_run_crontab -l 2>/dev/null)"
 
+    # Derive backup path for the forced path and cases (b) and (c).
+    local ts
+    ts="$(date +%Y%m%d-%H%M%S)"
+    local backup_file="${HOME}/.crontab.before-install-${ts}.bak"
+
+    # ---- Forced: rewrite only the kanban-managed lines -------------------
+    if [[ "$force_overwrite" == "true" ]]; then
+        local merged merge_rc=0
+        merged="$(printf '%s\n' "$current_crontab" \
+            | merge_kanban_crontab "$new_template" "$managed_root" \
+                "${commentary_files[@]+"${commentary_files[@]}"}")" || merge_rc=$?
+        if [[ "$merge_rc" -ne 0 ]]; then
+            printf 'safe_overwrite.sh: the current crontab has a "# BEGIN pgai-agent-kanban managed block" line with no matching END line; refusing to guess where the block ends.\n' >&2
+            printf 'Crontab unchanged. Edit it (crontab -e) so the block ends with:\n' >&2
+            if [[ -n "$managed_root" ]]; then
+                printf '  # END pgai-agent-kanban managed block: %s\n' "$managed_root" >&2
+            else
+                printf '  # END pgai-agent-kanban managed block\n' >&2
+            fi
+            return 1
+        fi
+
+        printf 'Tier override requested — rewriting kanban-managed lines only; every other crontab line is kept.\n'
+        if [[ -n "$current_crontab" ]]; then
+            backup_current_crontab "$backup_file" || {
+                printf 'safe_overwrite.sh: aborting — backup failed before crontab modification\n' >&2
+                return 1
+            }
+        fi
+        printf '%s\n' "$merged" | _run_crontab - || {
+            printf 'safe_overwrite.sh: crontab install failed; original preserved at: %s\n' "$backup_file" >&2
+            return 1
+        }
+        local kept_count
+        kept_count="$(printf '%s\n' "$merged" | awk 'index($0, "# BEGIN pgai-agent-kanban managed block") == 1 { exit } /[^ \t]/ { n++ } END { print n + 0 }')"
+        if [[ -n "$current_crontab" ]]; then
+            printf 'Crontab updated (%s other line(s) kept). Backup: %s\n' "$kept_count" "$backup_file"
+        else
+            printf 'Crontab installed.\n'
+        fi
+        return 0
+    fi
+
     # ---- Case (a): No existing crontab ------------------------------------
     if [[ -z "$current_crontab" ]]; then
         printf 'No existing crontab found.\n'
@@ -460,29 +622,18 @@ safe_overwrite_crontab() {
         esac
     fi
 
-    # Derive backup path for cases (b) and (c).
-    local ts
-    ts="$(date +%Y%m%d-%H%M%S)"
-    local backup_file="${HOME}/.crontab.before-install-${ts}.bak"
-
     # ---- Case (b): Existing crontab has PGAI entries ----------------------
     # Detection: wake-batch.sh (provider-agnostic dispatcher, current layout).
-    if printf '%s\n' "$current_crontab" | grep -qE 'wake-batch\.sh'; then
+    if grep -qE 'wake-batch\.sh' <<< "$current_crontab"; then
         printf 'Existing crontab has PGAI Kanban entries:\n'
         printf '%s\n' "$current_crontab" | grep -E 'wake-batch\.sh' | head -10
         printf '...\n'
         printf '\n'
         printf 'Updating will back up current crontab to: %s\n' "$backup_file"
 
-        local do_replace
-        if [[ "$force_overwrite" == "true" ]]; then
-            printf 'Tier override requested — applying new template (force_overwrite=true).\n'
-            do_replace="yes"
-        else
-            local response
-            _prompt_tty 'Replace with new template? [y/N] ' response
-            do_replace="$response"
-        fi
+        local do_replace response
+        _prompt_tty 'Replace with new template? [y/N] ' response
+        do_replace="$response"
 
         case "${do_replace:-no}" in
             [yY]*|yes)
@@ -517,15 +668,9 @@ safe_overwrite_crontab() {
     printf 'REPLACING this crontab will discard existing entries.\n'
     printf 'Existing entries will be backed up to: %s\n' "$backup_file"
 
-    local do_replace
-    if [[ "$force_overwrite" == "true" ]]; then
-        printf 'Tier override requested — applying new template (force_overwrite=true).\n'
-        do_replace="yes"
-    else
-        local response
-        _prompt_tty 'Replace? (will REPLACE non-PGAI entries) [y/N] ' response
-        do_replace="$response"
-    fi
+    local do_replace response
+    _prompt_tty 'Replace? (will REPLACE non-PGAI entries) [y/N] ' response
+    do_replace="$response"
 
     case "${do_replace:-no}" in
         [yY]*|yes)
@@ -563,13 +708,26 @@ safe_overwrite_crontab() {
 # has completed.  An empty crontab after a successful install is a red flag
 # indicating that wake scripts will not fire.
 #
-# Arguments: none
+# The recovery command it prints is install-crontab.sh, which renders the
+# tier template's placeholders (__KANBAN_ROOT__, __CLAUDE_PATH__) before
+# installing it -- never the raw template, whose placeholder paths would
+# make every installed line fail.
+#
+# Arguments:
+#   $1  tier         — optional; the wake tier to name in the recovery
+#                      command (small|medium|large). Default: small, the
+#                      tier install-crontab.sh itself defaults to.
+#   $2  kanban_root  — optional; the install root whose install-crontab.sh
+#                      the recovery command runs. Default:
+#                      $PGAI_AGENT_KANBAN_ROOT_PATH, then $HOME/pgai_agent_kanban.
 #
 # Return codes:
 #   0  crontab is non-empty — no warning printed
 #   1  crontab is empty or absent — warning printed with recovery instructions
 # ---------------------------------------------------------------------------
 warn_if_empty_crontab() {
+    local _tier="${1:-small}"
+    local _root="${2:-${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}}"
     local current_crontab
     current_crontab="$(_run_crontab -l 2>/dev/null)"
 
@@ -579,9 +737,9 @@ warn_if_empty_crontab() {
         printf 'Wake scripts will NOT fire. The autonomous chain is halted.\n'
         printf '\n'
         printf 'This may indicate the crontab install step was declined or failed.\n'
-        printf 'To recover, install the crontab manually:\n'
+        printf 'To recover, re-run the crontab installer (it renders the template first):\n'
         printf '\n'
-        printf '  crontab "${PGAI_AGENT_KANBAN_ROOT_PATH}/templates/install/crontab.example"\n'
+        printf '  %q --wake-tier=%s --yes\n' "${_root%/}/scripts/install-crontab.sh" "$_tier"
         printf '\n'
         printf 'Or restore from a backup (look in %s for .crontab.before-install-*.bak files):\n' "$HOME"
         printf '\n'

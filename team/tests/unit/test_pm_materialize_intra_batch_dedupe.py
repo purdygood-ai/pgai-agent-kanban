@@ -1,8 +1,8 @@
 """
 test_pm_materialize_intra_batch_dedupe.py
 ==========================================
-Unit and end-to-end tests for the intra-materialization dedupe guard added
-for BUG-0033 (pm-materialization-accepts-duplicate-tasks).
+Unit and end-to-end tests for the intra-materialization dedupe guard that
+rejects a plan re-emitting tasks it already produced within the same batch.
 
 The guard makes ``team/pm-agent/pm_materialize.py`` fail-closed against a
 context-degraded model re-emitting tasks it already produced within a
@@ -20,8 +20,7 @@ Two layers of coverage:
      (``python3 team/pm-agent/pm_materialize.py <plan.json> ...`` as a
      subprocess, exactly as ``pm-agent.sh`` invokes it) so the guard is
      verified through the production entry point, not only via the helper
-     in isolation — per the task's "Verify through the REAL materialization
-     entry point" constraint.
+     in isolation.
 
 All temp paths use pytest's ``tmp_path`` fixture (never bare /tmp).
 """
@@ -96,7 +95,7 @@ def test_closer_purpose_key_identifies_tester_verify() -> None:
 
 
 def test_closer_purpose_key_tester_falls_through_without_cm_bookends() -> None:
-    """BUG-0035: without CM bookends, TESTER is not a chain-closer purpose.
+    """Without CM bookends, TESTER is not a chain-closer purpose.
 
     Workflows that never emit CM bookends (testing-only, feature, document)
     may legitimately carry more than one distinct-purpose TESTER task in the
@@ -245,14 +244,14 @@ def test_dedupe_rewrites_prerequisite_ids_pointing_at_skipped_duplicates() -> No
 
 
 # ---------------------------------------------------------------------------
-# BUG-0035 — slug-aware TESTER closer bucket (no-CM-bookend workflows)
+# Slug-aware TESTER closer bucket (no-CM-bookend workflows)
 # ---------------------------------------------------------------------------
 
 
 def test_dedupe_distinct_slug_tester_tasks_both_survive_without_cm_bookends() -> None:
     """The testing-only shape: a plan work-ticket TESTER task plus an injected
     'verify-and-report' companion carry distinct slugs and must both survive
-    when the materialization does not emit CM bookends (BUG-0035).
+    when the materialization does not emit CM bookends.
     """
     tasks = [
         _task("TESTER-1", "TESTER", "verify-the-implementation"),
@@ -267,10 +266,10 @@ def test_dedupe_distinct_slug_tester_tasks_both_survive_without_cm_bookends() ->
 
 
 def test_dedupe_same_slug_tester_reemission_still_collapses_without_cm_bookends() -> None:
-    """BUG-0033's genuine catch survives the BUG-0035 fix: a wobbling model
-    re-emitting the SAME TESTER slug still collapses to one, even in a
-    no-CM-bookend workflow, because same-slug identity is exactly what the
-    generic worker-dedup path (role, slug) is built to catch.
+    """The same-slug collapse survives the slug-aware closer-bucket fix: a
+    wobbling model re-emitting the SAME TESTER slug still collapses to one,
+    even in a no-CM-bookend workflow, because same-slug identity is exactly
+    what the generic worker-dedup path (role, slug) is built to catch.
     """
     tasks = [
         _task("TESTER-1", "TESTER", "verify-the-implementation"),
@@ -287,10 +286,11 @@ def test_dedupe_same_slug_tester_reemission_still_collapses_without_cm_bookends(
 
 
 def test_dedupe_tester_verify_still_collapses_to_one_with_cm_bookends() -> None:
-    """BUG-0033 regression guard: with CM bookends (the release-lifecycle
+    """Regression guard: with CM bookends (the release-lifecycle
     shape), any additional TESTER task — regardless of its slug — is still
     presumptively the wobble-duplicate and collapses to the single
-    synthetic TESTER closer. This is the behavior BUG-0035 must NOT change.
+    synthetic TESTER closer. The slug-aware closer-bucket fix must NOT
+    change this behavior.
     """
     tasks = [
         _task("TESTER-1", "TESTER", "verify-v1", synthetic=True),
@@ -310,8 +310,9 @@ def test_dedupe_cm_buckets_unaffected_by_emit_cm_bookends_flag() -> None:
     """The CM open-rc / release purpose buckets are not workflow-shape gated:
     they still collapse doubled emissions with the same cm_operation
     regardless of the emit_cm_bookends flag passed to the dedupe pass (the
-    flag only changes TESTER handling). Confirms BUG-0035's fix does not
-    over-collapse — or under-collapse — the CM buckets.
+    flag only changes TESTER handling). Confirms the slug-aware
+    closer-bucket fix does not over-collapse — or under-collapse — the CM
+    buckets.
     """
     tasks = [
         _task("CM-1", "CM", "open-rc-v1", synthetic=True, cm_operation="open-rc"),
@@ -426,9 +427,10 @@ def test_real_entry_point_dedupes_doubled_chain_closers_and_worker_tasks(
     """End-to-end: doubled TESTER-verify + CM open/release pairs + a near-dup
     CODER task all collapse to exactly one materialized task each.
 
-    Reproduces the BUG-0033 production shape: alongside its two legitimate
-    CODER work tasks, the plan JSON also emits its own TESTER-role and
-    CM-role tasks (permitted by the release workflow roster) that duplicate
+    Reproduces the intra-batch duplication production shape: alongside its
+    two legitimate CODER work tasks, the plan JSON also emits its own
+    TESTER-role and CM-role tasks (permitted by the release workflow roster)
+    that duplicate
     the purposes the materializer always injects synthetically. The real
     CLI entry point must materialize exactly one CM-open, one TESTER, and
     one CM-release, plus the two distinct-slug CODER tasks — no duplicates
@@ -534,8 +536,9 @@ def test_real_entry_point_golden_path_reports_zero_dedupe(
 def test_real_entry_point_testing_only_workflow_materializes_two_distinct_tester_tasks(
     tmp_path: pathlib.Path,
 ) -> None:
-    """BUG-0035 end-to-end regression guard, verified through the REAL
-    materialization entry point (not the helper in isolation).
+    """Slug-aware closer-bucket end-to-end regression guard, verified
+    through the REAL materialization entry point (not the helper in
+    isolation).
 
     A testing-only decompose (no CM bookends) emits one plan TESTER work
     ticket (slug 'verify-the-implementation'); pm_materialize.py injects the

@@ -10,7 +10,7 @@ The kanban is an autonomous system. It runs on a wake-script schedule, and every
 
 A representative load looks like this:
 
-- **Task folders** under `projects/<name>/tasks/CLAUDE-*` — every agent invocation creates one (with a `README.md`, a `status.md`, an `artifacts/` directory, a `logs/` directory). At roughly 23 RCs per day with about 10 tasks per RC, that is ~230 task folders per day per project. Thirty days in, you are looking at 7,000+ folders per project.
+- **Task folders** under `projects/<name>/tasks/<task-id>/` — any folder whose name has the shared task-ID shape (e.g. `CODER-20260412-001-add-login-endpoint`, with or without the legacy `CLAUDE-` prefix). Every agent invocation creates one (with a `README.md`, a `status.md`, an `artifacts/` directory, a `logs/` directory). At roughly 23 RCs per day with about 10 tasks per RC, that is ~230 task folders per day per project. Thirty days in, you are looking at 7,000+ folders per project.
 - **Log archives** under `projects/<name>/logs/` and `$KANBAN_ROOT/logs/` — `cleanup.sh` rotates daily debug logs into per-day archive directories, but the archives themselves accumulate.
 - **Shipped requirement bundles** under `projects/<name>/requirements/` — `vX.Y.Z-bugfix-bundle-*.md` and `vX.Y.Z-priority-bundle-*.md` files remain after the release ships.
 - **Closed bug and priority files** under `projects/<name>/bugs/` and `priority/` — operator-authored intake files persist after their target release ships.
@@ -111,7 +111,7 @@ Limit the purge to a single project. Without this flag, every project under `pro
 
 ```bash
 # Only touch one project
-scripts/cleanup/purge-old-files.sh --project pgai-video-generator --apply
+scripts/cleanup/purge-old-files.sh --project pgai-chomp-man --apply
 ```
 
 If the named project does not exist, the script exits with an error and changes nothing.
@@ -266,9 +266,9 @@ If your disk pressure justifies it, schedule a weekly purge under cron. The reco
 
 ```cron
 # Weekly purge, Sunday 03:00 UTC, archive before delete
-0 3 * * 0 PGAI_AGENT_KANBAN_ROOT_PATH=/home/rocky/pgai_agent_kanban \
-    /home/rocky/pgai_agent_kanban/scripts/cleanup/purge-old-files.sh --archive --apply \
-    >> /home/rocky/pgai_agent_kanban/logs/cron-purge.log 2>&1
+0 3 * * 0 PGAI_AGENT_KANBAN_ROOT_PATH=$HOME/pgai_agent_kanban \
+    $HOME/pgai_agent_kanban/scripts/cleanup/purge-old-files.sh --archive --apply \
+    >> $HOME/pgai_agent_kanban/logs/cron-purge.log 2>&1
 ```
 
 A few notes on running under cron:

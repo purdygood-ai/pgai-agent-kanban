@@ -8,7 +8,7 @@
 # Each line is tagged with the agent name and current time in HH:MM:SS format.
 # When no project has verbose_mode enabled: shows a placeholder and waits.
 #
-# Color scheme (same as dashboard-logs.sh — reused, not reinvented):
+# Color scheme (same as logs.sh — reused, not reinvented):
 #   pm       = cyan
 #   po       = red
 #   coder    = green
@@ -25,7 +25,7 @@
 # not yet exist and begins following once they appear.
 #
 # Usage:
-#   dashboard-debug-logs.sh [--kanban-root <path>] [--stdout]
+#   debug-logs.sh [--kanban-root <path>] [--stdout] [-h|--help]
 #
 # Flags:
 #   --kanban-root <path>   Override the kanban root path
@@ -33,15 +33,38 @@
 #                          file once to stdout and exit 0. The blocking tail -F
 #                          pipeline is NOT started. Safe to call standalone from
 #                          a terminal without tmux or verbose mode enabled.
+#   -h, --help             Print this usage and exit 0. Nothing else runs: no
+#                          root resolution, no terminal query, no tail.
 #
 # Environment:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: ~/pgai_agent_kanban)
 #   NO_COLOR                     — set to 1 to disable color
 
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:40}"
+      exit 0
+      ;;
+  esac
+done
+
 # Not using set -euo pipefail — long-running tail pipeline; pipe closes should
 # not abort the process.
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh).
+# shellcheck source=../lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -143,25 +166,14 @@ if [[ "${TERM:-}" == "dumb" ]] || [[ "${NO_COLOR:-}" == "1" ]]; then
   USE_COLOR=false
 fi
 
-if [[ "$USE_COLOR" == "true" ]]; then
-  C_CYAN=$'\033[0;36m'
-  C_GREEN=$'\033[0;32m'
-  C_YELLOW=$'\033[0;33m'
-  C_BLUE=$'\033[0;34m'
-  C_MAGENTA=$'\033[0;35m'
-  C_RED=$'\033[0;31m'
-  C_DIM=$'\033[2m'
-  C_RESET=$'\033[0m'
-else
-  C_CYAN=""
-  C_GREEN=""
-  C_YELLOW=""
-  C_BLUE=""
-  C_MAGENTA=""
-  C_RED=""
-  C_DIM=""
-  C_RESET=""
-fi
+C_CYAN="$(ansi_code cyan)"
+C_GREEN="$(ansi_code green)"
+C_YELLOW="$(ansi_code yellow)"
+C_BLUE="$(ansi_code blue)"
+C_MAGENTA="$(ansi_code magenta)"
+C_RED="$(ansi_code red)"
+C_DIM="$(ansi_code dim)"
+C_RESET="$(ansi_code reset)"
 
 # ---------------------------------------------------------------------------
 # Agent definitions: name -> color
@@ -292,6 +304,28 @@ unset _n _i _path _agent _proj _color
 TAIL_ARGS=("${ALL_LOG_FILES[@]}")
 
 # ---------------------------------------------------------------------------
+# Line timestamps without a process per line. The awk program below stamps
+# every line with pane_ts(): awk's own strftime() where this awk has it
+# (gawk, mawk, busybox); otherwise `date` runs at most once per second, the
+# current second read with POSIX srand() (which returns the previous seed,
+# itself the time of day). A pane resumed after hours hidden replays its
+# whole backlog through this program, so a per-line fork would cost one
+# process per replayed line.
+# ---------------------------------------------------------------------------
+if awk 'BEGIN { strftime("%H") }' >/dev/null 2>&1; then
+  PANE_TS_AWK='function pane_ts() { return strftime("%H:%M:%S") }'
+else
+  PANE_TS_AWK='function pane_ts(    now, cmd) {
+    srand(); now = srand()
+    if (now != pane_ts_second) {
+      cmd = "date +%H:%M:%S"; cmd | getline pane_ts_value; close(cmd)
+      pane_ts_second = now
+    }
+    return pane_ts_value
+  }'
+fi
+
+# ---------------------------------------------------------------------------
 # Run tail -F and pipe through awk for agent tagging and colorization.
 #
 # tail -F prints "==> <filename> <==" when switching between files; awk uses
@@ -306,7 +340,8 @@ awk \
   -v c_reset="$C_RESET" \
   -v c_dim="$C_DIM" \
   -v multi_project="$MULTI_PROJECT_MODE" \
-  'BEGIN {
+  "${PANE_TS_AWK}"'
+  BEGIN {
     # Load per-file map: full_path -> (agent, project, color, reset)
     while ((getline line < agent_map_file) > 0) {
       n = split(line, parts, "\t")
@@ -362,9 +397,7 @@ awk \
 
     # Build tag label: [project/agent HH:MM:SS] in multi-project mode,
     # [agent HH:MM:SS] in single-project mode.
-    cmd = "date +%H:%M:%S"
-    cmd | getline ts
-    close(cmd)
+    ts = pane_ts()
 
     if (multi_project == "true" && current_project != "") {
       label = current_project "/" current_agent

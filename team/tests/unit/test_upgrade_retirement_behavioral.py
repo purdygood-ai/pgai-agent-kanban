@@ -3,7 +3,9 @@ test_upgrade_retirement_behavioral.py
 ======================================
 Behavioral acceptance tests for upgrade.sh's retirement step.
 
-These tests exercise the three scenarios called out in the originating bug spec:
+These tests exercise the three scenarios called out in the originating bug spec,
+plus a fourth covering the stale operator scripts and API test an older install
+carries after upgrading:
 
 1. **Two-sided fixture** (fossil + custom plugin): plant a fossil
    ``workflows/release.yaml`` AND an operator-authored custom plugin
@@ -21,6 +23,15 @@ These tests exercise the three scenarios called out in the originating bug spec:
    containing a glob character, assert the upgrade exits non-zero and the
    fossil file is NOT moved (the lint pre-check fired before any file
    operation).
+
+4. **Stale shipped files retired**: seed the six files the tree no longer
+   ships (the defer-low-bugs pair and its lib, the underscore twin of
+   release-locks.sh, the top-level agent-metrics.sh, and the API test that
+   POSTs to routes that no longer exist) at a live root, run the REAL
+   upgrade.sh, and assert none remains at the root, each sits under
+   ``retired/<ts>/`` at its relative path, one per-file line narrates each
+   move, and the retired-files lint's root scan flags them before the
+   upgrade and is clean after it.
 
 These tests complement the broader coverage in ``test_upgrade_fossil_advisory.py``
 by focusing on the exact acceptance criteria from the bug spec.
@@ -62,16 +73,29 @@ _REAL_ARGPARSE_SH = _TEAM_SCRIPTS_DIR / "lib" / "argparse.sh"
 _REAL_ENV_BOOTSTRAP_SH = _TEAM_SCRIPTS_DIR / "lib" / "env_bootstrap.sh"
 _REAL_INI_PARSER_SH = _TEAM_SCRIPTS_DIR / "lib" / "ini_parser.sh"
 _REAL_PROJECT_PATHS_SH = _TEAM_SCRIPTS_DIR / "lib" / "project_paths.sh"
+_REAL_ERROR_CONTRACT_SH = _TEAM_SCRIPTS_DIR / "lib" / "error_contract.sh"
 _REAL_TEMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "temp.sh"
 _REAL_RETIRED_LINT_SH = _TEAM_SCRIPTS_DIR / "lib" / "retired_files_lint.sh"
 _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
+_REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 
 _TEAM_TEMPLATES_DIR = pathlib.Path(__file__).parent.parent.parent / "templates"
 _REAL_RETIRED_FILES_TXT = _TEAM_TEMPLATES_DIR / "retired-files.txt"
 
 # Operator custom plugin path — exact name from the bug spec reproduction steps.
 _CUSTOM_PLUGIN_REL = "workflows/my-custom-type/workflow.cfg"
+
+# Files an older install still carries that the current tree no longer ships.
+# Each must be named in the real manifest and retired by a real upgrade run.
+_STALE_SHIPPED_FILES = [
+    "scripts/defer-low-bugs.sh",
+    "scripts/undefer-low-bugs.sh",
+    "scripts/release_locks.sh",
+    "scripts/agent-metrics.sh",
+    "scripts/lib/defer_low_bugs.sh",
+    "pgai_agent_kanban/api/tests/test_defer_low_bugs.py",
+]
 
 # Markers in upgrade.sh output that identify per-file retirement lines.
 # Per-file lines: contain "Retired:" AND " -> " (the move arrow) AND "[upgrade]".
@@ -92,6 +116,7 @@ def _build_retirement_sandbox(
     fossils: list[str],
     custom_plugin: str | None = None,
     malformed_manifest: bool = False,
+    stale_files: list[str] | None = None,
 ) -> dict[str, pathlib.Path]:
     """Build a minimal live-install sandbox for retirement behavioral tests.
 
@@ -113,6 +138,11 @@ def _build_retirement_sandbox(
     malformed_manifest:
         When ``True``, write a manifest containing a glob character so the
         hygiene lint pre-check fires and aborts the upgrade.
+    stale_files:
+        Optional list of kanban-root-relative paths to seed as regular files
+        at the live root, standing in for files an earlier release deposited
+        and the current tree no longer ships.  Parent directories are
+        created as needed.  Pass ``None`` to seed none.
 
     Returns
     -------
@@ -138,10 +168,11 @@ def _build_retirement_sandbox(
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
         _REAL_PROJECT_PATHS_SH,
+        _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
         _REAL_RETIRED_LINT_SH,
         _REAL_VERSION_STAMP_SH,
-        _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH,
     ]
     for lib_src in _lib_sources:
         if lib_src.exists():
@@ -214,6 +245,15 @@ def _build_retirement_sandbox(
             b"version = 1.0\n"
         )
 
+    # --- Kanban root: optional stale files an earlier release deposited ---
+    for stale_rel in stale_files or []:
+        stale_path = kanban_root / stale_rel
+        stale_path.parent.mkdir(parents=True, exist_ok=True)
+        stale_path.write_text(
+            f"# stale file the current tree no longer ships: {stale_rel}\n",
+            encoding="utf-8",
+        )
+
     # --- Dev tree: minimal content for the deposit loop ---
     # install.sh must exist at dev_tree root.
     dev_install = dev_tree / "install.sh"
@@ -222,7 +262,7 @@ def _build_retirement_sandbox(
 
     # team/ stubs for each item the deposit loop iterates over.
     (dev_tree / "team").mkdir(parents=True, exist_ok=True)
-    for doc_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP.md"]:
+    for doc_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
         (dev_tree / "team" / doc_name).write_text(
             f"# {doc_name} stub\n", encoding="utf-8"
         )
@@ -305,6 +345,28 @@ def _run_upgrade(
         text=True,
         timeout=60,
         env=env,
+    )
+
+
+def _run_retired_files_root_scan(
+    kanban_root: pathlib.Path,
+) -> subprocess.CompletedProcess:
+    """Run the real retired-files lint's root scan over a sandbox root.
+
+    Uses the manifest and lint helper the sandbox builder installed under
+    ``kanban_root`` so the scan reads exactly what upgrade.sh read.
+    """
+    return subprocess.run(
+        [
+            "bash",
+            str(kanban_root / "scripts" / "lib" / "retired_files_lint.sh"),
+            str(kanban_root / "templates" / "retired-files.txt"),
+            str(kanban_root),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={"PATH": os.environ.get("PATH", ""), "HOME": str(kanban_root), "LANG": "C"},
     )
 
 
@@ -501,4 +563,111 @@ def test_malformed_manifest_aborts_before_any_file_is_moved(
     assert not (kanban_root / "retired").exists(), (
         "retired/ directory was created despite manifest lint failure. "
         "Files were moved before or during the failed lint check."
+    )
+
+
+@pytest.mark.skipif(
+    not _REAL_UPGRADE_SH.exists(),
+    reason=f"Real upgrade.sh not found at {_REAL_UPGRADE_SH}; skipping.",
+)
+def test_stale_shipped_files_are_retired_and_root_scan_flags_them_only_before(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Files an older install carries that the tree no longer ships are retired.
+
+    Seeds the six stale paths at a live-layout sandbox root, runs the REAL
+    upgrade.sh, and asserts the whole retirement contract for each:
+
+    - It is named in the real manifest (so the retirement step can see it).
+    - The retired-files lint's root scan names it BEFORE the upgrade and
+      exits non-zero; AFTER the upgrade the same scan is clean and exits 0.
+    - It is gone from the live root and sits under ``retired/<ts>/`` at its
+      original relative path.
+    - One per-file ``Retired: <rel> -> retired/<ts>/<rel>`` line narrates it.
+    """
+    sandbox = _build_retirement_sandbox(
+        tmp_path,
+        fossils=[],
+        stale_files=_STALE_SHIPPED_FILES,
+    )
+    kanban_root = sandbox["kanban_root"]
+
+    manifest_lines = [
+        ln.strip()
+        for ln in (kanban_root / "templates" / "retired-files.txt").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if ln.strip() and not ln.lstrip().startswith("#")
+    ]
+    missing_from_manifest = [p for p in _STALE_SHIPPED_FILES if p not in manifest_lines]
+    assert not missing_from_manifest, (
+        "Stale paths not named in templates/retired-files.txt; the retirement "
+        f"step cannot retire them: {missing_from_manifest}"
+    )
+
+    # Root scan BEFORE the upgrade: every seeded path is reported, exit 1.
+    scan_before = _run_retired_files_root_scan(kanban_root)
+    assert scan_before.returncode == 1, (
+        "retired-files lint root scan should exit 1 while the stale files are "
+        f"present, got {scan_before.returncode}.\n"
+        f"stdout:\n{scan_before.stdout}\nstderr:\n{scan_before.stderr}"
+    )
+    not_flagged = [
+        p for p in _STALE_SHIPPED_FILES
+        if str(kanban_root / p) not in scan_before.stderr
+    ]
+    assert not not_flagged, (
+        f"Root scan did not flag these present stale files: {not_flagged}\n"
+        f"stderr:\n{scan_before.stderr}"
+    )
+
+    result = _run_upgrade(sandbox, tmp_path)
+
+    assert result.returncode == 0, (
+        f"upgrade.sh exited non-zero (code {result.returncode}).\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+
+    combined = result.stdout + result.stderr
+    graveyard = _graveyard_dir(kanban_root)
+    assert graveyard is not None, (
+        "No single retired/<ts>/ directory was created; retirement step did not fire."
+    )
+
+    retire_lines = [
+        line for line in combined.splitlines()
+        if _RETIRE_PREFIX in line and _RETIRE_MOVE_MARKER in line and "[upgrade]" in line
+    ]
+
+    still_at_root = [p for p in _STALE_SHIPPED_FILES if (kanban_root / p).exists()]
+    assert not still_at_root, (
+        f"Stale files still at the live root after upgrade: {still_at_root}\n"
+        f"stdout:\n{result.stdout}"
+    )
+    not_in_graveyard = [
+        p for p in _STALE_SHIPPED_FILES if not (graveyard / p).is_file()
+    ]
+    assert not not_in_graveyard, (
+        f"Stale files not found under {graveyard} at their relative path: "
+        f"{not_in_graveyard}"
+    )
+    not_narrated = [
+        p for p in _STALE_SHIPPED_FILES
+        if not any(f"{p} -> " in ln and f"{_GRAVEYARD_PREFIX}" in ln for ln in retire_lines)
+    ]
+    assert not not_narrated, (
+        f"No per-file retirement line for: {not_narrated}\n"
+        "All retirement lines:\n" + ("\n".join(retire_lines) or "  (none)")
+    )
+    assert f"Retired:           {len(_STALE_SHIPPED_FILES)} file(s)" in combined, (
+        f"Summary line does not count all {len(_STALE_SHIPPED_FILES)} retirements.\n"
+        f"stdout:\n{result.stdout}"
+    )
+
+    # Root scan AFTER the upgrade: nothing listed remains, exit 0.
+    scan_after = _run_retired_files_root_scan(kanban_root)
+    assert scan_after.returncode == 0, (
+        "retired-files lint root scan should be clean after the upgrade, "
+        f"got {scan_after.returncode}.\nstderr:\n{scan_after.stderr}"
     )

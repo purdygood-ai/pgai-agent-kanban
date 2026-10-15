@@ -1,0 +1,1475 @@
+{
+  "description": "Expected stdout of read_ship_policy_finding_dimensions (dims) and read_ship_policy_report_values (values, one entry per printed line) for every report in corpus/. Recorded by running the ship-policy report reader as it read reports before it moved onto pgai_agent_kanban.reports.tester_report (its test-only copy is legacy_readers/ship_policy_report.py). An entry changes only together with a differential.md row for its report, and the parser's golden file for that report must project to the same values; tests/unit/test_ship_policy_report_inputs.py holds both.",
+  "reports": {
+    "pgai-agent-kanban--TESTER-20260905-018-verify-2-9-20.md": {
+      "dims": "yes unknown",
+      "values": [
+        "recommendation=ship-with-serious-concerns",
+        "recommendation_raw=SHIP-WITH-SERIOUS-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=yes"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260905-025-verify-2-9-21.md": {
+      "dims": "yes unknown",
+      "values": [
+        "recommendation=ship-with-serious-concerns",
+        "recommendation_raw=SHIP-WITH-SERIOUS-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260907-011-verify-2-9-21.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260907-017-verify-2-9-22.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260907-023-verify-2-9-23.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260907-039-verify-2-10-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260907-048-verify-2-10-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260907-057-verify-2-10-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260907-063-verify-2-10-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260907-075-verify-2-10-4.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260908-011-verify-2-11-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260908-016-verify-2-11-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260908-029-verify-2-12-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260908-038-verify-2-12-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260908-053-verify-2-13-0.md": {
+      "dims": "yes unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260909-007-verify-2-12-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260909-021-verify-2-13-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260909-029-verify-2-13-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260909-040-verify-2-14-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260909-045-verify-2-14-1.md": {
+      "dims": "yes unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260910-008-verify-2-14-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260910-017-verify-2-14-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260910-028-verify-2-15-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260910-037-verify-2-15-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260910-045-verify-2-15-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260910-053-verify-2-15-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260910-059-verify-2-15-4.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260910-070-verify-2-16-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260911-006-verify-2-16-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260911-012-verify-2-16-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260911-023-verify-2-17-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260911-030-verify-2-18-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260911-037-verify-2-18-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260911-053-verify-2-19-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260911-058-verify-2-19-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260911-074-verify-2-20-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260912-007-verify-2-20-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260913-013-verify-2-20-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260913-027-verify-2-21-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260914-004-verify-2-21-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260914-012-verify-2-21-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260914-026-verify-2-22-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260914-040-verify-2-22-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260915-008-verify-2-22-2.md": {
+      "dims": "no unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260915-017-verify-2-22-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260915-024-verify-2-22-4.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260915-030-verify-2-22-5.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260915-044-verify-2-23-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260915-054-verify-2-23-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260915-061-verify-2-23-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260916-009-verify-2-23-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260916-014-verify-2-23-4.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260916-022-verify-2-23-5.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260916-030-verify-2-23-6.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260916-036-verify-2-23-7.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260916-042-verify-2-23-8.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260916-047-verify-2-23-9.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260917-006-verify-2-23-10.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260917-014-verify-2-23-11.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260917-023-verify-2-23-12.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260918-011-verify-2-23-13.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260918-021-verify-2-23-14.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260918-028-verify-2-23-15.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260918-036-verify-2-23-16.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260918-047-verify-2-24-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260918-053-verify-2-24-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260919-011-verify-2-24-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260919-020-verify-2-24-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260919-027-verify-2-24-4.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260919-036-verify-2-24-5.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260919-042-verify-2-24-6.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260920-008-verify-2-24-7.md": {
+      "dims": "yes breakage",
+      "values": [
+        "recommendation=ship-with-serious-concerns",
+        "recommendation_raw=SHIP-WITH-SERIOUS-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260920-024-verify-2-24-8.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260920-035-verify-2-24-9.md": {
+      "dims": "no breakage",
+      "values": [
+        "recommendation=ship-with-serious-concerns",
+        "recommendation_raw=SHIP-WITH-SERIOUS-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260923-010-verify-2-24-10.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260923-022-verify-2-24-11.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260923-030-verify-2-24-12.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260923-043-verify-2-24-13.md": {
+      "dims": "no breakage",
+      "values": [
+        "recommendation=ship-with-serious-concerns",
+        "recommendation_raw=SHIP-WITH-SERIOUS-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260926-009-verify-2-24-14.md": {
+      "dims": "yes destructive",
+      "values": [
+        "recommendation=ship-with-serious-concerns",
+        "recommendation_raw=SHIP-WITH-SERIOUS-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260926-019-verify-2-24-15.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260926-027-verify-2-24-16.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260927-007-verify-2-24-17.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260927-013-verify-2-24-18.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260927-028-verify-2-25-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260927-042-verify-2-25-1.md": {
+      "dims": "no breakage",
+      "values": [
+        "recommendation=ship-with-serious-concerns",
+        "recommendation_raw=SHIP-WITH-SERIOUS-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260928-012-verify-2-25-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260928-022-verify-2-26-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260929-009-verify-2-26-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260929-021-verify-2-26-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260929-033-verify-2-26-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260930-011-verify-2-26-4.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260930-022-verify-2-26-5.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260930-029-verify-2-26-6.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260930-037-verify-2-26-7.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260930-046-verify-2-26-8.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20260930-052-verify-2-26-9.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261001-005-verify-2-26-10.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261001-013-verify-2-26-11.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261001-020-verify-2-26-12.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261003-008-verify-2-27-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261003-024-verify-2-27-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261003-031-verify-2-27-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261003-038-verify-2-27-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261003-057-verify-2-28-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261004-007-verify-2-28-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261004-014-verify-2-28-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261004-021-verify-2-28-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261004-028-verify-2-28-4.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261004-045-verify-2-29-0.md": {
+      "dims": "yes destructive",
+      "values": [
+        "recommendation=ship-with-serious-concerns",
+        "recommendation_raw=SHIP-WITH-SERIOUS-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261005-010-verify-2-29-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261005-016-verify-2-29-2.md": {
+      "dims": "no none",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261005-035-verify-2-30-0.md": {
+      "dims": "yes breakage",
+      "values": [
+        "recommendation=ship-with-serious-concerns",
+        "recommendation_raw=SHIP-WITH-SERIOUS-CONCERNS",
+        "systemic_risk=high",
+        "systemic_risk_raw=high",
+        "has_large_fix_effort=yes"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261006-010-verify-2-30-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261006-016-verify-2-30-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261006-021-verify-2-30-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261006-032-verify-2-31-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261006-040-verify-2-31-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261006-050-verify-2-31-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261006-058-verify-2-31-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261007-007-verify-2-31-4.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261007-014-verify-2-31-5.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261007-020-verify-2-31-6.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261007-036-verify-2-32-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261007-044-verify-2-32-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261007-050-verify-2-32-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261007-058-verify-2-32-3.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261008-007-verify-2-32-4.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261008-015-verify-2-32-5.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261008-022-verify-2-32-6.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261008-028-verify-2-32-7.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261008-033-verify-2-32-8.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261008-040-verify-2-32-9.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=medium",
+        "systemic_risk_raw=medium",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-agent-kanban--TESTER-20261009-006-verify-2-32-10.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=ship-with-concerns",
+        "recommendation_raw=SHIP-WITH-CONCERNS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-006-verify-0-0-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-013-verify-0-1-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-018-verify-0-1-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-024-verify-0-1-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-031-verify-0-2-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-037-verify-0-2-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-044-verify-0-3-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-051-verify-0-4-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-056-verify-0-4-1.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-061-verify-0-4-2.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-068-verify-0-5-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260806-073-verify-0-6-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260807-004-verify-0-7-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    },
+    "pgai-chomp-man--TESTER-20260807-011-verify-0-8-0.md": {
+      "dims": "unknown unknown",
+      "values": [
+        "recommendation=pass",
+        "recommendation_raw=PASS",
+        "systemic_risk=low",
+        "systemic_risk_raw=low",
+        "has_large_fix_effort=no"
+      ]
+    }
+  }
+}

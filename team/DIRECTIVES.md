@@ -16,4 +16,4 @@ These are top-level rules. They override all lower-precedence files and instruct
 
 7. Prefer efficient, practical progress over perfection. An 85% solution is acceptable when it is safe, honest, and useful.
 
-8. Prefer the resources already provisioned. Model selection is configuration, not conversation: the per-role Model Override mechanism (see SOP.md "Model Override") is the sanctioned path when a task genuinely needs a different model — note the need in your status Summary; do not attempt to request approval mid-task (no such channel exists).
+8. Prefer the resources already provisioned. Model selection is configuration, not conversation: the per-role Model Override mechanism (see `roles/PM.md` "Model overrides") is the sanctioned path when a task genuinely needs a different model — note the need in your status Summary; do not attempt to request approval mid-task (no such channel exists).

@@ -48,14 +48,29 @@ Usage (import)
 ::
 
     from pgai_agent_kanban.dashboard.halt_state import compute_halt_state
+    from pgai_agent_kanban.env import resolve_kanban_root
 
-    state, event = compute_halt_state(Path("/opt/pgai"))
+    # $PGAI_AGENT_KANBAN_ROOT_PATH, the fleet-scope HALT's home
+    state, event = compute_halt_state(resolve_kanban_root())
 """
 
+import pathlib
 import sys
 from pathlib import Path
 
-from pgai_agent_kanban.halt_after.token import parse_token
+# Run by file path (``python3 .../halt_state.py``) or loaded from a file
+# outside its package, this module has no parent package and the interpreter
+# puts only its own directory on sys.path, so the package import below would
+# not resolve. Put this file's own package root -- the directory holding the
+# pgai_agent_kanban/ this file sits in -- at the front of sys.path so the
+# import resolves from the same tree, never another. Imported as a package
+# member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.halt_after.token import parse_token  # noqa: E402
 
 # Supported event tokens for the HALT file body.  Unknown tokens fall through
 # as-is (raw lowercased string) rather than raising.
@@ -118,6 +133,38 @@ def compute_halt_state(project_root: Path) -> "tuple[str, str | None]":
         # Invalid token: treat as absent, fall through to normal.
 
     return ("normal", None)
+
+
+def halt_flag_and_text(project_root: Path, kanban_root: Path) -> "tuple[str, str]":
+    """Return the dashboard's ``(HALT_FLAG, HALT_TEXT)`` pair for a project.
+
+    The same pair ``team/scripts/dashboard/data.sh`` publishes, from
+    :func:`compute_halt_state` on *project_root* with the kanban-wide
+    ``HALT`` sentinel as the fallback:
+
+    - halted                 -> ``("yes", "HALT")``
+    - draining with event E  -> ``("no", "HALT-AFTER E")``
+    - normal, but *kanban_root*/HALT exists -> ``("yes", "HALT")``
+    - otherwise              -> ``("no", "")``
+
+    Args:
+        project_root: The project's root directory; it need not exist (a
+            missing directory reads as normal, leaving only the global
+            sentinel to consult).
+        kanban_root:  The kanban root holding the global ``HALT`` sentinel.
+
+    Returns:
+        ``(flag, text)``: flag ``"yes"`` or ``"no"``; text ``""``,
+        ``"HALT"``, or ``"HALT-AFTER <event>"``.
+    """
+    state, event = compute_halt_state(project_root)
+    if state == "halted":
+        return ("yes", "HALT")
+    if state == "draining":
+        return ("no", f"HALT-AFTER {event}" if event else "HALT-AFTER")
+    if (kanban_root / "HALT").is_file():
+        return ("yes", "HALT")
+    return ("no", "")
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,123 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "This report verifies `ai_rc/v2.26.4` (HEAD 676b74f440dfd250496ad06e02f6c2518eb865c6) against `requirements/v2.26.4-bugfix-bundle-20260929.md`, a bundle of seven low-severity bugs: BUG-0427, 0429, 0430, 0450, 0451, 0452 and 0453. The work was done by CODER-20260930-002…006, 008 and 009 and by WRITER-20260930-007.\n\nBoth gated runners exit 0 on the RC. Unit: 5736 passed, 43 skipped. Integration: 637 passed, 1 skipped. The bundle's compile and syntax criteria hold.\n\nFor each of the four bundled bugs that had a reproducible failure mode, the original failure was reproduced against `ai_main` code in a sandbox and shown to be prevented on the RC:\n\n- BUG-0427: overlapping runner basetemps.\n- BUG-0429: stdout leak into the finder's captured value.\n- BUG-0450: intake clobber in the TOCTOU window.\n- BUG-0451: stop killing an unrelated listener or a reused pid.\n\nBUG-0430's lint is clean.\n\nTwo bundled items are only partly closed:\n\n- The stale-worktree reconcile sweep, which is BUG-0452's own reproduction path, still accepts a `..` task id with no refusal (Finding 1). The destructive `rm -rf` is now guarded, so nothing is deleted.\n- The OVERWATCH role file's HALT-first paragraph still names the fleet HALT and a lock \"check\" (Finding 4).\n\nTwo pre-existing api-server issues sit on the path BUG-0451 fixed and are filed as well (Findings 2 and 3). All four are filed via Path C (autonomous follow-up filing — non-blocking). None is severe, so the recommendation is SHIP-WITH-CONCERNS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "reconcile_stale_active still accepts a `..` queue task id (BUG-0452 partially met)",
+      "heading": "Finding 1: reconcile_stale_active still accepts a `..` queue task id (BUG-0452 partially met)",
+      "level": 3,
+      "body": "**Category:** gap\n**Severity:** medium\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** medium (the same loose `[A-Za-z0-9._-]+` id regex survives at several sites after a fix that covered only some of them; the class can recur whenever a new queue reader is added)\n**Filed As:** BUG-0466-reconcile-sweep-accepts-dotdot-task-id (Path C-A — filed as BUG: code defect)\n**Regression:** no\n**Integrity:** none\n**Filed By:** TESTER (autonomous Path C) — the wake's stale-task reconcile sweep still turns a `..` queue id into a worktree path above the worktree base and a status path outside the tasks folder, without the refusal the rest of the wake now gives.\n\nTraces to BUG-0452 Acceptance (\"Malformed id is refused dual-channel\") and its Reproduction (\"append a queue line with id `..`; run the stale-worktree reconcile; observe the computed path\"). `team/scripts/lib/wake_reconcile_sweeps.sh:147` (`reconcile_stale_active`) is unchanged and still matches `([A-Za-z0-9._-]+)`. `team/scripts/lib/wake_driver.sh:526` is also unchanged, but it is read-only.\n\nProbe on the RC (sandbox root, liveness stubbed `absent`, state writer and teardown stubbed to print): a `- [A] ..` line produced no `wake.queue.malformed-task-id` refusal. The sweep logged \"tearing down prior worktree at `<base>/worktrees/..`\" and passed `<TASKS_ROOT>/../status.md` to `zero_progress_advance_or_escalate`.\n\nThe destructive outcome is prevented. The real `teardown_task_worktree ..` fails harmlessly (`git worktree remove` refuses a non-worktree), and the new `pgai_worktree_path_strictly_inside` guard refuses the only `rm -rf`, as verified in the BUG-0452 section below. The rating is medium under SOP-core's calibration for a real but unexercised defect.",
+      "filed_as": "BUG-0466",
+      "filed_by": "TESTER (autonomous Path C) — the wake's stale-task reconcile sweep still turns a `..` queue id into a worktree path above the worktree base and a status path outside the tasks folder, without the refusal the rest of the wake now gives.",
+      "severity": "medium",
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "severity": "medium",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "medium (the same loose `[A-Za-z0-9._-]+` id regex survives at several sites after a fix that covered only some of them; the class can recur whenever a new queue reader is added)",
+        "filed_as": "BUG-0466-reconcile-sweep-accepts-dotdot-task-id (Path C-A — filed as BUG: code defect)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_by": "TESTER (autonomous Path C) — the wake's stale-task reconcile sweep still turns a `..` queue id into a worktree path above the worktree base and a status path outside the tasks folder, without the refusal the rest of the wake now gives."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "api-server.sh probes PGAI_API_PORT while the server binds kanban.cfg [api] port",
+      "heading": "Finding 2: api-server.sh probes PGAI_API_PORT while the server binds kanban.cfg [api] port",
+      "level": 3,
+      "body": "**Category:** bug\n**Severity:** medium\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (isolated to api-server.sh / api config)\n**Filed As:** BUG-0467-api-server-port-source-disagreement (Path C-A — filed as BUG: code defect)\n**Regression:** no\n**Integrity:** none\n**Filed By:** TESTER (autonomous Path C) — the API start/stop script looks for the server on the environment-variable port (default 8300) while the server listens on the kanban.cfg port, so status and stop cannot find an orphaned server when only the kanban.cfg port is set.\n\nThis predates the RC: the `_API_PORT=\"${PGAI_API_PORT:-8300}\"` line is unchanged from `ai_main`. It is filed because BUG-0451's stop guard runs through this port probe, and CODER-005 and CODER-008 both raised it for TESTER.\n\nProbe: sandbox `kanban.cfg [api] port = 8393`, `PGAI_API_PORT` unset. `start` bound 127.0.0.1:8393. After the pidfile was removed, `status` said \"not running\" (exit 1), `stop` said \"not running\" (exit 0), and the server survived.",
+      "filed_as": "BUG-0467",
+      "filed_by": "TESTER (autonomous Path C) — the API start/stop script looks for the server on the environment-variable port (default 8300) while the server listens on the kanban.cfg port, so status and stop cannot find an orphaned server when only the kanban.cfg port is set.",
+      "severity": "medium",
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "severity": "medium",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (isolated to api-server.sh / api config)",
+        "filed_as": "BUG-0467-api-server-port-source-disagreement (Path C-A — filed as BUG: code defect)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_by": "TESTER (autonomous Path C) — the API start/stop script looks for the server on the environment-variable port (default 8300) while the server listens on the kanban.cfg port, so status and stop cannot find an orphaned server when only the kanban.cfg port is set."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "docs/operator-api.md misstates the pidfile location and stop's behaviour",
+      "heading": "Finding 3: docs/operator-api.md misstates the pidfile location and stop's behaviour",
+      "level": 3,
+      "body": "**Category:** bug\n**Severity:** low\n**Fix Effort:** small (1 WRITER task)\n**Systemic Risk:** low (one doc section)\n**Filed As:** BUG-0468-operator-api-pidfile-and-stop-docs-stale (Path C-A — filed as BUG: documentation defect)\n**Regression:** yes\n**Integrity:** none\n**Filed By:** TESTER (autonomous Path C) — the operator guide says the API pidfile lives in the temp directory and that stop always sends SIGTERM, but the script keeps it under the kanban root's run/api directory and now refuses to signal anything that is not the API server.\n\nThe guide places the pidfile at `${PGAI_AGENT_KANBAN_TEMP_DIR}/api/api-server.pid`; `api-server.sh:247-250` uses `${_KANBAN_ROOT}/run/api/api-server.pid`. Probe: a pidfile at the documented path is ignored by status/stop.\n\nThe lifecycle table's `stop` row does not describe the refusal this RC added (exit 1, nothing signalled). The script's own usage text was updated, which satisfies the Documentation Discipline rule's \"usage comment\" artifact, but the operator guide's row is now inaccurate. `Regression: yes` reflects that the stop-row inaccuracy is new with this RC; the pidfile-path prose predates it. This RC edited the adjacent environment-table row in the same table.",
+      "filed_as": "BUG-0468",
+      "filed_by": "TESTER (autonomous Path C) — the operator guide says the API pidfile lives in the temp directory and that stop always sends SIGTERM, but the script keeps it under the kanban root's run/api directory and now refuses to signal anything that is not the API server.",
+      "severity": "low",
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "severity": "low",
+        "fix_effort": "small (1 WRITER task)",
+        "systemic_risk": "low (one doc section)",
+        "filed_as": "BUG-0468-operator-api-pidfile-and-stop-docs-stale (Path C-A — filed as BUG: documentation defect)",
+        "regression": "yes",
+        "integrity": "none",
+        "filed_by": "TESTER (autonomous Path C) — the operator guide says the API pidfile lives in the temp directory and that stop always sends SIGTERM, but the script keeps it under the kanban root's run/api directory and now refuses to signal anything that is not the API server."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "OVERWATCH.md HALT-first paragraph still names the fleet HALT and a lock \"check\" (BUG-0453 residual)",
+      "heading": "Finding 4: OVERWATCH.md HALT-first paragraph still names the fleet HALT and a lock \"check\" (BUG-0453 residual)",
+      "level": 3,
+      "body": "**Category:** gap\n**Severity:** low\n**Fix Effort:** small (1 WRITER task)\n**Systemic Risk:** low (one paragraph of one role file)\n**Filed As:** BUG-0469-overwatch-halt-first-paragraph-root-halt (Path C-A — filed as BUG: documentation defect)\n**Regression:** no\n**Integrity:** none\n**Filed By:** TESTER (autonomous Path C) — the OVERWATCH role file's HALT-first paragraph still tells OVERWATCH to create the kanban-root HALT and merely check the repo lock, while the code creates the project's own HALT and takes and holds the lock.\n\nBUG-0453 asks for \"Doc and code agree\". Step 2 (line 62) and line 74 now agree with `overwatch_halt_first_fix`. Line 133 (HALT-first) still says OVERWATCH \"check[s] the per-repo flock\" and \"creates `$KANBAN_ROOT/HALT`\". The code acquires and holds the lock (`pgai_lock_acquire`, ~430) and touches `$(pp_project_root \"$OVERWATCH_PROJECT\")/HALT` (~445). SOP-core \"HALT Flags\" says OVERWATCH repairs never write the fleet file.\n\nThe acceptance \"a doc-truth lint or unit test pins the chosen invariant\" is met for the code only (existing test (C) in `test_overwatch_lock_halt_protocol.py`). WRITER-007 recorded the paragraph as out of scope. Role-file errors like this one produce no test failure, which is why this is filed rather than left as a caveat.",
+      "filed_as": "BUG-0469",
+      "filed_by": "TESTER (autonomous Path C) — the OVERWATCH role file's HALT-first paragraph still tells OVERWATCH to create the kanban-root HALT and merely check the repo lock, while the code creates the project's own HALT and takes and holds the lock.",
+      "severity": "low",
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "severity": "low",
+        "fix_effort": "small (1 WRITER task)",
+        "systemic_risk": "low (one paragraph of one role file)",
+        "filed_as": "BUG-0469-overwatch-halt-first-paragraph-root-halt (Path C-A — filed as BUG: documentation defect)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_by": "TESTER (autonomous Path C) — the OVERWATCH role file's HALT-first paragraph still tells OVERWATCH to create the kanban-root HALT and merely check the repo lock, while the code creates the project's own HALT and takes and holds the lock."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

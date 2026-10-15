@@ -22,13 +22,19 @@
 #
 #   priority
 #     Integer. Lower value = higher priority for wake-script iteration.
-#     The wake script iterates projects in ascending priority order.
-#     Required field; projects without a priority are treated as lowest.
+#     The wake script iterates projects in ascending priority order; equal
+#     priorities keep their order in this file.
+#     Optional. Must be a plain integer. Default: 999 (sorted last; ties by
+#     file order). An absent or non-integer value (priority=abc) reads as
+#     999 everywhere it is read: the wake loop's list (scripts/lib/projects.sh
+#     projects_cfg_list) and the Python registry (GET /projects, the
+#     dashboards) order such a project last, identically.
 #     Example: priority=1
 #
 #   description
-#     Free-text description of the project. Used for documentation and
-#     display only; no effect on runtime behavior.
+#     Free-text note about the project, for whoever reads this file. It is
+#     parsed but no dashboard, report or REST response displays it, and it
+#     has no effect on runtime behavior.
 #     Optional. Default: empty.
 #     Example: description=Self-build kanban framework
 #
@@ -36,6 +42,14 @@
 #     Boolean (true|false). When false, the project is excluded from the
 #     wake-script iteration loop entirely, equivalent to halting without
 #     a HALT file. Useful for temporarily pausing a project.
+#     The skip covers every agent's wakes, PM discovery (pm-agent.sh --auto)
+#     and OVERWATCH sweeps (overwatch-sweep.sh and the daily OVERWATCH wake);
+#     each narrates one "disabled in projects.cfg (enabled=false) — skipped"
+#     line per firing. `why` reports the project IDLE, and dashboards and
+#     GET /projects still list it.
+#     Only false disables (any case, surrounding spaces ignored). Any other
+#     value leaves the project enabled; a value other than true or false
+#     (for example enabled=no) also prints one warning.
 #     Optional. Default: true.
 #     Example: enabled=false
 #
@@ -46,6 +60,9 @@
 #     is assigned based on the project's registration order.
 #     Accepted format:  #RRGGBB  (e.g. #378ADD)
 #     Rejected formats: 0xRRGGBB (use # not 0x), #RGB (short form unsupported)
+#     The rejected formats are refused only by the verbs that write the
+#     field (create-project.sh / add-project.sh --color and their REST
+#     routes); a value typed into this file by hand is not validated.
 #     Optional. Default: palette fallback.
 #     Example: dashboard_color=#378ADD
 #
@@ -53,8 +70,12 @@
 #     Integer. Maximum number of task rows displayed per visibility column
 #     for this project in the dashboard. When the task count exceeds this
 #     value, the last visible row is replaced with '... and N more'.
-#     Valid range: 5–100. Values outside this range are clamped with a warning.
-#     Optional. Default: 20 (or DASHBOARD_MAX_ROWS env var if set).
+#     Valid range: 5–100. Values outside this range are clamped (with a
+#     warning on the tmux dashboard); a non-integer value is ignored.
+#     Optional. Default: when absent, the DASHBOARD_MAX_ROWS environment
+#     variable if set, else kanban.cfg [dashboard] max_rows (shipped as 20),
+#     else 20. The tmux dashboard and the REST board (GET /board) apply the
+#     same clamp and the same fallback.
 #     Example: dashboard_max_rows=25
 #
 # -----------------------------------------------------------------------
@@ -68,17 +89,21 @@
 # color or row-count changes.
 # -----------------------------------------------------------------------
 
+# The two examples below are commented out: a copied projects.cfg must not
+# register projects that do not exist. Uncomment and rename to use one.
+
 # Example 1: Full-featured project with all fields specified.
-[project:pgai-chomp-man]
-priority=1
-description=Release-workflow demo project (see demos/chomp-man-demo/)
-enabled=true
-dashboard_color=#378ADD
-dashboard_max_rows=20
+# [project:my-app]
+# priority=1
+# description=Release-workflow application
+# enabled=true
+# dashboard_color=#378ADD
+# dashboard_max_rows=20
 
 # Example 2: Minimal project — only priority set; all other fields use
-# defaults: enabled=true, description empty, dashboard_max_rows=20, and
-# dashboard_color assigned from the palette by registration order.
-[project:pgai-three-bears]
-priority=2
+# defaults: enabled=true, description empty, dashboard_max_rows from the
+# fallback above, and dashboard_color assigned from the palette by
+# registration order.
+# [project:my-docs]
+# priority=2
 

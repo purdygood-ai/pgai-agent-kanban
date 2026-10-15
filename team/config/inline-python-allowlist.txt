@@ -1,0 +1,39 @@
+# team/config/inline-python-allowlist.txt
+#
+# Per-file ceiling on inline Python in non-test bash under team/scripts,
+# read by team/scripts/lint_inline_python.py (quality class, never fatal).
+# Format: one "<path>\t<blocks>\t<python_lines>" line per file, path relative
+# to the repository root. A file not listed here must carry no inline Python.
+#
+# Ratchet rule: an entry is lowered or removed when inline Python is moved
+# into a module, and is never raised. The lint reports a file below its
+# entry so the entry is tightened in the same change; its --emit-allowlist
+# mode prints the measured counts in this format.
+team/scripts/cm/finalize.sh	2	53
+team/scripts/dashboard/legend-render.sh	1	133
+team/scripts/dashboard/metrics.sh	1	249
+team/scripts/dashboard/queue-pane.sh	1	208
+team/scripts/dashboard/show-attention.sh	1	113
+team/scripts/dashboard/show-document-drill.sh	1	142
+team/scripts/dashboard/show-multi.sh	1	25
+team/scripts/dashboard/show-status-window.sh	2	58
+team/scripts/deep-verify-status.sh	1	38
+team/scripts/harness/helloworld-flow-check.sh	1	46
+team/scripts/lib/cm/release_ship_policy_report.sh	1	117
+team/scripts/lib/green_ledger.sh	2	90
+team/scripts/lib/overwatch-checks/check-cache-marker-drift.sh	1	33
+team/scripts/lib/overwatch-checks/check-readme-bundled.sh	1	72
+team/scripts/lib/overwatch_protocol.sh	2	48
+team/scripts/lib/provider_codex.sh	5	118
+team/scripts/lib/refusal_ledger.sh	1	21
+team/scripts/lib/token_capture.sh	2	292
+team/scripts/lib/wake_driver_finalize.sh	1	31
+team/scripts/lib/wake_lifecycle.sh	4	76
+team/scripts/lib/wake_readme_meta.sh	3	27
+team/scripts/lib/wake_task_id_gate.sh	2	75
+team/scripts/lint_governance_byte_budgets.sh	1	22
+team/scripts/migrate/bug-status-done.sh	1	130
+team/scripts/regenerate-changelog.sh	1	76
+team/scripts/release-state.sh	1	41
+team/scripts/retire-empty-bundles.sh	1	34
+team/scripts/verify-test-order-independence.sh	1	40

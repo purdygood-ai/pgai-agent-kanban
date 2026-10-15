@@ -5,7 +5,7 @@ Unit tests for pgai_agent_kanban.overwatch.resolution_matrix — the v2.0.0
 Goal 1 ("the resolution matrix") config-declared matrix and fail-closed
 matcher.
 
-Coverage (mirrors the task's Acceptance Criteria):
+Coverage:
   - The shipped default matrix loads exactly one CANCEL-AND-REBUNDLE row
     from config, not a hardcoded value.
   - The 2026-07-18 golden fixture facts match CANCEL-AND-REBUNDLE.
@@ -14,7 +14,14 @@ Coverage (mirrors the task's Acceptance Criteria):
     fail closed to HALT-hard.
   - Matrix structural validation: missing/extra row keys, wrong types, the
     reserved HALT-hard resolution literal, malformed top-level YAML.
-  - Fact extraction: TESTER report finding parsing, the retry-ceiling
+  - Fact extraction: TESTER report findings, read from parse_report by
+    matrix_findings (the same findings, in the same order and with the same
+    fields, as the CM release path's readers take from the same report, for
+    every heading shape and nesting, and never a field under a later
+    shallower heading as a finding's own, and for every Filed As and
+    Regression field-line shape -- backticked, annotated, irregularly
+    spaced -- the same filed_as and regression the shared parser reads),
+    the retry-ceiling
     Python counterpart of pp_max_rc_retries, and the git-backed evidence
     helpers (RC lineage cleanliness, tag existence) against real temp git
     repos.
@@ -22,13 +29,14 @@ Coverage (mirrors the task's Acceptance Criteria):
     including the fail-closed defaults when evidence is simply absent.
 
 All tests use tmp_path; no live filesystem paths. Function names describe
-behaviour under test, never bug/task IDs (SOP.md "Test Authoring
+behaviour under test, never bug/task IDs (roles/TESTER.md "Test Authoring
 Guidelines", Anti-pattern 6).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 
@@ -41,6 +49,8 @@ from pgai_agent_kanban.overwatch.resolution_matrix import (
     BlockFacts,
     CeilingConfigError,
     EvidenceError,
+    InvalidBlockTriageValue,
+    InvalidOverwatchResolveValue,
     MatrixError,
     MatrixRow,
     extract_facts,
@@ -48,11 +58,29 @@ from pgai_agent_kanban.overwatch.resolution_matrix import (
     git_tag_exists,
     load_matrix,
     match_resolution,
+    matrix_findings,
     operator_commit_in_rc_lineage,
-    parse_tester_report_findings,
     resolve_block,
+    resolve_block_triage,
     resolve_max_rc_retries,
+    resolve_overwatch_resolve,
 )
+from pgai_agent_kanban.cm.ship_policy_report_inputs import all_findings
+from pgai_agent_kanban.cm.stop_bug_files import filed_bug_id, report_findings
+from pgai_agent_kanban.reports.tester_report import parse_report
+from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="resolution-matrix")
 
 # ---------------------------------------------------------------------------
 # Golden facts (mirrors the 2026-07-18 golden fixture: ship-policy HALT, all
@@ -329,32 +357,393 @@ None.
 """
 
 
-def test_parse_tester_report_findings_extracts_filed_as_values() -> None:
-    findings = parse_tester_report_findings(_REPORT_ALL_FILED)
+def _matrix_findings(report_text: str) -> list:
+    """The matrix's findings for *report_text*, read the way resolution_stage
+    and extract_facts() read a report on disk."""
+    return matrix_findings(parse_report(report_text))
+
+
+def test_matrix_findings_carry_each_findings_filed_as_id() -> None:
+    # A Filed As value with an annotation after its id reads as the id alone,
+    # in canonical form (differential.md, "How to read a row": values are
+    # given in the parser's vocabulary, filed_as being the canonical id a
+    # Filed As value names).
+    findings = _matrix_findings(_REPORT_ALL_FILED)
     assert len(findings) == 2
-    assert findings[0]["filed_as"] == "BUG-0042 (Path C)"
-    assert findings[1]["filed_as"] == "BUG-0043 (Path C)"
+    assert findings[0]["filed_as"] == "BUG-0042"
+    assert findings[1]["filed_as"] == "BUG-0043"
 
 
 def test_findings_all_filed_true_when_every_finding_has_a_bug_id() -> None:
-    findings = parse_tester_report_findings(_REPORT_ALL_FILED)
+    findings = _matrix_findings(_REPORT_ALL_FILED)
     assert findings_all_filed(findings) is True
 
 
 def test_findings_all_filed_false_when_one_finding_unfiled() -> None:
-    findings = parse_tester_report_findings(_REPORT_ONE_UNFILED)
+    findings = _matrix_findings(_REPORT_ONE_UNFILED)
     assert findings_all_filed(findings) is False
 
 
 def test_findings_all_filed_vacuously_true_for_no_findings() -> None:
-    findings = parse_tester_report_findings(_REPORT_NO_FINDINGS)
+    findings = _matrix_findings(_REPORT_NO_FINDINGS)
     assert findings == []
     assert findings_all_filed(findings) is True
+
+
+def test_matrix_findings_keep_the_title_after_the_heading_label() -> None:
+    findings = _matrix_findings(_REPORT_ALL_FILED)
+    assert [f["title"] for f in findings] == [
+        "stale assertion in dashboard test",
+        "missing guard fixture",
+    ]
+
+
+@pytest.mark.parametrize(
+    "value, regression",
+    [("yes", True), ("no", False), ("yes (introduced by this RC)", True), ("unclear", None)],
+)
+def test_matrix_findings_read_regression_as_a_flag(value: str, regression) -> None:
+    # An annotated "yes (...)" reads as yes, as differential.md's regression
+    # rows resolve it: the leading token is the reading.
+    report = f"### Finding 1: a\n**Systemic Risk:** high\n**Regression:** {value}\n"
+    assert _matrix_findings(report)[0]["regression"] is regression
+
+
+def test_matrix_findings_name_a_priority_filing_as_filed() -> None:
+    # differential.md's filed_as rows: a finding filed as a priority is filed.
+    findings = _matrix_findings("### Finding 1: a\n**Filed As:** PRIORITY-0001\n")
+    assert findings[0]["filed_as"] == "PRIORITY-0001"
+    assert findings_all_filed(findings) is True
+
+
+def _cm_reader_findings(tmp_path: pathlib.Path, report_text: str) -> dict:
+    """The findings each CM release-path reader takes from *report_text*,
+    projected onto the five values a matrix finding carries."""
+    report = tmp_path / "report.md"
+    report.write_text(report_text, encoding="utf-8")
+
+    def project(findings: list) -> list:
+        regression = {"yes": True, "no": False}
+        return [
+            {
+                "title": f.title,
+                "category": f.category,
+                "filed_as": f.filed_as,
+                "regression": regression.get(f.regression),
+                "body": f.body,
+            }
+            for f in findings
+        ]
+
+    return {
+        "stop list / Bugs Skipped (stop_bug_files.report_findings)": project(
+            report_findings(str(report))
+        ),
+        "ship-policy inputs (ship_policy_report_inputs.all_findings)": project(
+            all_findings(parse_report(report))
+        ),
+    }
+
+
+# A finding at heading level 5, and a "### Finding" followed by a later
+# "## Lint Findings" section whose field lines are not the finding's own.
+_DEEP_FINDING_REPORT = """# Verification Report: rc/v9.9.9
+
+## Findings
+
+### Step 6
+
+#### Acceptance criteria
+
+##### Finding 1: deep finding
+**Category:** bug
+**Systemic Risk:** high
+**Regression:** yes (introduced by this RC's fix of BUG-0042)
+**Filed As:** BUG-0099
+
+Traces to BUG-0042.
+"""
+
+_FINDING_THEN_LINT_SECTION_REPORT = """# Verification Report: rc/v9.9.9
+
+## Findings
+
+### Finding 1: flat finding
+**Category:** bug
+**Systemic Risk:** high
+**Regression:** no
+**Filed As:** none
+
+## Lint Findings (non-blocking)
+**Regression:** yes
+**Filed As:** BUG-0007
+"""
+
+
+@pytest.mark.parametrize(
+    "report_text, expected",
+    [
+        (
+            _DEEP_FINDING_REPORT,
+            [("deep finding", "BUG-0099", True)],
+        ),
+        (
+            _FINDING_THEN_LINT_SECTION_REPORT,
+            [("flat finding", None, False)],
+        ),
+    ],
+    ids=["##### Finding 1:", "### Finding then ## Lint Findings"],
+)
+def test_matrix_findings_are_the_findings_the_cm_readers_read(
+    tmp_path: pathlib.Path, report_text: str, expected: list
+) -> None:
+    """The resolution matrix and every CM release-path reader take the same
+    findings, with the same values, from one report."""
+    findings = _matrix_findings(report_text)
+
+    assert [(f["title"], f["filed_as"], f["regression"]) for f in findings] == expected
+    for reader, cm_findings in _cm_reader_findings(tmp_path, report_text).items():
+        assert cm_findings == findings, f"{reader} read {cm_findings!r}, the matrix {findings!r}"
+    assert all("Lint Findings" not in f["body"] for f in findings)
+
+
+# Each heading shape, and whether the one TESTER-report parser
+# (pgai_agent_kanban.reports.tester_report, docstring Rule 1) opens a finding
+# for it. "###Finding 1:" and "## Finding 1:" open one: the parser's
+# heading-variants scenario fixture
+# (tests/fixtures/tester_reports/scenarios/heading-variants.md) pins both,
+# and every CM release-path reader already reads them so.
+_PARSER_HEADING_SHAPES = [
+    ("### Finding 1:", True),
+    ("#### Finding 1:", True),
+    ("##### Finding 1:", True),
+    ("###### Finding 1:", True),
+    ("###Finding 1:", True),
+    ("### Findings summary", False),
+    ("## Findings", False),
+    ("## Finding 1:", True),
+    ("### Finding: no number", True),
+]
+
+_UNFILED_PROBE_REPORT = """## Findings
+
+{heading} heading-shape probe
+**Category:** bug
+**Filed As:** none
+
+{nested}## Lint Findings (non-blocking)
+None.
+"""
+
+_NESTED_FILED_FINDING = "#### Finding 2: inner detail\n**Filed As:** BUG-0002\n\n"
+
+
+@pytest.mark.parametrize(
+    "heading, nested, opens",
+    [(heading, "", opens) for heading, opens in _PARSER_HEADING_SHAPES]
+    + [("### Finding 1:", _NESTED_FILED_FINDING, True)],
+    ids=[heading for heading, _ in _PARSER_HEADING_SHAPES]
+    + ["### Finding 1: with a nested #### Finding 2:"],
+)
+def test_matrix_findings_match_the_cm_readers_on_every_heading_shape(
+    tmp_path: pathlib.Path, heading: str, nested: str, opens: bool
+) -> None:
+    """The matrix and the CM readers agree on every heading shape and
+    nesting, and an unfiled finding the release path reads is unfiled to
+    findings_all_filed too -- whatever its heading depth."""
+    report = _UNFILED_PROBE_REPORT.format(heading=heading, nested=nested)
+    findings = _matrix_findings(report)
+
+    for reader, cm_findings in _cm_reader_findings(tmp_path, report).items():
+        assert cm_findings == findings, f"{reader} read {cm_findings!r}, the matrix {findings!r}"
+    assert bool(findings) is opens
+    if opens:
+        # "none" names no filing: the finding is unfiled (differential.md,
+        # "How to read a row": a not-filed value reads as no filing).
+        assert findings[0]["filed_as"] is None
+        assert findings_all_filed(findings) is False
+    if nested:
+        assert [f["filed_as"] for f in findings] == [None, "BUG-0002"]
+
+
+def test_field_under_a_later_shallower_heading_is_not_the_findings_own() -> None:
+    report = "### Finding 1: a\n**Filed As:** BUG-0001\n\n### Step 7\n**Filed As:** none\n"
+    findings = _matrix_findings(report)
+    assert len(findings) == 1
+    assert findings[0]["filed_as"] == "BUG-0001"
+    assert "Step 7" not in findings[0]["body"]
+    assert findings_all_filed(findings) is True
+
+
+# Field-line shapes that once read differently through OVERWATCH's own
+# field patterns than through the release path's reader: a backticked or
+# annotated not-filed value, a label with two spaces inside it, a
+# backticked or annotated Regression. Each row: the field line, then the
+# filed_as and regression the matrix finding must carry and whether
+# findings_all_filed counts the finding as filed. The last row is a control:
+# a backticked bug id stays filed.
+_FIELD_LINE_SHAPES = [
+    pytest.param("**Filed As:** none", None, None, False, id="bold-none"),
+    pytest.param("**Filed As:** `none`", None, None, False, id="backticked-none"),
+    pytest.param("Filed As: none (not filed)", None, None, False, id="annotated-not-filed"),
+    pytest.param("Filed  As: none", None, None, False, id="two-spaces-in-label"),
+    pytest.param("Regression: `yes`", None, True, False, id="backticked-regression-yes"),
+    pytest.param("**Regression:** Yes (introduced here)", None, True, False, id="annotated-regression-yes"),
+    pytest.param("**Filed As:** `BUG-0905`", "BUG-0905", None, True, id="backticked-bug-id"),
+]
+
+
+@pytest.mark.parametrize("field_line, filed_as, regression, all_filed", _FIELD_LINE_SHAPES)
+def test_matrix_findings_read_each_field_line_shape_like_the_shared_parser(
+    field_line: str, filed_as, regression, all_filed: bool
+) -> None:
+    """OVERWATCH's matrix finding reads Filed As and Regression exactly as
+    the shared parser's Finding does -- the reading the release path's Bugs
+    Skipped and Known Issues readers take through filed_bug_id -- for every
+    field-line shape, and findings_all_filed never counts a backticked or
+    annotated not-filed value as filed."""
+    report = parse_report(f"### Finding 1: x\n**Category:** bug\n{field_line}\n")
+    (shared,) = all_findings(report)
+    (finding,) = matrix_findings(report)
+
+    assert finding["filed_as"] == filed_as
+    assert finding["regression"] is regression
+    assert findings_all_filed([finding]) is all_filed
+
+    # The same reading as the shared parser and the release path's reader.
+    assert finding["filed_as"] == shared.filed_as
+    assert (filed_bug_id(shared) or None) == finding["filed_as"]
+    assert finding["regression"] is {"yes": True, "no": False}.get(shared.regression)
+    if "Filed" in field_line:
+        assert "filed_as" in shared.raw, f"the parser did not read {field_line!r} as a Filed As line"
 
 
 @pytest.mark.parametrize("sentinel", ["", "N/A", "none", "-", "TBD", "not filed"])
 def test_findings_all_filed_recognizes_not_filed_sentinels(sentinel: str) -> None:
     assert findings_all_filed([{"filed_as": sentinel}]) is False
+
+
+# A report as TESTER writes it: passing checks carry a Category but no Filed
+# As line (team/roles/TESTER.md, "## Findings": only a bug, gap or
+# stale-assertion carries Filed As), and the one defect is filed.
+_REPORT_PASSES_AND_ONE_FILED_BUG = """\
+# Verification Report: rc/v9.9.9
+
+## Recommendation
+SHIP-WITH-CONCERNS
+
+## Findings
+
+### Finding 1: unit suite green
+
+**Category:** pass
+
+All unit tests pass.
+
+### Finding 2: integration suite green
+
+**Category:** pass
+
+All integration tests pass.
+
+### Finding 3: dashboard renders a stale count
+
+**Category:** bug
+**Fix Effort:** small
+**Systemic Risk:** low
+**Filed As:** BUG-0001 (Path C)
+
+Detail.
+"""
+
+_FILED_BUG_LINE = "**Filed As:** BUG-0001 (Path C)\n"
+
+
+def test_matrix_findings_carry_each_findings_parsed_category() -> None:
+    findings = _matrix_findings(_REPORT_PASSES_AND_ONE_FILED_BUG)
+    assert [f["category"] for f in findings] == ["pass", "pass", "bug"]
+    assert [f["filed_as"] for f in findings] == [None, None, "BUG-0001"]
+
+
+def test_findings_all_filed_skips_pass_findings_when_every_defect_is_filed() -> None:
+    findings = _matrix_findings(_REPORT_PASSES_AND_ONE_FILED_BUG)
+    assert findings_all_filed(findings) is True
+
+
+def test_findings_all_filed_false_when_the_bug_beside_pass_findings_is_unfiled() -> None:
+    report = _REPORT_PASSES_AND_ONE_FILED_BUG.replace(_FILED_BUG_LINE, "")
+    assert report != _REPORT_PASSES_AND_ONE_FILED_BUG
+    findings = _matrix_findings(report)
+    assert findings[2]["filed_as"] is None
+    assert findings_all_filed(findings) is False
+
+
+def test_findings_all_filed_skips_a_pass_with_caveat_finding_beside_filed_bugs() -> None:
+    report = _REPORT_ALL_FILED + (
+        "\n### Finding 3: retry path slow but correct\n\n"
+        "**Category:** pass-with-caveat\n\n"
+        "Works; the retry waits longer than it needs to.\n"
+    )
+    findings = _matrix_findings(report)
+    assert [f["category"] for f in findings] == ["stale-assertion", "bug", "pass-with-caveat"]
+    assert findings[2]["filed_as"] is None
+    assert findings_all_filed(findings) is True
+
+
+def test_findings_all_filed_counts_an_unfiled_finding_with_no_category_line() -> None:
+    report = _REPORT_PASSES_AND_ONE_FILED_BUG + (
+        "\n### Finding 4: observation with no category\n\nSomething looked off.\n"
+    )
+    findings = _matrix_findings(report)
+    assert findings[3]["category"] is None
+    assert findings[3]["filed_as"] is None
+    assert findings_all_filed(findings) is False
+
+
+def test_findings_all_filed_counts_an_unfiled_finding_with_an_unrecognised_category() -> None:
+    report = _REPORT_PASSES_AND_ONE_FILED_BUG + (
+        "\n### Finding 4: odd category\n\n**Category:** passing\n"
+    )
+    findings = _matrix_findings(report)
+    assert findings[3]["category"] is None
+    assert findings_all_filed(findings) is False
+
+
+def test_findings_all_filed_counts_an_unfiled_pre_existing_bug() -> None:
+    report = _REPORT_PASSES_AND_ONE_FILED_BUG + (
+        "\n### Finding 4: old defect\n\n**Category:** pre-existing-bug\n"
+    )
+    findings = _matrix_findings(report)
+    assert findings[3]["category"] == "pre-existing-bug"
+    assert findings_all_filed(findings) is False
+
+
+def test_findings_all_filed_vacuously_true_for_an_all_pass_report() -> None:
+    report = _REPORT_PASSES_AND_ONE_FILED_BUG.split("### Finding 3:")[0]
+    findings = _matrix_findings(report)
+    assert [f["category"] for f in findings] == ["pass", "pass"]
+    assert findings_all_filed(findings) is True
+
+
+def test_findings_all_filed_vacuously_true_for_an_empty_findings_list() -> None:
+    assert findings_all_filed([]) is True
+
+
+@pytest.mark.parametrize(
+    "finding",
+    [
+        pytest.param({"filed_as": None}, id="no-category-key"),
+        pytest.param({"category": None, "filed_as": None}, id="none-category"),
+        pytest.param({"category": "PASS", "filed_as": None}, id="non-token-case"),
+        pytest.param({"category": ["pass"], "filed_as": None}, id="non-string-category"),
+    ],
+)
+def test_findings_all_filed_counts_a_caller_finding_without_a_parser_pass_token(
+    finding: dict,
+) -> None:
+    """A pre-parsed BlockEvidence.tester_findings item is skipped only for
+    the parser's own pass tokens; anything else fails closed."""
+    assert findings_all_filed([finding]) is False
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +783,232 @@ def test_resolve_max_rc_retries_rejects_non_integer_value(tmp_path: pathlib.Path
     _write_cfg(tmp_path / "kanban.cfg", "[release]\nmax_rc_retries = notanumber\n")
     with pytest.raises(CeilingConfigError, match="invalid value"):
         resolve_max_rc_retries("myproj", str(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# resolve_overwatch_resolve — Python counterpart of pp_overwatch_resolve.
+# Same project.cfg-overrides-kanban.cfg precedence as
+# resolve_max_rc_retries, opposite fail-safe direction: absence resolves to
+# False rather than raising.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_overwatch_resolve_absent_from_both_defaults_false(
+    tmp_path: pathlib.Path,
+) -> None:
+    assert resolve_overwatch_resolve("myproj", str(tmp_path)) is False
+
+
+def test_resolve_overwatch_resolve_absent_kanban_cfg_missing_defaults_false(
+    tmp_path: pathlib.Path,
+) -> None:
+    """No kanban.cfg on disk at all still resolves to False -- unlike
+    resolve_max_rc_retries, an unreadable/missing kanban.cfg is not an
+    error for this key."""
+    assert resolve_overwatch_resolve("myproj", str(tmp_path)) is False
+
+
+def test_resolve_overwatch_resolve_kanban_default_used_when_project_silent(
+    tmp_path: pathlib.Path,
+) -> None:
+    _write_cfg(tmp_path / "kanban.cfg", "[release]\noverwatch_resolve = true\n")
+    assert resolve_overwatch_resolve("myproj", str(tmp_path)) is True
+
+
+def test_resolve_overwatch_resolve_project_true_wins_over_kanban_false(
+    tmp_path: pathlib.Path,
+) -> None:
+    _write_cfg(tmp_path / "kanban.cfg", "[release]\noverwatch_resolve = false\n")
+    _write_cfg(
+        tmp_path / "projects" / "myproj" / "project.cfg",
+        "[project]\nproject_name = myproj\n\n[release]\noverwatch_resolve = true\n",
+    )
+    assert resolve_overwatch_resolve("myproj", str(tmp_path)) is True
+
+
+def test_resolve_overwatch_resolve_project_false_wins_over_kanban_true(
+    tmp_path: pathlib.Path,
+) -> None:
+    _write_cfg(tmp_path / "kanban.cfg", "[release]\noverwatch_resolve = true\n")
+    _write_cfg(
+        tmp_path / "projects" / "myproj" / "project.cfg",
+        "[project]\nproject_name = myproj\n\n[release]\noverwatch_resolve = false\n",
+    )
+    assert resolve_overwatch_resolve("myproj", str(tmp_path)) is False
+
+
+def test_resolve_overwatch_resolve_rejects_unrecognized_value(tmp_path: pathlib.Path) -> None:
+    _write_cfg(tmp_path / "kanban.cfg", "[release]\noverwatch_resolve = yes\n")
+    with pytest.raises(InvalidOverwatchResolveValue, match="unrecognized value 'yes'"):
+        resolve_overwatch_resolve("myproj", str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "kanban_cfg_text, project_cfg_text",
+    [
+        pytest.param(
+            "[release]\noverwatch_resolve = false\n",
+            "[project]\nproject_name = myproj\n\n[release]\noverwatch_resolve = true\n",
+            id="project_true_over_kanban_false",
+        ),
+        pytest.param(
+            "[release]\noverwatch_resolve = true\n",
+            "[project]\nproject_name = myproj\n",
+            id="project_absent_kanban_true",
+        ),
+        pytest.param(
+            "",
+            "[project]\nproject_name = myproj\n",
+            id="absent_everywhere",
+        ),
+    ],
+)
+def test_resolve_overwatch_resolve_agrees_with_bash_accessor(
+    tmp_path: pathlib.Path, kanban_cfg_text: str, project_cfg_text: str
+) -> None:
+    """The Python read path and the bash pp_overwatch_resolve accessor must
+    return the same answer for the same cfg pair -- asserted here by
+    running both rather than by inspection."""
+    if kanban_cfg_text:
+        _write_cfg(tmp_path / "kanban.cfg", kanban_cfg_text)
+    _write_cfg(tmp_path / "projects" / "myproj" / "project.cfg", project_cfg_text)
+
+    python_answer = "true" if resolve_overwatch_resolve("myproj", str(tmp_path)) else "false"
+
+    dev_tree_root = pathlib.Path(__file__).resolve().parents[2]
+    bash_lib = dev_tree_root / "scripts" / "lib" / "project_paths.sh"
+    result = subprocess.run(
+        ["bash", "-c", f"source {bash_lib} && pp_overwatch_resolve myproj"],
+        env={**os.environ, "KANBAN_ROOT": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == python_answer
+
+
+# ---------------------------------------------------------------------------
+# resolve_block_triage — Python counterpart of pp_block_triage. Same
+# project.cfg-overrides-kanban.cfg precedence under [overwatch]; absence
+# resolves to True (the shipped default); a non-boolean value raises.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_block_triage_absent_from_both_defaults_true(tmp_path: pathlib.Path) -> None:
+    _write_cfg(tmp_path / "kanban.cfg", "[wake]\nzero_progress_cap = 3\n")
+    _write_cfg(tmp_path / "projects" / "myproj" / "project.cfg", "[project]\nproject_name = myproj\n")
+    assert resolve_block_triage("myproj", str(tmp_path)) is True
+
+
+def test_resolve_block_triage_no_cfg_files_at_all_defaults_true(tmp_path: pathlib.Path) -> None:
+    assert resolve_block_triage("myproj", str(tmp_path)) is True
+
+
+def test_resolve_block_triage_kanban_value_used_when_project_silent(tmp_path: pathlib.Path) -> None:
+    _write_cfg(tmp_path / "kanban.cfg", "[overwatch]\nblock_triage = false\n")
+    _write_cfg(tmp_path / "projects" / "myproj" / "project.cfg", "[project]\nproject_name = myproj\n")
+    assert resolve_block_triage("myproj", str(tmp_path)) is False
+
+
+def test_resolve_block_triage_project_false_wins_over_kanban_true(tmp_path: pathlib.Path) -> None:
+    _write_cfg(tmp_path / "kanban.cfg", "[overwatch]\nblock_triage = true\n")
+    _write_cfg(
+        tmp_path / "projects" / "myproj" / "project.cfg",
+        "[project]\nproject_name = myproj\n\n[overwatch]\nblock_triage = false\n",
+    )
+    assert resolve_block_triage("myproj", str(tmp_path)) is False
+
+
+def test_resolve_block_triage_project_true_wins_over_kanban_false(tmp_path: pathlib.Path) -> None:
+    _write_cfg(tmp_path / "kanban.cfg", "[overwatch]\nblock_triage = false\n")
+    _write_cfg(
+        tmp_path / "projects" / "myproj" / "project.cfg",
+        "[project]\nproject_name = myproj\n\n[overwatch]\nblock_triage = true\n",
+    )
+    assert resolve_block_triage("myproj", str(tmp_path)) is True
+
+
+def test_resolve_block_triage_rejects_non_boolean_value(tmp_path: pathlib.Path) -> None:
+    project_cfg = tmp_path / "projects" / "myproj" / "project.cfg"
+    _write_cfg(project_cfg, "[project]\nproject_name = myproj\n\n[overwatch]\nblock_triage = yes\n")
+    with pytest.raises(InvalidBlockTriageValue, match="unrecognized value 'yes'") as excinfo:
+        resolve_block_triage("myproj", str(tmp_path))
+    assert str(project_cfg) in str(excinfo.value)
+    assert "true|false" in str(excinfo.value)
+
+
+_BLOCK_TRIAGE_PARITY_CASES = [
+    pytest.param("", "[project]\nproject_name = myproj\n", id="absent_everywhere"),
+    pytest.param(
+        "[overwatch]\nblock_triage = true\n",
+        "[project]\nproject_name = myproj\n\n[overwatch]\nblock_triage = false\n",
+        id="project_false_over_kanban_true",
+    ),
+    pytest.param(
+        "[overwatch]\nblock_triage = false\n",
+        "[project]\nproject_name = myproj\n\n[overwatch]\nblock_triage = true\n",
+        id="project_true_over_kanban_false",
+    ),
+    pytest.param(
+        "[overwatch]\nblock_triage = false\n",
+        "[project]\nproject_name = myproj\n",
+        id="project_silent_kanban_false",
+    ),
+    pytest.param(
+        "[overwatch]\nblock_triage = false\n",
+        "[project]\nproject_name = myproj\n\n[overwatch]\nblock_triage =\n",
+        id="project_blank_falls_through",
+    ),
+    pytest.param(
+        "[overwatch]\nblock_triage = true\n",
+        "[project]\nproject_name = myproj\n\n[overwatch]\nblock_triage = yes\n",
+        id="project_non_boolean_refuses",
+    ),
+    pytest.param(
+        "[overwatch]\nblock_triage = on\n",
+        "[project]\nproject_name = myproj\n",
+        id="kanban_non_boolean_refuses",
+    ),
+]
+
+
+@pytest.mark.parametrize("kanban_cfg_text, project_cfg_text", _BLOCK_TRIAGE_PARITY_CASES)
+def test_resolve_block_triage_agrees_with_bash_accessor(
+    tmp_path: pathlib.Path, kanban_cfg_text: str, project_cfg_text: str
+) -> None:
+    """The Python resolver and the bash pp_block_triage accessor give the
+    same answer for the same cfg pair -- 'true', 'false', or a refusal --
+    so the triage sweep's two entry points can never disagree."""
+    if kanban_cfg_text:
+        _write_cfg(tmp_path / "kanban.cfg", kanban_cfg_text)
+    _write_cfg(tmp_path / "projects" / "myproj" / "project.cfg", project_cfg_text)
+
+    try:
+        python_answer = "true" if resolve_block_triage("myproj", str(tmp_path)) else "false"
+    except InvalidBlockTriageValue:
+        python_answer = "refused"
+
+    dev_tree_root = pathlib.Path(__file__).resolve().parents[2]
+    bash_lib = dev_tree_root / "scripts" / "lib" / "project_paths.sh"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    result = subprocess.run(
+        ["bash", "-c", f"source {bash_lib} && pp_block_triage myproj"],
+        env=build_scrubbed_env(
+            home_dir=tmp_path / "home",
+            extra_env={"KANBAN_ROOT": str(tmp_path), "PGAI_AGENT_KANBAN_TEMP_DIR": str(scratch)},
+        ),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        bash_answer = result.stdout.strip()
+    else:
+        assert "block_triage.invalid_value" in result.stderr, result.stderr
+        bash_answer = "refused"
+    assert bash_answer == python_answer, (
+        f"bash said {bash_answer!r}, python said {python_answer!r}; bash stderr: {result.stderr!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

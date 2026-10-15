@@ -1,0 +1,107 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.20.2 is a fourteen-item bug bundle. Every bundled item was verified individually\nagainst its own `## Acceptance` section, not merely against the diff: the two\nbehavioural fixes (BUG-0256 refusal-ledger root fabrication, BUG-0258 show-queues on a\nregistry-less root) were exercised by triggering their original failure modes and\nconfirming the guards now fire, and their new-normal cases were re-checked so the fix\ndid not break the working path. The remaining twelve — a step-number narration\ninconsistency, a manifest-lint path-naming defect, a canned-reason remedy, a stale\nREST-parity exemption, a mislabelled dashboard column, a hygiene-lint blind spot over\n`team/config/`, a five-role governance byte-budget overrun, and five provenance-litter\nsites across code, tests and shipped release notes — were each checked by running the\nlint or grep the bug's own acceptance criterion names. Both gated runners exited 0\n(unit 4344 passed / 31 skipped; integration 455 passed / 1 skipped). Thirteen of the\nfourteen items are fully closed. One acceptance criterion of BUG-0246 (the governance\ntrim) is not met: the trim deleted the census lint's finding-name documentation from\n`team/roles/CODER.md` and delegated it to a document that carries only half of it, so\ntwo of the four finding names the lint emits are now documented nowhere in the tree.\nThat, plus two residual quality-class hygiene findings whose only trackers close with\nthis RC, are the report's findings; both are filed via Path C and neither prevents the\nrelease from being usable.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "the governance trim deleted census-lint finding documentation and delegated it to a document that does not carry it",
+      "heading": "Finding 1: the governance trim deleted census-lint finding documentation and delegated it to a document that does not carry it",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1 WRITER task)\n**Systemic Risk:** low (documentation-only; a CODER authoring a new gate can still read the lint's own output, which names the finding kind)\n**Regression:** yes (this RC's `WRITER-20260913-011` trim removed the text; the enumeration was present on `ai_main`)\n**Integrity Damage:** no\n**Filed As:** BUG-0259 (Path C-A)\n\nBUG-0246's third acceptance criterion is *\"No governance rule is lost in the trim:\nevery directive removed from one file is either still stated in exactly one canonical\nplace or was a duplicate of a statement that remains.\"* One removal fails it.\n\nOn `ai_main`, `team/roles/CODER.md` enumerated the census lint's findings:\n\n```\n`team/scripts/lint_gate_census_compliance.py` enforces this, and produces exactly three findings:\n\n- `missing_signal` — a candidate refusal site ... whose window carries no census classification comment, no dual-channel emitter call, or neither.\n- `unindexed_anchor` — a `# CENSUS-ANCHOR: <token>` marker whose token no `path:token CLASS` line in the Locator Index names.\n- `anchor_class_mismatch` — a marker whose Locator Index entry names a different class than the site's own inline comment declares.\n```\n\nThe RC replaces that with a pointer:\n\n```\n`team/scripts/lint_gate_census_compliance.py` enforces this. Everything it reports is quality-class — the lint always exits 0 whatever it finds — and each finding's name, meaning, and fix are in `docs/blocking-site-census.md`, the file you are already opening to add the index entry.\n```\n\nThe pointer's claim is false for half the vocabulary. The lint declares four finding\nkinds (`team/scripts/lint_gate_census_compliance.py:271-274`): `missing_signal`,\n`unindexed_anchor`, `anchor_class_mismatch`, `unresolved_locator`.\n`docs/blocking-site-census.md` names only `unindexed_anchor` and `unresolved_locator`\n(line 451). Verified across the whole tree:\n\n```\n$ grep -rln 'missing_signal' --include=*.md .          # (no output)\n$ grep -rln 'anchor_class_mismatch' --include=*.md .   # (no output)\n$ grep -rln 'unresolved_locator' --include=*.md .\ndocs/blocking-site-census.md\n```\n\nSo `missing_signal` — the most common of the four, the one a new gate trips when it\nomits its class comment or its emitter — and `anchor_class_mismatch` are documented in\nno markdown file in the tree. The pre-trim text was also already stale (\"exactly three\nfindings\" for a four-kind lint), so the correct repair is to document all four in\n`docs/blocking-site-census.md` rather than to revert the trim.\n\nNo governance *rule* was lost — requirements 1-3 of the gate-authoring contract are\nintact in `CODER.md`, and the two moved passages spot-checked did land in one canonical\nplace each (`CODER.md`'s intro now states the origin-is-CM's rule that the deleted \"Git\noperates locally\" section carried; `roles/CM.md:83` carries verbatim the\n`Regression`/`Integrity`/`Fix Effort: large` clearing rule that `SOP-core.md` dropped).\nWhat was lost is reference content the trim promised was somewhere else.",
+      "filed_as": "BUG-0259",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1 WRITER task)",
+        "systemic_risk": "low (documentation-only; a CODER authoring a new gate can still read the lint's own output, which names the finding kind)",
+        "regression": "yes (this RC's `WRITER-20260913-011` trim removed the text; the enumeration was present on `ai_main`)",
+        "filed_as": "BUG-0259 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "two quality-class hygiene provenance findings survive, and both bugs that name them close with this RC",
+      "heading": "Finding 2: two quality-class hygiene provenance findings survive, and both bugs that name them close with this RC",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task — two comment rewords)\n**Systemic Risk:** low (comment-only; no shipped code path changes behaviour, both gated runners exit 0)\n**Regression:** no (the two sites predate this RC — `team/tests/unit/test_operator_verb_manifest.py` carried them at `ai_main`, and this RC's diff does not touch those lines)\n**Integrity Damage:** no\n**Filed As:** BUG-0260 (Path C-A)\n\nBoth gated runners' findings files carry the same two instances, and no more:\n\n```\nteam/tests/unit/test_operator_verb_manifest.py:159  [task-ID] 'CODER-20260911-066'\nteam/tests/unit/test_operator_verb_manifest.py:176  [task-ID] 'CODER-20260911-066'\n```\n\nThese are listed here rather than in \"Lint Findings (non-blocking)\" alone because of\nwhat happens when this RC ships. BUG-0254's symptom section names exactly these two\ninstances and attributes them to *\"the open BUG-0245\"*; BUG-0245's own acceptance\ncriteria name only `team/tests/unit/test_posture_bar_truth.py:20`, which this RC did\nfix. Both BUG-0245 and BUG-0254 are in this bundle, so `cm-release.sh` Step 16b sets\nboth to `done` — leaving two live findings with no open tracker. Per the\ncite-an-open-bug-or-file-one rule (TESTER.md Step 5c), and its explicit \"never skip a\nfiling on the grounds that some earlier run already filed something,\" a new bug is\nfiled for the `hygiene` lint class, listing both instances.\n\nRecommendation impact: on its own a bug filed *solely* to track a quality-class lint\nfinding does not elevate the recommendation. This one is recorded as a Step-7 finding\nbecause the defect is the tracking gap (two instances about to become untracked), not\nmerely the lint signal. Finding 1 elevates the recommendation independently.",
+      "filed_as": "BUG-0260",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task — two comment rewords)",
+        "systemic_risk": "low (comment-only; no shipped code path changes behaviour, both gated runners exit 0)",
+        "regression": "no (the two sites predate this RC — `team/tests/unit/test_operator_verb_manifest.py` carried them at `ai_main`, and this RC's diff does not touch those lines)",
+        "filed_as": "BUG-0260 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "(behavioural): BUG-0256 — refusal-ledger no longer fabricates a missing kanban root",
+      "heading": "Finding 3 (behavioural): BUG-0256 — refusal-ledger no longer fabricates a missing kanban root",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe original failure mode was triggered directly, not inferred. With\n`PGAI_PROJECT_NAME` set — the environment in which the defect bit — `halt-global.sh`\nwas run twice in a row against a non-existent `KANBAN_ROOT`:\n\n```\nrun 1: error: halt_global.kanban_root_missing   exit=1\n       find <root>  ->  No such file or directory      (previously: root + projects/<name>/refusal-ledger.md)\nrun 2: error: halt_global.kanban_root_missing   exit=1   (previously: \"global HALT set: <root>/HALT\", exit 0)\n       find <root>  ->  No such file or directory\n```\n\n`unhalt-global.sh` behaves identically (`unhalt_global.kanban_root_missing`, exit 1\ntwice, no tree created). Every acceptance criterion of BUG-0256 is met, and the\ndual-channel `error`/`message`/`remedy` fields and exit codes are unchanged.\n\nThe new-normal case was verified too, because a fix that suppressed the side effect\neverywhere would break ledger recording: with `KANBAN_ROOT` pointing at a directory\nthat *does* exist, `refusal_ledger_record` still returns 0 and still creates\n`projects/<name>/refusal-ledger.md` beneath it. Only the root itself is guarded, which\nis what both the bash guard (`team/scripts/lib/refusal_ledger.sh`) and the Python\nwriter (`team/pgai_agent_kanban/lib/refusal_ledger.py`, `os.path.isdir` early return)\ndocument. The regression test the bug asked for exists and covers the\ntwo-invocations-in-a-row case with and without `PGAI_PROJECT_NAME`\n(`team/tests/unit/test_verb_fixture_matrix.py`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "(behavioural): BUG-0258 — show-queues refuses on a registry-less root",
+      "heading": "Finding 4 (behavioural): BUG-0258 — show-queues refuses on a registry-less root",
+      "level": 3,
+      "body": "**Category:** pass\n\nExercised on a scratch kanban root deliberately created with no `projects.cfg`:\n\n```\n--project bogus-name   -> error: show_queues.project_directory_missing   exit=1   (no board)\nno --project           -> full board renders, exit 0\nno --project --details -> renders, exit 0\n```\n\nand, for the contrast the bug drew, the same invocation against a root whose\n`projects.cfg` exists but is empty still refuses at the resolver\n(`project_resolve.not_found`, exit 1) — the pre-existing path is unchanged. A valid\n`--project` against the live kanban root still renders the real board. All three\nacceptance criteria are met; the third (a test covering the registry-less root) is\n`team/tests/unit/test_show_queues_human_queue.py` (+54 lines in this RC).\n\nThe new refusal site is a correctly authored gate: it declares `BLOCK-WORTHY` in an\ninline comment, emits through `pgai_emit_error_contract` with all three fields, carries\n`# CENSUS-ANCHOR: show-queues-project-directory-missing-01`, and adds the matching\nLocator Index line\n`team/scripts/dashboard/show-queues.sh:show-queues-project-directory-missing-01 BLOCK-WORTHY`\nin the same change — both halves authored together, as the new-gate rule requires.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

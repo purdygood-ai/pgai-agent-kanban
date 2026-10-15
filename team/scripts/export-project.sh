@@ -2,11 +2,15 @@
 # team/scripts/export-project.sh
 #
 # Package a registered project's entire projects/<name>/ tree into a portable
-# .tar.gz archive containing an embedded MANIFEST file.
+# .tar.gz archive containing an embedded MANIFEST file. When the project has
+# archived items -- the finished work the archive run moved to
+# $KANBAN_ROOT/archive/<name>/, with its ARCHIVE-LEDGER.tsv -- that whole
+# tree travels in the same archive file, so an import restores the project
+# and its archive together.
 #
 # This script is strictly read-only: it never creates, modifies, or deletes
-# anything under projects/<name>/. The only output is the archive written to
-# --out (or the default output path).
+# anything under projects/<name>/ or archive/<name>/. The only output is the
+# archive written to --out (or the default output path).
 #
 # A MANIFEST file is embedded inside the archive (not written into the live
 # project tree). The MANIFEST captures:
@@ -18,8 +22,19 @@
 # Archive layout:
 #   <name>/                   (top-level entry — extract directly into projects/)
 #   <name>/MANIFEST           (embedded; not present in the live tree)
+#   <name>/ARCHIVE/           (embedded copy of $KANBAN_ROOT/archive/<name>/,
+#                              present only when that directory exists;
+#                              import-project.sh moves it to archive/<name>/)
+#   <name>/ARCHIVE/ARCHIVE-LEDGER.tsv
+#                             (and every archived bug, task, queue line and
+#                              training log, under the same relative names)
 #   <name>/project.cfg        (and all other files from projects/<name>/)
 #   ...
+#
+# MANIFEST and ARCHIVE are reserved names at the top of the exported
+# project: a file or directory of either name in projects/<name>/ itself is
+# replaced in the export by the embedded one (when the project has an
+# archive directory).
 #
 # Usage:
 #   export-project.sh --project <name>
@@ -76,7 +91,7 @@ OUT_FILE=""
 
 # Value-taking flags: project, out.
 # Boolean flags: help.
-argparse_parse --value-flags "project out" -- "$@"
+operator_args_argparse --value-flags "project out" -- "$@"
 
 # Emit clear error for value-taking flags given with no value.
 if argparse_missing "out"; then
@@ -87,7 +102,7 @@ fi
 # Handle --help / -h.
 if argparse_has "help" || argparse_has "h"; then
     operator_args_render_help_for_flags "export-project.sh" \
-        "Package a registered project's directory tree into a portable .tar.gz archive." \
+        "Package a registered project's directory tree, and its archive/<name>/ tree with ARCHIVE-LEDGER.tsv, into a portable .tar.gz archive." \
         OPERATOR_VALID_FLAGS \
         "" \
         "  --out FILE           Output archive path (default: ./<name>-export-<UTCstamp>.tar.gz)"
@@ -253,6 +268,19 @@ cp -a "${PROJECT_DIR}/." "${STAGE_DIR}/${NAME}/"
 # Place the MANIFEST at the top of <name>/
 cp "$MANIFEST_FILE" "${STAGE_DIR}/${NAME}/MANIFEST"
 
+# Embed the project's archive tree, ledger included, at <name>/ARCHIVE/.
+# Carrying it inside the single <name>/ top-level entry keeps the archive
+# file extractable straight into projects/ (the layout import-project.sh
+# reads the project name from); the importer then moves ARCHIVE/ to
+# $KANBAN_ROOT/archive/<name>/.
+ARCHIVE_DIR="${KANBAN_ROOT}/archive/${NAME}"
+ARCHIVE_INCLUDED=false
+if [[ -d "$ARCHIVE_DIR" ]]; then
+    rm -rf "${STAGE_DIR}/${NAME}/ARCHIVE"
+    cp -a "${ARCHIVE_DIR}" "${STAGE_DIR}/${NAME}/ARCHIVE"
+    ARCHIVE_INCLUDED=true
+fi
+
 # Resolve output file to absolute path before changing directories
 if [[ "$OUT_FILE" != /* ]]; then
     OUT_FILE="$(pwd)/${OUT_FILE}"
@@ -274,4 +302,8 @@ ARCHIVE_SIZE="$(du -sh "$OUT_FILE" 2>/dev/null | cut -f1)"
 echo "Exported project '${NAME}' to: ${OUT_FILE} (${ARCHIVE_SIZE})"
 echo "  kanban_version:    ${KANBAN_VERSION}"
 echo "  export_timestamp:  ${EXPORT_TIMESTAMP}"
-echo "  archive contains:  ${NAME}/ (including MANIFEST)"
+if [[ "$ARCHIVE_INCLUDED" == true ]]; then
+    echo "  archive contains:  ${NAME}/ (including MANIFEST, and ARCHIVE/ from ${ARCHIVE_DIR})"
+else
+    echo "  archive contains:  ${NAME}/ (including MANIFEST; the project has no archived items)"
+fi

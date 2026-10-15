@@ -14,9 +14,9 @@ Response shape (HTTP 200):
     "priority":       int,           # sort priority from projects.cfg
     "color":          str,           # #RRGGBB hex string from projects.cfg
     "ceilings": {
-      "max_major":    int | null,    # from project.cfg [versioning]; null when absent
-      "max_minor":    int | null,
-      "max_patch":    int | null,
+      "max_major":    int | null,    # ceiling in effect: project.cfg [versioning], or the
+      "max_minor":    int | null,    #   documented default (0 / 13 / 21) when absent;
+      "max_patch":    int | null,    #   null = no ceiling (written `none`) or unreadable
     },
     "last_released":  str | null,    # vX.Y.Z from release-state.md ## Last Released; null when none/absent
     "active_rc":      str | null,    # vX.Y.Z from release-state.md ## Active RC; null when none/absent
@@ -35,12 +35,16 @@ Constraints:
   - Loopback trust boundary: dev_tree_path and git_repo are returned verbatim,
     never redacted.
   - last_released is resolved from the canonical release-state.md ## Last Released
-    field — the same source board_classifier.get_last_released_for_project reads.
+    field — the same source pgai_agent_kanban.board.get_last_released_for_project reads.
     This is the Python counterpart to the bash pp_last_released_version tier-aware
     resolver (which writes to release-state.md via finalize.sh after each release).
   - active_rc is null when release-state.md has "none" or is absent — never the
     string "none".
   - halt reflects the HALT file presence verbatim.
+  - ceilings resolve through pgai_agent_kanban.lib.version_ceiling, the rule
+    every ceiling reader shares. A malformed value is reported null and adds
+    one ``warnings`` entry naming the file, key and value; discovery treats
+    that project as ceiling-blocked, not unlimited.
   - queue_counts covers all five agent roles (pm, coder, writer, tester, cm).
     Counts only include tasks whose status.md was found and readable; tasks with
     no status.md fall back to the queue marker state.
@@ -48,7 +52,6 @@ Constraints:
 
 from __future__ import annotations
 
-import configparser
 import pathlib
 import re
 from typing import Optional
@@ -56,16 +59,23 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.terminal_states import is_terminal as _is_terminal_state
 from pgai_agent_kanban.lib.palette import load_default_palette
-from ..dependencies import warn_unknown_query_params
-from ..board_classifier import (
+from pgai_agent_kanban.lib.version_ceiling import (
+    CEILING_KEYS,
+    CeilingValueError,
+    project_cfg_file,
+    read_ceiling,
+)
+from pgai_agent_kanban.board import (
     get_active_rc_for_project,
     get_last_released_for_project,
     marker_to_state,
     parse_queue_line,
     read_task_state_from_status_md,
 )
+from ..dependencies import warn_unknown_query_params
 
 __all__ = ["router"]
 
@@ -82,8 +92,8 @@ _AGENT_ROLES = ["pm", "coder", "writer", "tester", "cm"]
 # ---------------------------------------------------------------------------
 
 
-def _read_project_cfg(project_dir: pathlib.Path) -> configparser.RawConfigParser | None:
-    """Return a parsed RawConfigParser for project.cfg in *project_dir*.
+def _read_project_cfg(project_dir: pathlib.Path) -> ini.IniParser | None:
+    """Return the parsed project.cfg in *project_dir*.
 
     Returns None when project.cfg is absent or unreadable.
     Accepts both project.cfg (INI-format) and PROJECT.cfg (legacy fallback).
@@ -91,17 +101,15 @@ def _read_project_cfg(project_dir: pathlib.Path) -> configparser.RawConfigParser
     for cfg_name in ("project.cfg", "PROJECT.cfg"):
         cfg_path = project_dir / cfg_name
         if cfg_path.is_file():
-            parser = configparser.RawConfigParser()
             try:
-                parser.read(str(cfg_path), encoding="utf-8")
-                return parser
-            except configparser.Error:
+                return ini.load(cfg_path)
+            except ini.IniError:
                 return None
     return None
 
 
 def _cfg_get(
-    parser: configparser.RawConfigParser | None,
+    parser: ini.IniParser | None,
     section: str,
     key: str,
     fallback: str = "",
@@ -111,22 +119,28 @@ def _cfg_get(
         return fallback
     try:
         return parser.get(section, key).strip()
-    except (configparser.NoSectionError, configparser.NoOptionError):
+    except (ini.NoSectionError, ini.NoOptionError):
         return fallback
 
 
-def _cfg_get_int_or_none(
-    parser: configparser.RawConfigParser | None,
-    section: str,
-    key: str,
-) -> Optional[int]:
-    """Read an integer key from the parsed config, returning None on absence or error."""
-    if parser is None:
-        return None
-    try:
-        return parser.getint(section, key)
-    except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
-        return None
+def _resolve_ceilings(project_dir: pathlib.Path) -> tuple[dict[str, Optional[int]], list[str]]:
+    """Return the ceilings in effect for *project_dir* and any unreadable-value warnings.
+
+    Each value is the configured number, the documented default for an
+    absent key (or an absent project.cfg), or None for an explicit ``none``.
+    A malformed value is None too, with one warning naming the file, key and
+    value -- the same line the bash accessors print.
+    """
+    cfg_file = project_cfg_file(project_dir)
+    ceilings: dict[str, Optional[int]] = {}
+    problems: list[str] = []
+    for key in CEILING_KEYS:
+        try:
+            ceilings[key] = read_ceiling(cfg_file, key).limit
+        except CeilingValueError as exc:
+            ceilings[key] = None
+            problems.append(str(exc))
+    return ceilings, problems
 
 
 # ---------------------------------------------------------------------------
@@ -144,31 +158,15 @@ def _read_projects_registry(
       - color: str       (hex string or '' when absent; caller must apply palette)
       - registration_index: int  (position in projects.cfg for palette assignment)
     """
-    cfg_path = kanban_root / "projects.cfg"
-    if not cfg_path.is_file():
-        return {}
-
-    parser = configparser.RawConfigParser()
-    parser.read(str(cfg_path), encoding="utf-8")
-
-    entries: dict[str, dict] = {}
-    for idx, section in enumerate(parser.sections()):
-        if not section.startswith("project:"):
-            continue
-        name = section[len("project:"):]
-        try:
-            priority = parser.getint(section, "priority")
-        except (configparser.NoOptionError, ValueError):
-            priority = 999
-
-        color = parser.get(section, "dashboard_color", fallback="").strip()
-        entries[name] = {
-            "priority": priority,
-            "color": color,
-            "registration_index": idx,
+    entries = sorted(ini.projects_registry(kanban_root), key=lambda e: e.section_index)
+    return {
+        entry.name: {
+            "priority": entry.priority,
+            "color": entry.color,
+            "registration_index": entry.section_index,
         }
-
-    return entries
+        for entry in entries
+    }
 
 
 def _resolve_color(color: str, registration_index: int) -> str:
@@ -298,7 +296,11 @@ def get_project_metadata(
     - ``color``         — hex color string (#RRGGBB) from projects.cfg; palette
                           fallback when absent.
     - ``ceilings``      — version ceiling object with max_major, max_minor,
-                          max_patch (each int or null when unconfigured).
+                          max_patch: each the int ceiling in effect (an absent
+                          key reads as its documented default, 0 / 13 / 21),
+                          or null when the value is ``none`` (unlimited) or
+                          malformed; a malformed value also adds a
+                          ``warnings`` entry naming the file, key and value.
     - ``last_released`` — vX.Y.Z string from release-state.md ## Last Released;
                           null when absent or sentinel "none"/"v0.0.0".
     - ``active_rc``     — vX.Y.Z string from release-state.md ## Active RC;
@@ -336,10 +338,8 @@ def get_project_metadata(
     dev_tree_path = _cfg_get(project_cfg, "project", "dev_tree_path", fallback="")
     git_repo = _cfg_get(project_cfg, "project", "git_repo_url", fallback="")
 
-    # --- Version ceilings from project.cfg [versioning] ---
-    max_major = _cfg_get_int_or_none(project_cfg, "versioning", "max_major")
-    max_minor = _cfg_get_int_or_none(project_cfg, "versioning", "max_minor")
-    max_patch = _cfg_get_int_or_none(project_cfg, "versioning", "max_patch")
+    # --- Version ceilings in effect (shared rule: lib.version_ceiling) ---
+    ceilings, ceiling_warnings = _resolve_ceilings(project_dir)
 
     # --- Color (with palette fallback) ---
     color = _resolve_color(
@@ -348,13 +348,13 @@ def get_project_metadata(
     )
 
     # --- Release state ---
-    # last_released: read via the canonical board_classifier helper (same source
+    # last_released: read via the canonical pgai_agent_kanban.board helper (same source
     # as pp_last_released_version's release-state.md fallback path).
     last_released_raw = get_last_released_for_project(project_dir)
     # get_last_released_for_project returns "" for sentinels; convert to None.
     last_released: Optional[str] = last_released_raw if last_released_raw else None
 
-    # active_rc: read via the canonical board_classifier helper, then normalize
+    # active_rc: read via the canonical pgai_agent_kanban.board helper, then normalize
     # "none" and non-semver values to null (never emit the string "none").
     active_rc_raw = get_active_rc_for_project(project_dir)
     active_rc: Optional[str] = _normalize_active_rc(active_rc_raw)
@@ -377,15 +377,15 @@ def get_project_metadata(
             "priority": reg_entry["priority"],
             "color": color,
             "ceilings": {
-                "max_major": max_major,
-                "max_minor": max_minor,
-                "max_patch": max_patch,
+                "max_major": ceilings["max_major"],
+                "max_minor": ceilings["max_minor"],
+                "max_patch": ceilings["max_patch"],
             },
             "last_released": last_released,
             "active_rc": active_rc,
             "halt": halt,
             "queue_counts": queue_counts,
-            "warnings": warnings,
+            "warnings": [*warnings, *ceiling_warnings],
         },
         status_code=200,
     )

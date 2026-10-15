@@ -12,7 +12,7 @@ Tests cover:
      would make the gate always green.
 
   2. **Clean tree passes**: the real team/scripts/upgrade.sh produces no hits
-     (exit 0).  This confirms the retirement from CODER-20260708-002 is intact
+     (exit 0).  This confirms the retirement is intact
      and the scanner recognises the current file as clean.
 
   3. **Comment lines are exempt**: a fixture whose retired identifiers appear
@@ -147,7 +147,7 @@ def test_guard_fires_returns_nonzero_exit_for_fixture(tmp_path: Path) -> None:
 def test_clean_upgrade_sh_passes() -> None:
     """The real team/scripts/upgrade.sh produces no hits (exit 0).
 
-    Confirms the retirement applied in CODER-20260708-002 is intact: the
+    Confirms the retirement is intact: the
     current upgrade.sh contains no executable lines with the retired identifiers.
     If this test fails, the retired guard block has been reintroduced — either
     by a merge conflict or a direct edit.
@@ -155,6 +155,9 @@ def test_clean_upgrade_sh_passes() -> None:
     if not _REAL_UPGRADE_SH.exists():
         pytest.skip(f"Real upgrade.sh not found at {_REAL_UPGRADE_SH}; skipping.")
 
+    # Deliberately exercises the real team/scripts/upgrade.sh (not a
+    # fixture): this is a live regression guard, not an isolated behavior a
+    # fixture could stand in for.
     hits = _lint.find_executable_hits(_REAL_UPGRADE_SH)
 
     assert not hits, (
@@ -172,6 +175,9 @@ def test_clean_upgrade_sh_main_exits_zero() -> None:
     if not _REAL_UPGRADE_SH.exists():
         pytest.skip(f"Real upgrade.sh not found at {_REAL_UPGRADE_SH}; skipping.")
 
+    # Deliberately exercises the real team/scripts/upgrade.sh (not a
+    # fixture): this is a live regression guard, not an isolated behavior a
+    # fixture could stand in for.
     exit_code = _lint.main(["--upgrade-sh", str(_REAL_UPGRADE_SH)])
 
     assert exit_code == 0, (

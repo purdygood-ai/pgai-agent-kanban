@@ -9,16 +9,36 @@
 #
 # Two runs on the same tree produce byte-identical output.
 #
+# Baseline policy (canonical regenerations only -- never with --output PATH):
+# the per-version baseline docs/api/baselines/icd-v<ICD_VERSION>.json is
+# created only when ICD_VERSION is newer (semver) than every existing
+# baseline, refreshed only while the version is not yet listed in
+# docs/api/baselines/SUPPORTED, and NEVER rewritten once it is listed there.
+# A regeneration that changes icd.json at a published version writes
+# icd.json, leaves the published baseline byte-untouched, prints
+# error / message / remedy naming the baseline file and the ICD_VERSION
+# bump step, and exits 1.  Freezing is not unconditional; adding a version
+# to SUPPORTED remains a separate operator decision.
+#
 # Usage:
-#   generate-icd.sh [--output PATH]
+#   generate-icd.sh [--output PATH] [--refreeze]
 #
 # Options:
 #   --output PATH   Write ICD JSON to PATH instead of docs/api/icd.json.
+#                   A non-default PATH never touches any baseline file.
+#   --refreeze      Rewrite the PUBLISHED baseline icd-v<ICD_VERSION>.json
+#                   (a version listed in SUPPORTED) to the new artifact
+#                   instead of refusing.  Explicit override only; the default
+#                   never re-freezes a published baseline, and no other
+#                   version's baseline is ever touched.
 #   --help, -h      Show this help and exit.
 #
 # Exit codes:
-#   0   ICD artifact written successfully.
-#   1   Error (Python not found, ICD_VERSION missing, output unwritable, etc.).
+#   0   ICD artifact written successfully; baseline policy applied.
+#   1   Error (Python not found, ICD_VERSION missing, output unwritable,
+#       etc.), or the published-baseline refusal (icd-v<ICD_VERSION>.json is
+#       listed in SUPPORTED, differs from the new artifact, and --refreeze
+#       was not given).
 #
 # The script resolves the repository root from its own location so it can be
 # invoked from any working directory.
@@ -43,5 +63,5 @@ fi
 export PYTHONPATH="${_TEAM_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # Run the generator module.  Forward all arguments so the caller can pass
-# --output PATH or --help directly to generate_icd.py.
+# --output PATH, --refreeze or --help directly to generate_icd.py.
 exec python3 -m pgai_agent_kanban.api.generate_icd "$@"

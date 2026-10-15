@@ -32,6 +32,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEAM_DIR="${SCRIPT_DIR}/.."
+# shellcheck source=lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/lib/pp_run_ops.sh"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -105,4 +107,5 @@ fi
 # ---------------------------------------------------------------------------
 # Run the report
 # ---------------------------------------------------------------------------
-python3 "$AGENT_TIMING_PY" "${PY_ARGS[@]+"${PY_ARGS[@]}"}"
+# Run as a package module so its shared-library imports resolve from this tree.
+pp_run_ops pgai_agent_kanban.reports.agent_timing "${PY_ARGS[@]+"${PY_ARGS[@]}"}"

@@ -1,0 +1,457 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified RC v2.20.0 — \"Every fleet posture is one idempotent verb with a REST\ntwin, and the halt family speaks versions\" — against its requirements\ndocument, its twelve contributing tasks, and the shipped tree. Pre-flight\nmerge verification passed (all twelve prerequisite tasks DONE, feature\nbranches cleaned up post-merge, worktree HEAD matches the RC tip). The core\ndeliverables are present and behaviourally correct: the machine-readable\noperator verb manifest reconciles against the tree in both directions and its\ndrift detection fires on planted drift; the runnable-remedy lint catches a\nplanted angle-bracket placeholder and finds zero offenders across 240 real\nfiles; `halt-after --until` refuses all three of its specified failure modes\ndual-channel while writing nothing to disk; and the RC-close gate was\nexercised end to end — a satisfied drain defers and latches while an RC is\nopen, survives a later unsatisfied re-check, and promotes only once Active RC\nreads `none`. The gated unit suite passed (`UNIT_EXIT=0`, 4319 passed / 36\nskipped). The gated integration suite did not (`INTEGRATION_EXIT=1`): one\ntest asserts the prose of a refusal this RC legitimately replaced with the\nshared project-name resolver — a stale assertion, not a production defect,\nbut the suite-pass precondition for a `PASS` recommendation is therefore not\nmet. Beyond that, four of the verb set's stated cross-cutting properties are\nonly partly delivered: five of the verbs the requirements doc names by hand\nstill have no dual-channel refusal at all, and two of the read verbs do not\nresolve project keys by prefix — with `show-queues` silently rendering an\nall-zero board for a name it never resolved. Seven findings are filed via\nPath C; none of them makes the release unusable.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Integration suite fails on a stale refusal-wording assertion",
+      "heading": "Finding 1: Integration suite fails on a stale refusal-wording assertion",
+      "level": 3,
+      "body": "**Category:** stale-assertion\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one assertion in one test; production behaviour is correct and still refuses, dual-channel, writing no ledger record)\n**Regression:** yes (this RC's change to `deep-verify.sh` is what made the asserted literal unreachable)\n**Integrity Damage:** no\n**Filed As:** BUG-0249 (Path C — autonomous follow-up filing, non-blocking; Path C-A — filed as BUG)\n\nStale-assertion evidence, per the Step 7 requirements:\n\n- **Test file and line:** `team/tests/integration/test_deep_verify_run.py:318`\n- **Failing assertion:** `assert \"not registered\" in result.stderr` — expected\n  the literal `not registered`; actual stderr was\n  `error:   project_resolve.not_found` /\n  `message: pp_resolve_project_name: no project matches 'nonexistent-project' in <root>/projects.cfg.` /\n  `remedy:  Check the project name against projects.cfg (registered: ).`\n- **Production code change:** `team/scripts/deep-verify.sh`, the block\n  inserted at ~line 228 — `_dv_project=\"$(pp_resolve_project_name \"${_dv_project}\")\" || exit 1`\n  — placed ahead of the pre-existing `projects_cfg_has` check. The literal\n  `not registered` lived in that check's message\n  (`ai_main:team/scripts/deep-verify.sh:240`), which the RC's own comment now\n  describes as \"effectively unreachable\".\n- **RC commit / task:** `8c7ec4a` / `f03e472` (CODER-20260911-063,\n  verb-keys-and-idempotence), merged at `6f68d8f`.\n- **Recommendation:** update the test in the next iteration to assert on the\n  stable machine key `project_resolve.not_found` rather than on prose. The\n  test, not the production code, is what needs to change. The verb's other\n  guarantees are unaffected and still hold — exit 1, all three dual-channel\n  fields present, no ledger record written.",
+      "filed_as": "BUG-0249",
+      "filed_by": null,
+      "severity": null,
+      "category": "stale-assertion",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no",
+        "test_file_and_line": "team/tests/integration/test_deep_verify_run.py:318",
+        "failing_assertion": "`assert \"not registered\" in result.stderr` — expected",
+        "production_code_change": "`team/scripts/deep-verify.sh`, the block",
+        "rc_commit_task": "`8c7ec4a` / `f03e472` (CODER-20260911-063,",
+        "recommendation": "update the test in the next iteration to assert on the"
+      },
+      "raw": {
+        "category": "stale-assertion",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one assertion in one test; production behaviour is correct and still refuses, dual-channel, writing no ledger record)",
+        "regression": "yes (this RC's change to `deep-verify.sh` is what made the asserted literal unreachable)",
+        "filed_as": "BUG-0249 (Path C — autonomous follow-up filing, non-blocking; Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "not-found remedy degenerates to an empty list and supersedes a more useful refusal",
+      "heading": "Finding 2: not-found remedy degenerates to an empty list and supersedes a more useful refusal",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (a weaker refusal message; no state is damaged and no operation proceeds wrongly)\n**Regression:** yes (introduced by wiring `pp_resolve_project_name` in front of the verbs in this RC)\n**Integrity Damage:** no\n**Filed As:** BUG-0250 (Path C-A)\n\nAgainst a kanban root whose `projects.cfg` lists nothing, the\n`project_resolve.not_found` remedy renders as\n`Check the project name against projects.cfg (registered: ).` — the entire\nadvice is \"compare your name against this list\", and the list is empty\n(`_pp_join_names` returns the empty string). It also now fires ahead of\n`deep_verify.unregistered_project`, whose remedy named the fixing command\n(`add-project.sh --project X`). That superseded site is unreachable yet is\nstill indexed in `docs/blocking-site-census.md` as\n`team/scripts/deep-verify.sh:deep-verify-01 BLOCK-WORTHY`; the census lint\nreconciles anchors by name against file text, not by reachability, so it\npasses over a censused stop that can no longer occur.",
+      "filed_as": "BUG-0250",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (a weaker refusal message; no state is damaged and no operation proceeds wrongly)",
+        "regression": "yes (introduced by wiring `pp_resolve_project_name` in front of the verbs in this RC)",
+        "filed_as": "BUG-0250 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "five verbs in the named set have no dual-channel refusals",
+      "heading": "Finding 3: five verbs in the named set have no dual-channel refusals",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** medium (3-5 CODER tasks — nine scripts, each needing an error key, a remedy, a census class and, where BLOCK-WORTHY, an anchor plus index line)\n**Systemic Risk:** low (the verbs still refuse and still exit non-zero; what is missing is the machine-readable channel)\n**Regression:** no (the plain-stderr validation predates this RC — `halt-global.sh`, `unhalt-global.sh` and `wake-now.sh` are untouched by the RC diff, and `verify-rc-state.sh:165`'s `ERROR: <project> is required.` is present verbatim at `ai_main:team/scripts/verify-rc-state.sh:163`)\n**Integrity Damage:** no\n**Filed As:** BUG-0251 (Path C-A)\n\nThe deliverable states the verb set carries \"dual-channel refusals\". Five\nverbs the doc names by hand do not: `halt-global`, `unhalt-global`,\n`wake-now`, `show-queues`, `verify-rc-state`. Four more outside the doc's\nlist (`switch-provider`, `create-project`, `add-project`, `remove-project`)\nare in the same state — 9 of 27 active verbs. The RC records this honestly\nrather than concealing it: `_DUAL_CHANNEL_SCENARIOS` in\n`team/tests/unit/test_verb_fixture_matrix.py` marks each one `NotApplicable`\nwith the reason \"validates its own arguments with plain stderr lines, not the\nshared pgai_emit_error_contract/dual-channel emitter\". That honesty is worth\nnoting, but an inventory of where a property is absent is not the property.\n`verify-rc-state.sh:165` additionally prints a literal angle-bracket\nplaceholder (`ERROR: <project> is required.`) to the operator; the\nrunnable-remedy lint does not see it because it scans emitter call sites only.",
+      "filed_as": "BUG-0251",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "medium (3-5 CODER tasks — nine scripts, each needing an error key, a remedy, a census class and, where BLOCK-WORTHY, an anchor plus index line)",
+        "systemic_risk": "low (the verbs still refuse and still exit non-zero; what is missing is the machine-readable channel)",
+        "regression": "no (the plain-stderr validation predates this RC — `halt-global.sh`, `unhalt-global.sh` and `wake-now.sh` are untouched by the RC diff, and `verify-rc-state.sh:165`'s `ERROR: <project> is required.` is present verbatim at `ai_main:team/scripts/verify-rc-state.sh:163`)",
+        "filed_as": "BUG-0251 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "read verbs do not resolve project keys by prefix; show-queues renders a false all-zero board",
+      "heading": "Finding 4: read verbs do not resolve project keys by prefix; show-queues renders a false all-zero board",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (read-only surfaces; the misleading board could prompt a wrong operator judgement but changes no state)\n**Regression:** no (`git show ai_main:team/scripts/dashboard/show-queues.sh` has no project validation either; this RC touched the file only to add `OPERATOR_VALID_FLAGS`)\n**Integrity Damage:** no\n**Filed As:** BUG-0252 (Path C-A)\n\nBehaviourally verified against the live kanban root (one registered project):\n\n```\n$ bash team/scripts/dashboard/show-queues.sh --project pgai-agent-kanban\npm: 36/36  coder: 155/155  writer: 40/40        (real counts)\n$ bash team/scripts/dashboard/show-queues.sh --project pgai\npm: 0/0  coder: 0/0  writer: 0/0  tester: 0/0   (exit 0)\n$ bash team/scripts/dashboard/show-queues.sh --project totally-not-a-project\npm: 0/0  coder: 0/0  writer: 0/0  tester: 0/0   (exit 0)\n$ bash team/scripts/verify-rc-state.sh pgai\nERROR: project directory not found: .../projects/pgai   (exit 2)\n```\n\n`pgai` is an unambiguous prefix that the shared resolver does resolve\n(`pp_resolve_project_name pgai` → `pgai-agent-kanban`). Neither script calls\nit. The zero board is the more serious half: zeros are indistinguishable from\na genuinely idle project, so the failure is silent.",
+      "filed_as": "BUG-0252",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (read-only surfaces; the misleading board could prompt a wrong operator judgement but changes no state)",
+        "regression": "no (`git show ai_main:team/scripts/dashboard/show-queues.sh` has no project validation either; this RC touched the file only to add `OPERATOR_VALID_FLAGS`)",
+        "filed_as": "BUG-0252 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "manifest lint's drift refusal names the default manifest, not the file scanned",
+      "heading": "Finding 5: manifest lint's drift refusal names the default manifest, not the file scanned",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (the gated-runner invocation passes no `--manifest`, so the two paths coincide there)\n**Regression:** yes (the file is new in this RC)\n**Integrity Damage:** no\n**Filed As:** BUG-0253 (Path C-A)\n\n`team/scripts/lint_operator_verb_manifest.py:314` interpolates\n`ovm.default_manifest_path()` into the `operator_verb_manifest.drift`\nmessage. Verified by scanning a deliberately drifted copy: the lint correctly\nfound all three planted drifts (missing script, undeclared flag, non-existent\nroute) but reported the failure against\n`team/config/operator_verbs.manifest`, which it had not read. The remedy's\nre-run command likewise omits `--manifest`.",
+      "filed_as": "BUG-0253",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (the gated-runner invocation passes no `--manifest`, so the two paths coincide there)",
+        "regression": "yes (the file is new in this RC)",
+        "filed_as": "BUG-0253 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "provenance litter in a new shipped config file, unseen by the hygiene lint",
+      "heading": "Finding 6: provenance litter in a new shipped config file, unseen by the hygiene lint",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (hygiene)\n**Regression:** yes (both the file and its comments are new in this RC)\n**Integrity Damage:** no\n**Filed As:** BUG-0254 (Path C-A)\n\n`team/config/operator_verbs.manifest` names `CODER-20260911-071`, \"ticket 3\",\n\"ticket 9\" and \"ticket 12 (WRITER)\" in its shipped comment block. The\n`hygiene` quality-class lint flagged the same class of reference in the RC's\ntest files but not here, because its file selection does not include\n`team/config/*.manifest`. Both halves — the litter and the blind spot — are in\nthe filed bug.",
+      "filed_as": "BUG-0254",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (hygiene)",
+        "regression": "yes (both the file and its comments are new in this RC)",
+        "filed_as": "BUG-0254 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "placeholder sweep replaced a remedy with a canned reason the refusal itself forbids",
+      "heading": "Finding 7: placeholder sweep replaced a remedy with a canned reason the refusal itself forbids",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (wording of two refusals)\n**Regression:** yes (introduced by this RC's sweep, commit `0bd8ba6`)\n**Integrity Damage:** no\n**Filed As:** BUG-0255 (Path C-A)\n\n`team/scripts/cm/release.sh`'s two operator-force refusals state that \"an\noperator override must carry a written reason, never a default one\" and then\nhand the operator a pasteable default:\n`--reason \"operator override: shipping despite the ship-policy matrix stop\"`.\nMessage and remedy contradict each other in the same emission. Related, milder\ninstances noted in the bug: `defer.sh` and `halt-after.sh` remedies now\nhardcode this install's project name (`pgai-agent-kanban`) and version\nliterals (`v2.20.0`, `v2.20.1`) as examples, which will not be runnable on a\ndifferent install — though both name `$PGAI_PROJECT_NAME` first, so they stay\nactionable.",
+      "filed_as": "BUG-0255",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (wording of two refusals)",
+        "regression": "yes (introduced by this RC's sweep, commit `0bd8ba6`)",
+        "filed_as": "BUG-0255 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "operator verb manifest and its reconciliation check",
+      "heading": "Finding 8: operator verb manifest and its reconciliation check",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/config/operator_verbs.manifest` declares 27 verbs with script, flag\nvocabulary, mutation, idempotence class and REST twin. Every verb the\nrequirements doc names is present and `active`; no row is `planned`.\n`python3 team/scripts/lint_operator_verb_manifest.py` exits 0 — \"27 verb(s)\nchecked, 42 router route(s) scanned, 0 drift finding(s)\". Guard logic\nexercised by planting three drifts in a copy (a script path that does not\nexist, a flag the script does not accept, a route no router declares): the\nlint caught all three, named each one, and refused dual-channel with a\nrunnable remedy (exit 1). `python3 team/scripts/lint_api_parity.py` also\nexits 0 over 19 script/model pairs.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "runnable-remedy lint and the placeholder sweep",
+      "heading": "Finding 9: runnable-remedy lint and the placeholder sweep",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_runnable_remedy.py` on the real tree: \"OK — 240\nfile(s) checked, 0 offenders\" (166 bash, 74 python), exit 0. Guard logic\nexercised with a synthetic pair: a call site whose remedy contained\n`--project <name>` was flagged with file, line, the extracted placeholder and\na per-instance remedy, and the run refused dual-channel (exit 1); the\nbyte-identical call site with a literal project name was not flagged. The\n\"no angle-bracket placeholders anywhere in emitted remedies\" deliverable holds\nfor every emitter call site in the tree. (Its limitation — plain `echo`\nrefusals are outside the lint's scope — is Finding 3.)",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "halt-after `--until`, rc scope only",
+      "heading": "Finding 10: halt-after `--until`, rc scope only",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll three specified refusals exercised directly against the live tree; each\nemitted all three dual-channel fields with a placeholder-free remedy, exited\n1, and wrote no sentinel (`projects/pgai-agent-kanban/HALT-AFTER` still\nabsent afterwards):\n\n- `--project pgai-agent-kanban --key coder --until v2.21.0` →\n  `halt-after.until_scope_mismatch`, \"--until targets a release boundary;\n  scope 'coder' has none.\"\n- `--until v2.21.0` with no project and no `$PGAI_PROJECT_NAME` →\n  `halt-after.project_required`\n- `--project pgai-agent-kanban --until 2.9` → `halt-after.until_malformed`,\n  \"not well-formed semver (expected vX.Y.Z)\"\n\nThe scope-mismatch check is correctly ordered ahead of the project-required\ncheck, so it fires whether or not a project was named. `--help` lists the new\nflag and its rc-scope-only restriction. The three refusals match the wording\nSOP.md specifies for this family, and each carries a census anchor with a\nmatching Locator Index line.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "HALT-AFTER converts only at RC close",
+      "heading": "Finding 11: HALT-AFTER converts only at RC close",
+      "level": 3,
+      "body": "**Category:** pass\n\nExercised `pgai_agent_kanban.halt_after.rc_gate.evaluate` directly against two\nsynthetic project roots.\n\nVersioned token `rc:v9.9.9`, Active RC open:\n`NOT_DRAINED` → (ship recorded, RC still open) `DEFERRED` with\n`HALT-AFTER.rc-gate` latch written, `HALT` absent, `HALT-AFTER` still present\n→ (Active RC set to `none`) `PROMOTED`, latch removed, `HALT` created,\n`HALT-AFTER` removed.\n\nRole token `coder`, the requirements doc's literal scenario: drain satisfied\nmid-RC → `DEFERRED` + latch; a CODER task then appears in `WORKING` so the\ncondition is no longer satisfied → still `DEFERRED` (the latch wins, and the\ncondition is not re-derived); RC closes with that CODER task still `WORKING` →\n`PROMOTED`. The \"deferring a satisfied drain must never lose it\" invariant\nholds under exactly the sequence that would break a naive implementation.\n\nCM's ship-time spend is wired at `release_finalize.sh:439`\n(`cm_release_spend_halt_after_sentinel`, Step 12c) through the same evaluator\nthe wake loop calls, and `release_halt_after_spend.sh` returns 0 on every path\nso a bookkeeping failure cannot roll back an already-cut tag. The integration\nfixtures for the boundary\n(`test_halt_after_rc_close_gate.py::test_role_token_drain_defers_through_rc_close_then_promotes`,\n`::test_latched_drain_is_not_undone_by_a_later_unsatisfied_recheck`,\n`::test_cm_release_spends_versioned_sentinel_when_shipped_version_matches_target`,\n`::test_cm_release_spends_versioned_sentinel_when_shipped_version_skips_past_target`)\nall passed in the integration run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "release-locks verb",
+      "heading": "Finding 12: release-locks verb",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`team/scripts/release-locks.sh` (new, 342 lines, executable) lists every lock\nunder `locks/` with its provenance and a `held`/`stale`/`unparseable` verdict,\nand releases a named lock with a live-holder guard behind `--force`. Exercised:\n`--help` (exit 0, documents the four exit codes), no-flag listing (exit 0,\nread-only), `--bogus` (uniform unknown-argument refusal, exit 1),\n`--release no-such-lock` (exit 3, `release_locks.not_found` dual-channel, its\nremedy naming the listing command and the prefix rule).\n\nCaveat, no finding: the verb's `--help` renders `--release` as a bare\n`  --release` with no value placeholder and no description, because the shared\n`operator_args_render_help_for_flags` has no built-in description for that\nflag name; the script compensates with appended lines that read as detached\nfrom the option list. Second caveat: the manifest declares `release-locks`\n`mutates=yes` with a `GET /release-locks` twin, which is deliberate and\ndocumented — the GET route is the read-only listing half and returns 422 if a\ncaller supplies `release` or `force`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "gates prescribe their unblock verb",
+      "heading": "Finding 13: gates prescribe their unblock verb",
+      "level": 3,
+      "body": "**Category:** pass\n\nReviewed the sweep (commit `06e4e3d`). `discovery.sh`'s per-project and global\nHALT guards now emit dual-channel refusals naming\n`team/scripts/unhalt.sh --project ${PROJECT_NAME}` and\n`team/scripts/unhalt-global.sh`; `discovery_guards.sh`'s Active-RC guard names\n`team/scripts/unwind-rc.sh --project ... --key ...`;\n`lock_provenance.sh`'s contended-lock path names\n`team/scripts/release-locks.sh --release ${_lock_name}`. Each interpolates the\nresolved value rather than a placeholder, which is why the runnable-remedy\nlint is clean over them.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "census compliance",
+      "heading": "Finding 14: census compliance",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_gate_census_compliance.py` exits 0 — \"35 file(s)\nchecked, 0 offenders\", 137 census-anchored sites exempted. The RC adds 13\nLocator Index entries, each paired with a `# CENSUS-ANCHOR:` marker in the\nnamed file: three in `halt-after.sh`, two in `discovery.sh`, one in\n`lock_provenance.sh`, two in `project_paths.sh`, three in `release-locks.sh`,\nand two CONVERT-class entries for the new lints. (The one census weakness\nfound is reachability, not compliance — see Finding 2.)",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "REST twins and ICD",
+      "heading": "Finding 15: REST twins and ICD",
+      "level": 3,
+      "body": "**Category:** pass\n\nSeven new endpoints ship: `POST /operations/{defer,undefer,deep-verify,wake-now}`\nin `routers/operations.py` and `GET /{show-queues,verify-rc-state,release-locks}`\nin `reads.py`. `docs/api/ICD_VERSION` and\n`team/pgai_agent_kanban/api/ICD_VERSION` both read `1.7.0` and agree; baselines\n`icd-v1.6.0.json` and `icd-v1.7.0.json` are added and both listed in\n`docs/api/baselines/SUPPORTED`. The `why` verb's twin is `GET /verdicts`,\nwhich resolves through the same `verdict_resolve_project()` engine as the CLI,\nand the manifest documents that choice. WRITER recorded, and resolved in\nfavour of the implementation, a ticket-text claim of \"nine REST endpoints\"\nthat the merged tree contradicts — the diff shows exactly seven new paths,\nwhich this verification independently confirms.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "per-verb fixture matrix",
+      "heading": "Finding 16: per-verb fixture matrix",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/unit/test_verb_fixture_matrix.py` (1020 lines) parametrizes five\ncolumns over all 27 active verbs: `--help` exits 0 and lists exactly the\nverb's own declared flags (no leakage from other verbs' vocabularies), an\nundeclared flag is refused with the uniform message, a declared refusal emits\nall three dual-channel fields with a placeholder-free remedy, an idempotent\nverb produces a byte-identical tree hash on repeat invocation, and the REST\ntwin reproduces the CLI's machine error key. Coverage tests fail naming any\nmanifest verb missing from a scenario registry, and that claim is itself\nproven behaviourally by loading a manifest with a planted bogus verb. All 16\nverbs the manifest declares `idempotent` have a real repeat-invocation\nfixture — the \"coverage gap\" `NotApplicable` branch is unused. The\n`NotApplicable` entries in the dual-channel (9) and REST-parity (13) columns\neach carry a written reason; the dual-channel ones are Finding 3.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 17,
+      "label": "17",
+      "title": "operator documentation",
+      "heading": "Finding 17: operator documentation",
+      "level": 3,
+      "body": "**Category:** pass\n\n`docs/operator-commands.md` gains sections for `show-queues`,\n`release-locks`, and `verify-rc-state`, a `--until` row in the halt-after flag\ntable, prose on why `--until` is rc-scope only, and an error-key table whose\n`halt-after.until_scope_mismatch` and `halt-after.until_malformed` message\nstrings match what the script actually printed in Finding 10.\n`docs/operator-api.md` documents all seven new endpoints with their\nparameters, including the two non-obvious ones (`verify-rc-state` maps\n`project` to a positional argument, not a `--project` flag;\n`GET /release-locks` forbids `release`/`force` with 422).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 18,
+      "label": "18",
+      "title": "prerequisite graph and RC state",
+      "heading": "Finding 18: prerequisite graph and RC state",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/verify-rc-state.sh pgai-agent-kanban` reports\n**0 errors, 14 warnings, 89 ok**. Checks a–e (release-state consistency,\nqueue↔folder, status↔marker, Prerequisites references resolve, release-state↔\ngit branch) are all clean. The 14 warnings are check f bundle-invariant notes\nabout PRIORITY backlog entries marked done but not present in any active\nrequirements file — historical bookkeeping that predates this RC and is not\nRC-specific.\n\nIndependently: `## Last Released` reads `v2.19.1` and is well formed;\n`pp_last_released_version` resolves to the same value from the tag\n`ai_v2.19.1`; `v2.20.0` is strictly greater by semver; `## Active RC` reads\n`v2.20.0` and the `ai_rc/v2.20.0` branch exists at the verified commit.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 19,
+      "label": "19",
+      "title": "syntax, shell hygiene, and skip gate",
+      "heading": "Finding 19: syntax, shell hygiene, and skip gate",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash -n` over every changed `*.sh` and `python3 -m py_compile` over every\nchanged `*.py` in the RC diff: clean, no output. The new operator scripts\n(`release-locks.sh`, `halt-after.sh`) carry `set -euo pipefail`; the new\nsourced libraries correctly omit it, matching the convention of every existing\nlibrary in `team/scripts/lib/`. Skip-cites-real-bug gate: no `BUG-SKIP` or\nnon-numeric `BUG-` placeholder in any live test (the only grep hits are\narchived runner logs under `team/tests/artifacts/`), and no skip annotation\ncites a `BUG-NNNN` that lacks a file in `bugs/`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

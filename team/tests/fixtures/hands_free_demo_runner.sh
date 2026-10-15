@@ -3,21 +3,23 @@
 # ==========================
 # Deliberate good-example fixture: a minimal gated-runner-shaped script that
 # reuses the REAL breakage/quality split library (scripts/lib/gated_runner_lint.sh)
-# and the real content-described-notes provenance lint
-# (scripts/lint_comment_provenance.py) to demonstrate the hands-free demo's
-# "runners exit 0 with the findings file written" behavior end to end, without
-# running the full unit/integration suite.
+# and the real hygiene lint's provenance class
+# (scripts/lint_hygiene.py --classes provenance) to demonstrate the
+# hands-free demo's "runners exit 0 with the findings file written" behavior
+# end to end, without running the full unit/integration suite.
 #
 # Given a prose directory and/or a code directory containing a deliberate
 # quality-class finding (a release-notes file, or a code comment, citing a
 # bare internal ledger ID) and a pytest target (file or directory) containing
 # an otherwise-green test module, this runner:
-#   1. Runs the quality-class provenance lint against --prose-dir and/or
-#      --code-dir via the shared gated_runner_run_quality_lint helper — never
-#      fatal, the finding is recorded and printed, and the runner continues
-#      regardless of the lint's own exit code. At least one of --prose-dir /
-#      --code-dir must be supplied; whichever is omitted is scanned as an
-#      empty scratch directory (no findings from that surface).
+#   1. Runs the hygiene lint's provenance class against --prose-dir and/or
+#      --code-dir, merging its own per-instance findings-file output via the
+#      shared gated_runner_merge_findings_file helper — the same wiring the
+#      real gated runners use — never fatal, the finding is recorded and
+#      printed, and the runner continues regardless of what the scan finds.
+#      At least one of --prose-dir / --code-dir must be supplied; whichever
+#      is omitted is scanned as an empty scratch directory (no findings from
+#      that surface).
 #   2. Runs pytest against --pytest-path — this IS fatal (mirrors
 #      run-unit-tests.sh: a real test failure still fails the runner; only
 #      the quality-class lint is non-fatal). Pass the specific test file when
@@ -86,10 +88,10 @@ TestHandsFreeDemoCodeSurfaceLitterEndToEnd).
 
 Options:
   --prose-dir PATH      Directory of .md release-notes-shaped prose scanned
-                         by the real content-described-notes provenance lint
-                         (never fatal — a finding is recorded, not blocking).
+                         by the real hygiene lint's provenance class (never
+                         fatal — a finding is recorded, not blocking).
   --code-dir PATH       Directory of .py/.sh code-shaped files scanned by the
-                         same provenance lint's code surface (never fatal).
+                         same provenance class's code surface (never fatal).
                          At least one of --prose-dir / --code-dir is
                          required; the other is scanned as an empty scratch
                          directory.
@@ -133,19 +135,31 @@ if ! command -v pytest >/dev/null 2>&1 && ! python3 -m pytest --version >/dev/nu
   exit 2
 fi
 
-# --- Quality-class pre-flight: content-described-notes provenance lint ---
+# --- Quality-class pre-flight: hygiene lint (provenance class) ---
 # Whichever of --prose-dir / --code-dir was not supplied is scanned as an
 # empty scratch directory, so the caller can exercise either surface (or
-# both) without the other contributing spurious findings.
+# both) without the other contributing spurious findings. --test-tree-dirs
+# and --config-dirs are each pinned to their own empty scratch directory
+# too, so this fixture never sweeps the real team/tests/ or team/config/
+# trees in as a side effect (lint_hygiene.py's default --config-dirs is
+# team/config/ relative to its own real repo root, which this fixture's
+# unpinned --repo-root would otherwise resolve to).
 _HFDR_EMPTY_PROSE_DIR="$(mktemp -d)"
 _HFDR_EMPTY_CODE_DIR="$(mktemp -d)"
-trap 'rm -rf "${_HFDR_EMPTY_PROSE_DIR}" "${_HFDR_EMPTY_CODE_DIR}"' EXIT
+_HFDR_EMPTY_TEST_TREE_DIR="$(mktemp -d)"
+_HFDR_EMPTY_CONFIG_DIR="$(mktemp -d)"
+_HFDR_HYGIENE_FINDINGS="$(mktemp)"
+trap 'rm -rf "${_HFDR_EMPTY_PROSE_DIR}" "${_HFDR_EMPTY_CODE_DIR}" "${_HFDR_EMPTY_TEST_TREE_DIR}" "${_HFDR_EMPTY_CONFIG_DIR}"; rm -f "${_HFDR_HYGIENE_FINDINGS}"' EXIT
 
-echo "Running content-described-notes provenance lint against prose-dir=${PROSE_DIR:-<none>} code-dir=${CODE_DIR:-<none>}..."
-gated_runner_run_quality_lint "content_described_notes" -- \
-  python3 "${_HFDR_SCRIPTS_DIR}/lint_comment_provenance.py" \
-    --code-dirs "${CODE_DIR:-${_HFDR_EMPTY_CODE_DIR}}" \
-    --prose-dirs "${PROSE_DIR:-${_HFDR_EMPTY_PROSE_DIR}}"
+echo "Running hygiene lint (provenance class) against prose-dir=${PROSE_DIR:-<none>} code-dir=${CODE_DIR:-<none>}..."
+python3 "${_HFDR_SCRIPTS_DIR}/lint_hygiene.py" \
+  --classes provenance \
+  --code-dirs "${CODE_DIR:-${_HFDR_EMPTY_CODE_DIR}}" \
+  --test-tree-dirs "${_HFDR_EMPTY_TEST_TREE_DIR}" \
+  --prose-dirs "${PROSE_DIR:-${_HFDR_EMPTY_PROSE_DIR}}" \
+  --config-dirs "${_HFDR_EMPTY_CONFIG_DIR}" \
+  --findings-file "${_HFDR_HYGIENE_FINDINGS}"
+gated_runner_merge_findings_file "${_HFDR_HYGIENE_FINDINGS}"
 
 # --- Write the aggregate quality-class findings file (always, per contract) ---
 gated_runner_write_findings_file "${FINDINGS_FILE}" "hands_free_demo_runner.sh"

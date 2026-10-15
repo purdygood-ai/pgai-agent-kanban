@@ -1,0 +1,185 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.11.0 collapses three competing records of task state — queue markers,\n`status.md`, and `release-state.md` — into one truth (`status.md`) with\neverything else a rendering of it. All six deliverables in the requirements\ndocument are implemented, and all five acceptance fixtures were verified twice\nover: once by the RC's own integration suite, and once independently by this\nverification, exercising each guard against the failure mode it is supposed to\nprevent rather than reading the code that implements it. Both gated runners\nexited 0 (3321 unit tests passed / 3 skipped; 360 integration tests passed / 1\nskipped). Pre-flight merge verification passed, the prerequisite graph is\nacyclic with every reference resolving, no empty commits are present in the RC\nrange, and the build ran end to end with no manual intervention.\n\nFour follow-ups are filed. Two are pre-existing defects the spot-check\nsurfaced (`verify-rc-state.sh` ignores `branch_prefix`; the generated queue\nlegend omits `[B]`), one is a corner of deliverable 4 the conversion did not\nreach (a test-only wake provider still takes the shared repo lock raw, and its\ntruncating open wipes a live holder's provenance record), and one is a\nquality-class lint the RC's own line-shifts tripped (two census Locator Index\nentries went stale). None prevents the release from being operated; all four go\nto the next iteration.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "All six requirements deliverables implemented and behaviourally verified",
+      "heading": "Finding 1: All six requirements deliverables implemented and behaviourally verified",
+      "level": 3,
+      "body": "**Category:** pass\n\nEach deliverable was exercised against its own failure mode (Step 6.5), not\nmerely read.\n\n**D1 — discovery/idle checks read `status.md`, never raw queue markers, enforced.**\n`_disc_chain_idle` and `_disc_pm_ticket_in_flight` (`team/scripts/lib/discovery_guards.sh`)\nnow resolve every backlog entry through the new `_disc_task_terminal`, which\nreads that task's own `## State`. The rewrite also fixes a second, independent\nbug the marker read was hiding: the old gate inspected only the *tail* entry of\neach backlog, so an earlier still-WORKING task was invisible. Driven directly\nagainst a synthetic kanban root, all four arms behave correctly:\n\n| Fixture | Result |\n|---|---|\n| stale `[b]` marker over a `DONE` status.md | gate OPEN — discovery proceeds |\n| `[x]` marker over a `WORKING` status.md | gate CLOSED, log names the task and its state |\n| `[x]` marker over an unparseable status.md | gate CLOSED (conservative) |\n| backlog names a task with no folder | gate OPEN, logged as a distinct NOTE |\n\nThe \"enforced\" half is real: `team/scripts/lint_raw_marker_read.py` (new,\nwired into `run-unit-tests.sh` as a CONVERT-class quality lint) reports OK on\nthe current tree, and when the pre-fix `\\[([^]]*)\\]` capture shape was\nreintroduced into a copy of `discovery_guards.sh`, the lint caught it and\nprinted a remedy naming `_disc_task_terminal` as the pattern to follow.\n\n**D2 — atomic transitions through one write path.** `transition_task_state`\n(`team/scripts/lib/wake_task_transition.sh`, new) owns the sole state→marker\ntable and snapshots both surfaces before writing either. Exercised:\n\n- queue entry missing → refuses `wake.transition.marker-write-failed`,\n  **rolls `## State` back**; both surfaces byte-identical to their pre-call\n  values (verified by comparison, not by inspection).\n- invalid target state → refuses `wake.transition.invalid-state`, touches\n  nothing.\n- missing `status.md` → refuses `wake.transition.status-missing`.\n- happy path → `## State` = DONE and marker `[x]` together, exit 0.\n\nBoth named callers use it: the watchdog (`reconcile_stale_active`,\n`wake_task_state.sh`) and self-correction (`handle_working_after_exit`,\n`wake_lifecycle.sh`), each via the shared `zero_progress_advance_or_escalate`.\n\n**D3 — one validating release-state loader, shared by both readers.**\n`RELEASE_STATE_SCHEMA` in `team/pgai_agent_kanban/cm/read_state_field.py` names\nall four fields, their accepted shapes, and whether the heading may be absent;\n`load_release_state` raises through the shared dual-channel contract. The\n`--validate` CLI is what `verify-rc-state.sh` Check A now calls (via\n`pp_run_ops`), so the two cannot disagree — the script's own duplicate\n`_is_valid_iso8601` helper and its four hand-rolled format branches were\ndeleted in this RC. Run against the live file, Check A reports OK on all four\nfields. The `NONE` fixture the requirements name refuses exactly as specified:\n\n```\nActive RC\tERROR\t'## Active RC' is 'NONE', which is not one of: 'none' or vX.Y.Z — remedy: set '## Active RC' to one of: 'none' or vX.Y.Z, then re-run\n```\n\n**D4 — lock provenance required.** `pgai_lock_acquire`\n(`team/scripts/lib/lock_provenance.sh`, new) refuses with return 2 and the\n`lock.provenance.incomplete` contract when *any* of holder/pid/op/task is\nblank — verified one field at a time, all four — and takes no lock (the lock\nfile was never created). A fully provenanced acquire writes the four-line\nrecord; a contending acquire declines with return 1 and names the holder\nverbatim; release clears the record. See Finding 3 for the one call site not\nyet converted.\n\n**D5 — zero-progress cycle cap.** Driven three consecutive times against a\nsynthetic orphaned task with the default cap of 3:\n\n```\ncycle 1 → BACKLOG, marker [ ], Needs Human: no, count 1/3\ncycle 2 → BACKLOG, marker [ ], Needs Human: no, count 2/3\ncycle 3 → BLOCKED, marker [B], Needs Human: yes,  count 3/3\n```\n\nAt the cap, `## Blockers` carries the full dual-channel block keyed\n`wake.reconcile.zero-progress-cap` with a runnable remedy. The counter is\ndurable (`## Zero Progress` in `status.md`), survives BACKLOG promotion, is\nreset only by `wd_finalize_task.sh` when the task moved under its own power,\nand is a genuinely separate counter from `## Transient Retry`. The cap is\nconfigurable end to end: `kanban.cfg [wake] zero_progress_cap` → `config_loader.sh`\n→ `ZERO_PROGRESS_CAP` → `zero_progress_cap()`, documented in\n`kanban.cfg_example`. The requirement's \"covers the exit-0 turn-end variant\"\nis met — `handle_working_after_exit`'s non-transient branch routes through the\nsame shared core.\n\n**D6 — contention retry.** `wake_common_run` collects projects whose\n`run_project_chain` returned 3 (repo-lock contention) into `_CONTENDED_PROJECTS`\nand gives each exactly one more attempt after every project has had its\nordinary turn — never a loop, never a sleep-poll, never a blocking flock. The\nretry pass re-evaluates the per-project HALT fast-exit fresh, re-exports the\nper-project environment, and respects the batch runtime budget both before the\npass and between projects within it. Verified end to end by the RC's own\nreal-subprocess integration coverage (see Finding 7).\n\n---",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "`verify-rc-state.sh` Check e ignores `branch_prefix` and always errors on prefixed projects",
+      "heading": "Finding 2: `verify-rc-state.sh` Check e ignores `branch_prefix` and always errors on prefixed projects",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (a read-only operator diagnostic; no automated gate consumes its exit code, and no chain behaviour depends on it)\n**Regression:** no (`_check_e` is not in this RC's diff at all — `git diff ai_main..ai_rc/v2.11.0 -- team/scripts/verify-rc-state.sh` touches only Check A and the deleted `_is_valid_iso8601` helper; the defect predates this release)\n**Integrity Damage:** no\n**Filed As:** BUG-0193 (Path C-A — filed as BUG — code defect / regression / test failure)\n\nRunning the checker against the live project during Step 6.11:\n\n```\n--- Check e: release-state.md <-> git branch consistency ---\n[ERROR] release-state.md Active RC=v2.11.0 but local branch rc/v2.11.0 does not exist in $HOME/develop/pgai-agent-kanban\n\nverify-rc-state: 1 errors, 14 warnings, 36 ok    (exit 1)\n```\n\nThe branch exists — as `ai_rc/v2.11.0`, because the project declares\n`branch_prefix = ai_`. Check e builds `local rc_branch=\"rc/${active_rc}\"` and\nglobs `git branch --list 'rc/*'`, applying no prefix, even though the script\nalready sources `lib/project_paths.sh` and so has `pp_prefix_branch` in\nprocess. The `Active RC = none` arm is blind in the opposite direction: an\norphaned `ai_rc/*` branch would never be reported.\n\nThis is worth more than its systemic risk suggests because `docs/OPERATIONS.md`\ntells operators to run this exact command after unwinding an RC and states\n\"After a clean cancellation, `verify-rc-state.sh` should exit 0.\" That success\ncondition is unreachable on any prefixed project, which teaches operators to\nignore the exit code of the one tool documented as the post-unwind safety net.\n\nNote that this RC's own change to the *same script* is correct and verified:\nCheck A now delegates every field-format judgement to the shared validator and\nreports OK on all four fields.\n\n---",
+      "filed_as": "BUG-0193",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (a read-only operator diagnostic; no automated gate consumes its exit code, and no chain behaviour depends on it)",
+        "regression": "no (`_check_e` is not in this RC's diff at all — `git diff ai_main..ai_rc/v2.11.0 -- team/scripts/verify-rc-state.sh` touches only Check A and the deleted `_is_valid_iso8601` helper; the defect predates this release)",
+        "filed_as": "BUG-0193 (Path C-A — filed as BUG — code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "A wake provider still takes the shared repo lock without provenance — and its truncating open destroys the live holder's record",
+      "heading": "Finding 3: A wake provider still takes the shared repo lock without provenance — and its truncating open destroys the live holder's record",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (`harness.sh` is a test-only stub provider, explicitly never active in a live install, and its tests run against sandboxed temp roots; flock exclusion itself is unaffected)\n**Regression:** no (`team/scripts/wake/harness.sh` is not in this RC's diff; the acquisition shape predates the release — what is new is the \"ALWAYS\" claim it does not satisfy)\n**Integrity Damage:** no (the destroyed record is diagnostic provenance, not task state or queue state; exclusion and correctness rest entirely on flock, which is unaffected)\n**Filed As:** BUG-0194 (Path C-A)\n\nDeliverable 4 says provenance is *always* populated. Three of the four\nacquisition sites were converted (`wake_driver.sh`, `overwatch_lib.sh`,\n`overwatch_protocol.sh`). The fourth was not:\n\n```bash\n# team/scripts/wake/harness.sh\n  _lock_file=\"$(pp_repo_lock_path \"$project_name\")\" || return 0\n  local _lock_fd\n  exec {_lock_fd}>\"$_lock_file\"\n  if ! flock -n \"$_lock_fd\"; then\n```\n\nTwo consequences, the second concrete and reproduced. `exec {fd}>PATH` opens\nwith `O_TRUNC`, and it does so *before* `flock -n` is evaluated — so a\ncorrectly-declined acquisition still wipes the incumbent's record. This is\nprecisely the failure `lock_provenance.sh`'s own header says its append-mode\nopen exists to prevent. Demonstrated by replaying the harness's exact shape\nagainst a provenanced lock:\n\n```\nprovenance before harness-style attempt:\nholder=wake-driver\npid=668522\nop=wake-chain:proj\ntask=none\nharness-style acquire correctly declined (contended)\nprovenance AFTER harness-style attempt:\n(end)\n```\n\nThe only other raw `flock` in `team/scripts/` is\n`temp_purge.sh:196` (`flock -n \"$lock_file\" true`), which is a liveness probe,\nnot an acquisition, and is correctly out of scope.\n\n---",
+      "filed_as": "BUG-0194",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no (the destroyed record is diagnostic provenance, not task state or queue state; exclusion and correctness rest entirely on flock, which is unaffected)"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (`harness.sh` is a test-only stub provider, explicitly never active in a live install, and its tests run against sandboxed temp roots; flock exclusion itself is unaffected)",
+        "regression": "no (`team/scripts/wake/harness.sh` is not in this RC's diff; the acquisition shape predates the release — what is new is the \"ALWAYS\" claim it does not satisfy)",
+        "filed_as": "BUG-0194 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Generated queue-file marker legend omits `[B]`, contradicting the vocabulary this RC canonised",
+      "heading": "Finding 4: Generated queue-file marker legend omits `[B]`, contradicting the vocabulary this RC canonised",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (documentation drift in a generator; no runtime effect)\n**Regression:** no (`team/scripts/create-project.sh` is not in this RC's diff; the legend predates the release — this RC is what makes the omission newly inconsistent, by canonising the five-marker table)\n**Integrity Damage:** no\n**Filed As:** BUG-0195 (Path C-A)\n\nThe WRITER deliverable states the full marker vocabulary in `team/SOP-core.md`\nas five values — `[ ]`, `[W]`, `[A]`, `[B]`, `[x]` — matching\n`transition_task_state`'s derivation table exactly. `create-project.sh` stamps\na legend into the header of every queue file it creates, and that legend names\nonly four; `[B]` is absent. Every existing project's queue files carry the same\nfour-value header, having been generated by this path.\n\nThe omission is newly load-bearing: v2.11.0's zero-progress ceiling\ndeliberately parks a task at `[B]` + `Needs Human: yes`, so `[B]` is now\nwritten on a documented escalation path but explained nowhere a queue reader\nlooks.\n\n---",
+      "filed_as": "BUG-0195",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (documentation drift in a generator; no runtime effect)",
+        "regression": "no (`team/scripts/create-project.sh` is not in this RC's diff; the legend predates the release — this RC is what makes the omission newly inconsistent, by canonising the five-marker table)",
+        "filed_as": "BUG-0195 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Zero-progress escalation leaves a stale `## Summary` from the previous cycle",
+      "heading": "Finding 5: Zero-progress escalation leaves a stale `## Summary` from the previous cycle",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nWhen `zero_progress_advance_or_escalate` escalates at the cap it writes\n`## Blockers` and `## Needs Human` but does not refresh `## Summary`, which\nstill holds the below-cap wording from the prior cycle. Observed on the\nverified fixture:\n\n```\n## State\nBLOCKED\n\n## Summary\nReset to BACKLOG by wake reconciliation: orphaned WORKING task (cycle 2/3).\n\n## Blockers\nerror:   wake.reconcile.zero-progress-cap\nmessage: This task made zero observable progress 3 consecutive times (ceiling 3) ...\n```\n\nThe authoritative fields are all correct and the `## Blockers` block tells the\nwhole story with a runnable remedy, so a reader is not misled about state — but\nthe summary line a dashboard is most likely to surface says \"Reset to BACKLOG\"\nabout a task that was just blocked. Cosmetic; recorded as a caveat rather than\nfiled, since no criterion requires `## Summary` content and filing it would\ninflate the follow-up queue over a wording nit.\n\n---",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Pre-flight, merge, and structural integrity",
+      "heading": "Finding 6: Pre-flight, merge, and structural integrity",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Pre-flight merge verification** passed: no DONE task's feature branch is\n  unmerged, and no BUG-92 zero-commits-ahead anomaly.\n- **Worktree identity:** `git rev-parse HEAD` == `git rev-parse ai_rc/v2.11.0`\n  == `ac4f15a`; `git status --short` empty; `git stash list` empty.\n- **Empty commits:** none. Every non-merge commit in `ai_main..ai_rc/v2.11.0`\n  has a tree differing from its parent — the BUG-0183 / BUG-0192 pattern that\n  recurred through the v2.10.x line does not recur here.\n- **Structural:** all new files present; `lock_provenance.sh` and\n  `wake_task_transition.sh` are mode 755; `bash -n` clean on all 14 changed\n  shell files; `py_compile` clean on all changed Python.\n- **Prerequisite graph:** 12 tasks, no cycles, every referenced task folder\n  exists, bookends correct (CM-open first, TESTER then CM-release last).\n- **`release-state.md` (Step 6.1):** `Active RC = v2.11.0`, `RC Opened At`\n  well-formed ISO-8601, `RC Opened By Task` names the CM task,\n  `Last Released = v2.10.4` well-formed. `pp_last_released_version` returns\n  `v2.10.4` from git tags and `semver_gt v2.11.0 v2.10.4` holds. No drift.\n- **Constraint negatives (Step 6.9):** no hardcoded credential-shaped\n  assignments and no bare-`/tmp` literals in the RC's added lines.\n- **Skip-cites-real-bug (Step 6.13):** no placeholder skip IDs and no skip\n  annotation citing a non-existent bug. (`grep` matches under\n  `team/tests/artifacts/*.log` are archived runner logs, not skip\n  annotations.)\n- **Coding standards (Step 6.14):** the new lint ships a `--help` naming every\n  argument; no bug/task ID provenance in any of the four new/heavily-modified\n  non-test files.\n- **Synthetic release simulation (Step 6.8):** triggered, since\n  `read_state_field.py` participates in the release lifecycle.\n  `test_cm_release_synthetic.py` — 15 passed.\n\n---",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "worktree_identity": "git rev-parse HEAD` == `git rev-parse ai_rc/v2.11.0",
+        "empty_commits": "none. Every non-merge commit in `ai_main..ai_rc/v2.11.0`",
+        "structural": "all new files present; `lock_provenance.sh` and",
+        "prerequisite_graph": "12 tasks, no cycles, every referenced task folder",
+        "constraint_negatives_step_6_9": "no hardcoded credential-shaped",
+        "skip_cites_real_bug_step_6_13": "no placeholder skip IDs and no skip",
+        "coding_standards_step_6_14": "the new lint ships a `--help` naming every",
+        "synthetic_release_simulation_step_6_8": "triggered, since"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Test fidelity of the RC's own new coverage",
+      "heading": "Finding 7: Test fidelity of the RC's own new coverage",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe acceptance suite is not a sanitized proxy. `test_wake_contention_retry.py`\nand `test_single_truth_state_integrity.py`'s fifth fixture drive a real\n`bash scripts/wake/claude.sh --agent=writer` subprocess against a real\nsimulated installed root, with a genuine background process holding the real\nrepo flock — so strict-mode bash, the installed tree layout, and multi-project\niteration are all exercised for real rather than simulated in Python\n(fidelity checklist items 1, 2, 3 and 6). The five acceptance fixtures share\none kanban tree by design, so a regression breaking the compound guarantee\ntrips even when each function still passes in isolation. Re-run standalone in a\nthrowaway root: 9 passed in 17 s.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

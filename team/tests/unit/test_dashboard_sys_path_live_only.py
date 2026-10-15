@@ -23,7 +23,7 @@ Three areas covered:
 
 TEST NAMING
 -----------
-All names describe behavior, not bug IDs (SOP.md Anti-pattern 6).
+All names describe behavior, not bug IDs (roles/TESTER.md Anti-pattern 6).
 """
 
 from __future__ import annotations
@@ -34,6 +34,20 @@ import re
 import subprocess
 import sys
 import types
+
+import pytest
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="dashboard-sys-path-live-only")
 
 
 # ---------------------------------------------------------------------------

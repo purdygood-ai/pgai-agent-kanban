@@ -1,13 +1,13 @@
 """
 test_retry_counter_bundle_family.py
 ====================================
-Integration tests for the v2.0.0 Goal 3 retry counter ("attempt: N in
+Integration tests for the retry counter ("attempt: N in
 release-state/<version>.json, keyed by bundle family") exercised through the
 real cm-open-rc.sh / cm-cancel-rc.sh production entry points — not just the
 Python helper functions in isolation (those are covered by
 test_bundle_family.py and test_write_rc_state_attempt.py).
 
-Coverage (mirrors the task's Acceptance Criteria):
+Coverage:
   - attempt: N is persisted in release-state/<version>.json after a real
     open-rc.sh run against a requirements bundle.
   - The same sorted cargo set rebundled under a new version (open -> cancel
@@ -38,6 +38,18 @@ import subprocess
 from typing import Optional
 
 import pytest
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="retry-counter-bundle-family")
 
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# dashboard-metadata.sh
+# metadata.sh
 # Emits a formatted metadata overview for the pgai kanban dashboard.
 #
-# Designed to run under `watch -n 10 dashboard-metadata.sh` in the
-# tmux `metadata` window created by dashboard-create.sh.
+# Designed to run under `watch -n 10 metadata.sh` in the
+# tmux `metadata` window created by dashboard/create.sh.
 #
 # Output sections:
 #   === Kanban Metadata ===
@@ -14,7 +14,7 @@
 #     max minor, max major
 #
 # Usage:
-#   dashboard-metadata.sh [--kanban-root <path>] [--no-color]
+#   metadata.sh [--kanban-root <path>] [--no-color]
 #
 # Options:
 #   --kanban-root <path>   Override the kanban root directory
@@ -54,7 +54,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -35
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:28}"
       exit 0
       ;;
     *)
@@ -84,8 +89,13 @@ source "${SCRIPT_DIR}/../lib/projects.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh).
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
+
 # ---------------------------------------------------------------------------
-# Source optional config files (same pattern as dashboard-status-bottom.sh)
+# Source optional config files (same pattern as dashboard/status-bottom.sh)
 # so PGAI_KANBAN_PM_MODE is available in subshell invocations.
 # ---------------------------------------------------------------------------
 [[ -f "$KANBAN_ROOT/bashrc" ]]               && source "$KANBAN_ROOT/bashrc"            2>/dev/null || true
@@ -110,26 +120,12 @@ if [[ "$NO_COLOR_ARG" == "true" ]] || \
   USE_COLOR=false
 fi
 
-_c() {
-  [[ "$USE_COLOR" != "true" ]] && { printf ''; return; }
-  case "$1" in
-    bold)    printf '\033[1m' ;;
-    dim)     printf '\033[2m' ;;
-    reset)   printf '\033[0m' ;;
-    cyan)    printf '\033[0;36m' ;;
-    green)   printf '\033[0;32m' ;;
-    yellow)  printf '\033[0;33m' ;;
-    white)   printf '\033[0;37m' ;;
-    *)       printf '' ;;
-  esac
-}
-
-RESET="$(_c reset)"
-BOLD="$(_c bold)"
-DIM="$(_c dim)"
-CYAN="$(_c cyan)"
-GREEN="$(_c green)"
-YELLOW="$(_c yellow)"
+RESET="$(ansi_code reset)"
+BOLD="$(ansi_code bold)"
+DIM="$(ansi_code dim)"
+CYAN="$(ansi_code cyan)"
+GREEN="$(ansi_code green)"
+YELLOW="$(ansi_code yellow)"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -146,40 +142,31 @@ _cfg_field() {
     | tr -d '[:space:]'
 }
 
-# Read Active RC from release-state.md
-# Liberal parse — read first ## Active RC header only, trim whitespace,
-# validate: accept only vX.Y.Z semver; anything else (empty, malformed, 'none') → "none".
-_active_rc() {
-  local project_name="$1"
-  local release_state
-  release_state="$(pp_project_root "$project_name" 2>/dev/null)/release-state.md" || { echo "none"; return; }
-
-  if [[ ! -f "$release_state" ]]; then
-    echo "none"
-    return
-  fi
-
-  local rc
-  rc="$(awk '/^##[[:space:]]+Active RC/{found=1;next} found && /^[[:space:]]*$/{next} found{print; exit}' \
-        "$release_state" 2>/dev/null | tr -d '[:space:]')"
-
-  if [[ "$rc" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "$rc"
-  else
-    echo "none"
-  fi
-}
+# _active_rc <project> none -- a project's Active RC, or "none" (lib/cm/common.sh).
+# shellcheck source=../lib/cm/common.sh
+source "${SCRIPT_DIR}/../lib/cm/common.sh"
 
 # Unset placeholder (em-dash fallback to hyphen if locale is restrictive)
 UNSET_PLACEHOLDER="—"
 
-# ---------------------------------------------------------------------------
-# Section header helper
-# ---------------------------------------------------------------------------
-section_header() {
-  local title="$1"
-  printf '%s%s%s\n' "${CYAN}${BOLD}" "=== ${title} ===" "$RESET"
+# _ceiling_cell <accessor> <project> -- one version ceiling as the pane shows
+# it: the number in effect, "none" for an explicit no-ceiling, or "invalid"
+# when the accessor refuses a malformed value (its own stderr line, naming
+# the file, key and value, is not discarded).
+_ceiling_cell() {
+  local _value
+  if _value="$("$1" "$2")"; then
+    printf '%s' "${_value:-none}"
+  else
+    printf 'invalid'
+  fi
 }
+
+# ---------------------------------------------------------------------------
+# Section header helper (lib/dashboard_common.sh)
+# ---------------------------------------------------------------------------
+# shellcheck source=../lib/dashboard_common.sh
+source "${SCRIPT_DIR}/../lib/dashboard_common.sh"
 
 # ---------------------------------------------------------------------------
 # Kanban-wide metadata
@@ -255,21 +242,19 @@ else
     fi
 
     # active RC
-    _active_rc_val="$(_active_rc "$_proj")"
+    _active_rc_val="$(_active_rc "$_proj" none)"
 
     # last released (via pp_last_released_version — uses git tags on dev tree)
     _last_released="$(pp_last_released_version "$_proj" 2>/dev/null || echo "v0.0.0")"
     [[ -z "$_last_released" ]] && _last_released="v0.0.0"
 
-    # max_minor / max_major (via pp_max_minor / pp_max_major helpers)
-    _max_minor="$(pp_max_minor "$_proj" 2>/dev/null || echo "")"
-    [[ -z "$_max_minor" ]] && _max_minor="$UNSET_PLACEHOLDER"
-
-    _max_major="$(pp_max_major "$_proj" 2>/dev/null || echo "")"
-    [[ -z "$_max_major" ]] && _max_major="$UNSET_PLACEHOLDER"
-
-    _max_patch="$(pp_max_patch "$_proj" 2>/dev/null || echo "")"
-    [[ -z "$_max_patch" ]] && _max_patch="0"
+    # Version ceilings in effect (pp_max_* apply the documented default to an
+    # absent key and echo empty for an explicit `none`). A malformed value
+    # shows as "invalid"; its accessor's one line naming the file, key and
+    # value is left on stderr.
+    _max_minor="$(_ceiling_cell pp_max_minor "$_proj")"
+    _max_major="$(_ceiling_cell pp_max_major "$_proj")"
+    _max_patch="$(_ceiling_cell pp_max_patch "$_proj")"
 
     # Print per-project row — indented 2 spaces, values aligned at col 20
     printf '  %-16s %s\n' "workflow:"      "$_workflow"

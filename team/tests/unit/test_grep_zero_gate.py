@@ -28,7 +28,20 @@ the dispatcher sources them, so the type name appearing there is legitimate.
 Negative proof: a temp file containing a synthetic violation is confirmed to
 match the pattern, showing the gate can catch new violations if they appear.
 
-TEST NAMING CONVENTION (SOP.md Anti-pattern 6)
+IDENTIFIER-BY-NECESSITY
+------------------------
+This gate is targeted at the identifier ``workflow_type`` itself, not a
+content-independent behavior shape — and that is by necessity, not
+oversight. ``workflow_type`` is the one canonical field name for this
+concept across the whole system (project.cfg, task README fields, the
+materializer, the workflow dispatcher); there is no synonym or alternate
+spelling in legitimate use, so a scan keyed on the name does not have the
+"identifier renamed, behavior walks back in" failure mode removal-work
+gates guard against — renaming the field itself would be a schema change
+visible everywhere else this name appears, not a quiet local rename that
+slips past this one gate.
+
+TEST NAMING CONVENTION (roles/TESTER.md Anti-pattern 6)
 -----------------------------------------------
 All test function names describe behavior, not the bug ID or task ID that
 prompted them.
@@ -39,6 +52,20 @@ from __future__ import annotations
 import pathlib
 import re
 import subprocess
+
+import pytest
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="grep-zero-gate")
 
 
 # ---------------------------------------------------------------------------
@@ -394,4 +421,156 @@ def test_import_form_pattern_does_not_match_live_install_form(
     assert not matching_lines, (
         f"Pattern matched live-install import form that should not be flagged: "
         f"{matching_lines!r}.  Only 'from team.' and 'import team.' must match."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ship-path gate: the blocked-interval ledger writer never reaches the CM
+# release decision logic
+# ---------------------------------------------------------------------------
+#
+# WHY THIS EXISTS
+# ----------------
+# The rc-metrics Blocked column is measurement/display only (Enforcement
+# Class: quality throughout) -- nothing in its ledger, aggregator, or
+# renderer may gate, block, or alter ship behavior. The two stamping
+# functions (append_block_start / append_block_end) and the ledger module
+# itself are written from exactly two places: the wake path's HALT-skip
+# detection and the status-writer's BLOCKED transition. If either name ever
+# reached team/scripts/cm/release.sh, the release engine's own decision of
+# whether to ship would depend on a measurement path never designed to gate
+# anything -- this gate keeps that dependency from forming silently.
+#
+# SCOPE
+# -----
+# Pattern : append_block_start | append_block_end | blocked_ledger
+# Subject : team/scripts/cm/release.sh, read whole (no head, no early exit)
+#
+# NEGATIVE PROOF
+# ---------------
+# A synthetic copy of release.sh's own shape, carrying an injected call to
+# one of the three names, is confirmed to match -- so this gate is shown to
+# fire on a real violation, not merely to read as clean because the pattern
+# never matches anything.
+#
+# IDENTIFIER-BY-NECESSITY
+# ------------------------
+# This gate targets three literal identifiers, not a content-independent
+# behavior shape -- and that is by necessity. There is exactly one ledger
+# reader/writer module in the tree (blocked_ledger.py) and exactly two
+# stamping functions it exports; a rename of any of the three is a visible,
+# tree-wide API change (every call site, and every other test importing
+# these names, moves with it), never a quiet local rename that could slip
+# past a name-keyed gate the way a renamed internal helper could.
+
+_LEDGER_WRITER_PATTERN = re.compile(
+    r"\bappend_block_start\b|\bappend_block_end\b|\bblocked_ledger\b"
+)
+
+_RELEASE_SCRIPT_RELATIVE_PATH = "team/scripts/cm/release.sh"
+
+
+def _find_ledger_writer_references_in_release_script() -> list[str]:
+    """Return '<lineno>:<content>' for each ledger-writer reference found
+    anywhere in team/scripts/cm/release.sh. Returns an empty list when the
+    invariant holds. Reads the whole file -- no head, no early break."""
+    root = _repo_root()
+    release_script = root / _RELEASE_SCRIPT_RELATIVE_PATH
+
+    if not release_script.is_file():
+        raise FileNotFoundError(
+            f"{_RELEASE_SCRIPT_RELATIVE_PATH} not found at {release_script}; "
+            "repo root resolution may be wrong."
+        )
+
+    lines = release_script.read_text(encoding="utf-8", errors="replace").splitlines()
+    return [
+        f"{lineno}:{line.rstrip()}"
+        for lineno, line in enumerate(lines, start=1)
+        if _LEDGER_WRITER_PATTERN.search(line)
+    ]
+
+
+def test_blocked_ledger_writer_absent_from_release_decision_logic() -> None:
+    """The blocked-interval ledger writer names never appear in
+    team/scripts/cm/release.sh.
+
+    The rc-metrics Blocked column is quality-class measurement/display
+    only; the release engine's ship/no-ship decision must never come to
+    depend on it. append_block_start, append_block_end, and the
+    blocked_ledger module name are stamped only from the wake path's
+    HALT-skip detection and the status-writer's BLOCKED transition --
+    never from release.sh.
+    """
+    violations = _find_ledger_writer_references_in_release_script()
+    assert not violations, (
+        f"ship-path invariant violated — {len(violations)} blocked-ledger "
+        f"writer reference(s) found in {_RELEASE_SCRIPT_RELATIVE_PATH}:\n"
+        + "\n".join(f"  {v}" for v in violations)
+        + "\n\nThe Blocked column is measurement/display only; the release "
+        "decision path must not read or write the blocked-interval ledger. "
+        "Remove the reference from release.sh's decision logic."
+    )
+
+
+def test_ledger_writer_pattern_detects_synthetic_violation(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The ledger-writer pattern matches a known-bad call injected into a
+    release.sh-shaped script.
+
+    Negative proof: confirms the pattern catches a real violation rather
+    than always reading as clean (a silent pass-through bug in the scan).
+    """
+    bad_script = tmp_path / "bad_release.sh"
+    bad_script.write_text(
+        '#!/usr/bin/env bash\n'
+        '# Synthetic violation for negative-proof test.\n'
+        'if should_ship; then\n'
+        '    python3 -c "from pgai_agent_kanban.metrics.blocked_ledger import append_block_end"\n'
+        '    append_block_start "$ledger_path" "$version" "release:decision" "$(date -Iseconds)"\n'
+        'fi\n',
+        encoding="utf-8",
+    )
+
+    matching_lines = [
+        line
+        for line in bad_script.read_text(encoding="utf-8").splitlines()
+        if _LEDGER_WRITER_PATTERN.search(line)
+    ]
+
+    assert len(matching_lines) >= 2, (
+        f"Expected at least 2 matching lines in the synthetic bad script; "
+        f"got {len(matching_lines)}: {matching_lines!r}.  "
+        "The ledger-writer pattern may not be correct — check _LEDGER_WRITER_PATTERN."
+    )
+
+
+def test_ledger_writer_pattern_does_not_match_unrelated_blocked_mentions(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The pattern does not fire on unrelated, legitimate uses of the word
+    'blocked' (e.g. the BLOCKED task state) that release.sh may otherwise
+    carry -- only the three ledger-specific identifiers trigger it."""
+    clean_script = tmp_path / "clean_release.sh"
+    clean_script.write_text(
+        '#!/usr/bin/env bash\n'
+        '# Legitimate, unrelated uses of "blocked" -- must not match.\n'
+        'echo "task state: BLOCKED"\n'
+        'if [[ "$state" == "BLOCKED" ]]; then\n'
+        '    echo "a task is blocked; this is not the blocked-interval ledger"\n'
+        'fi\n',
+        encoding="utf-8",
+    )
+
+    matching_lines = [
+        line
+        for line in clean_script.read_text(encoding="utf-8").splitlines()
+        if _LEDGER_WRITER_PATTERN.search(line)
+    ]
+
+    assert not matching_lines, (
+        f"Pattern matched unrelated 'blocked' mentions that should not be "
+        f"flagged: {matching_lines!r}.  Only append_block_start, "
+        "append_block_end, and blocked_ledger must match."
     )

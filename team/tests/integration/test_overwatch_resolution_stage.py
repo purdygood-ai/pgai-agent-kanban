@@ -1,10 +1,10 @@
 """
 test_overwatch_resolution_stage.py
 ====================================
-Integration tests for the v2.0.0 Goal 2 ("The execution") OVERWATCH
-resolution stage — pgai_agent_kanban.overwatch.resolution_stage.
+Integration tests for the OVERWATCH resolution stage's execution
+behavior — pgai_agent_kanban.overwatch.resolution_stage.
 
-Coverage (mirrors the task's Acceptance Criteria):
+Coverage:
   - Golden path: a matched CANCEL-AND-REBUNDLE row executes the full drill
     through the REAL team/scripts/cm/cancel-rc.sh subprocess (not a mock)
     plus the real wontdo_item/close_item/reset_item ops functions, and
@@ -51,6 +51,18 @@ from pgai_agent_kanban.overwatch.resolution_stage import (
     classify_halt_file,
     run_resolution_stage,
 )
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="overwatch-resolution-stage")
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _CANCEL_RC_SCRIPT = _TEAM_DIR / "scripts" / "cm" / "cancel-rc.sh"
@@ -438,7 +450,7 @@ class TestFailClosedDeclines:
 
 
 # ---------------------------------------------------------------------------
-# The ceiling (v2.0.0 Goal 4) — CODER-20260727-054-ceiling-hard-block-history
+# The ceiling — hard-block after repeated cancel-and-rebundle attempts
 # ---------------------------------------------------------------------------
 
 
@@ -605,7 +617,7 @@ class TestCeilingReached:
 
 
 # ---------------------------------------------------------------------------
-# Missing ceiling config fails loud (v2.0.0 Goal 4, second half)
+# Missing ceiling config fails loud
 # ---------------------------------------------------------------------------
 
 

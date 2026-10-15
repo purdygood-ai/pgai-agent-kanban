@@ -2,7 +2,7 @@
 test_cm_release_hooks.py
 ========================
 Behavioral unit tests for the CM release hook resolution, printing, and
-enforcement subsystem introduced by CODER-20260711-027-resolver-print-enforce-lib.
+enforcement subsystem.
 
 Covers:
   (a) Precedence: cfg > kanban-side > in-repo — all three tiers planted, then
@@ -35,6 +35,18 @@ import subprocess
 import pytest
 
 from tests.unit.shell_harness import run_bash
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="cm-release-hooks")
 
 # Paths to the libraries under test (relative to team/, where pytest runs from).
 _LIB_PROJECT_PATHS = "scripts/lib/project_paths.sh"
@@ -577,11 +589,10 @@ def test_nonexecutable_inrepo_hook_not_silently_skipped(tmp_path: pathlib.Path) 
 
 
 # ---------------------------------------------------------------------------
-# (e2) Retrofit (CODER-20260727-019): full three-part remedy block for the
+# (e2) Retrofit: full three-part remedy block for the
 # non-executable-hook failure — docs/coding-standards.md "Gates prescribe,
-# not just diagnose", classified full-remedy for the pre-tag hook gate in
-# docs/audits/v1.27.2-gate-remedy-census.md (row 24's deterministic
-# sub-case). Covers the filesystem in-repo tier and the RC-branch-aware
+# not just diagnose": the pre-tag hook gate's deterministic sub-case is a
+# full remedy. Covers the filesystem in-repo tier and the RC-branch-aware
 # tiers, plus the CM_HOOK_NONEXEC_PATH / CM_HOOK_NONEXEC_FIX_CMD globals a
 # caller (release.sh) reads to build a placeholder-free HALT message.
 # ---------------------------------------------------------------------------
@@ -675,7 +686,7 @@ def test_nonexecutable_inrepo_hook_remedy_command_clears_the_gate(tmp_path: path
     inrepo_hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-tag.sh"
     _write_hook(inrepo_hook, executable=False)
 
-    # First call: must fail with the fix command captured.
+    # First call: must fail with the printed remedy command captured.
     first = _run_resolve_with_remedy_globals(
         tmp_path, kanban_root, "noexec-remedy4", project_dir / "hooks", dev_tree, phase="pre-tag"
     )
@@ -741,6 +752,12 @@ def test_rc_branch_aware_nonexecutable_hook_prints_full_remedy_block(
 # non-executable hook, proving the HALT reason release.sh builds from
 # CM_HOOK_NONEXEC_PATH / CM_HOOK_NONEXEC_FIX_CMD carries the derived literal
 # values rather than the pre-retrofit "(path shown above)" placeholder.
+#
+# The call site lives inside _cm_run_pre_tag_hook_step() (v2.9.20
+# engine-decomposition threaded it into release_finalize.sh as a callback —
+# see that file's "Why two callbacks"), so it is indented one function-body
+# level rather than sitting at column 0; the match below compares stripped
+# lines so the extraction is indentation-agnostic.
 # ---------------------------------------------------------------------------
 
 _RELEASE_SH = "scripts/cm/release.sh"
@@ -754,9 +771,9 @@ def _extract_pretag_call_site() -> str:
     start = next(
         i
         for i, l in enumerate(lines)
-        if l.startswith('cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-tag"')
+        if l.lstrip().startswith('cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-tag"')
     )
-    end = next(i for i in range(start + 1, len(lines)) if lines[i] == "}")
+    end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == "}")
     return "\n".join(lines[start : end + 1])
 
 

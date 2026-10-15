@@ -182,7 +182,7 @@
           <h3>Drop the first requirement</h3>
           <p>Deposit the <span class="mono">v0.0.1</span> requirement into the project. <span class="mono">intake.sh</span> is a dumb router — it places the file by name; it doesn't validate contents.</p>
           <div class="cmd"><span class="lbl">copy · paste</span>scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span> \
-  <span class="p">v0.0.1-three-bears-story-20260604.md</span></div>
+  <span class="f">--file</span> <span class="p">demos/three-bears-demo/intake/v0.0.1-three-bears-story.md</span></div>
           <p style="font-size:.86rem; color:var(--muted);">The filename's <span class="mono">vX.Y.*</span> prefix routes it to <span class="mono">projects/pgai-three-bears/requirements/</span>. That's the only "command" the build needs — the chain takes it from here on the next cron wake.</p>
         </div>
       </div>
@@ -192,6 +192,7 @@
         <div class="sc">
           <h3>Watch it on the dashboard</h3>
           <p>Two views you'll live in: the <b>main</b> window (window&nbsp;0) for at-a-glance progress, and the <b>visibility</b> window (window&nbsp;1) for the per-agent columns.</p>
+          <p style="font-size:.86rem; color:var(--muted);">The terminal panels on this page are example captures from a reference run. The kanban version in the status bar, the times, task IDs and figures on your own dashboard will differ.</p>
 
           <div class="term">
             <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 0 · main</span></div>
@@ -219,7 +220,7 @@
 <span class="statusbar">0:main* 1:visibility 2:attention 5:metrics 6:logs 9:terminal
 v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T01:58:04</span></pre>
           </div>
-          <p class="cap">Window 0 — progress bars per project + the staggered wake schedule. WRITER is mid-task on v0.0.1.</p>
+          <p class="cap">Example capture · Window 0 — progress bars per project + the staggered wake schedule. WRITER is mid-task on v0.0.1.</p>
 
           <div class="term">
             <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">tmux · window 1 · visibility</span></div>
@@ -260,7 +261,7 @@ v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T01
               </div>
             </div>
           </div>
-          <p class="cap">Window 1 — the eight-column board (all three intake lanes + the five agents), each column ruled and left-justified like the live dashboard. Leading squares are project color: <span class="og">orange</span> = pgai-three-bears, <span class="bl">blue</span> = pgai-chomp-man. Text color is status: <span class="gn">done</span>, <span class="yl">running</span>. The WRITER task for bears v0.0.2 is <span class="yl">running</span>.</p>
+          <p class="cap">Example capture · Window 1 — the eight-column board (all three intake lanes + the five agents), each column ruled and left-justified like the live dashboard. Leading squares are project color: <span class="og">orange</span> = pgai-three-bears, <span class="bl">blue</span> = pgai-chomp-man. Text color is status: <span class="gn">done</span>, <span class="yl">running</span>. The WRITER task for bears v0.0.2 is <span class="yl">running</span>.</p>
         </div>
       </div>
 
@@ -285,7 +286,7 @@ v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T01
 <span class="statusbar">0:main 1:visibility 2:attention 5:metrics 6:logs* 9:terminal
 v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T02:00:28</span></pre>
           </div>
-          <p class="cap">Window 6 — the document chain end to end: PM <span class="arrow">→</span> WRITER <span class="arrow">→</span> CM, finishing with the published artifact path.</p>
+          <p class="cap">Example capture · Window 6 — the document chain end to end: PM <span class="arrow">→</span> WRITER <span class="arrow">→</span> CM, finishing with the published artifact path.</p>
         </div>
       </div>
 
@@ -322,7 +323,7 @@ v0.0.1      52.20    22,237   117,786   14,906,163       610,045       7
 <span class="statusbar">0:main 1:visibility 2:attention 5:metrics* 6:logs 9:terminal
 v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T02:01:10</span></pre>
           </div>
-          <p class="cap">Window 5 — wall-time (seconds) and token usage per version. The document workflow reports the same metrics as release.</p>
+          <p class="cap">Example capture · Window 5 — wall-time (seconds) and token usage per version. The document workflow reports the same metrics as release.</p>
         </div>
       </div>
 
@@ -333,10 +334,11 @@ v0.91.0 | PM:auto | <span class="hl">pgai-three-bears</span> | Sat 2026-06-27T02
           <p>This is the part that makes it a <i>workflow</i>, not a one-shot. The <span class="mono">v0.0.2</span>
           requirement tells WRITER to read the <span class="mono">v0.0.1</span> artifact and add a scene. Same command, next file:</p>
           <div class="cmd"><span class="lbl">copy · paste</span>scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span> \
-  <span class="p">v0.0.2-three-bears-friendly-fox-at-the-stream.md</span>
+  <span class="f">--file</span> <span class="p">demos/three-bears-demo/intake/v0.0.2-three-bears-friendly-fox-at-the-stream.md</span>
 
 <span class="c"># then v0.0.3, v0.0.4, v0.0.5 the same way — each reads the prior artifact</span>
-scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span> <span class="p">v0.0.3-bears-add-interior-scene.md</span></div>
+scripts/intake.sh <span class="f">--project</span> <span class="a">pgai-three-bears</span> \
+  <span class="f">--file</span> <span class="p">demos/three-bears-demo/intake/v0.0.3-bears-add-interior-scene.md</span></div>
           <p style="font-size:.86rem; color:var(--muted);">Drop them one at a time. The Active-RC gate serializes them — <span class="mono">v0.0.1</span> fully publishes before <span class="mono">v0.0.2</span> starts — so you can stack the whole arc and walk away.</p>
         </div>
       </div>
@@ -365,7 +367,7 @@ scripts/unhalt.sh <span class="f">--project</span> <span class="a">pgai-three-be
       <dl class="rows">
         <dt>show … --key v0.0.2</dt><dd>print a version's status &amp; paths</dd>
         <dt>close … --key v0.0.2</dt><dd>mark a requirement done by hand</dd>
-        <dt>wontdo … --key v0.0.2</dt><dd>abandon a version you don't want</dd>
+        <dt>close … --key v0.0.2 --state wont-do</dt><dd>abandon a version you don't want</dd>
       </dl>
     </div>
   </section>
@@ -374,7 +376,7 @@ scripts/unhalt.sh <span class="f">--project</span> <span class="a">pgai-three-be
 
 <footer>
   pgai-agent-kanban · document-workflow demo · pgai-three-bears · examples scoped to the managed demo projects ·
-  commands verified against v0.91.x. Pair with the operator cheat sheet for the full command reference.
+  pair with the operator cheat sheet for the full command reference.
 </footer>
 
 </body>

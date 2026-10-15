@@ -1,0 +1,326 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `ai_rc/v2.23.4` (HEAD `9bd522e`, detached worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260916-014-verify-2-23-4`)\nagainst `projects/pgai-agent-kanban/requirements/v2.23.4-bugfix-bundle-20260916.md`.\nThe bundle carries a single item, BUG-0297 (severity `low`): v2.23.3 closed the\ncode-writing lane's `bugs/`-directory write path at the prompt level but shipped\nno test pinning that prose, so a future role-file trim could delete the only\nbarrier with both gated runners still exiting 0. The RC's entire diff against\n`ai_main` is one new file, `team/tests/unit/test_coder_role_forbids_bugs_directory_writes.py`\n(123 lines, 3 tests). Pre-flight merge verification passed; the worktree is clean\nand stash-free; the version ordering is sound. Both gated runners exited 0\n(unit: 4627 passed / 31 skipped in 761.94s; integration: 510 passed / 1 skipped\nin 628.34s) with every quality-class lint OK and zero entries in both findings\nfiles. The RC's guard logic was verified behaviorally in both directions against\nsandboxed copies of the role file, not merely by observing the green suite. The\nrequirements doc's own two mechanical criteria (Python compiles, bash parses)\nwere re-run independently and are clean. No bug, gap, or stale-assertion finding\nwas recorded, so nothing was filed via Path C (autonomous follow-up filing —\nnon-blocking).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Deliverable exists and is the only change on the RC",
+      "heading": "Finding 1: Deliverable exists and is the only change on the RC",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git diff --name-only ai_main...ai_rc/v2.23.4` returns exactly one path:\n`team/tests/unit/test_coder_role_forbids_bugs_directory_writes.py`. Two commits\nsit on the RC beyond `ai_main`: `68656a7` (\"Pin the code-writing lane's\nbugs/-directory write boundary with a test\") and the `--no-ff` merge `9bd522e`.\nNo production script, role file, or governance document was touched — consistent\nwith BUG-0297's `## Fix`, which asks for an assertion that pins existing prose\nrather than any change to the prose itself. `team/roles/CODER.md:138` still\ncarries the boundary sentence verbatim.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0297 acceptance bullet 1 — the pin fails on removal, passes on presence, in both demonstrated directions",
+      "heading": "Finding 2: BUG-0297 acceptance bullet 1 — the pin fails on removal, passes on presence, in both demonstrated directions",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0297 asks for a test in `team/tests/` that \"fails when the\nnever-write-into-`bugs/` boundary is removed from `team/roles/CODER.md`, and\npasses with it present. Demonstrate both directions.\" This was verified\nbehaviorally (Step 6.5), independently of the shipped module's own\n`pytest.raises` wrapper, by reconstructing the layout the module resolves\n(`pathlib.Path(__file__).resolve().parents[2] / \"roles\" / \"CODER.md\"`) inside a\nsandbox under `$PGAI_AGENT_KANBAN_TEMP_DIR` and swapping the role file underneath\nthe unmodified test:\n\n- **Negative direction** (role file with the boundary sentence stripped):\n  `3 failed` — `test_shipped_role_file_states_the_boundary`,\n  `test_assertion_is_position_independent`, and\n  `test_assertion_fails_once_the_boundary_sentence_is_removed` all raised, and the\n  failure message named the missing phrase and a remedy. The pin is a real gate,\n  not a tautology that passes against anything.\n- **Positive direction** (shipped role file, unmodified): `3 passed`.\n\nThe negative case was produced by editing a copy under the framework temp root;\nthe shipped `team/roles/CODER.md` was never modified.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "The chosen match phrase balances reword-tolerance against deletion-detection as specified",
+      "heading": "Finding 3: The chosen match phrase balances reword-tolerance against deletion-detection as specified",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nBUG-0297's `## Fix` asks the assertion to \"match on a stable phrase rather than\nthe whole paragraph, so ordinary rewording does not produce a false failure while\ndeletion does.\" PM's handoff explicitly asked TESTER to read the chosen phrase\nrather than trust the green runner. The module pins\n``Never write into a project's `bugs/` directory.`` — the bolded lead sentence\nthat states the prohibition. Two probes against sandboxed copies:\n\n- Rewriting all four explanatory sentences that follow the lead sentence (who may\n  file, what to do with a mid-task defect, the `bug_backlog.md` exemption), leaving\n  the lead sentence intact: `3 passed`. Ordinary paragraph rewording does not\n  produce a false failure, as specified.\n- Replacing the lead sentence with a semantically equivalent reword\n  (`The code-writing lane never writes into a project's \\`bugs/\\` directory.`):\n  `3 failed`.\n\nThe second probe is the documented cost of a literal-phrase pin, and the module's\ndocstring names it as a deliberate choice rather than an oversight. It is recorded\nas a caveat, not a gap: the acceptance criterion asked for deletion-detection, and\na WRITER who rewords the rule itself gets an explicit, actionable failure rather\nthan a silent pass. See `## Caveats` for the one wording nit in the assertion's\nremedy text.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0297 acceptance bullet 2 — both gated runners exit 0",
+      "heading": "Finding 4: BUG-0297 acceptance bullet 2 — both gated runners exit 0",
+      "level": 3,
+      "body": "**Category:** pass\n\nRun from the RC worktree root, with `--coverage`:\n\n- `bash team/scripts/run-unit-tests.sh --coverage` → **UNIT_EXIT = 0**\n  (`4627 passed, 31 skipped in 761.94s`). The new module appears in the run as\n  `tests/unit/test_coder_role_forbids_bugs_directory_writes.py ...` (3 passed).\n- `bash team/scripts/run-integration-tests.sh --coverage` → **INTEGRATION_EXIT = 0**\n  (`510 passed, 1 skipped in 628.34s`).\n\nEvery quality-class lint pre-flight reported OK in both runs: breakage-class gate\n(463 python / 269 shell files, 0 failures), Dockerfile static lint, test\nanti-pattern lint (0 findings across 518 files), skip-cites-real-bug gate,\norphan-test lint (318 test files covered, no orphans — the new module is covered),\nAPI-parity, operator-verb-manifest, upgrade no-temp-copy guard, ICD freshness,\nICD compat, dashboard window census, CHANGELOG freshness, doc-truth lint,\nengine-size/dupe lint, bare-`/tmp` cleanliness, and listener cleanliness. The PASS\nevidence cited here is the gated-runner exit codes, not a direct-pytest \"N passed\"\nline.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0297 acceptance bullet 3 — no new gate introduced",
+      "heading": "Finding 5: BUG-0297 acceptance bullet 3 — no new gate introduced",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe deliverable is an ordinary pytest module. It introduces no refusal site, no\n`exit`/`sys.exit`, no `# CENSUS-ANCHOR:` marker, and no entry in\n`docs/blocking-site-census.md`; it therefore incurs none of the SOP's new-gate\nobligations (census class comment, dual-channel error contract, Locator Index\nentry). The bug's stronger runtime-guard variant (a wake-teardown diff of\n`projects/<name>/bugs/` across a CODER session) was explicitly out of scope and\nwas correctly not built.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Requirements acceptance criterion — all Python files compile cleanly",
+      "heading": "Finding 6: Requirements acceptance criterion — all Python files compile cleanly",
+      "level": 3,
+      "body": "**Category:** pass\n\n`find . -name '*.py' -not -path './.git/*' | xargs python3 -m py_compile` over the\nwhole RC worktree: exit 0, empty stderr.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Requirements acceptance criterion — all bash files pass syntax check",
+      "heading": "Finding 7: Requirements acceptance criterion — all bash files pass syntax check",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash -n` over every `*.sh` in the RC worktree (269 shell files by the runner's own\ncount): zero syntax failures, empty error file. The gated runner's breakage-class\ngate independently confirms the same result.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Pre-flight merge verification",
+      "heading": "Finding 8: Pre-flight merge verification",
+      "level": 3,
+      "body": "**Category:** pass\n\nScanned all task directories under `projects/pgai-agent-kanban/tasks/` for\n`## State: DONE` with a `## Feature Branch` other than `none`. Every such branch\nhas already been deleted post-merge (normal CODER/WRITER Procedure A Step 8\ncleanup), so both Check 1 (ancestor of RC) and Check 2 (BUG-92 zero-commits-ahead)\ncorrectly skip. Script output: `Pre-flight merge verification passed.` No unmerged\nbranch and no BUG-92 anomaly.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Working tree and stash state",
+      "heading": "Finding 9: Working tree and stash state",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` = `9bd522e6cffda8ea10c1e1804286474a59951aa3`, identical to\n`git rev-parse ai_rc/v2.23.4`. `git status --short` empty before and after all\nverification work. `git stash list` empty.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Step 6.1 — release-state.md drift check",
+      "heading": "Finding 10: Step 6.1 — release-state.md drift check",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_last_released_version pgai-agent-kanban` → `v2.23.3` (from git tags).\n`semver_gt v2.23.4 v2.23.3` → true, so the RC version is strictly greater than\nLast Released. `release-state.md` `## Last Released` reads `v2.23.3`, a well-formed\n`vX.Y.Z` value (its presence is by design and is not drift). `## Active RC` is\n`v2.23.4` and the branch `ai_rc/v2.23.4` exists — no state drift. No `HALT`,\n`HALT-AFTER`, `DEFER-LOW-BUGS`, or `SUBSTRATE_BROKEN` flag at either the kanban or\nthe project scope.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Step 6.8 — synthetic release simulation not triggered",
+      "heading": "Finding 11: Step 6.8 — synthetic release simulation not triggered",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe RC diff touches no release-lifecycle file (`cm-release.sh`, `cm-open-rc.sh`,\n`cm-cancel-rc.sh`, `team/scripts/lib/project_paths.sh`, or anything else under\n`team/scripts/`). Trigger condition unmet; step skipped with note, as the procedure\nspecifies.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Step 6.10 — prerequisite dependency graph",
+      "heading": "Finding 12: Step 6.10 — prerequisite dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe v2.23.4 lifecycle is a clean chain with no cycles and no missing task IDs:\n`CM-20260916-013-open-rc-2-23-4` (prereqs: none, DONE) →\n`CODER-20260916-012-pin-coder-bugs-boundary` (DONE) →\n`TESTER-20260916-014-verify-2-23-4` (WORKING, this task) →\n`CM-20260916-016-release-2-23-4` (WAITING; prereqs CODER-012 and TESTER-014).\nBookends are correct — CM-open at the start, TESTER then CM-release at the end.\nNo HUMAN-APPROVE task, consistent with the bundle's `## Human Approval Required: auto`.\nSequence numbers are consistent and non-colliding.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Step 6.13 — skip-cites-real-bug gate",
+      "heading": "Finding 13: Step 6.13 — skip-cites-real-bug gate",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe authoritative check, `lint_skip_bug_gate.sh`, ran inside both gated runners and\nreported `BUG-NNNN file-existence check: 0 missing files` and\n`OK — all skip annotations are compliant`. Running the role file's illustrative\ngrep by hand produces four apparent `MISSING:` lines (`BUG-1234`, `BUG-1235`,\n`BUG-1237`, `BUG-1239`); all four are string fixtures inside\n`team/tests/unit/test_skip_bug_citation_scan.py`, the lint's own test module, and\nthe real gate correctly excludes them. This is a known limitation of the hand-grep,\nnot a defect in the tree — recorded as an observation under `## Caveats`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Step 6.14 — coding-standards spot-check",
+      "heading": "Finding 14: Step 6.14 — coding-standards spot-check",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe RC's only new file was checked against the directives most likely to be\nmissed: no new script and therefore no `--help` obligation (directive 6); no bug\nID, task ID, RC name, or framework version anywhere in its docstrings, comments,\nor assertion messages (directive 8) — the module's only version-shaped token is\nnone, and its only `/tmp` mention is prose explaining that no bare `/tmp` path is\ntouched; no hardcoded operational value an operator would want to change\n(directive 5); no duplicated `lib/` implementation (directives 1 and 3). The\nmodule writes its temporary copies through pytest's `tmp_path`, which the parent\nconftest redirects under `$PGAI_AGENT_KANBAN_TEMP_DIR`, satisfying the\ntemp-file-hygiene rule and the Live-Install Safety boundary (`team/roles/` is\nnever written).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Step 6.11 — spot-check outside the spec",
+      "heading": "Finding 15: Step 6.11 — spot-check outside the spec",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo state drift (release-state consistent with the branch and the git tags; the\nper-RC state file `release-state/v2.23.4.json` exists and matches). No untested\nnew mechanism — the RC's only addition is itself a test, and the orphan-test lint\nconfirms it is collected by a registered root. No sign of a returning prior gap:\nBUG-0297's own precursor (BUG-0295's fourth acceptance bullet) is the thing this\nRC closes, and the boundary sentence it depends on is present at\n`team/roles/CODER.md:138`. `bug_backlog.md` carries BUG-0297 as `[x]` and the bug\nfile's `## Status` is `running`, which is the correct in-flight shape for an item\nbundled into an open RC.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

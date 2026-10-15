@@ -1,0 +1,338 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified release candidate `ai_rc/v2.23.11` (HEAD `f371e14`) of pgai-agent-kanban\nagainst `requirements/v2.23.11-bugfix-bundle-20260917.md` — a three-item BUG\nbundle (BUG-0307 agent-metrics mis-aggregation, BUG-0308 window-4 roster order,\nBUG-0309 untested schedule pane floors) decomposed into four CODER tickets\n(009, 010, 011, 012). Pre-flight was clean: HEAD matches `ai_rc/v2.23.11`, the\nworktree is clean, no stashes, and every DONE task's feature branch was deleted\nafter merging (all four merges are present on the RC as `--no-ff` commits). Both\ngated runners exited 0 with zero lint findings. All three bundled bugs were\nverified behaviorally, not structurally: per-agent wall aggregation was exercised\nagainst a hand-computed fixture task tree, the rendered table was checked against\nthose hand-computed values on both the new and the legacy rollup schema, window-4\nroster ordering was observed stable across 78 seconds spanning a minute boundary,\nand every new guard was mutation-tested in an isolated clone (reverting the sort\nand hardcoding each pane floor each make the new tests fail). All 489 Python files\ncompile and all 281 bash files pass syntax check. Four findings were recorded —\nnone of them affecting the fixes themselves: five task-ID provenance citations\nthat reached shipped test source, the hygiene lint's task-ID pattern that let them\nthrough, a new `create.sh` flag missing from the script's usage block, and a\npre-existing intermittent full-suite flake CODER reported and no bug tracked.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight — RC integrity",
+      "heading": "Finding 1: Pre-flight — RC integrity",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` = `f371e1497587354961b66c19157a4b7ffe93cd93` =\n`git rev-parse ai_rc/v2.23.11`. `git status --porcelain` empty.\n`git stash list` empty. Scanned every task folder under\n`projects/pgai-agent-kanban/tasks/`: no DONE task names a `## Feature Branch`\nthat still exists locally, which is the normal post-merge shape (CODER deletes\nafter merging). All four cycle feature branches are present on the RC as\n`--no-ff` merge commits: `fcb4452` (009), `d53dbae` (010), `5c556e5` (011),\n`f371e14` (012). No branch failed Check 1 or Check 2.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "`release-state.md` schema and version ordering",
+      "heading": "Finding 2: `release-state.md` schema and version ordering",
+      "level": 3,
+      "body": "**Category:** pass\n\nFour fields present and well-formed: `## Active RC` = `v2.23.11`,\n`## RC Opened At` = `2026-09-17T02:34:58+00:00`, `## RC Opened By Task` =\n`CM-20260917-013-open-rc-2-23-11`, `## Last Released` = `v2.23.10`.\n`pp_last_released_version \"pgai-agent-kanban\"` returns `v2.23.10`, and\n`semver_gt \"v2.23.11\" \"v2.23.10\"` (from `team/scripts/lib/semver.sh`) succeeds —\nthe RC under test is strictly greater than the last released version. No inline\nstring comparison was used.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Gated suites",
+      "heading": "Finding 3: Gated suites",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth runners were executed from the worktree root with `--coverage`, output tee'd\nunder `$PGAI_AGENT_KANBAN_TEMP_DIR/tester/`:\n\n- `bash team/scripts/run-unit-tests.sh --coverage` → `UNIT_EXIT=0`\n  (`4678 passed, 31 skipped in 835.39s`, `Unit tests PASSED`,\n  `bare_tmp_cleanliness: OK`, `listener_cleanliness: OK`).\n- `bash team/scripts/run-integration-tests.sh --coverage` → `INTEGRATION_EXIT=0`\n  (`515 passed, 1 skipped in 575.18s`, `Integration tests PASSED`,\n  `bare_tmp_cleanliness: OK`, `listener_cleanliness: OK`).\n\nThe PASS evidence for the suite precondition is these two exit codes, not any\npytest summary line. Direct pytest was used later only as a debugging aid for\nmutation experiments in an isolated clone, and no pytest exit code is quoted as\na verdict anywhere in this report.\n\nCoverage (informational only, never part of the verdict). Field names were read\nfrom the generated JSON rather than assumed:\n\n| Suite | statement % | branch % | blended % |\n|---|---|---|---|\n| unit | 76.59 | 63.13 | 73.48 |\n| integration | 9.87 | 7.97 | 9.43 |\n\nSource: `percent_statements_covered`, `percent_branches_covered`, and\n`percent_covered` in the `totals` object of\n`/tmp/pgai_kanban_tmp/coverage/unit.json` and `.../integration.json`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0307 — per-agent wall aggregation (CODER-009)",
+      "heading": "Finding 4: BUG-0307 — per-agent wall aggregation (CODER-009)",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehavioral, not structural. Built a fixture kanban root with a task tree whose\n`tokens.json` files carry known `elapsed_seconds`, then ran\n`metrics_aggregator.aggregate_rc()` over it.\n\nFixture: coder 600 + 1200 + 1800 s over 3 tasks; tester 300 + 900 s over 2;\ncm 120 s over 1; pm two tasks, one omitting `elapsed_seconds` and one carrying\nthe string `\"abc\"`.\n\nResult:\n\n```\ntasks.by_agent: {\"cm\": 1, \"coder\": 3, \"pm\": 2, \"tester\": 2}\nwall.by_agent : {\"cm\": {\"seconds\": 120, \"task_count\": 1},\n                 \"coder\": {\"seconds\": 3600, \"task_count\": 3},\n                 \"tester\": {\"seconds\": 1200, \"task_count\": 2}}\n```\n\nEvery figure equals the hand-computed sum and count. `pm` is absent from\n`wall.by_agent` entirely — neither a zero entry nor an exception — while still\npresent in `tasks.by_agent` with 2 tasks, which is the required split. The\ntop-level `wall_time_minutes` and the `tasks.by_agent`/`tokens.by_agent` shapes\nare untouched by the diff. Real rollups written before this change\n(`projects/pgai-agent-kanban/metrics/rc/*.json`, e.g. `v2.9.9.json`, whose key\nset carries no `wall`) load through the readers without error — exercised below\nin Finding 5. `_extract_elapsed_seconds()` rejects `bool` explicitly, which\nmatters because `json.loads` returns `True`/`False` as an `int` subclass.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0307 — averaging denominators and rendering (CODER-010)",
+      "heading": "Finding 5: BUG-0307 — averaging denominators and rendering (CODER-010)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`compute_agent_averages()` over the Finding 4 rollup returns per-agent\n`avg_wall_minutes` of coder 20.0, tester 10.0, cm 2.0, and `null` for pm —\nmatching 3600/3/60, 1200/2/60 and 120/1/60 exactly. No two agents share a value.\nRendering the same data through `team/scripts/lib/agent_metrics.py`'s\n`render_project_block()`:\n\n```\nAgent         Avg Wall (min/task)  Avg Tokens (/RC)  Avg Tasks (/RC)\ncm                              2               150                1\ncoder                          20               450                3\npm                             --               300                2\ntester                         10               300                2\n```\n\nEvery averaged column header names its own denominator, and the chosen\ndenominator for Avg Tasks (per invocation RC) is documented in the module\ndocstring, in `docs/operator-api.md`, and in `docs/DASHBOARD-PANES.md`.\n\nThe legacy contract was exercised two ways. Stripping the `wall` key from the\nsame rollup renders `--` in the wall column for all four agents with no\nexception. Rendering the operator's real rollup directory — ten RCs, none of\nwhich has the field — likewise gives `--` for cm/coder/pm/tester/writer while\nthe token and task columns still populate. This is the specific defect BUG-0307\nreported (four agents printing an identical impossible 151 min): the column can\nno longer print a wrong shared number, because the RC-level `wall_time_minutes`\nis no longer read at all.\n\nCLI/REST parity: `team/pgai_agent_kanban/api/tests/test_cli_rest_agent_metrics_parity.py`\npasses (4 tests), and its fixture was strengthened so coder (30 min/task) and\nwriter (45 min/task) share their invocation RCs but must render different\nfigures — a regression to the RC-level join would make them equal and fail the\nassertion. `rc-metrics.sh` and `show-metrics.sh` are byte-unchanged in the diff,\nper the constraint that rc-metrics is already correct.\n\nThe ICD artifact is consistent: running `bash team/scripts/generate-icd.sh`\nleaves `git status --porcelain` empty, so the committed `docs/api/icd.json` and\nthe re-frozen `docs/api/baselines/icd-v1.7.0.json` match a fresh generation.\nEditing the `1.7.0` baseline is the documented behavior of the generator\n(\"Regeneration also re-freezes the current-version baseline … whether or not the\nregeneration accompanied a version bump\"), and the change is description prose\nonly — no path, field, or enum was removed, so the additive-only promise holds.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0308 — window-4 roster ordering (CODER-011)",
+      "heading": "Finding 6: BUG-0308 — window-4 roster ordering (CODER-011)",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo crontab is installed in this environment (`crontab -l` → \"no crontab for\nrocky\"), so the renderer was exercised against a PATH-shimmed fixture crontab\ncarrying the seven documented roster entries, the same mechanism the suite's own\n`_sandbox_crontab` fixture uses.\n\nOrdering is stable and pm-first. Six runs spanning 78 seconds — deliberately\ncrossing a minute boundary so both the even-minute (pm/cm/tester) and\nodd-minute (coder/writer) stagger groups took their turn at being soonest —\nproduced the identical row order every time:\n\n```\nPM CM TESTER CODER WRITER OVERWATCH CLEANUP\n```\n\nUnder the previous soonest-first sort the top row would have changed to CODER\nduring odd minutes. It never moved. All seven roster entries render; no row is\nlost.\n\nGuard exercised by triggering the failure mode, in an isolated clone of the RC\n(not the verification worktree): re-inserting `int_entries.sort(key=lambda x:\nx[1])` makes `test_next_cron_firings_renders_seven_rows_pm_first` and\n`test_next_cron_firings_pm_first_stable_across_real_time` both fail, with the\nfirst reporting `['TESTER','CM','PM','CODER','WRITER','OVERWATCH','CLEANUP']`\nagainst the expected roster order. Reverting the mutation returns the module to\n16/16 green. The new assertions therefore do not depend on the contrived\nwithin-the-minute-second-59 epoch that BUG-0308 identified as the reason the old\ntest passed vacuously; one of the two new tests uses no clock stub at all.\n\nDocumentation landed in the same commit: `next-cron-firings.sh`'s file header no\nlonger claims rows are sorted ascending by time-remaining, states the new\nordering, and states the truncation order explicitly (bottom-drop over a\nroster-ordered list drops the weekly entries first, then works back up through\nCM/TESTER/WRITER/CODER, regardless of which fires soonest). The same truncation\nstatement appears in `docs/DASHBOARD-PANES.md` and in\n`team/config/dashboard_windows.census`'s window-4 pane-0 description. The\nwindow-0 HEADER tile is untouched, as required.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0309 — schedule pane floor coverage (CODER-012)",
+      "heading": "Finding 7: BUG-0309 — schedule pane floor coverage (CODER-012)",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll of BUG-0309's hand-verified assertions are now pinned, and I re-verified each\nby hand against the production code rather than reading the tests alone.\n\nRoster count helper, against PATH-shimmed fixture crontabs:\n\n| Input | `dashboard_schedule_roster_count` |\n|---|---|\n| seven current agent entries | 7 |\n| plus a synthetic eighth entry | 8 |\n| empty crontab | 0 |\n| `crontab -l` exiting non-zero | 0 |\n| missing `cron_parser.py` path | 0 |\n\nThe two creation-time floors, read through the new `--print-schedule-floors`\ndiagnostic path:\n\n```\n7-entry crontab:  SCHEDULE_ROSTER_COUNT=7  HEADER_MIN_H=10  SCHED_FIRINGS_MIN_H=9\n8-entry crontab:  SCHEDULE_ROSTER_COUNT=8  HEADER_MIN_H=11  SCHED_FIRINGS_MIN_H=10\n```\n\nThese match BUG-0309's stated expectations (`HEADER_MIN_H` = 7 + 3,\n`SCHED_FIRINGS_MIN_H` = 7 + 2) and track the eighth entry, confirming the\npre-OVERWATCH hardcoded-five assumption is gone.\n\nGuard exercised by triggering the failure mode, twice, in the isolated clone.\nReplacing `SCHEDULE_ROSTER_COUNT` with a literal `5` in `HEADER_MIN_H` fails\n`TestScheduleCreationFloors::test_floors_match_roster_count_plus_reserved_rows`\nand `::test_floors_track_a_synthetic_eighth_roster_entry` (`assert 8 == (8 + 3)`).\nThe same mutation applied to `SCHED_FIRINGS_MIN_H` fails the same two tests\n(`assert 7 == (7 + 2)`). Both reverted cleanly to 16/16 green. This is the exact\nregression BUG-0309 said would pass unnoticed on the previous tree, and it no\nlonger does. The floor assertions are computed from roster count plus each\nrenderer's reserved-row constant, never hardcoded, as the constraint required.\n\n`grep -rn \"dashboard_schedule_roster_count\" team/tests/` and\n`grep -rn \"HEADER_MIN_H\\|SCHED_FIRINGS_MIN_H\" team/tests/` each return hits.\nThe production change is confined to hoisting the two floor computations to a\nsingle site and adding the diagnostic flag; the resize blocks now only clamp up\nto them, which removes the previous duplicated arithmetic.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Requirements-doc acceptance criteria",
+      "heading": "Finding 8: Requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- *Each bundled item is addressed in the implementation* — BUG-0307 by\n  Findings 4 and 5, BUG-0308 by Finding 6, BUG-0309 by Finding 7.\n- *All Python files compile cleanly* — 489 `*.py` files, `python3 -m py_compile`\n  across all of them, zero failures.\n- *All bash files pass syntax check* — 281 `*.sh` files, `bash -n` on each, zero\n  failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Constraint negative checks and skip-gate",
+      "heading": "Finding 9: Constraint negative checks and skip-gate",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/lint_skip_bug_gate.sh` exits 0: no placeholder skip IDs, and\n`BUG-NNNN file-existence check: 0 missing files`. A manual grep for `BUG-SKIP`\nacross `team/tests/` and `team/pgai_agent_kanban/` returns nothing, and the RC\ndiff adds no new skip annotation. No hardcoded secret, credential, or banned\npattern appears in the added lines. The RC's shell changes preserve their\nexisting `set -euo pipefail` headers.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Prerequisite dependency graph",
+      "heading": "Finding 10: Prerequisite dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CM-013` (open RC) → `CODER-009` and `CODER-011`; `CODER-009` → `CODER-010`;\n`CODER-011` → `CODER-012`; all four CODER tasks → `TESTER-014` (this task);\nthose four plus `TESTER-014` → `CM-016` (release). No cycles. Every referenced\ntask ID resolves to an existing folder. Lifecycle bookends are correctly linked:\nCM-open at the start, TESTER plus CM-release at the end, with `CM-016` currently\n`WAITING` behind this task. Queue markers match states exactly — the four CODER\nentries are `[x]`, `CM-013` is `[x]`, `CM-016` is `[W]`, and `TESTER-014` is\n`[A]`. The sequence number 015 is unused in this cycle; that is a gap in\nnumbering, not a collision, and the two `-002-` suffixes today belong to\ndifferent agents (`CODER-20260917-002` and `PM-20260917-002`), so no task ID\ncollides.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Synthetic release simulation",
+      "heading": "Finding 11: Synthetic release simulation",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nSkipped by rule, with a note. Step 6.8 applies only when the diff touches\nrelease-lifecycle files. The RC diff touches `team/scripts/dashboard/` and\n`team/scripts/lib/` only; `cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`,\nand `team/scripts/lib/project_paths.sh` are all unchanged, and nothing in the\nopen/close cycle is modified. `team/tests/integration/test_cm_release_synthetic.py`\nwas therefore not run separately — it ran as part of the green integration\nsuite in Finding 3.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Internal task IDs cited in shipped test source",
+      "heading": "Finding 12: Internal task IDs cited in shipped test source",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (five comment lines in two test modules; no runtime effect)\n**Filed As:** BUG-0311 (Path C-A — filed as BUG)\n\nFive comment/docstring lines added by this RC cite the internal work ticket that\nproduced the code instead of describing the behavior:\n\n```\nteam/pgai_agent_kanban/api/tests/test_cli_rest_agent_metrics_parity.py:100\nteam/tests/unit/test_agent_metrics.py:135\nteam/tests/unit/test_agent_metrics.py:234\nteam/tests/unit/test_agent_metrics.py:354\nteam/tests/unit/test_agent_metrics.py:407\n```\n\nall of the shape `ticket CODER-009's field`. `SOP-core.md` (\"Naming: describe\nbehavior, not scaffolding or provenance\") states the rule directly: \"let no\ninternal bug identifier, task ID, RC, or framework-version citation reach a\nshipped artifact — git history holds the 'why', the artifact the meaning.\" None\nof the five fits one of the three sanctioned exceptions. `git grep -n \"CODER-009\"\nai_main -- '*.py'` returns nothing, so all five are introduced by this RC.\n\nThis traces to a constraint, not to scope creep: `docs/coding-standards.md`\ncompliance is a Step 6.14 check, and the naming rule is core law binding every\nname and comment an agent authors.\n\nWorth recording that the rule was otherwise honoured in this cycle — commit\n`d526b9e` reworded a different batch of citations, and the two `BUG-0307`\nreferences that `BUG-0310` recorded at `test_agent_metrics.py:442` and `:518`\nwere reworded before the merge. Only the abbreviated shape survived, for the\nreason in Finding 13.",
+      "filed_as": "BUG-0311",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (five comment lines in two test modules; no runtime effect)",
+        "filed_as": "BUG-0311 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "The provenance lint does not recognise short-form task IDs",
+      "heading": "Finding 13: The provenance lint does not recognise short-form task IDs",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the gate will keep passing this class of citation on every future RC, so Finding 12 recurs by default)\n**Filed As:** BUG-0312 (Path C-A)\n\n`team/scripts/lint_hygiene.py`'s `provenance` class matches task IDs with\n\n```python\n_TASK_ID = re.compile(r\"\\b(?:CODER|WRITER|TESTER|CM|PM|PO)-\\d{8}-\\d+\\b\", re.IGNORECASE)\n```\n\nThe mandatory eight-digit date segment means only the full\n`<ROLE>-YYYYMMDD-NNN` spelling is a violation; the abbreviated `<ROLE>-NNN`\nspelling passes. The sibling patterns in the same list do not carry that\nrestriction — `_BUG_ID` is `\\bBUG-\\d+\\b` and `_PRIORITY_ID` is\n`\\bPRIORITY-\\d+\\b` — and neither the lint's own remedy text nor `SOP-core.md`\nqualifies the rule by spelling.\n\nDemonstrated by triggering the difference rather than inferring it. In an\nisolated clone of the RC, `python3 team/scripts/lint_hygiene.py --classes\nprovenance` reports `OK — 0 findings` while five short-form citations are\npresent. Changing exactly one of them from `CODER-009` to `CODER-20260917-009`\nand re-running the identical command reports it:\n\n```\nteam/tests/unit/test_agent_metrics.py:234: [task-ID] provenance reference\n'CODER-20260917-009' in code — comments and output must describe behavior,\nnot internal IDs\n```\n\nThe only difference between the silent and the reported run is the date segment.\nThis is the mechanism that let Finding 12 ship with a green quality pre-flight\nand empty `findings-unit.json` / `findings-integration.json`.\n\nRated `medium` on systemic risk rather than `low` because it is not RC-specific:\nuntil the pattern is widened, any agent writing the natural shorthand produces an\nundetected violation, and the loop has no other check that would catch it.\nRated `medium` and not `high` because nothing is broken at runtime and the\nexisting long-form detection still works.",
+      "filed_as": "BUG-0312",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the gate will keep passing this class of citation on every future RC, so Finding 12 recurs by default)",
+        "filed_as": "BUG-0312 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "`create.sh --print-schedule-floors` is absent from the script's usage block",
+      "heading": "Finding 14: `create.sh --print-schedule-floors` is absent from the script's usage block",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one flag on one script; the flag itself works)\n**Filed As:** BUG-0313 (Path C-A)\n\nCODER-012's constraints required that \"if a production signature or tunable\nchanges to enable testing, its usage comment and any example file are updated in\nthe same commit\", and `SOP-core.md`'s Documentation Discipline Rule names \"that\nscript's README or usage comment\" as the matching artifact for a script-behavior\nchange. The new `--print-schedule-floors` flag was added to the parser and to the\nunknown-argument error string at line 249, but not to the header comment's\n`Usage:`/`Flags:` block at lines 126-134 — which is the block `-h|--help` prints.\n\n```\n$ bash team/scripts/dashboard/create.sh --help | grep -c \"print-schedule-floors\"\n0\n```\n\nA compounding pre-existing condition is worth naming for whoever fixes it: the\n`-h|--help` branch prints only the first 30 lines of the header comment\n(`\"${__help_lines[@]:0:30}\"`) and the usage block sits around line 126, so\n`--help` today names none of the flags — `--no-tmux`, `--kanban-root` and\n`--session` are equally invisible. Updating the header block is necessary but\nnot sufficient to make the flag discoverable through `--help`. The pre-existing\nhalf is recorded in BUG-0313 as context; the part this RC owns is the omitted\nheader entry.\n\nCategorised `gap` rather than `bug` because the flag itself behaves correctly —\nwhat is unmet is a documentation constraint the ticket carried explicitly.",
+      "filed_as": "BUG-0313",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one flag on one script; the flag itself works)",
+        "filed_as": "BUG-0313 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Pre-existing intermittent full-suite failures, untracked",
+      "heading": "Finding 15: Pre-existing intermittent full-suite failures, untracked",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (it degrades the one authoritative pass/fail signal every future verification depends on, and it recurs on any tree carrying this module)\n**Filed As:** BUG-0314 (Path C-A)\n\n`CODER-20260917-012-schedule-floor-coverage`'s `status.md` records, and\nexplicitly hands to TESTER, an intermittent full-suite failure of four to six\ntests unrelated to its own work — concentrated in\n`team/tests/unit/test_lint_changelog_freshness.py`, once in\n`test_debug_log_routing.py` — green in isolation, with the symptom of a stray\n`v99.0.0` CHANGELOG section. A grep of `projects/pgai-agent-kanban/bugs/` for\n`changelog_freshness`, `v99.0.0`, `intermittent` and `flake` finds only BUG-0162\nand BUG-0163, both `done` and both describing different defects. Nothing tracked\nit, so it is filed now rather than silently carried.\n\n**I did not reproduce it.** Three full unit runs during this verification were\ngreen: the gated `run-unit-tests.sh --coverage` (4678 passed, 31 skipped, exit\n0), and a direct `pytest tests/unit -p no:randomly` reproduction attempt (4289\npassed, 29 skipped). The direct run is a debugging aid and is not quoted as PASS\nevidence anywhere; Finding 3 carries the verdict.\n\nWhat I did establish is the mechanism, by reading the module rather than by\ninference from the symptom.\n`test_rc_mode_tolerates_new_release_section_addition` writes a real\n`release-notes/v99.0.0.md` into the checked-out repository root — not into\n`tmp_path`:\n\n```python\n_DEV_TREE_ROOT = _TEAM_DIR.parent              # the checked-out repository root\n_RELEASE_NOTES_DIR = _DEV_TREE_ROOT / \"release-notes\"\nsynthetic_notes = _RELEASE_NOTES_DIR / \"v99.0.0.md\"\n```\n\nThe file is removed in a `finally`, and its own docstring says \"This file must\nnever appear in the real release-notes directory.\" That teardown covers the happy\npath only. While the test runs, any other test in the session that regenerates or\ncompares `CHANGELOG.md` against `release-notes/` genuinely sees a `## v99.0.0`\nsection — which is the reported symptom, and which explains why an isolated\n`PGAI_AGENT_KANBAN_TEMP_DIR` does not help (the leak is in the source tree, not\nthe temp root). And a `finally` does not run on SIGKILL or a hard timeout, so an\ninterrupted suite leaves the checkout dirty; in this framework that has a second\ncost, because TESTER's Step 3 pre-flight sets `BLOCKED` on a non-empty\n`git status --porcelain`.\n\nThe same module resolves `_REAL_BUGS_DIR` to the operator's live bug ledger, so\nits inputs change whenever anything files a bug — including a TESTER Path C\nfiling made while a suite is running.\n\nPre-existing, not a regression:\n`git diff --stat ai_main..ai_rc/v2.23.11 -- team/tests/unit/test_lint_changelog_freshness.py`\nis empty. Recorded as `pre-existing` per Step 5a and filed because it was not\nalready tracked. It does not reflect on the four CODER tickets in this bundle.\n\nThis is also the one test-fidelity concern I can point at concretely, in the\nsense of the \"Test fidelity verification\" section: the tests covering this RC's\nown changes exercise real breaking conditions rather than sanitized proxies —\nthe roster-order and pane-floor guards were each confirmed by mutation, and the\nmetrics tests assert that two agents sharing invocation RCs render different wall\nfigures — but the suite they run inside has a cross-test coupling that can make\nany of their verdicts unreliable in a given run.",
+      "filed_as": "BUG-0314",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (it degrades the one authoritative pass/fail signal every future verification depends on, and it recurs on any tree carrying this module)",
+        "filed_as": "BUG-0314 (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

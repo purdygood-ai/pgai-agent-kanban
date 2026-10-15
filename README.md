@@ -1,9 +1,9 @@
 # PGAI Agent Kanban
 
 **A software shop in a box.** It ships its own releases, watches itself
-through OVERWATCH, serves itself through an operator REST API and a
-browser UI, and extends without repo access through workflow-type
-plugins dropped into a directory.
+through OVERWATCH, serves itself through an operator REST API, and
+extends without repo access through workflow-type plugins dropped into a
+directory.
 
 Drop a requirements document. Walk away. Come back to a tagged release.
 
@@ -12,6 +12,13 @@ file-driven pipeline that decomposes structured work — software
 releases, prose documents, whatever a plugin declares — into discrete,
 verifiable tasks, executes them, verifies the result, and ships it. It
 runs unattended on a single VPS, driven by cron.
+
+> **Where you are standing.** This file and [ARCHITECTURE.md](ARCHITECTURE.md)
+> are repository documents. `install.sh` deposits a different, shorter
+> `README.md` at the kanban root (the one under `team/`), so every link
+> below is written for a reader with the repo checked out. See
+> [Documentation](#documentation) for what an installed root actually
+> receives.
 
 ---
 
@@ -23,14 +30,15 @@ One sentence, one link per row. Depth lives in the linked document.
 |---|---|---|
 | **Pipeline** | Six specialized agents (PO, PM, CODER, WRITER, TESTER, CM) advance one release candidate at a time per project through a file-driven, single-threaded pipeline. | [team/OVERVIEW.md](team/OVERVIEW.md) |
 | **Workflow-type plugins** | Every workflow type is a directory under `workflows/` with a manifest, hooks, and an optional pipeline — the engine reads capabilities, never type names, and fails closed on unknown types. | [team/workflows/README.md](team/workflows/README.md) |
-| **The Loop + blocking census** | Quality findings become filed bugs, never stops; every gate in the tree is inventoried and classified in a census enforced by lint. | [team/SOP.md](team/SOP.md) |
+| **The Loop + blocking census** | Quality findings become filed bugs, never stops; every gate in the tree is inventoried and classified in a census enforced by lint. | [team/SOP-core.md](team/SOP-core.md) |
+| **Read-order manifests** | Each role's governance reading list is a plain-text manifest at `read-order/<role>.txt` — a document not named there is not read by that role, and per-role byte budgets narrate rulebook growth without blocking. | [docs/read-order-manifests.md](docs/read-order-manifests.md) |
 | **Resilient verification** | Runners split breakage (fatal) from quality findings (recorded to a findings file, carried into the TESTER report, healed next loop). | [docs/blocking-site-census.md](docs/blocking-site-census.md) |
-| **Dual-channel errors** | Every refusal and HALT emits a machine key plus a plain-language message and runnable remedy — error/message/remedy. | [team/SOP.md](team/SOP.md) |
-| **Operator REST API** (experimental — see [status](#operator-rest-api-and-browser-ui-status)) | A loopback-only FastAPI service (`scripts/api-server.sh`) that thin-adapts the operator command surface — every endpoint shells out to the one canonical script and returns a `{exit_code, stdout, stderr}` envelope. | [docs/operator-api.md](docs/operator-api.md) |
+| **Dual-channel errors** | Every refusal and HALT emits a machine key plus a plain-language message and runnable remedy — error/message/remedy. | [team/SOP-core.md](team/SOP-core.md) |
+| **Operator REST API** (experimental — see [status](#operator-rest-api-and-browser-ui-status)) | A loopback-only FastAPI service (`scripts/api-server.sh`) that thin-adapts the operator command surface — every mutating endpoint shells out to the one canonical script and returns a `{exit_code, stdout, stderr}` envelope. | [docs/operator-api.md](docs/operator-api.md) |
 | **Structured reads** (experimental — see [status](#operator-rest-api-and-browser-ui-status)) | JSON-native reads (`/board`, `/projects/{name}`, `?format=json` on `/metrics` and `/costs`, `/logs/{kind}`, `/traces`) designed for the browser UI, coexisting with the ANSI-pane reads without disturbing them. | [docs/operator-api.md](docs/operator-api.md) |
-| **OVERWATCH self-monitor** | A horizontal watchdog that runs an hourly deterministic sweep (Tier 1) and a daily LLM deep-clean (Tier 2), with an on-BLOCK trigger that wakes it within seconds of a fresh failure. | [team/roles/OVERWATCH.md](team/roles/OVERWATCH.md) |
+| **OVERWATCH self-monitor** | A horizontal watchdog: a deterministic sweep (Tier 1) and an LLM deep-clean (Tier 2) on the cadences the installed crontab sets, plus an on-BLOCK trigger that wakes it on a fresh failure instead of at the next sweep. | [team/roles/OVERWATCH.md](team/roles/OVERWATCH.md) |
 | **Two-phase upgrade** | `upgrade.sh` runs as a small stable Phase-1 bootstrap in the installed tree, then execs into the dev-tree's own `upgrade.sh --phase2` for the real deposit — so upgrades honor the version being installed, not the version already installed. | [team/scripts/upgrade.sh](team/scripts/upgrade.sh) |
-| **Provider abstraction** | Claude is the supported production provider; the Codex/OpenAI lane is exercised and ships experimental; the Gemini lane is scaffolded — switching providers is a `switch-provider.sh` call, not a refactor. | [docs/codex-known-issues.md](docs/codex-known-issues.md) |
+| **Provider abstraction** | Two provider wake lanes ship, `wake/claude.sh` and `wake/codex.sh`. Claude is the supported production provider; the Codex lane is exercised and ships experimental. Switching between them is a `switch-provider.sh` call, not a refactor. | [docs/codex-known-issues.md](docs/codex-known-issues.md) |
 | **Browser UI (sibling repo)** (experimental — see [status](#operator-rest-api-and-browser-ui-status)) | The kanban ships the API; a separate `pgai-agent-kanban-ui` repository ships the browser dashboard that consumes it — deliberate separation, not delayed. | [docs/operator-api.md](docs/operator-api.md) |
 
 Every capability above is checkable against the tree of the release you
@@ -39,8 +47,10 @@ a bug, not a promise.
 
 ### Operator REST API and browser UI status
 
-Experimental — full automated coverage; contract published (ICD 1.1.0);
-operator field-testing in progress; surfaces may be refined.
+Experimental — full automated coverage; the interface contract is
+published and versioned (`docs/api/icd.json`, with the current version in
+`docs/api/ICD_VERSION`); operator field-testing in progress; surfaces may
+be refined.
 
 This applies to every reader-facing mention of the REST API and the
 sibling browser UI in this document, in [docs/operator-api.md](docs/operator-api.md),
@@ -49,83 +59,141 @@ fronts are stable; the HTTP surface is the part still being field-tested.
 
 ---
 
+## The agents
+
+Seven role files ship under `team/roles/`, one per agent. Six of them are
+the pipeline that advances a release candidate; the seventh watches the
+system from outside it and never advances a release.
+
+| Agent | Role file | What it does |
+|---|---|---|
+| **PO** | [team/roles/PO.md](team/roles/PO.md) | Validates a human-authored brief and expands it into a requirements document. Operator-invoked (`scripts/po-agent.sh`); no cron line ships for it. |
+| **PM** | [team/roles/PM.md](team/roles/PM.md) | Decomposes a requirements document into ordered tickets across the agent queues. |
+| **CODER** | [team/roles/CODER.md](team/roles/CODER.md) | Implements code changes from decomposed tickets, in a per-task git worktree off the RC branch. |
+| **WRITER** | [team/roles/WRITER.md](team/roles/WRITER.md) | Authors standalone documents — guides, role files, SOPs, release notes — under the same git contract as CODER. |
+| **TESTER** | [team/roles/TESTER.md](team/roles/TESTER.md) | Verifies the RC against its requirements and files findings as bugs. Observation-only. |
+| **CM** | [team/roles/CM.md](team/roles/CM.md) | Opens RC branches, applies ship policy, tags and ships. The only role that touches origin. |
+| **OVERWATCH** | [team/roles/OVERWATCH.md](team/roles/OVERWATCH.md) | Horizontal self-monitor on its own schedule. Auto-fixes a whitelist of provably-safe wedges, files bugs for everything else, never advances a release. |
+
+Each of the seven also has a governance reading manifest at
+`team/read-order/<role>.txt`. A document not named in a role's manifest is
+not read by that role — see [docs/read-order-manifests.md](docs/read-order-manifests.md).
+
+---
+
 ## Prerequisites
 
-- **tmux ≥ 3.1** — the dashboard uses features (popup panes, `-Z`
-  zoom semantics) that are not present in older tmux builds. The
-  chain is exercised regularly against tmux 3.4; anything from 3.1
-  forward should work.
-- **Python 3.12+**, `git`, `bash`, `curl` — standard shop tooling.
+- **tmux ≥ 3.1** — the dashboard's layout uses `split-window -l N%`
+  sizing, and the dashboard launcher refuses to start below 3.1, naming
+  the version it found.
+- **Python 3.12 or newer** — `install.sh` warns on an older interpreter
+  and the wake scripts refuse to start on one. Also `git`, `bash`, and
+  `curl`.
 - **cron** — the pipeline is driven by cron ticks. Container hosts
-  without cron can substitute `pseudocron.sh`; see
-  [docs/pseudocron.md](docs/pseudocron.md).
+  without cron can substitute the bundled scheduler, installed with
+  `install-pseudocron.sh`; see [docs/pseudocron.md](docs/pseudocron.md).
 
-## Five-minute demo spine
+## Demo spine
 
-The fastest path from empty directory to a running kanban. Every
+The shortest path from empty directory to a running kanban. Every
 command is verbatim; adjust the URLs to your fork.
 
-<!-- doc-lint: skip — installation narrative requiring a fresh checkout with no prior kanban install, a registered project, and a live kanban root; harness cannot establish these prerequisites and several commands call scripts at full $KANBAN_ROOT paths that the ephemeral tempdir does not provide -->
+<!-- doc-lint: skip — installation narrative requiring a fresh checkout with no prior kanban install, a registered project, and a live kanban root; the harness cannot establish these prerequisites, and several commands call scripts at absolute install-root paths the ephemeral tempdir does not provide -->
 ```bash
-# 1. Clone and install (canonical default: $HOME/pgai_agent_kanban).
+# 1. Clone the repository.
 git clone <this-repo> ~/develop/pgai-agent-kanban
 cd ~/develop/pgai-agent-kanban
-./install.sh
 
-# 2. Install Python deps (runtime = PyYAML; test toolchain adds pytest + pytest-cov).
+# 2. Install Python deps before installing the kanban (runtime: PyYAML,
+#    FastAPI, pydantic, uvicorn; requirements-test.txt adds pytest,
+#    pytest-cov and pytest-xdist on top of these).
 #    Drop --break-system-packages if the target Python is a venv.
 pip install -r requirements.txt --break-system-packages
 
-# 3. Register a project (its repo, dev tree, and workflow type).
+# 3. Install the kanban (default root: $HOME/pgai_agent_kanban).
+./install.sh
+
+# 4. Register a project (its repo, dev tree, and workflow type).
 ~/pgai_agent_kanban/scripts/create-project.sh --project my-app \
     --workflow-type release \
     --dev-tree ~/develop/my-app --git-repo <repo-url>
 
-# 4. One-time git setup for release-workflow projects (pushes base branches).
+# 5. One-time git setup for release-workflow projects (pushes base branches).
 ~/pgai_agent_kanban/scripts/init-project-git-repo.sh --project my-app
 
-# 5. Drop a requirements document and let discovery find it.
+# 6. Drop a requirements document and let discovery find it.
 ~/pgai_agent_kanban/scripts/intake.sh --project my-app v1.0.0-my-feature.md
 
-# 6. Watch the tmux dashboard while cron drives the pipeline.
+# 7. Watch the tmux dashboard while cron drives the pipeline.
 ~/pgai_agent_kanban/scripts/dashboard/create.sh
 ```
 
 **What to expect after intake.** Nothing visible happens until the next
-wake tick; on the default schedule that can be several minutes, and an
-idle dashboard immediately after intake is the schedule, not a failure.
-Then PM decomposes the document into tasks and the chain runs
-unattended. A small release (like the demos' bootstrap) ships in a
-couple of hours of wall-clock time for a few dollars in tokens; the
-dashboard's cost pane and `scripts/cost-report.sh --project <name>`
-show the real spend as it accrues.
+wake tick. The installed crontab wakes each pipeline agent every two
+minutes on a sub-minute stagger, so an idle dashboard immediately after
+intake is the schedule, not a failure. Then PM decomposes the document
+into tasks and the chain runs unattended. The dashboard's cost pane and
+`scripts/cost-report.sh --project <name>` show the real spend as it
+accrues; the figures below are what this project's own release history
+measures.
 
-**Fastest first run: the demos.** The repo ships demos from 10 minutes
-to full workflow tours —
+<!-- MEASURED-PACE-GENERATED:BEGIN -->
+<!-- generated by team/scripts/generate_measured_pace_docs.py from
+     projects/<project>/metrics/rc/v*.json. Do not hand-edit
+     between these markers; run 'python3 team/scripts/
+     generate_measured_pace_docs.py' (from the repo root) and
+     commit the result instead. -->
+
+**Per-task wall time (measured):** 5.4–142.7 min, median 17.3 min. Sample: 112 RC(s), 864 task(s), window = every rollup available at render time (v1.27.1 .. v2.21.2). This is an RC's own wall-clock duration spread evenly across its tasks (clock-to-clock, including wake-cadence idle time), not an isolated per-task stopwatch reading -- see this generator's module docstring for why.
+
+**Composed RC cost (measured):** ~162 min = 1.1×pm bookend + 3.7×coder + 1.4×writer + 1.1×tester + 1.1×cm bookend, each term the average tasks per RC for that role times the median per-task minutes above.
+
+<!-- MEASURED-PACE-GENERATED:END -->
+
+Those numbers are this project's own RC rollups, not a projection for
+yours. The kanban does not currently instrument demo runs, so the demos
+below carry no duration claim.
+
+**Fastest first run: the demos.** The repo ships four complete, runnable
+examples —
 [team/demos/helloworld-demo/README.md](team/demos/helloworld-demo/README.md)
-(a ~10–15 minute proof of life: one goal, one test, one tagged release),
+(the smallest correct `release` run: one goal, one unit test, one tagged
+`v0.1.0`),
 [team/demos/chomp-man-demo/README.md](team/demos/chomp-man-demo/README.md)
-(a small game shipped through the `release` workflow, git tags and all),
+(a small arcade game built feature by feature through the `release`
+workflow, with bugs and priorities dropped in between, each shipping a
+tagged release into a local git repo),
 [team/demos/three-bears-demo/README.md](team/demos/three-bears-demo/README.md)
-(a story shipped through the `document` workflow), and
+(a children's story evolved across five revisions through the `document`
+workflow, publishing an artifact each time), and
 [team/demos/testing-only-demo/README.md](team/demos/testing-only-demo/README.md)
-(a read-only audit of your Chomp-Man run's latest tag). Evaluating the
-framework? Run a demo first — every file you need is included.
+(a read-only audit of your Chomp-Man run's latest tag, producing a report
+instead of a release). Evaluating the framework? Run a demo first — every
+file you need is included. See [team/demos/README.md](team/demos/README.md)
+for the recommended order.
+
+To re-check the helloworld flow without the hands-on tour,
+`team/scripts/harness/helloworld-flow-check.sh` runs that same demo end
+to end against a throwaway, self-registering project root and prints a
+pass/fail line for each of the decompose, verify, and ship stages.
+Nothing under your live kanban root is read or written.
 
 ---
 
 ## API quickstart
 
-The REST API is experimental — full automated coverage; contract
-published (ICD 1.1.0); operator field-testing in progress; surfaces
-may be refined. See [Operator REST API and browser UI status](#operator-rest-api-and-browser-ui-status)
+The REST API is experimental — full automated coverage; a published,
+versioned contract; operator field-testing in progress; surfaces may be
+refined. See [Operator REST API and browser UI status](#operator-rest-api-and-browser-ui-status)
 above.
 
-Three commands that reach a running server. Copy-paste; no edits.
+Three commands that reach a running server. `$KANBAN_ROOT` is your
+install root — `~/pgai_agent_kanban` unless you moved it.
 
+<!-- doc-lint: skip — starts a long-running loopback service and then queries it; the harness must not start a background server on the host, and the two curl calls are meaningless without the server the first line starts. The api-server.sh citation itself is checked from the feature census row above. -->
 ```bash
 # 1. Start the loopback-only API server.
-~/pgai_agent_kanban/scripts/api-server.sh start
+$KANBAN_ROOT/scripts/api-server.sh start
 
 # 2. Read the unified kanban board (one JSON call, every project, every column).
 curl -sS http://127.0.0.1:8300/board
@@ -151,24 +219,30 @@ HTTP status derives from `exit_code`: `200` on `0`, `500` when the
 underlying script exits non-zero, `422` when required parameters are
 missing or invalid. The API never re-interprets script output — a
 warning to stderr with exit 0 is a warning in the envelope with HTTP
-200. The interactive Swagger UI is at `http://127.0.0.1:8300/docs`.
+200. The interactive Swagger UI is at `http://127.0.0.1:8300/docs`; port
+8300 is the default and is settable with `PGAI_API_PORT`.
 
-Loopback-only is not a configuration option — the server refuses to
-bind to a routable address. Reach it from your workstation with an SSH
-tunnel or a SOCKS proxy; see [docs/operator-api.md](docs/operator-api.md)
-for the full model.
+Loopback-only is not a configuration option — the startup guard refuses
+to bind to anything that is not a loopback address. Reach it from your
+workstation with an SSH tunnel or a SOCKS proxy; see
+[docs/operator-api.md](docs/operator-api.md) for the full model.
 
 ---
 
 ## Feeding the system
 
 Three intake types, all plain Markdown, all discovered automatically.
+`intake.sh` routes on the filename prefix.
 
 | Intake | Filename shape | Lands in | Versioning |
 |---|---|---|---|
-| Bug | `BUG-####-short-description.md` | `projects/<name>/bugs/` | bundled into the next patch release |
-| Priority | `PRIORITY-####-short-name.md` | `projects/<name>/priority/` | bundled into the next patch release |
-| Requirements | `vX.Y.Z-feature-name.md` | `projects/<name>/requirements/` | declares its own target version |
+| Bug | `BUG-NNNN[-YYYYMMDD]-slug.md` | `projects/<name>/bugs/` | bundled into the next patch release |
+| Priority | `PRIORITY-NNNN[-YYYYMMDD]-slug.md` | `projects/<name>/priority/` | bundled into the next patch release |
+| Requirements | `vX.Y.Z-slug.md` | `projects/<name>/requirements/` | declares its own target version |
+
+The filename rules — including what a malformed file does instead of
+being silently dropped — are owned by
+[docs/public-contract.md](docs/public-contract.md).
 
 A requirements document carries control fields (`## Target Version`,
 `## Workflow Type`, `## Test Required`, `## Source Branch`,
@@ -204,6 +278,10 @@ project — there is no special flag, no special mode:
 - **TESTER reports, CM decides.** TESTER categorizes findings (pass,
   gap, bug); CM ships unless verification could not complete. Found
   bugs become intake files for the next iteration.
+- **Quality findings never stop the line.** Lint findings ride a
+  machine-readable findings file into the TESTER report as non-blocking
+  line items — each cites or files a bug, and the next iteration fixes
+  it. Only breakage stops a suite.
 - **The intake file encodes the human's decision; agents execute it.**
   Requirements, bug, and priority files are where the operator
   constrains the work — file allowlists, must-not-modify guards,
@@ -217,9 +295,6 @@ project — there is no special flag, no special mode:
   exactly two moments per release, both by CM.
 - **Loopback-only API.** The API binds to `127.0.0.1` and refuses to
   bind anywhere else. SSH does the exposure.
-  Lint findings ride a machine-readable findings file into the report
-  as non-blocking line items — each cites or files a bug, and the next
-  iteration fixes it. Only breakage stops a suite.
 
 ---
 
@@ -227,6 +302,7 @@ project — there is no special flag, no special mode:
 
 - **Dashboard.** A tmux surface showing every project's queues, agent
   activity, progress, HALT state, and next cron firings, side by side.
+  The window and pane inventory is in [docs/dashboard.md](docs/dashboard.md).
 - **HALT controls.** `touch $KANBAN_ROOT/HALT` stops everything;
   `projects/<name>/HALT` stops one project; a `HALT-AFTER` token drains
   the current release to completion and then halts — the timing-
@@ -235,11 +311,16 @@ project — there is no special flag, no special mode:
   and token counts; rollups per day, per release, per agent, per
   provider. `scripts/cost-report.sh` answers "what did today cost"
   with real numbers.
-- **Per-project release hooks.** Drop scripts in
-  `projects/<name>/hooks/` (`cm-release-pre-squash.sh`,
-  `cm-release-pre-tag.sh`, `cm-release-post-tag.sh`) and CM runs them
-  at the right moments: bump a `pyproject.toml`, regenerate a TOC,
-  whatever your deliverable needs.
+- **Per-project release hooks.** Drop executable hook scripts in
+  `projects/<name>/hooks/` and CM runs them at the right moments — bump
+  a `pyproject.toml`, regenerate a TOC, whatever your deliverable needs:
+
+  ```
+  projects/<name>/hooks/
+  ├── cm-release-pre-squash.sh   # before the squash to develop
+  ├── cm-release-pre-tag.sh      # before the tag
+  └── cm-release-post-tag.sh     # after the tag (best-effort)
+  ```
 
 ---
 
@@ -267,6 +348,9 @@ project — there is no special flag, no special mode:
 
 ## Documentation
 
+These pages live in the repository checkout. Every link resolves from
+the repository root.
+
 | Page | What it covers |
 |---|---|
 | [HOW_TO.md](HOW_TO.md) | Install, configure, register projects, daily operation |
@@ -274,7 +358,7 @@ project — there is no special flag, no special mode:
 | [ROADMAP.md](ROADMAP.md) | Where the project is headed, version by version |
 | [docs/operator-api.md](docs/operator-api.md) | The REST API (experimental — see [status](#operator-rest-api-and-browser-ui-status)), envelope, endpoints, and the loopback trust boundary |
 | [docs/operator-commands.md](docs/operator-commands.md) | Every operator command, flags, and examples |
-| [docs/public-contract.md](docs/public-contract.md) | What you can depend on across the 1.x line |
+| [docs/public-contract.md](docs/public-contract.md) | The stable surface — what changes only with a major version |
 | [docs/pseudocron.md](docs/pseudocron.md) | Scheduling without cron (containers) |
 | [docs/docker.md](docs/docker.md) | Container workspace (Debian and Rocky Linux 9 flavors): build → launch a shell → start pseudocron and the dashboard yourself |
 | [docs/dashboard.md](docs/dashboard.md), [docs/DASHBOARD-PANES.md](docs/DASHBOARD-PANES.md) | The tmux dashboard |
@@ -285,17 +369,26 @@ project — there is no special flag, no special mode:
 | [docs/codex-known-issues.md](docs/codex-known-issues.md) | The experimental Codex lane |
 | [docs/hybrid-shop-setup.md](docs/hybrid-shop-setup.md) | Mixed human + agent development |
 | [docs/creating-a-workflow.md](docs/creating-a-workflow.md) | Author a new workflow-type plugin end-to-end |
+| [docs/read-order-manifests.md](docs/read-order-manifests.md) | Add or remove a document from a role's wake; the governance byte budgets |
 | [team/workflows/README.md](team/workflows/README.md) | The plugin surface — manifest, hooks, `pipeline.yaml` |
-| [team/roles/OVERWATCH.md](team/roles/OVERWATCH.md) | The self-monitor's two tiers, on-BLOCK trigger, and whitelist |
-| [team/demos/helloworld-demo/README.md](team/demos/helloworld-demo/README.md) | 10-minute release-workflow proof of life |
-| [team/demos/chomp-man-demo/README.md](team/demos/chomp-man-demo/README.md) | Guided release-workflow walkthrough |
-| [team/demos/three-bears-demo/README.md](team/demos/three-bears-demo/README.md) | Guided document-workflow walkthrough |
-| [team/demos/testing-only-demo/README.md](team/demos/testing-only-demo/README.md) | Read-only audit of a shipped tag |
+| [team/demos/README.md](team/demos/README.md) | The four demos and the order to run them in |
 
-Inside the install: `SOP.md` (operational procedures), `roles/`
-(per-agent specifications), `workflows/` (workflow type definitions),
-`docs/` (the full docs tree). Browse `docs/` directly for anything not
-listed above.
+**What an installed root receives is narrower.** `install.sh` copies the
+governance tree — `SOP-core.md`, `DIRECTIVES.md`, `OVERVIEW.md`,
+`roles/`, `read-order/`, `workflows/`, `demos/`, `scripts/` — plus
+exactly the `docs/` pages named in `team/config/docs-manifest.txt`. That
+manifest is the transitive closure of the `docs/` references the
+installed governance files cite; the rest of `docs/` is
+repository-checkout material by design. If you are standing on an
+installed root and a page above is not under `$KANBAN_ROOT/docs/`, read
+it here in the checkout.
+
+---
+
+## License
+
+PGAI Agent Kanban is released under the MIT License. The full text is in
+[LICENSE](LICENSE).
 
 ---
 

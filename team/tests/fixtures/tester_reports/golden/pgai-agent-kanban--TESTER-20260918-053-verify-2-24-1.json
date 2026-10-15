@@ -1,0 +1,288 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": null,
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight — RC intact, worktree clean",
+      "heading": "Finding 1: Pre-flight — RC intact, worktree clean",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` = `git rev-parse ai_rc/v2.24.1` = `15a20278973aa5b6d4c3a8e8d936c0ef38689481`.\n`git status --porcelain` empty; `git stash list` empty. Scanned all task\nfolders under `projects/pgai-agent-kanban/tasks/`: every task whose\n`## State` is `DONE` and whose `## Feature Branch` is not `none` has a branch\nthat no longer exists locally (the normal post-merge shape, which passes both\npre-flight checks trivially). The one surviving `ai_feature/*` branch\n(`CODER-20260917-020-agent-metrics-avg-wall`) belongs to a `WONT-DO` task and\nis out of scope for both checks. Zero anomalies.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Acceptance criterion — \"Each bundled item is addressed in the implementation\"",
+      "heading": "Finding 2: Acceptance criterion — \"Each bundled item is addressed in the implementation\"",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth bundled items are addressed, and each was checked against its own bug\nfile rather than against the CODER summary.\n\n**BUG-0331 (blocked-ledger no-op logs a failure).** The ledger module\n`team/pgai_agent_kanban/metrics/blocked_ledger.py` gained\n`ERROR_NO_OP = \"blocked-ledger.no-op\"`; `append_block_start` and\n`append_block_end` now raise that key (instead of `blocked-ledger.malformed`)\nfor the two \"boundary already in the requested state\" refusals.\n`team/scripts/lib/wake_blocked_ledger.sh`'s `pgai_stamp_halt_boundary`\ncaptures the CLI's stderr, extracts the dual-channel machine key, and\nsuppresses the wake-log line only when the key is `blocked-ledger.no-op`.\nBehavioral evidence is Finding 3.\n\n**BUG-0332 (history.csv writer docstring column miscount).** The wrong\nnumeral was removed rather than corrected, matching the bug's stated second\nacceptable outcome (\"states the position without a numeral the way the\nshipped operator documentation does\"). Line 24 of\n`team/scripts/lib/metrics_csv_writer.py` now reads \"added after the other\ncolumns were already a public contract\".\n`grep -n \"nineteen\\|twentieth\\|nineteenth\"` over the writer and its test file\nreturns nothing. The probe from the bug report still prints `21 20`\n(21 columns, `blocked_minutes` at index 20), confirming the code was always\ncorrect and only the prose was wrong. Four test docstrings in\n`team/tests/unit/test_metrics_csv_writer.py` carrying the same miscount were\ncorrected in the same commit; no executable line changed (every assertion\nstill derives its boundary from `_PRE_BLOCKED_COLUMNS` or a negative index).\nThe single remaining tree-wide hit for the phrase is\n`release-notes/v2.24.0.md:34`, which quotes the original bug report verbatim\nas a historical Known Issues record and is correctly left alone.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Behavioral verification (Step 6.5) — guard fires in both directions",
+      "heading": "Finding 3: Behavioral verification (Step 6.5) — guard fires in both directions",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0331's reproduction steps were replayed verbatim against the RC code in a\nthrowaway sandbox root (`mktemp -d -p $PGAI_AGENT_KANBAN_TEMP_DIR`, with\n`PGAI_TASKS_DIR`/`PGAI_PROJECT_ROOT` cleared and `KANBAN_ROOT`,\n`PGAI_AGENT_KANBAN_ROOT_PATH`, `PGAI_AGENT_KANBAN_TEMP_DIR` repointed), with a\nreal capturing `log()` rather than a stub, against a synthetic project whose\n`## Active RC` is a version:\n\n- `pgai_stamp_fleet_halt_boundary \"halt:global\" end` +\n  `pgai_stamp_halt_boundary demo \"halt:project\" end`, run twice — **zero**\n  wake-log lines, no ledger file created. This is the exact scenario that\n  produced the two \"did not apply\" lines per cycle the bug reports; the\n  original failure mode is gone.\n- First `start` — writes, silent. Two further `start` calls with one already\n  open — **zero** log lines; exactly one `block-start` record in the ledger.\n- Matching `end` — writes, silent. Two further orphaned `end` calls — **zero**\n  log lines.\n- **Genuine failure A**, metrics directory chmod `0555`: exactly **one**\n  wake-log line, function still returns 0.\n- **Genuine failure B**, ledger file corrupted to `not json at all`: exactly\n  **one** wake-log line, function still returns 0.\n- CLI dual-channel contract inspected directly: an orphaned `end` emits\n  `error:   blocked-ledger.no-op` / `message:` / `remedy:` and exits 1. The\n  adapter's `sed -n 's/^error:[[:space:]]*//p'` correctly tolerates the\n  contract's multi-space alignment.\n\nBoth halves of Anti-Pattern 6 are satisfied: the original failure mode is\nsilent and the new normal case (a real fault) still speaks. The \"no key at\nall\" path (a failure before the CLI can emit its contract) falls through to\nthe logging branch by construction, which is the safe default.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Acceptance criterion — \"All Python files compile cleanly\"",
+      "heading": "Finding 4: Acceptance criterion — \"All Python files compile cleanly\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 -m compileall -q -x '(\\.git|__pycache__)' .` over the whole worktree\nexited 0 (504 `.py` files). The two changed Python files compile individually\nas well. Generated `__pycache__` directories were removed afterwards;\n`git status --porcelain` re-confirmed empty.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Acceptance criterion — \"All bash files pass syntax check\"",
+      "heading": "Finding 5: Acceptance criterion — \"All bash files pass syntax check\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash -n` over all 282 `.sh` files in the worktree: 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Gated suites (Steps 5a, 6.6, 6.7)",
+      "heading": "Finding 6: Gated suites (Steps 5a, 6.6, 6.7)",
+      "level": 3,
+      "body": "**Category:** pass\n\nRun from the worktree root, output teed under\n`$PGAI_AGENT_KANBAN_TEMP_DIR/tester/`:\n\n- `bash team/scripts/run-unit-tests.sh --coverage` → **`UNIT_EXIT=0`**,\n  `4806 passed, 31 skipped in 802.45s`, `Unit tests PASSED`,\n  `bare_tmp_cleanliness: OK`, `listener_cleanliness: OK`.\n- `bash team/scripts/run-integration-tests.sh --coverage` →\n  **`INTEGRATION_EXIT=0`**, `518 passed, 1 skipped in 530.50s`,\n  `Integration tests PASSED`, both cleanliness gates OK.\n\nThe PASS evidence cited here is the two runner exit codes, not a pytest\n\"N passed\" line. Direct pytest was not used at any point in this verification.\n\nNote on the prior-session record: CODER-20260918-050's `status.md` reports a\nfull-suite run with 9 failures it attributed to resource contention, and\nCODER-20260918-051 reports a later clean run. This verification's own run of\nboth gated runners on the final RC commit was clean, which is the\nauthoritative signal.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "`release-state.md` sanity (Step 6.1)",
+      "heading": "Finding 7: `release-state.md` sanity (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\nFour fields present and well-formed: `## Active RC` = `v2.24.1`,\n`## RC Opened At` = `2026-09-18T23:54:29+00:00`, `## RC Opened By Task` =\n`CM-20260918-052-open-rc-2-24-1`, `## Last Released` = `v2.24.0` (well-formed\n`vX.Y.Z`; its presence is by design, not drift). `pp_last_released_version\n\"pgai-agent-kanban\"` returns `v2.24.0`, and `semver_gt \"v2.24.1\" \"v2.24.0\"`\nfrom `team/scripts/lib/semver.sh` returns true — the RC version is strictly\ngreater than the last released version. No inline version comparison was\nperformed. The per-RC state file `release-state/v2.24.1.json` is consistent:\n`attempt 1`, `outcome in_progress`, `closed_at null`, cargo exactly the two\nbundled bug files.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Constraint negative checks (Step 6.9) and skip-bug gate (Step 6.13)",
+      "heading": "Finding 8: Constraint negative checks (Step 6.9) and skip-bug gate (Step 6.13)",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo hardcoded secret-shaped assignment in any added line\n(`password|api_key|secret|token` followed by `=`): zero hits. No `curl|bash`\npattern introduced. `lint_skip_bug_gate.sh` run standalone: \"OK — all skip\nannotations are compliant\", 0 missing `BUG-NNNN` files. No placeholder skip\nshapes (`BUG-SKIP`, `skip` near `BUG-<letters>`) outside archived run logs and\none test fixture that deliberately contains the literal string `BUG-NNNN`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Coding-standards spot-check (Step 6.14)",
+      "heading": "Finding 9: Coding-standards spot-check (Step 6.14)",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo added line carries a bug ID, task ID, RC identifier, or version citation —\n`grep -E '^\\+' | grep -iE 'BUG-[0-9]|TASK-|CODER-2026|v2\\.2[0-9]|ticket'` over\nthe full RC diff returns zero hits, which matters here because the RC's whole\nsubject matter is two numbered bugs. No new script was added (so no `--help`\nobligation), no new operational value was hardcoded, and no `lib/`\nimplementation was duplicated. The new machine error key is defined once as a\nmodule constant and referenced by name at both raise sites.\n\nDocumentation discipline: the changed behavior is script behavior, and the\nmatching artifact is `wake_blocked_ledger.sh`'s own header usage comment,\nwhich was updated in the same commit to describe the silent-no-op / loud-fault\nsplit. `docs/blocking-site-census.md` needs no edit — the census anchor\n`team/pgai_agent_kanban/metrics/blocked_ledger.py:blocked-ledger-01 CONVERT`\nis unchanged and correctly still classifies the site; no new refusal site was\nauthored, only a new key value at two pre-existing ones. No operator-facing\ndoc, `*_example` file, or ICD entry describes the suppressed log line or the\nledger error keys, so none was owed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Prerequisite dependency graph (Step 6.10)",
+      "heading": "Finding 10: Prerequisite dependency graph (Step 6.10)",
+      "level": 3,
+      "body": "**Category:** pass\n\nFive tasks, acyclic, correctly bookended:\n`CM-20260918-052-open-rc-2-24-1` (no prerequisites) → `CODER-20260918-050`\nand `CODER-20260918-051` (both gated on the open) → `TESTER-20260918-053`\n(gated on both CODERs) → `CM-20260918-055-release-2-24-1` (gated on both\nCODERs plus TESTER). Every referenced task ID resolves to an existing task\nfolder. Sequence numbers 050, 051, 052, 053, 055 are non-colliding; 054 is\nunused, consistent with no approval task being materialized on an\n`auto`-approval bundle.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Synthetic release simulation (Step 6.8)",
+      "heading": "Finding 11: Synthetic release simulation (Step 6.8)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe RC diff touches no release-lifecycle file — not `cm-release.sh`,\n`cm-open-rc.sh`, `cm-cancel-rc.sh`, or `team/scripts/lib/project_paths.sh` —\nso this step was not required. It is nonetheless satisfied:\n`tests/integration/test_cm_release_synthetic.py` ran as part of the gated\nintegration suite and all of its tests passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Spot-checks outside the spec (Step 6.11)",
+      "heading": "Finding 12: Spot-checks outside the spec (Step 6.11)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **State drift:** none. `Active RC` = `v2.24.1` and the branch\n  `ai_rc/v2.24.1` exists locally; no HALT or HALT-AFTER file at either the\n  kanban root or the project root; queue markers match task states exactly\n  (`[x]` for the two DONE CODER tasks and the DONE CM open, `[A]` for this\n  running TESTER task, `[W]` for the waiting CM release task). The live\n  `projects/pgai-agent-kanban/metrics/` directory contains no\n  `blocked-intervals.jsonl` — consistent with BUG-0331's own report that every\n  stamp attempt was a correct no-op, not drift.\n- **Untested new mechanisms:** the new `ERROR_NO_OP` key is not asserted by\n  value anywhere in `team/tests/unit/test_blocked_ledger.py`; its two existing\n  pairing-rule tests assert only that `LedgerError` is raised. Demoted to an\n  observation rather than a finding, because the key is covered behaviorally\n  one layer up: reverting it to `blocked-ledger.malformed` would make both\n  silent-no-op assertions in `test_wake_blocked_ledger.py` fail, since the\n  adapter would log again. Noted under Caveats as a cheap future hardening.\n- **Regressions of prior gaps:** the four `blocked-ledger.malformed`\n  assertions CODER's `## Stale Literal Risks` flagged were re-checked\n  independently. All four (lines 206, 225, 240, 255) exercise\n  `parse_records()`/`blocked_minutes()` replay-time refusals — a different\n  code path from the two explicit-request refusals this RC retargeted — so\n  they are correctly not stale, and the green suite confirms it. No\n  stale-assertion finding is owed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "state_drift": "none. `Active RC` = `v2.24.1` and the branch",
+        "untested_new_mechanisms": "the new `ERROR_NO_OP` key is not asserted by",
+        "regressions_of_prior_gaps": "the four `blocked-ledger.malformed`"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Test fidelity",
+      "heading": "Finding 13: Test fidelity",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe RC's test change is itself a fidelity repair: `_LIB_SOURCE_PREAMBLE`'s\n`log() { :; }` stub — named in BUG-0331 as the reason the two existing\n\"silent no-op\" tests could not see the defect they claimed to cover — is\nreplaced by a real capturing `log()` that echoes a `WAKE-LOG:`-tagged line to\nstdout. The tests now assert on the real observable (the tag's absence in the\nno-op cases, exactly one tagged line naming both project and source in the\nunwritable-directory case) rather than on a mocked-away condition. The tests\ndrive the real bash adapter sourcing the real libs against a real ledger file\nunder `tmp_path`, not a proxy. My independent sandbox replay (Finding 3)\nreached the same conclusions through a different harness.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

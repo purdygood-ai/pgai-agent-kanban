@@ -1,0 +1,95 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified the v2.12.0 release candidate — the ship-policy regression/integrity\ndimensions, the `SHIP-KNOWN-ISSUE` ship with its two records, the front-of-bundle\ncarry-forward ordering, the HALT scope law plus its new mechanical lint, the\noperator-only `cm/release.sh --force --reason` override, and the four governance\ndocuments brought level with them — against the requirements document's\ndeliverables and its five acceptance fixtures. Every acceptance fixture was\nreproduced independently of the RC's own test suite: the matrix driven directly\nover fifteen input combinations, the report-field parser over five synthetic\nreports, the bundle-ordering partition over six files (marked, unmarked,\nblank-marker, unreadable), the known-issue stamp and marker over a synthetic notes\nfile and bug pair, and all four `--force` refusals against the real script in a\nthrowaway kanban root. All behaved exactly as the shipped documents describe. The\n**unit gated runner exits 1**: the RC's governance additions push all seven roles'\nassembled governance over their configured byte budgets, a threshold that was\ngreen on `ai_main` and is red on the RC. That is a real, RC-introduced defect and\nit is what keeps this report off `PASS`; it breaks no runtime path, corrupts no\nstate, and is repaired by trimming or re-baselining in the next iteration.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "every role's assembled governance is over its configured byte budget",
+      "heading": "Finding 1: every role's assembled governance is over its configured byte budget",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** medium (3-5 CODER/WRITER tasks, or one operator decision to re-baseline the budgets)\n**Systemic Risk:** medium (a real defect that ships and is fixed next iteration — no runtime path fails)\n**Regression:** yes (green on `ai_main`, red on this RC; this RC's own governance additions caused it)\n**Integrity:** none\n**Integrity Damage:** no\n**Filed As:** BUG-0199 (Path C-A — filed as BUG — code defect / regression / test failure)\n\nThe unit gated runner exits 1 on\n`tests/unit/test_composer_governance_byte_budget.py::test_every_role_governance_assembly_stays_under_configured_budget`.\nAll seven roles are over the `[governance] budget_bytes_<role>` ceilings in the\nchecked-in `kanban.cfg_example`:\n\n| Role | Assembled | Budget | Over by |\n|---|---|---|---|\n| po | 58124 | 57344 | +780 |\n| pm | 68753 | 65536 | +3217 |\n| coder | 63715 | 61440 | +2275 |\n| writer | 63465 | 61440 | +2025 |\n| tester | 96373 | 92160 | +4213 |\n| cm | 78093 | 71680 | +6413 |\n| overwatch | 68948 | 66560 | +2388 |\n\nRun directly on both trees, the same lint the test drives shows the transition\ncleanly — every role under budget on `ai_main`, every role over on the RC:\n\n```\n# ai_main                          # ai_rc/v2.12.0\npo        55695  57344  under      po        58124  57344  OVER\npm        65508  65536  under      pm        68753  65536  OVER\ncoder     61286  61440  under      coder     63715  61440  OVER\nwriter    61036  61440  under      writer    63465  61440  OVER\ntester    92037  92160  under      tester    96373  92160  OVER\ncm        71652  71680  under      cm        78093  71680  OVER\noverwatch 66519  66560  under      overwatch 68948  66560  OVER\n```\n\nEvery role was within ~200 bytes of its ceiling on `ai_main`, so the shared\n`team/SOP-core.md` growth alone (\"Rating a Finding\" plus the expanded HALT-scope\nlaw) pushes all seven over; `team/roles/CM.md`, `team/roles/TESTER.md`, and\n`team/roles/PM.md` add their own on top for those three roles. The additions\nthemselves are correct and required by the requirements doc; nothing here says the\ntext is wrong, only that the budget was not re-balanced against it.\n\nRuntime impact is prompt size only. `lint_governance_byte_budgets.sh` is\nexplicitly a narrating check (it exits 0 while reporting `OVER`, confirmed by\nrunning it), the wake path never calls `read_order_role_byte_total`, and no agent\nrefuses to assemble. The only enforcement is this unit test, which is why the\ndefect surfaces as a red suite rather than a broken chain.",
+      "filed_as": "BUG-0199",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "medium",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "medium (3-5 CODER/WRITER tasks, or one operator decision to re-baseline the budgets)",
+        "systemic_risk": "medium (a real defect that ships and is fixed next iteration — no runtime path fails)",
+        "regression": "yes (green on `ai_main`, red on this RC; this RC's own governance additions caused it)",
+        "integrity": "none",
+        "filed_as": "BUG-0199 (Path C-A — filed as BUG — code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "the new HALT-scope lint misses the `local var=\"${KANBAN_ROOT}/HALT\"` shape",
+      "heading": "Finding 2: the new HALT-scope lint misses the `local var=\"${KANBAN_ROOT}/HALT\"` shape",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks — one regex, one test)\n**Systemic Risk:** low (a guard with a hole in it; the tree it guards is currently clean)\n**Regression:** yes (the defect is in code this RC introduces; no prior behavior regressed)\n**Integrity:** none\n**Integrity Damage:** no\n**Filed As:** BUG-0200 (Path C-A)\n\n`team/scripts/lint_halt_scope_writers.py` is the RC's mechanical guard against\n\"the next unnamed root-HALT writer\" (requirements deliverable 3). Driven against\nsynthetic fixtures under `--team-dir`, it correctly flags a bare assignment\n(`halt_flag=\"${KANBAN_ROOT}/HALT\"` then `touch \"$halt_flag\"`), a direct literal\n`touch \"${KANBAN_ROOT}/HALT\"`, a `: > \"$halt_flag\"` redirect, and the Python\n`.touch()` shape — and correctly passes a `global`-named scope, an allowlisted\nsite, and a project-scoped writer.\n\nIt does **not** flag the single-line declaration-and-assignment form:\n\n```bash\nrepair_one_project() {\n    local halt_flag=\"${KANBAN_ROOT}/HALT\"\n    touch \"$halt_flag\"          # lint reports OK — no violation\n}\n```\n\nCause: `_BASH_ROOT_HALT_ASSIGN_RE` is anchored at\n`^\\s*([A-Za-z_][A-Za-z0-9_]*)=`, so any `local` / `declare` / `typeset` /\n`export` / `readonly` prefix breaks the variable-tracking match and the later\n`touch \"$halt_flag\"` is never associated with a root-scoped path. `local x=\"...\"`\nis a common shape in this codebase (`release_ship_policy.sh` uses it throughout),\nso the hole is reachable by ordinary authoring, not only by contrivance. The\nlint's own unit file carries 16 tests and none covers this form.\n\nThe current tree is clean either way — the lint reports OK on the RC, and the one\nsite the RC moved (`overwatch_halt_first_fix`) is genuinely project-scoped now.",
+      "filed_as": "BUG-0200",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks — one regex, one test)",
+        "systemic_risk": "low (a guard with a hole in it; the tree it guards is currently clean)",
+        "regression": "yes (the defect is in code this RC introduces; no prior behavior regressed)",
+        "integrity": "none",
+        "filed_as": "BUG-0200 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "the operator HALT playbook still names the fleet-wide root HALT for CM triggers",
+      "heading": "Finding 3: the operator HALT playbook still names the fleet-wide root HALT for CM triggers",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1 WRITER task)\n**Systemic Risk:** low (an operator-facing documentation defect; costs recovery time, not correctness)\n**Regression:** no (CM's release halts were already project-scoped on `ai_main`; the doc drift predates this RC)\n**Integrity:** none\n**Integrity Damage:** no\n**Filed As:** BUG-0201 (Path C-A)\n\nThe requirements doc's third deliverable is \"Matrix HALTs are PROJECT-scoped\n(`projects/<name>/HALT`) ... every HALT writer audited for scope.\" `team/SOP-core.md`\nand `team/roles/CM.md` both now state that law, and the code has honored it for\nCM's release halts since before this RC (`PROJECT_HALT_FILE=\"${_CM_PROJECT_ROOT}/HALT\"`).\n`docs/OPERATIONS.md` — the operator-facing playbook, and a file this RC edited, in\nthe very section it edited — still says the opposite:\n\n- \"CM creates `$PGAI_AGENT_KANBAN_ROOT_PATH/HALT` for any of the following eight\n  conditions\" (the shipped trigger list is nine, and CM writes the project file).\n- The \"Operator response procedure\" tells the operator to\n  `cat \"$PGAI_AGENT_KANBAN_ROOT_PATH/HALT\"` and then\n  `rm \"$PGAI_AGENT_KANBAN_ROOT_PATH/HALT\"` to resume.\n- The \"HALT-file lifecycle\" table names `$PGAI_AGENT_KANBAN_ROOT_PATH/HALT` as\n  the file CM creates and the operator removes.\n\nAn operator following it after an autonomous CM halt finds no file to read and\nremoves a file that is not there, while the project's own `projects/<name>/HALT`\nkeeps that lane parked. The new \"Overriding a ship-policy stop\" subsection\ninserted between those passages is correct and scope-aware, which makes the\nsurrounding stale text more misleading, not less.",
+      "filed_as": "BUG-0201",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1 WRITER task)",
+        "systemic_risk": "low (an operator-facing documentation defect; costs recovery time, not correctness)",
+        "regression": "no (CM's release halts were already project-scoped on `ai_main`; the doc drift predates this RC)",
+        "integrity": "none",
+        "filed_as": "BUG-0201 (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

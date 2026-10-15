@@ -56,18 +56,21 @@ _REAL_ARGPARSE_SH = _TEAM_SCRIPTS_DIR / "lib" / "argparse.sh"
 _REAL_ENV_BOOTSTRAP_SH = _TEAM_SCRIPTS_DIR / "lib" / "env_bootstrap.sh"
 _REAL_INI_PARSER_SH = _TEAM_SCRIPTS_DIR / "lib" / "ini_parser.sh"
 _REAL_PROJECT_PATHS_SH = _TEAM_SCRIPTS_DIR / "lib" / "project_paths.sh"
+_REAL_ERROR_CONTRACT_SH = _TEAM_SCRIPTS_DIR / "lib" / "error_contract.sh"
 _REAL_TEMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "temp.sh"
 _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
+_REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 
 _REAL_LIBS = [
     _REAL_ARGPARSE_SH,
     _REAL_ENV_BOOTSTRAP_SH,
     _REAL_INI_PARSER_SH,
     _REAL_PROJECT_PATHS_SH,
+    _REAL_ERROR_CONTRACT_SH,
     _REAL_TEMP_SH,
     _REAL_VERSION_STAMP_SH,
-    _REAL_SUBAGENT_DEPLOY_SH,
+    _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH,
 ]
 
 _SANDBOX_VERSION = "v1.7.0-sandbox-converted"
@@ -124,7 +127,7 @@ def _build_sandbox(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_lib / lib_src.name)
 
-    for doc_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP.md"]:
+    for doc_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
         (dev_tree / "team" / doc_name).write_text(f"# {doc_name} stub\n", encoding="utf-8")
     for sub_name in [
         "roles", "pm-agent", "workflows", "pgai_agent_kanban",

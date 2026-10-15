@@ -125,6 +125,7 @@ _build_fixture_kanban() {
     local kanban_root="$1"
     local project_name="${2:-test-project}"
     local dev_tree="${3:-}"
+    local branch_prefix="${4:-}"
 
     mkdir -p \
         "${kanban_root}/projects/${project_name}/overwatch/backups" \
@@ -152,6 +153,10 @@ PCFG
 project_name = ${project_name}
 workflow_type = release
 PCFG
+    fi
+
+    if [[ -n "${branch_prefix}" ]]; then
+        echo "branch_prefix = ${branch_prefix}" >> "${kanban_root}/projects/${project_name}/project.cfg"
     fi
 }
 
@@ -462,6 +467,76 @@ if [[ -d "${T8_WT_PATH}" ]]; then
     _pass "below-threshold/not-pruned"
 else
     _fail "below-threshold/not-pruned" "fresh worktree was unexpectedly removed"
+fi
+
+# ===========================================================================
+# TEST 9: Project configured with a non-default branch_prefix — a
+# <prefix>rc/* branch is recognized as an integration branch
+# ===========================================================================
+echo ""
+echo "=== TEST 9: <prefix>rc/* recognized as integration branch ==="
+
+T9_ROOT="${FIXTURE_DIR}/t9"
+T9_DEV="${FIXTURE_DIR}/t9-dev"
+T9_WTS="${FIXTURE_DIR}/t9-worktrees"
+T9_TASK_ID="CODER-20260101-005-fixture-prefixed-rc"
+T9_TASKS_ROOT="${T9_ROOT}/projects/test-project/tasks"
+
+_build_dev_tree_with_worktree "${T9_DEV}" "${T9_TASK_ID}" "${T9_WTS}"
+T9_WT_PATH="${_WT_PATH}"
+
+# Make a commit in the worktree, then merge it into a prefixed RC branch
+# (foo_rc/v1.0.0) in the dev tree -- simulating a project configured with
+# branch_prefix = "foo_" whose feature work has already landed on its own
+# RC branch rather than main.
+git -C "${T9_WT_PATH}" config user.email "test@fixture.local"
+git -C "${T9_WT_PATH}" config user.name "Test Fixture"
+echo "prefixed rc commit" > "${T9_WT_PATH}/prefixed.txt"
+git -C "${T9_WT_PATH}" add prefixed.txt
+git -C "${T9_WT_PATH}" commit -m "prefixed rc commit" 2>/dev/null
+T9_FEATURE_BRANCH="ai_feature/${T9_TASK_ID}"
+git -C "${T9_DEV}" branch "foo_rc/v1.0.0" "${T9_FEATURE_BRANCH}" 2>/dev/null
+
+_build_fixture_kanban "${T9_ROOT}" "test-project" "${T9_DEV}" "foo_"
+_write_task_status "${T9_TASKS_ROOT}" "${T9_TASK_ID}" "DONE"
+
+# Age the worktree directory.
+touch -t "$(date -d '10 days ago' +%Y%m%d%H%M.%S 2>/dev/null || date -v-10d +%Y%m%d%H%M.%S 2>/dev/null || echo '202601010000.00')" \
+    "${T9_WT_PATH}" 2>/dev/null || true
+
+T9_EXIT=0
+T9_OUT="$(KANBAN_ROOT="${T9_ROOT}" \
+    OVERWATCH_PROJECT="test-project" \
+    OVERWATCH_STALE_WORKTREE_THRESHOLD_DAYS="1" \
+    bash -c "
+        source '${PROTOCOL_SH}'
+        source '${CHECK_SCRIPT}'
+        overwatch_check_stale_worktrees
+    " 2>&1)" || T9_EXIT=$?
+
+if (( T9_EXIT == 0 )); then
+    _pass "prefixed-rc/exit-zero"
+else
+    _fail "prefixed-rc/exit-zero" "exit ${T9_EXIT}; output: ${T9_OUT}"
+fi
+
+# The worktree should have been pruned: foo_rc/v1.0.0 is recognized as an
+# integration branch containing the feature branch's commits (because this
+# project is configured with branch_prefix = "foo_"), so the worktree is
+# safe to prune rather than bug-filed as "carries commits". Before the
+# prefix fix, only the literal "ai_rc/*" was recognized, so a project
+# configured with any other prefix would have bug-filed this worktree
+# instead.
+if [[ ! -d "${T9_WT_PATH}" ]]; then
+    _pass "prefixed-rc/worktree-pruned"
+else
+    _fail "prefixed-rc/worktree-pruned" "worktree still exists: ${T9_WT_PATH} (foo_rc/* not recognized as an integration branch)"
+fi
+
+if echo "${T9_OUT}" | grep -qi "prun"; then
+    _pass "prefixed-rc/prune-message"
+else
+    _fail "prefixed-rc/prune-message" "no prune message in: ${T9_OUT}"
 fi
 
 # ===========================================================================

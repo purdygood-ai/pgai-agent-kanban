@@ -233,20 +233,20 @@ else
     pass "AC-1 (create): create_task_worktree succeeded; worktree at ${CODER_WT_PATH}"
 
     # Verify repo B lists the worktree (confirms git-dir association)
-    if git -C "$REPO_B" worktree list 2>/dev/null | grep -qF "$CODER_WT_PATH"; then
+    if grep -qF "$CODER_WT_PATH" <<< "$(git -C "$REPO_B" worktree list 2>/dev/null)"; then
         pass "AC-1 (git-dir): repo B lists the worktree in 'git worktree list'"
     else
         fail "AC-1 (git-dir): repo B does NOT list ${CODER_WT_PATH} in 'git worktree list'"
     fi
 
-    if git -C "$REPO_A" worktree list 2>/dev/null | grep -qF "$CODER_WT_PATH"; then
+    if grep -qF "$CODER_WT_PATH" <<< "$(git -C "$REPO_A" worktree list 2>/dev/null)"; then
         fail "AC-1 (isolation): repo A lists the CODER worktree — isolation violated"
     else
         pass "AC-1 (isolation): repo A does NOT list the CODER worktree"
     fi
 
     # Verify feature branch exists in repo B
-    if git -C "$REPO_B" branch --list "$FEATURE_BRANCH" | grep -q "$FEATURE_BRANCH"; then
+    if grep -q "$FEATURE_BRANCH" <<< "$(git -C "$REPO_B" branch --list "$FEATURE_BRANCH")"; then
         pass "AC-1 (branch): feature branch ${FEATURE_BRANCH} exists in repo B"
     else
         fail "AC-1 (branch): feature branch ${FEATURE_BRANCH} NOT found in repo B"
@@ -327,13 +327,13 @@ else
     fi
 
     # Verify repo B lists the worktree (confirms git-dir association)
-    if git -C "$REPO_B" worktree list 2>/dev/null | grep -qF "$TESTER_WT_PATH"; then
+    if grep -qF "$TESTER_WT_PATH" <<< "$(git -C "$REPO_B" worktree list 2>/dev/null)"; then
         pass "AC-2 (git-dir): repo B lists the TESTER worktree"
     else
         fail "AC-2 (git-dir): repo B does NOT list ${TESTER_WT_PATH} in 'git worktree list'"
     fi
 
-    if git -C "$REPO_A" worktree list 2>/dev/null | grep -qF "$TESTER_WT_PATH"; then
+    if grep -qF "$TESTER_WT_PATH" <<< "$(git -C "$REPO_A" worktree list 2>/dev/null)"; then
         fail "AC-2 (isolation): repo A lists the TESTER worktree — isolation violated"
     else
         pass "AC-2 (isolation): repo A does NOT list the TESTER worktree"
@@ -390,14 +390,14 @@ echo "pollution" > "$POLLUTION_FILE_A"
 
 # Verify sweep sees the B file but not the A file when anchored on B
 B_PORCELAIN="$(git -C "$_sweep_canonical_tree" status --porcelain=v1 --untracked-files=all 2>/dev/null || true)"
-if echo "$B_PORCELAIN" | grep -qF "$(basename "$POLLUTION_FILE_B")"; then
+if grep -qF "$(basename "$POLLUTION_FILE_B")" <<< "$B_PORCELAIN"; then
     pass "AC-3 (sweep-sees-b): pollution sweep detects untracked file in repo B"
 else
     fail "AC-3 (sweep-sees-b): pollution sweep DID NOT detect untracked file in repo B"
 fi
 
 A_PORCELAIN="$(git -C "$_sweep_canonical_tree" status --porcelain=v1 --untracked-files=all 2>/dev/null || true)"
-if echo "$A_PORCELAIN" | grep -qF "$(basename "$POLLUTION_FILE_A")"; then
+if grep -qF "$(basename "$POLLUTION_FILE_A")" <<< "$A_PORCELAIN"; then
     fail "AC-3 (sweep-not-a): sweep sees repo A's pollution file — incorrect tree anchoring"
 else
     pass "AC-3 (sweep-not-a): sweep does NOT see repo A's pollution file (correct B-only scope)"

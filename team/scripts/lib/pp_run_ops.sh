@@ -18,6 +18,25 @@
 #      The first argument is the fully-qualified module path (e.g.
 #      "pgai_agent_kanban.ops"); remaining arguments are forwarded verbatim.
 #
+# QUEUE-MARKER VERBS (pgai_agent_kanban.ops) — the one queue-line marker
+# writer; bash callers use these instead of a sed or regex of their own:
+#
+#      pp_run_ops pgai_agent_kanban.ops set_marker    "$queue_file" "$key" "$marker" [1]
+#      pp_run_ops pgai_agent_kanban.ops remove_marker "$queue_file" "$key" [1]
+#
+#      set_marker rewrites only the bracket of every "- [?] KEY ..." line to
+#      MARKER (one of " " W A B x; "" reads as " "), keeping the "- " prefix
+#      and description; remove_marker deletes those lines. A trailing "1"
+#      matches KEY case-insensitively (intake backlogs). Exit 0 on success,
+#      3 when the file has no line for KEY, 1 for a bad MARKER, 4 on I/O error.
+#
+#      pp_run_ops pgai_agent_kanban.ops render_ensure_marker "$queue_file" "$key" "$marker"
+#
+#      render_ensure_marker prints the queue file with KEY's line set to
+#      MARKER, adding "- [MARKER] KEY" under "## Queue" when there is no
+#      such line (a missing file renders a new cache). It writes nothing;
+#      commit its output with atomic_write.sh's pgai_atomic_write.
+#
 # PYTHONPATH PRECEDENCE CONTRACT (explicit; do not change without updating callers):
 #
 #   Order (highest to lowest):
@@ -86,6 +105,36 @@ _pp_run_ops_locate_root() {
 # Example:
 #   pp_run_ops pgai_agent_kanban.ops close_item "$project_root" "$key" done
 # ---------------------------------------------------------------------------
+# pp_pythonpath
+# Compose and print the PYTHONPATH value pp_run_ops() would use, per the
+# precedence contract documented in the module header. Callers that need to
+# `import`/`from` a pgai_agent_kanban module inside their OWN inline `python3
+# -` heredoc (rather than invoking a module's CLI via `python3 -m`) use this
+# to get the same cwd-independent path resolution pp_run_ops() gets, e.g.:
+#
+#   PYTHONPATH="$(pp_pythonpath)" python3 - "$status_file" <<'PY'
+#   from pgai_agent_kanban.lib.state_parser import parse_state
+#   ...
+#   PY
+#
+# Returns 1 (no output) if the own-tree root cannot be derived — mirrors
+# pp_run_ops()'s own failure mode.
+# ---------------------------------------------------------------------------
+pp_pythonpath() {
+    local _pp_own_root
+    _pp_own_root="$(_pp_run_ops_locate_root "${BASH_SOURCE[0]}")" || {
+        echo "pp_pythonpath: could not derive own-tree root from BASH_SOURCE[0]=${BASH_SOURCE[0]:-<unset>}" >&2
+        return 1
+    }
+
+    if [[ -n "${KANBAN_ROOT:-}" && "${KANBAN_ROOT}" != "${_pp_own_root}" ]]; then
+        echo "${PYTHONPATH:+${PYTHONPATH}:}${_pp_own_root}:${KANBAN_ROOT}"
+    else
+        echo "${PYTHONPATH:+${PYTHONPATH}:}${_pp_own_root}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 pp_run_ops() {
     local _module="${1:-}"
     if [[ -z "${_module}" ]]; then
@@ -94,21 +143,9 @@ pp_run_ops() {
     fi
     shift
 
-    # Self-locate using BASH_SOURCE[0] (safe inside a function defined via source).
-    local _pp_own_root
-    _pp_own_root="$(_pp_run_ops_locate_root "${BASH_SOURCE[0]}")" || {
-        echo "pp_run_ops: could not derive own-tree root from BASH_SOURCE[0]=${BASH_SOURCE[0]:-<unset>}" >&2
-        return 1
-    }
-
     # Compose PYTHONPATH per the precedence contract (see module header).
-    # Deduplicate when _pp_own_root equals KANBAN_ROOT (live-install case).
     local _pythonpath
-    if [[ -n "${KANBAN_ROOT:-}" && "${KANBAN_ROOT}" != "${_pp_own_root}" ]]; then
-        _pythonpath="${PYTHONPATH:+${PYTHONPATH}:}${_pp_own_root}:${KANBAN_ROOT}"
-    else
-        _pythonpath="${PYTHONPATH:+${PYTHONPATH}:}${_pp_own_root}"
-    fi
+    _pythonpath="$(pp_pythonpath)" || return 1
 
     PYTHONPATH="${_pythonpath}" python3 -m "${_module}" "$@"
 }

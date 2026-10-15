@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# cm-push-watchdog.sh
-# Push unpushed main commits and tags to origin for every registered project.
+# team/scripts/cm/push-watchdog.sh
+# Push unpushed main commits and release tags to each registered project's
+# git remote: project.cfg [project] git_remote_name, origin when absent or
+# blank (pp_git_remote_name). "origin" below means that remote.
 #
 # Designed to run from cron OUTSIDE the Claude Code tool-use environment,
 # so PreToolUse hook interception cannot block git push to main/origin.
 #
 # Usage:
-#   cm-push-watchdog.sh [--dry-run] [--project <name>]
+#   cm/push-watchdog.sh [--dry-run] [--project <name>]
 #
 # Options:
 #   --dry-run          Show what would be pushed without actually pushing.
@@ -19,11 +21,29 @@
 #
 # Behaviour per project:
 #   1. Skip projects with a per-project HALT file (KANBAN_ROOT/projects/<name>/HALT).
-#   2. Read dev_tree_path from the project's PROJECT.cfg.
-#   3. Skip projects whose dev_tree_path is not a git repository.
-#   4. Check whether local main is ahead of origin/main.
-#   5. Check for local tags absent from origin.
-#   6. Push the missing commits and/or tags.
+#   2. Ask the shared push-decision resolver (pp_push_decision,
+#      lib/push_decision.sh) before any git call:
+#        unresolved -- the project is not registered in projects.cfg, has no
+#                      project.cfg (or legacy PROJECT.cfg), or that file names
+#                      no dev_tree_path: log one 'skipped-unresolved-project'
+#                      line naming the missing piece, run no git command, skip.
+#        no-push    -- push_to_remote = false: origin-isolated by design; skip.
+#        push       -- push_to_remote true or absent (the default): continue,
+#                      using the resolver's dev tree (the project.cfg
+#                      dev_tree_path; PGAI_DEV_TREE_PATH is never consulted).
+#   3. Skip projects whose dev_tree_path is not a git repository, and
+#      projects whose git_remote_name is not a valid remote name (the
+#      dual-channel git_remote_name.invalid block goes to stderr, one line
+#      to the project log; no git network command runs).
+#   4. Check whether local main is ahead of <remote>/<prefix>main.
+#   5. Check for this project's local release tags absent from the remote. A
+#      release tag is <branch_prefix>vX.Y.Z -- the name pp_prefix_tag gives
+#      the tag the release cuts (ai_v1.2.3 with branch_prefix=ai_, v1.2.3
+#      with none). Any other local tag, including another lane's bare vX.Y.Z
+#      in a shared repository, is never considered.
+#   6. Push the missing commits and/or tags. Each missing tag is pushed by
+#      its explicit ref (refs/tags/<tag>); the watchdog never pushes every
+#      local tag at once.
 #   7. Log every action to KANBAN_ROOT/projects/<name>/logs/cm-push-watchdog.log.
 #
 # Idempotent and safe: when there is nothing to push the script exits 0
@@ -56,10 +76,22 @@ while [[ $# -gt 0 ]]; do
     --project)   SINGLE_PROJECT="${2:-}"; shift 2 ;;
     --help|-h)
       cat <<'EOF'
-Usage: cm-push-watchdog.sh [--dry-run] [--project <name>]
+Usage: scripts/cm/push-watchdog.sh [--dry-run] [--project <name>]
 
-Pushes unpushed main commits and tags to origin for each registered project.
-Safe to run on every cron tick — no-op when there is nothing to push.
+Pushes unpushed main commits and release tags to each registered project's
+git remote (project.cfg [project] git_remote_name, origin when absent or
+blank). Safe to run on every cron tick — no-op when there is nothing to push.
+
+A release tag is the project's <branch_prefix>vX.Y.Z (e.g. ai_v1.2.3 with
+branch_prefix = ai_, v1.2.3 with none). Only a release tag missing from the
+remote is pushed, each by its explicit refs/tags/<tag> ref; no other local
+tag is ever pushed.
+
+A project is pushed only when it is registered in projects.cfg, its own
+project.cfg exists and names a dev_tree_path, and push_to_remote is true or
+absent there. Otherwise it is skipped before any git command runs: one
+'skipped-unresolved-project' log line names the missing piece, or a
+'[push_to_remote=false]' line for a local-only project.
 
 Options:
   --dry-run          Report what would be pushed without pushing.
@@ -82,14 +114,15 @@ done
 # ---------------------------------------------------------------------------
 # Source projects.sh library (handles both INI and colon-legacy projects.cfg)
 # ---------------------------------------------------------------------------
-# This file lives under $KANBAN_ROOT/scripts/ at runtime (install.sh strips
-# the team/ prefix). The library helpers handle both projects.cfg formats:
+# This file lives under $KANBAN_ROOT/scripts/cm/ at runtime (install.sh strips
+# the team/ prefix); its libraries are in the sibling scripts/lib/. The
+# library helpers handle both projects.cfg formats:
 #   - INI ([project:NAME] sections)
 #   - colon-legacy (NAME:PRIORITY[:COLOR])
 # Without these helpers, an ad-hoc 'awk -F:' parser silently extracted the
 # literal string '[project' from INI headers and created a ghost
 # projects/[project/ directory on every cron tick.
-_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 if [[ -f "${_LIB_DIR}/projects.sh" ]]; then
     # shellcheck source=lib/projects.sh
     source "${_LIB_DIR}/projects.sh"
@@ -97,12 +130,29 @@ else
     echo "cm-push-watchdog: ERROR: projects.sh library not found at ${_LIB_DIR}/projects.sh" >&2
     exit 1
 fi
-# project_paths.sh provides pp_project_root, _pp_project_cfg_file, _pp_read_cfg_key
+# project_paths.sh provides pp_prefix_branch
 if [[ -f "${_LIB_DIR}/project_paths.sh" ]]; then
     # shellcheck source=lib/project_paths.sh
     source "${_LIB_DIR}/project_paths.sh"
 else
     echo "cm-push-watchdog: ERROR: project_paths.sh library not found at ${_LIB_DIR}/project_paths.sh" >&2
+    exit 1
+fi
+# release_refs.sh provides the release-tag filter and the prefixed main
+# branch, shared with OVERWATCH's check-push-lag.sh
+if [[ -f "${_LIB_DIR}/release_refs.sh" ]]; then
+    # shellcheck source=../lib/release_refs.sh
+    source "${_LIB_DIR}/release_refs.sh"
+else
+    echo "cm-push-watchdog: ERROR: release_refs.sh library not found at ${_LIB_DIR}/release_refs.sh" >&2
+    exit 1
+fi
+# push_decision.sh provides pp_push_decision, the shared push-decision resolver
+if [[ -f "${_LIB_DIR}/push_decision.sh" ]]; then
+    # shellcheck source=../lib/push_decision.sh
+    source "${_LIB_DIR}/push_decision.sh"
+else
+    echo "cm-push-watchdog: ERROR: push_decision.sh library not found at ${_LIB_DIR}/push_decision.sh" >&2
     exit 1
 fi
 
@@ -182,42 +232,45 @@ _process_project() {
     return 0
   fi
 
-  # --- push_to_remote check ---
-  # Projects with push_to_remote=false are origin-isolated by design; the
-  # watchdog MUST NOT push them out-of-band.  Skip immediately and log so the
-  # operator can grep for the local-only signal.
-  local _watchdog_push_to_remote
-  _watchdog_push_to_remote="$(KANBAN_ROOT="$KANBAN_ROOT" PGAI_PROJECT_NAME="$project_name" \
-    pp_push_to_remote "$project_name" 2>/dev/null || echo "true")"
-  if [[ "$_watchdog_push_to_remote" == "false" ]]; then
-    _log "[push_to_remote=false] skipping origin push for ${project_name}: push_to_remote=false — project is origin-isolated"
-    return 0
+  # --- Push decision (shared resolver) ---
+  # Decided before any git command, so an unresolved or origin-isolated
+  # project contacts no remote. There is no fallback to pushing: a resolver
+  # that cannot answer reads as unresolved.
+  # The project's git remote (origin when git_remote_name is absent or
+  # blank; empty when it is invalid).
+  local remote
+  remote="$(pp_git_remote_name --quiet "$project_name")" || remote=""
+  pp_push_decision "$project_name"
+  case "$PP_PUSH_DECISION" in
+    push) ;;
+    no-push)
+      # Projects with push_to_remote=false are origin-isolated by design; the
+      # watchdog MUST NOT push them out-of-band.  Log so the operator can grep
+      # for the local-only signal.
+      _log "[push_to_remote=false] skipping ${remote:-the configured remote} push for ${project_name}: push_to_remote=false — project is local-only by design"
+      return 0
+      ;;
+    *)
+      _log "$PP_PUSH_STATUS_LINE"
+      return 0
+      ;;
+  esac
+
+  # The dev tree is the project.cfg dev_tree_path the resolver read.
+  local dev_tree="$PP_PUSH_DEV_TREE"
+
+  # --- Resolve the release-tag prefix and MAIN_BRANCH (release_refs.sh) ---
+  # This project's release tags are <branch_prefix>vX.Y.Z and its main
+  # branch <branch_prefix>main (ai_main with branch_prefix=ai_, main with
+  # none). A prefix that cannot be read leaves the tag check off for this
+  # tick rather than guessing: an empty-prefix guess would push another
+  # lane's bare tags. MAIN_BRANCH then falls back to "main", as before.
+  local tag_prefix tag_prefix_ok=true MAIN_BRANCH
+  if ! tag_prefix="$(release_refs_tag_prefix "$project_name")"; then
+    tag_prefix_ok=false
+    tag_prefix=""
   fi
-
-  # --- Read project config for dev_tree_path ---
-  # Use the project_paths.sh helpers so we handle both project.cfg (INI)
-  # and PROJECT.cfg (legacy bash-style key=value).
-  local cfg_file dev_tree
-  cfg_file="$(_pp_project_cfg_file "$project_dir")"
-
-  if [[ -z "$cfg_file" ]]; then
-    _log "No project.cfg or PROJECT.cfg found in $project_dir — skipping"
-    return 0
-  fi
-
-  dev_tree="$(_pp_read_cfg_key "$cfg_file" project dev_tree_path "")"
-
-  if [[ -z "$dev_tree" ]]; then
-    _log "dev_tree_path not set in $cfg_file — skipping"
-    return 0
-  fi
-
-  # --- Resolve MAIN_BRANCH via pp_prefix_branch ---
-  # For projects with branch_prefix=ai_, MAIN_BRANCH=ai_main.
-  # For projects with no branch_prefix, MAIN_BRANCH=main unchanged.
-  local MAIN_BRANCH
-  MAIN_BRANCH="$(KANBAN_ROOT="$KANBAN_ROOT" PGAI_PROJECT_NAME="$project_name" \
-    pp_prefix_branch "$project_name" "main" 2>/dev/null || echo "main")"
+  MAIN_BRANCH="$(release_refs_main_branch "$tag_prefix")"
 
   # --- Verify git repo ---
   if ! git -C "$dev_tree" rev-parse --git-dir &>/dev/null 2>&1; then
@@ -225,55 +278,74 @@ _process_project() {
     return 0
   fi
 
-  # --- Fetch from origin to get current remote state ---
+  # --- A remote name git can be handed safely ---
+  # An invalid git_remote_name skips this project this tick; the resolver
+  # prints its dual-channel block (git_remote_name.invalid) on stderr.
+  if [[ -z "$remote" ]]; then
+    pp_git_remote_name "$project_name" >/dev/null || true
+    _log "git_remote_name for ${project_name} is not a valid git remote name — skipping (fix [project] git_remote_name in its project.cfg)"
+    return 0
+  fi
+
+  # --- Fetch from the remote to get its current state ---
   # Best-effort: network or credential failure just means we can't compare accurately.
   local fetch_ok=true
-  if ! git -C "$dev_tree" fetch origin --tags --quiet 2>/dev/null; then
-    _log "WARNING: fetch from origin failed — push detection may use stale remote state"
+  if ! git -C "$dev_tree" fetch "$remote" --tags --quiet 2>/dev/null; then
+    _log "WARNING: fetch from $remote failed — push detection may use stale remote state"
     fetch_ok=false
   fi
 
-  # --- Check: is local MAIN_BRANCH ahead of origin/MAIN_BRANCH? ---
+  # --- Check: is local MAIN_BRANCH ahead of <remote>/MAIN_BRANCH? ---
   local push_main=false
   # Verify both refs exist before comparing
   if git -C "$dev_tree" rev-parse --verify "$MAIN_BRANCH" &>/dev/null 2>&1 && \
-     git -C "$dev_tree" rev-parse --verify "origin/$MAIN_BRANCH" &>/dev/null 2>&1; then
+     git -C "$dev_tree" rev-parse --verify "${remote}/$MAIN_BRANCH" &>/dev/null 2>&1; then
     local commits_ahead
-    commits_ahead="$(git -C "$dev_tree" rev-list --count "origin/${MAIN_BRANCH}..${MAIN_BRANCH}" 2>/dev/null || echo 0)"
+    commits_ahead="$(git -C "$dev_tree" rev-list --count "${remote}/${MAIN_BRANCH}..${MAIN_BRANCH}" 2>/dev/null || echo 0)"
     if [[ "$commits_ahead" -gt 0 ]]; then
-      _log "$MAIN_BRANCH is $commits_ahead commit(s) ahead of origin/$MAIN_BRANCH — push needed"
+      _log "$MAIN_BRANCH is $commits_ahead commit(s) ahead of ${remote}/$MAIN_BRANCH — push needed"
       push_main=true
     else
-      _log "$MAIN_BRANCH is up to date with origin/$MAIN_BRANCH"
+      _log "$MAIN_BRANCH is up to date with ${remote}/$MAIN_BRANCH"
     fi
   elif git -C "$dev_tree" rev-parse --verify "$MAIN_BRANCH" &>/dev/null 2>&1; then
-    # Local MAIN_BRANCH exists but origin/MAIN_BRANCH does not — definitely needs push
-    _log "origin/$MAIN_BRANCH does not exist — local $MAIN_BRANCH needs initial push"
+    # Local MAIN_BRANCH exists but <remote>/MAIN_BRANCH does not — definitely needs push
+    _log "${remote}/$MAIN_BRANCH does not exist — local $MAIN_BRANCH needs initial push"
     push_main=true
   else
     _log "local $MAIN_BRANCH branch does not exist — nothing to push for main"
   fi
 
-  # --- Check: local tags absent from origin ---
-  # Compare local tags to tags known on origin after fetch.
+  # --- Check: this project's release tags absent from the remote ---
+  # Only <tag_prefix>vX.Y.Z counts; compare each to the tags on the remote.
   local missing_tags=()
-  local all_local_tags
-  all_local_tags="$(git -C "$dev_tree" tag 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
-  if [[ -n "$all_local_tags" ]]; then
+  local tag release_tags=""
+  if [[ "$tag_prefix_ok" == "true" ]]; then
+    release_tags="$(release_refs_local_release_tags "$dev_tree" "$tag_prefix")"
+  else
+    _log "WARNING: branch_prefix for ${project_name} could not be read — release tags not checked this tick (fix [project] branch_prefix in its project.cfg)"
+  fi
+  if [[ -n "$release_tags" ]]; then
     while IFS= read -r tag; do
       [[ -z "$tag" ]] && continue
-      # A tag is "on origin" when it appears in the remote-tracking namespace
-      if ! git -C "$dev_tree" ls-remote --tags origin "refs/tags/${tag}" 2>/dev/null | grep -q .; then
+      # A tag is "on the remote" when the remote advertises refs/tags/<tag>
+      if ! git -C "$dev_tree" ls-remote --tags "$remote" "refs/tags/${tag}" 2>/dev/null | grep -q .; then
         missing_tags+=("$tag")
       fi
-    done <<< "$all_local_tags"
+    done <<< "$release_tags"
   fi
 
   if [[ ${#missing_tags[@]} -gt 0 ]]; then
-    _log "Tags missing from origin: ${missing_tags[*]}"
+    _log "Tags missing from ${remote}: ${missing_tags[*]}"
   else
-    _log "All local tags are present on origin"
+    _log "All local release tags are present on ${remote}"
   fi
+
+  # The explicit refs a tag push names — one per missing release tag.
+  local tag_refs=()
+  for tag in "${missing_tags[@]}"; do
+    tag_refs+=("refs/tags/${tag}")
+  done
 
   # --- Nothing to do? ---
   if [[ "$push_main" == "false" && ${#missing_tags[@]} -eq 0 ]]; then
@@ -284,10 +356,10 @@ _process_project() {
   # --- Dry-run mode ---
   if [[ "$DRY_RUN" == "true" ]]; then
     if [[ "$push_main" == "true" ]]; then
-      _log "[dry-run] would: git -C '$dev_tree' push origin $MAIN_BRANCH"
+      _log "[dry-run] would: git -C '$dev_tree' push ${remote} $MAIN_BRANCH"
     fi
     if [[ ${#missing_tags[@]} -gt 0 ]]; then
-      _log "[dry-run] would: git -C '$dev_tree' push origin --tags"
+      _log "[dry-run] would: git -C '$dev_tree' push ${remote} ${tag_refs[*]}"
     fi
     return 0
   fi
@@ -295,26 +367,26 @@ _process_project() {
   # --- Push MAIN_BRANCH ---
   local push_main_rc=0
   if [[ "$push_main" == "true" ]]; then
-    _log "Pushing $MAIN_BRANCH to origin..."
-    if git -C "$dev_tree" push origin "$MAIN_BRANCH" 2>&1 | \
+    _log "Pushing $MAIN_BRANCH to ${remote}..."
+    if git -C "$dev_tree" push "$remote" "$MAIN_BRANCH" 2>&1 | \
        while IFS= read -r line; do _log "  git: $line"; done; then
       _log "$MAIN_BRANCH pushed successfully"
     else
       push_main_rc=$?
-      _log "WARNING: push origin $MAIN_BRANCH failed (exit code $push_main_rc) — will retry on next tick"
+      _log "WARNING: push ${remote} $MAIN_BRANCH failed (exit code $push_main_rc) — will retry on next tick"
     fi
   fi
 
-  # --- Push missing tags ---
+  # --- Push missing release tags, each by its explicit ref ---
   local push_tags_rc=0
   if [[ ${#missing_tags[@]} -gt 0 ]]; then
-    _log "Pushing tags to origin..."
-    if git -C "$dev_tree" push origin --tags 2>&1 | \
+    _log "Pushing tags to ${remote}: ${tag_refs[*]}"
+    if git -C "$dev_tree" push "$remote" "${tag_refs[@]}" 2>&1 | \
        while IFS= read -r line; do _log "  git: $line"; done; then
       _log "Tags pushed successfully"
     else
       push_tags_rc=$?
-      _log "WARNING: push origin --tags failed (exit code $push_tags_rc) — will retry on next tick"
+      _log "WARNING: push ${remote} ${tag_refs[*]} failed (exit code $push_tags_rc) — will retry on next tick"
     fi
   fi
 

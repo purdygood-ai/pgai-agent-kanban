@@ -9,8 +9,8 @@ evidence PATHS (never duplicated report/bug content — this ledger is the
 index, TESTER reports and bug files remain the record, per
 team/roles/OVERWATCH.md's "Reversible-only" authority-boundary clause).
 
-Two operations, both atomic (temp file in the same directory + os.replace,
-same pattern as pgai_agent_kanban.ops.write._atomic_write):
+Two operations, both atomic (pgai_agent_kanban.lib.atomic_write: temp file
+in the same directory + fsync + os.replace):
 
   - append_entry(ledger_path, entry) — writes a brand-new entry. Nothing
     already in the file is touched; the write either lands the whole file
@@ -64,11 +64,25 @@ import argparse
 import hashlib
 import json
 import os
+import pathlib
 import re
 import sys
-import tempfile
 from dataclasses import dataclass, field, fields
 from typing import Optional
+
+# Run by file path (``python3 .../ledger.py``) or loaded from a file outside
+# its package, this module has no parent package and the interpreter puts only
+# its own directory on sys.path, so the package import below would not resolve.
+# Put this file's own package root -- the directory holding the
+# pgai_agent_kanban/ this file sits in -- at the front of sys.path so the
+# import resolves from the same tree, never another. Imported as a package
+# member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -150,6 +164,7 @@ class LedgerEntry:
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def to_dict(self) -> dict:
+        """Return the entry as a dict keyed by field name, with ``entry_id`` resolved (generated when unset)."""
         data = {f.name: getattr(self, f.name) for f in fields(self)}
         data["entry_id"] = self.resolved_entry_id()
         return data
@@ -213,32 +228,15 @@ def _ledger_header(ledger_path: str) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Atomic write primitive (same pattern as pgai_agent_kanban.ops.write._atomic_write)
-# ---------------------------------------------------------------------------
-
-
-def _atomic_write(target: str, content: str) -> None:
-    """Write *content* to *target* atomically: a temp file in the same
-    directory, written and closed, then renamed over the target with
-    os.replace (atomic on POSIX). Mirrors
-    pgai_agent_kanban.ops.write._atomic_write's pattern exactly.
+def _write_ledger_file(target: str, content: str) -> None:
+    """Atomically replace *target* with *content* via the shared writer,
+    creating its directory first. A write failure is a LedgerError.
     """
-    target_dir = os.path.dirname(os.path.abspath(target))
-    os.makedirs(target_dir, exist_ok=True)
-    tmp_path = None
+    os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
     try:
-        fd, tmp_path = tempfile.mkstemp(prefix=".ledger_tmp_", dir=target_dir)
-        os.close(fd)
-        with open(tmp_path, "w", encoding="utf-8") as handle:
-            handle.write(content)
-        os.replace(tmp_path, target)
-        tmp_path = None
+        atomic_write(target, content, prefix=".ledger_tmp_")
     except OSError as exc:
         raise LedgerError(f"ledger.py: failed writing {target}: {exc}") from exc
-    finally:
-        if tmp_path is not None and os.path.exists(tmp_path):
-            os.remove(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +264,7 @@ def append_entry(ledger_path: str, entry: LedgerEntry) -> str:
     else:
         new_content = _ledger_header(ledger_path) + "\n" + block + "\n"
 
-    _atomic_write(ledger_path, new_content)
+    _write_ledger_file(ledger_path, new_content)
     return entry.resolved_entry_id()
 
 
@@ -450,7 +448,7 @@ def backfill_outcome(ledger_path: str, entry_id: str, outcome: str) -> bool:
     block_lines[outcome_line_idx] = f"- Outcome: {outcome}"
     lines[target_start:target_end] = block_lines
     new_text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
-    _atomic_write(ledger_path, new_text)
+    _write_ledger_file(ledger_path, new_text)
     return True
 
 
@@ -491,6 +489,15 @@ def ledger_path_for_project(kanban_root: str, project_name: str) -> str:
 
 
 def main() -> None:
+    """Run the auto-resolutions ledger CLI.
+
+    ``append LEDGER ENTRY_JSON`` appends an entry and prints its
+    ``{"entry_id": ...}``; ``backfill-outcome LEDGER ENTRY_ID OUTCOME`` prints
+    ``{"changed": ...}``; ``backfill-family LEDGER FAMILY_KEY OUTCOME`` prints
+    ``{"updated_entry_ids": [...]}``; ``list LEDGER`` prints every entry as a
+    JSON array. Returns None (exit 0); a ledger error propagates as an
+    exception (exit 1), and argparse exits 2 on a usage error.
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Append or read the append-only auto-resolutions ledger. "
@@ -503,23 +510,38 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     p_append = subparsers.add_parser("append", help="Append a new entry from JSON.")
-    p_append.add_argument("ledger_path")
+    p_append.add_argument(
+        "ledger_path",
+        help="path to the project's auto-resolutions.md ledger (created on first write)",
+    )
     p_append.add_argument("entry_json", help="Path to a LedgerEntry JSON file.")
 
     p_backfill = subparsers.add_parser("backfill-outcome", help="Backfill one entry's Outcome.")
-    p_backfill.add_argument("ledger_path")
-    p_backfill.add_argument("entry_id")
-    p_backfill.add_argument("outcome")
+    p_backfill.add_argument("ledger_path", help="path to the project's auto-resolutions.md ledger")
+    p_backfill.add_argument("entry_id", help="the entry's ID, as append printed it")
+    p_backfill.add_argument(
+        "outcome",
+        help="terminal outcome to record, e.g. 'SHIPPED attempt 2' or CEILING-BLOCKED",
+    )
 
     p_backfill_family = subparsers.add_parser(
         "backfill-family", help="Backfill Outcome for every pending entry in a family."
     )
-    p_backfill_family.add_argument("ledger_path")
-    p_backfill_family.add_argument("family_key")
-    p_backfill_family.add_argument("outcome")
+    p_backfill_family.add_argument(
+        "ledger_path",
+        help="path to the project's auto-resolutions.md ledger",
+    )
+    p_backfill_family.add_argument(
+        "family_key",
+        help="the family key whose pending entries are backfilled",
+    )
+    p_backfill_family.add_argument(
+        "outcome",
+        help="terminal outcome to record, e.g. 'SHIPPED attempt 2' or CEILING-BLOCKED",
+    )
 
     p_list = subparsers.add_parser("list", help="Print all entries as JSON.")
-    p_list.add_argument("ledger_path")
+    p_list.add_argument("ledger_path", help="path to the project's auto-resolutions.md ledger")
 
     args = parser.parse_args()
 

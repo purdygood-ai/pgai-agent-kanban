@@ -1,24 +1,27 @@
 """
 test_cm_release_hook_failure_remedy.py
 =======================================
-Retrofit (CODER-20260727-019): a blocking release-lifecycle hook that exits
-non-zero (the `_run_release_hook` failure path in team/scripts/cm/release.sh)
-is classified non-deterministic (exempt) in
-docs/audits/v1.27.2-gate-remedy-census.md — the hook is project-supplied, so
-its failure cause is not knowable from release.sh.  Per docs/coding-standards.md
-"The non-deterministic exemption", the failure is exempt from a numbered
-fix-command block but must still name the next diagnostic step and the rule
-the gate enforces.
+Retrofit: a blocking release-lifecycle hook that exits
+non-zero (the `_run_release_hook` failure path in
+team/scripts/lib/cm/release_finalize.sh — see "WHY EXTRACTION" below) is
+classified non-deterministic (exempt) — the hook is project-supplied, so its failure cause is not knowable from the
+caller.  Per docs/coding-standards.md "The non-deterministic exemption", the
+failure is exempt from a numbered fix-command block but must still name the
+next diagnostic step and the rule the gate enforces.
 
 WHY EXTRACTION, NOT REPLICATION
 --------------------------------
-`_run_release_hook` is a private function defined inline in release.sh (not
-factored into team/scripts/lib/), so it cannot be `source`d in isolation the
-way library functions can.  Rather than hand-retype its body into the test
-(risking silent drift from the real script), this file extracts the function
-verbatim from the live release.sh text at test time and sources the extracted
-text into a bash harness.  The test therefore exercises the production
-function body, not a copy of it.
+`_run_release_hook` is a private helper defined at file scope in
+release_finalize.sh (moved there from release.sh by the v2.9.20
+engine-decomposition, since every one of its call sites is one of the
+hook-step callbacks release.sh threads through by name — see that file's
+"Why two callbacks"). It is not exposed as part of the lib's public API, so
+it cannot be `source`d and called directly the way cm_release_finalize can.
+Rather than hand-retype its body into the test (risking silent drift from
+the real script), this file extracts the function verbatim from the live
+release_finalize.sh text at test time and sources the extracted text into a
+bash harness. The test therefore exercises the production function body,
+not a copy of it.
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ import stat
 from tests.unit.shell_harness import run_bash
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
-_RELEASE_SH = _TEAM_DIR / "scripts" / "cm" / "release.sh"
+_RELEASE_FINALIZE_SH = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_finalize.sh"
 _LIB_ERROR_CONTRACT = _TEAM_DIR / "scripts" / "lib" / "error_contract.sh"
 
 _FUNCTION_NAME = "_run_release_hook"
@@ -41,9 +44,10 @@ def _extract_function(source_path: pathlib.Path, function_name: str) -> str:
     Scans for a line exactly matching "<function_name>() {" and returns
     every line up to and including the next line that is exactly "}"
     (the closing brace of a function defined at column 0 — the convention
-    every function in release.sh follows). Raises AssertionError if the
-    function or its closing brace cannot be found, so a rename or reformat
-    upstream fails this test loudly rather than silently testing nothing.
+    release_finalize.sh's file-scope helpers follow). Raises AssertionError
+    if the function or its closing brace cannot be found, so a rename or
+    reformat upstream fails this test loudly rather than silently testing
+    nothing.
     """
     text = source_path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -73,7 +77,7 @@ def _run_hook_call(
     no_block: bool = False,
 ) -> object:
     """Source the real _run_release_hook() and invoke it against hook_path."""
-    fn_body = _extract_function(_RELEASE_SH, _FUNCTION_NAME)
+    fn_body = _extract_function(_RELEASE_FINALIZE_SH, _FUNCTION_NAME)
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True, exist_ok=True)
 
@@ -134,7 +138,7 @@ def test_failing_hook_prints_rule_line(tmp_path: pathlib.Path) -> None:
 
 def test_failing_hook_emits_dual_channel_error_contract(tmp_path: pathlib.Path) -> None:
     """The blocking failure path also emits the house-shape error/message/remedy
-    triple (requirements v2.3.5 Goal 4) via team/scripts/lib/error_contract.sh,
+    triple via team/scripts/lib/error_contract.sh,
     in addition to the pre-existing Cause(s)/Next-diagnostic-step/Rule block —
     a forced hook failure must speak both channels."""
     hook = tmp_path / "hooks" / "cm-release-pre-tag.sh"

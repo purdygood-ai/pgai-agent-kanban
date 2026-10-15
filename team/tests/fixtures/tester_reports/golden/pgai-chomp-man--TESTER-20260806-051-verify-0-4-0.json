@@ -1,0 +1,200 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified RC v0.4.0 of pgai-chomp-man against `requirements/v0.4.0-power-pellets.md`.\nThe release adds power-ups (\"Dragon Bane\"), a vulnerable-mode trigger + wall-clock timer,\ndragon NORMAL<->VULNERABLE state transitions with a distinct render color, eat-vulnerable-dragon\n(den respawn + escalating combo bonus 200/400/800/1600), and preserves the v0.3.0 normal-dragon\nlife-loss collision. Pre-flight passed (HEAD matches rc/v0.4.0, clean tree, no stashes, all three\nCODER feature branches merged and cleaned up). All 8 acceptance criteria verified programmatically\nand behaviorally; `python3 -m py_compile` passes for every changed file; the project's pytest suite\nis 163 passed / 0 failed / 0 skipped; independent behavioral triggering of both collision branches,\nthe combo clamp, timer expiry, den respawn, and the v0.3.0 regression all confirmed the guard logic\nfires correctly.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "AC1 -- py_compile passes for all changed/added .py files",
+      "heading": "Finding 1: AC1 -- py_compile passes for all changed/added .py files",
+      "level": 3,
+      "body": "**Category:** pass\n`python3 -m py_compile *.py tests/*.py` exits 0. All 11 changed files compile.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "AC2 -- Power-ups render distinctly and are placed on open cells",
+      "heading": "Finding 2: AC2 -- Power-ups render distinctly and are placed on open cells",
+      "level": 3,
+      "body": "**Category:** pass\n`maze.find_power_pellet_cells()` anchors on the four geometric corners and picks the nearest\neligible non-wall, non-excluded cell per corner. Behavioral run on the default maze returned 4\ndistinct corner-adjacent open cells [(1,1),(1,17),(13,1),(13,17)], none on walls.\n`Maze.place_power_pellets()` only converts non-WALL cells (verified: a placement request on a wall\ncell is skipped -- returned count 1 of 2 requested when one target was a wall). Distinct rendering\nvia `POWER_PELLET_COLOR (255,176,64)` + glow highlight and a larger radius\n(`POWER_PELLET_RADIUS_DIVISOR=3` vs pellet's 8) in `maze.draw_power_pellet`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "AC3 -- Eating a power-up sets dragons VULNERABLE and starts a timer",
+      "heading": "Finding 3: AC3 -- Eating a power-up sets dragons VULNERABLE and starts a timer",
+      "level": 3,
+      "body": "**Category:** pass\nMain loop reads `maze.has_power_pellet()` before `eat_at()` clears the cell; on a power-pellet eat\nit calls `set_dragons_vulnerable(dragons)`, sets\n`vulnerable_mode_remaining_ms = VULNERABLE_MODE_DURATION_MS (8000)`, and resets the combo counter\nto 0. State transition and timer start confirmed behaviorally.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "AC4 -- Vulnerable dragons are visually distinct and edible",
+      "heading": "Finding 4: AC4 -- Vulnerable dragons are visually distinct and edible",
+      "level": 3,
+      "body": "**Category:** pass\n`Dragon.draw()` renders body + horns in the shared `VULNERABLE_COLOR (72,108,224)` while\n`state is VULNERABLE`, reverting to the roster color otherwise. Edibility confirmed via the\ncollision resolver branch (Finding 5).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "AC5 -- Eating a vulnerable dragon -> den + escalating combo bonus + named constants",
+      "heading": "Finding 5: AC5 -- Eating a vulnerable dragon -> den + escalating combo bonus + named constants",
+      "level": 3,
+      "body": "**Category:** pass\nBehavioral test of `resolve_dragon_collisions`: eating a VULNERABLE dragon sends it to its own den\n(order-matched `dragon_start_positions`), flips it back to NORMAL, resets its direction to None, and\nawards `dragon_eat_bonus(combo)`. Escalation confirmed: successive eats in one window awarded\n200 -> 400 (combo 1 -> 2), and the sequence holds at 1600 past the 4th eat\n(`dragon_eat_bonus(5)==1600`, no IndexError). Constants\n`DRAGON_EAT_BONUS_VALUES=(200,400,800,1600)` and `POWER_PELLET_POINTS=50` are named; no stray combo\nliterals found outside the constant. Eating a vulnerable dragon does not cost a life.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "AC6 -- Vulnerable mode expires on the timer and dragons return to NORMAL",
+      "heading": "Finding 6: AC6 -- Vulnerable mode expires on the timer and dragons return to NORMAL",
+      "level": 3,
+      "body": "**Category:** pass\n`update_vulnerable_timer()` counts `remaining_ms` down by `elapsed_ms`, floors at 0, and calls\n`set_dragons_normal()` exactly on the expiry edge. Behavioral run: 100ms->(-40)=60ms keeps\nVULNERABLE; 60ms->(-100)=0ms reverts to NORMAL. Combo counter is NOT reset on timer expiry (only on\na new power-pellet eat), matching the requirements doc.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "AC7 -- NORMAL dragon still costs a life (v0.3.0 regression preserved)",
+      "heading": "Finding 7: AC7 -- NORMAL dragon still costs a life (v0.3.0 regression preserved)",
+      "level": 3,
+      "body": "**Category:** pass\nBehavioral test: a NORMAL dragon on Chomp Man's cell drives `apply_life_loss` (lives 3->2, no score\ngain, \"life-loss\" cue). Life loss is applied at most once per call even with multiple NORMAL dragons\non the cell. Mixed case (one VULNERABLE + one NORMAL on the same cell) correctly eats the vulnerable\none (+200) AND loses a life (3->2) -- both branches fire independently, and the pre-mutation state\ncapture prevents an eaten dragon from double-counting as a NORMAL collision.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "AC8 -- Scoring additions use named constants",
+      "heading": "Finding 8: AC8 -- Scoring additions use named constants",
+      "level": 3,
+      "body": "**Category:** pass\n`PELLET_POINTS=10`, `POWER_PELLET_POINTS=50`, `DRAGON_EAT_BONUS_VALUES=(200,400,800,1600)`,\n`VULNERABLE_MODE_DURATION_MS=8000` are all named. `POINT_VALUES` registry keyed by `CellType` keeps\nthe eat path generic. No bare scoring literals in the eat/collision paths.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Test fidelity",
+      "heading": "Finding 9: Test fidelity",
+      "level": 3,
+      "body": "**Category:** pass\n`tests/test_dragon_eat_collision.py` (334 lines) exercises the real `resolve_dragon_collisions` with\nreal `Dragon`/`Lives`/`Score` objects (a stub SoundManager recording calls, no mocking of the branch\nlogic), covering the v0.3.0 life-loss regression, combo escalation, top-value clamp, den respawn,\nand no-collision no-op. This corroborates my independent behavioral verification -- tests do not mock\naway the critical conditions.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

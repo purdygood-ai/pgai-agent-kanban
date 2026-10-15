@@ -3,7 +3,7 @@ test_cancel_rc_frees_version.py
 ================================
 Integration tests for the cancel-RC-frees-version semantics.
 
-These tests cover BUG-0092 defect 1: after cancelling an RC that was opened for
+These tests cover the cancel-frees-version defect: after cancelling an RC that was opened for
 a requirement with a hardcoded Target Version, the version number must be freed
 so that the same requirement can be re-selected and open-rc can succeed on the
 same version number without collision.
@@ -39,6 +39,18 @@ import subprocess
 from typing import Optional
 
 import pytest
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="cancel-rc-frees-version")
 
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.
@@ -436,7 +448,7 @@ class TestCancelRCFreesVersion:
 class TestBundleNumberingSkipsCancelledVersions:
     """discovery_compute_next_patch skips cancelled versions.
 
-    The expected semantics per BUG-0092: bundles still skip a cancelled number
+    The expected semantics: bundles still skip a cancelled number
     when computing the next open patch slot — the freed slot is available only to
     the requirement that originally owned the hardcoded Target, not to new bundles.
     """

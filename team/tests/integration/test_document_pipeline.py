@@ -25,7 +25,7 @@ Design notes:
   - All tests use tmp_path for scratch.  No bare /tmp paths appear in this file.
   - Each test is self-contained; no shared state between tests.
   - Test names describe the behavior under test; no bug IDs, version numbers, or
-    gate tokens appear in function names (SOP.md Anti-pattern 6).
+    gate tokens appear in function names (roles/TESTER.md Anti-pattern 6).
   - The minimal kanban root built here includes the pgai_agent_kanban/cm/ Python
     helpers (write_rc_state.py etc.) because open-doc.sh and finalize.sh invoke
     them via $KANBAN_ROOT/pgai_agent_kanban/cm/.  Failures in those helpers are

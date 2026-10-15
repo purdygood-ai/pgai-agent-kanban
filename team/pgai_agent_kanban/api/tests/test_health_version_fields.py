@@ -1,12 +1,12 @@
 """
 test_health_version_fields.py — Tests for the /health endpoint's version fields.
 
-Covers the BUG-0035 fix: /health now reports both ``installed`` (read from the
+Covers /health's split version reporting: ``installed`` (read from the
 VERSION file on every request) and ``running`` (baked once at app startup and
 never re-read).
 
 Test suite:
-  1. **Schema superset**: /health returns all pre-fix fields (``service``,
+  1. **Schema superset**: /health returns all original fields (``service``,
      ``kanban_root``, ``version``) plus the new ``installed`` and ``running``
      fields — no fields were removed.
 
@@ -29,7 +29,7 @@ Design notes
   creating the app captures the running version; subsequent VERSION file mutations
   are visible through ``installed`` but not through ``running``.
 
-Test-name policy (SOP.md Anti-pattern 6):
+Test-name policy (roles/TESTER.md, Test Authoring Guidelines, Anti-pattern 6):
   Names describe observable behavior, never bug IDs or scaffolding labels.
 """
 
@@ -81,14 +81,14 @@ def _make_client(kanban_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 class TestHealthSchemaSuperset:
-    """GET /health returns all pre-fix fields plus the new version fields."""
+    """GET /health returns all original fields plus the new version fields."""
 
-    def test_all_pre_fix_fields_present(
+    def test_all_original_fields_present(
         self,
         tmp_path: pathlib.Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """GET /health returns service, kanban_root, and version (pre-fix fields).
+        """GET /health returns service, kanban_root, and version (original fields).
 
         These fields must not be removed; downstream consumers may depend on them.
         Adding ``installed`` and ``running`` must not displace any existing field.
@@ -109,17 +109,17 @@ class TestHealthSchemaSuperset:
         )
         body = resp.json()
 
-        # Pre-fix fields that must remain.
+        # Original fields that must remain.
         assert "service" in body, (
-            f"Pre-fix field 'service' missing from /health response.\n"
+            f"Original field 'service' missing from /health response.\n"
             f"Got: {sorted(body.keys())}"
         )
         assert "kanban_root" in body, (
-            f"Pre-fix field 'kanban_root' missing from /health response.\n"
+            f"Original field 'kanban_root' missing from /health response.\n"
             f"Got: {sorted(body.keys())}"
         )
         assert "version" in body, (
-            f"Pre-fix field 'version' missing from /health response.\n"
+            f"Original field 'version' missing from /health response.\n"
             f"Got: {sorted(body.keys())}"
         )
 
@@ -130,7 +130,7 @@ class TestHealthSchemaSuperset:
     ) -> None:
         """GET /health returns the new installed and running fields.
 
-        Both fields must be present in every /health response after the fix.
+        Both fields must be present in every /health response.
 
         Args:
             tmp_path:    pytest-provided temp directory.

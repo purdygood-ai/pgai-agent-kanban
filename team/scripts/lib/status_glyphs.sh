@@ -19,6 +19,14 @@
 #   #   GLYPH_HALT       — leading glyph for HALT (full stop) segment
 #   #   GLYPH_HALT_AFTER — leading glyph for HALT-AFTER (draining) segment
 #   #   GLYPH_TIMESTAMP  — leading glyph for the date/time segment
+#   #   GLYPH_DEFERRED_BUG — leading glyph for a deferred bug (BUGS DEFERRED
+#   #                        status-bar segment, and each deferred bug's card
+#   #                        in the BUGS column)
+#   #   GLYPH_DEFER_WARNING — leading glyph for the unparseable-campaign-file
+#   #                         fallback (status bar and cards alike) — rendered
+#   #                         instead of GLYPH_DEFERRED_BUG whenever the
+#   #                         deferral posture could not be resolved, so an
+#   #                         icon is never rendered off unreadable state
 #
 # Retheme: edit the literals in this file only.  The two sibling scripts
 # pick up the change automatically on next render.
@@ -49,3 +57,11 @@ GLYPH_HALT_AFTER="⚠️"
 
 # Timestamp segment
 GLYPH_TIMESTAMP="📅"
+
+# Deferral posture segments — the raised-hand names a bug (or the BUGS
+# DEFERRED bar segment) currently held back by the deferral posture; the
+# warning glyph replaces it wherever that posture could not be resolved (an
+# unparseable DEFER-LOW-BUGS campaign file), so a posture icon is never
+# rendered from state the code could not parse.
+GLYPH_DEFERRED_BUG="✋"
+GLYPH_DEFER_WARNING="⚠️"

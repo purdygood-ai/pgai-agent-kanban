@@ -2,10 +2,12 @@
 test_wake_claude_llm_thinking_bash.py
 ======================================
 Behavioral unit tests for the llm_thinking_enabled wiring in
-team/scripts/lib/wake_claude_provider.sh.
+team/scripts/lib/provider_claude.sh (formerly wake_claude_provider.sh,
+folded into the four-function provider interface by
+v2.9.20-engine-decomposition).
 
-These tests exercise the four behavioral cases required by
-PRIORITY-0005 / CODER-20260721-015:
+These tests exercise the four behavioral cases the thinking-mode toggle
+must satisfy:
 
   (a) cfg=false  → the assembled claude command array contains
                    --thinking disabled (exact adjacent tokens)
@@ -19,7 +21,7 @@ Each test creates a minimal kanban.cfg fixture, then runs a bash
 harness that:
   1. Sources ini_parser.sh and config_loader.sh.
   2. Calls load_config against the fixture cfg.
-  3. Executes the exact same thinking-flag logic as wake_claude_provider.sh.
+  3. Executes the exact same thinking-flag logic as provider_claude.sh.
   4. Echoes the resulting "command array" tokens so the test can assert
      on presence/absence of --thinking disabled.
 
@@ -207,12 +209,15 @@ def test_invalid_thinking_value_fails_loud(tmp_path: pathlib.Path, bad_value: st
 
 
 def test_wake_claude_provider_contains_thinking_disabled_wiring() -> None:
-    """Structural: wake_claude_provider.sh contains the --thinking disabled conditional.
+    """Structural: provider_claude.sh contains the --thinking disabled conditional.
 
     This verifies that the behavioral tests above exercise code that is actually
     present in the provider script — not just a harness that tests the harness.
+    provider_claude.sh folded the former wake_claude_provider.sh's
+    provider-interface implementation into the four-function contract
+    (v2.9.20-engine-decomposition).
     """
-    provider = pathlib.Path("scripts/lib/wake_claude_provider.sh")
+    provider = pathlib.Path("scripts/lib/provider_claude.sh")
     content = provider.read_text(encoding="utf-8")
 
     assert "--thinking disabled" in content, (
@@ -230,22 +235,25 @@ def test_wake_claude_provider_contains_thinking_disabled_wiring() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Structural: wake_codex_provider.sh wires the reasoning-effort override
+# Structural: provider_codex.sh wires the reasoning-effort override
 # ---------------------------------------------------------------------------
 
 
 def test_wake_codex_provider_wires_reasoning_effort_override() -> None:
-    """Structural: wake_codex_provider.sh wires a reasoning-effort control.
+    """Structural: provider_codex.sh wires a reasoning-effort control.
 
     The Codex lane previously carried a placeholder comment at the
     invocation-assembly site marking where "a reasoning switch would wire
     in" (referencing llm_thinking_enabled as the closest prior-art example).
-    v2.1.0 (CODER-20260728-013) replaced that placeholder with the real
+    That placeholder was replaced with the real
     wiring: a ``-c model_reasoning_effort=<value>`` config override, wired
-    at the same site. This test verifies the real wiring landed rather than
-    asserting the now-obsolete placeholder comment still exists.
+    at the same site. provider_codex.sh folded the former
+    wake_codex_provider.sh's provider-interface implementation into the
+    four-function contract (v2.9.20-engine-decomposition). This test
+    verifies the real wiring landed rather than asserting the now-obsolete
+    placeholder comment still exists.
     """
-    provider = pathlib.Path("scripts/lib/wake_codex_provider.sh")
+    provider = pathlib.Path("scripts/lib/provider_codex.sh")
     content = provider.read_text(encoding="utf-8")
 
     assert "model_reasoning_effort" in content, (

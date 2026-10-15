@@ -24,7 +24,8 @@
 #   --project-root DIR   Path to $PGAI_PROJECT_ROOT (default: auto-detected from
 #                        kanban-root + active project)
 #   --rc BRANCH          RC branch to compare against (default: auto-detected
-#                        from first rc/* or ai_rc/* branch found in the repo)
+#                        from the project's configured branch_prefix rc/*
+#                        branch, falling back to a bare rc/* branch)
 #   --help               Print this usage text and exit 0
 #
 # Exit codes:
@@ -60,6 +61,10 @@
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+# shellcheck source=lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
+# shellcheck source=lib/ini_parser.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/ini_parser.sh"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -81,9 +86,16 @@ PROTECTED_PATTERNS=(
 # Helpers
 # ---------------------------------------------------------------------------
 
-usage() {
-  sed -n '/^# Usage:/,/^# Exit codes:/{ /^# Exit codes:/d; s/^# \{0,1\}//; p }' "$0"
-}
+# Usage text as data (per lib/script_common.sh's print_usage_and_exit contract):
+# the header comment block of this file, self-read via sed.  The sentinel
+# capture preserves the header's trailing blank line, which plain command
+# substitution would otherwise swallow (it strips ALL trailing newlines);
+# one newline is then trimmed back off because print_usage_and_exit's own
+# printf adds exactly one — together this reproduces the pre-refactor
+# byte-for-byte --help output.
+_USAGE_TEXT="$(sed -n '/^# Usage:/,/^# Exit codes:/{ /^# Exit codes:/d; s/^# \{0,1\}//; p }' "$0"; printf 'x')"
+_USAGE_TEXT="${_USAGE_TEXT%x}"
+_USAGE_TEXT="${_USAGE_TEXT%$'\n'}"
 
 log_info()  { printf '[INFO]  %s\n' "$*"; }
 log_warn()  { printf '[WARN]  %s\n' "$*" >&2; }
@@ -125,20 +137,22 @@ task_is_artifact_only() {
   [[ -n "$inside" && -z "$outside" ]] || return 1
 
   # Constraints must explicitly forbid source-tree edits.
-  printf '%s\n' "$con_body" \
-    | grep -qiE \
-        'do not edit|do not modify|no source[- ]tree edits|forbids? source[- ]tree edits' \
+  grep -qiE \
+      'do not edit|do not modify|no source[- ]tree edits|forbids? source[- ]tree edits' \
+      <<< "$con_body" \
     || return 1
 
   return 0
 }
 
 # Returns 0 if the given branch is currently checked out in any worktree.
+# The branch list is captured before grep reads it: grep -q stops at its
+# first match, and under pipefail a producer still writing into the closed
+# pipe would turn a match into a failure.
 branch_is_checked_out() {
   local branch="$1"
-  git worktree list --porcelain \
-    | awk '/^branch /{print $2}' \
-    | grep -qxF "refs/heads/${branch}"
+  grep -qxF "refs/heads/${branch}" \
+    <<< "$(git worktree list --porcelain | awk '/^branch /{print $2}')"
 }
 
 # ---------------------------------------------------------------------------
@@ -156,11 +170,10 @@ while [[ $# -gt 0 ]]; do
     --kanban-root)  KANBAN_ROOT="$2";     shift 2 ;;
     --project-root) PROJECT_ROOT="$2";    shift 2 ;;
     --rc)           RC_BRANCH="$2";       shift 2 ;;
-    --help|-h)      usage; exit 0 ;;
+    --help|-h)      print_usage_and_exit 0 "$_USAGE_TEXT" ;;
     *)
       log_error "Unknown argument: $1"
-      usage >&2
-      exit 1
+      print_usage_and_exit 1 "$_USAGE_TEXT"
       ;;
   esac
 done
@@ -186,8 +199,16 @@ fi
 # ---------------------------------------------------------------------------
 
 if [[ -z "$RC_BRANCH" ]]; then
-  # Auto-detect: prefer ai_rc/* then rc/*
-  RC_BRANCH=$(git branch --list 'ai_rc/*' --format='%(refname:short)' | sort -V | tail -1)
+  # Auto-detect: prefer the project's OWN configured branch_prefix (read
+  # straight from project.cfg -- the same [project] branch_prefix source
+  # pp_prefix_branch resolves) then fall back to a bare rc/*. This routes
+  # through the project's actual prefix instead of hardcoding "ai_"
+  # specifically, so a project configured with any other prefix (or no
+  # prefix at all) still auto-detects its own RC branch correctly.
+  _configured_branch_prefix="$(read_ini "${PROJECT_ROOT}/project.cfg" project branch_prefix "")"
+  if [[ -n "$_configured_branch_prefix" ]]; then
+    RC_BRANCH=$(git branch --list "${_configured_branch_prefix}rc/*" --format='%(refname:short)' | sort -V | tail -1)
+  fi
   if [[ -z "$RC_BRANCH" ]]; then
     RC_BRANCH=$(git branch --list 'rc/*' --format='%(refname:short)' | sort -V | tail -1)
   fi

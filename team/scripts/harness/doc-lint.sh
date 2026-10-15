@@ -75,6 +75,12 @@ set -euo pipefail
 # Self-locate — each tree finds itself; never import from a sibling tree
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Every container-engine command goes through the shared helper
+# (pgai_docker), the one path kanban code takes to an engine.
+# shellcheck source=../lib/docker_use.sh
+source "${SCRIPT_DIR}/../lib/docker_use.sh"
+# shellcheck source=../lib/pp_run_ops.sh
+declare -F pp_run_ops >/dev/null || source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 # ---------------------------------------------------------------------------
@@ -116,6 +122,9 @@ done
 if [[ -z "${SUITE}" ]]; then
     echo "doc-lint.sh: --suite is required." >&2
     echo "  Valid suites: cmd, links, fossil-greps, feature-greps" >&2
+    # CONVERT: quality-class harness precondition -- an unnamed suite means
+    # the run has nothing to check, not that the docs tree has a defect.
+    # CENSUS-ANCHOR: doc-lint-suite-required-01
     exit 2
 fi
 
@@ -132,26 +141,31 @@ AUDITED_DOCS=(
 
 # ---------------------------------------------------------------------------
 # Fossil grep patterns — known internal-residue strings that must not appear
-# in the audited doc surface. These are the patterns swept in the v1.26.4
-# WRITER pass; extend this array as new fossils are identified and swept.
+# in the audited doc surface. Extend this array as new fossils are
+# identified and swept.
 #
 #   Pattern calibration notes (to avoid false positives on legitimate docs):
 #
-#   - /home/rocky/pgai_agent_kanban : live-install path fossil; narrowed to the
-#     actual kanban root path (not bare /home/rocky which appears legitimately
-#     in config-example snippets like dev_tree_path = /home/rocky/develop/my-app)
+#   - /home/<user>/pgai_agent_kanban : live-install path fossil -- a kanban root
+#     under one real account's home. Narrowed to the kanban root path itself
+#     (not a bare /home/<user>, which config-example snippets use legitimately,
+#     e.g. dev_tree_path = /home/<user>/develop/my-app), and the negative
+#     lookahead skips the placeholder account names the docs already use
+#     (you, user, youruser, your-user, USERNAME, op), so a documented example
+#     such as /home/you/pgai_agent_kanban is not a fossil. These patterns are
+#     Perl-compatible (grep -P) for that lookahead.
 #
 #   - Internal bug file absolute paths: the fossil form is an absolute path
-#     like /home/rocky/pgai_agent_kanban/projects/.../bugs/BUG-NNN-slug.md.
+#     like /home/<user>/pgai_agent_kanban/projects/.../bugs/BUG-NNN-slug.md.
 #     The example form in HOW_TO.md uses a relative path or cp narrative
 #     (projects/<name>/bugs/) which is legitimate documentation.
 #     Pattern targets only absolute-path bug references with /home/ prefix.
 #
-#   - v1.23.3 : specific internal version string from pre-flatten era;
-#     should not appear in forward-looking docs.
+#   - v1.23.3 : a specific internal version string that must not appear
+#     in forward-looking docs.
 # ---------------------------------------------------------------------------
 FOSSIL_PATTERNS=(
-    "/home/rocky/pgai_agent_kanban"
+    "/home/(?!(?i:you|user|youruser|your[-_]user|username|op)/)[A-Za-z0-9_][A-Za-z0-9._-]*/pgai_agent_kanban"
     "/home/[a-z_][a-z0-9_]*/pgai_agent_kanban/projects/.*/bugs/BUG-[0-9]"
     "v1\\.23\\.3"
 )
@@ -159,17 +173,23 @@ FOSSIL_PATTERNS=(
 # ---------------------------------------------------------------------------
 # Feature grep patterns — tokens that must be present in the doc surface to
 # confirm feature coverage. Case-insensitive to handle capitalization variants
-# (Debian/debian, Rocky9/rocky9, UBI9/ubi9).
+# (Debian/debian, Rocky9/rocky9). Keep this list in sync with the flavours the
+# tree actually ships under docker/*/Dockerfile — a token for a flavour that
+# does not exist trains a reader to ignore this suite's output.
 # ---------------------------------------------------------------------------
 FEATURE_PATTERNS=(
     "debian"
     "rocky9"
-    "ubi9"
     "branch_prefix"
     "push_to_remote"
     "dev_tree_path"
     "wake-batch.sh"
     "install.sh"
+    # blocked_minutes: the rc-metrics Blocked column (history.csv's own
+    # column name) -- guards against a future edit that drops HOW_TO.md's
+    # operator-facing mention (or docs/OPERATIONS.md's / docs/dashboard.md's,
+    # which cite the same token) without anyone noticing the doc-truth gap.
+    "blocked_minutes"
 )
 
 # ---------------------------------------------------------------------------
@@ -191,13 +211,13 @@ _is_placeholder_cmd() {
 
     # a. Angle-bracket tokens: <foo>, <placeholder>, <repo-url>, etc.
     # Use grep -qE to avoid bash ERE word-boundary issues with < and > in [[ =~ ]]
-    if echo "$cmd" | grep -qE '<[^[:space:]>]+>'; then
+    if grep -qE '<[^[:space:]>]+>' <<< "$cmd"; then
         return 0
     fi
 
     # b. Ellipsis-dot paths: .../something or bare ... used as path fragment
     #    Catches: echo rc:v0.62.0 > .../HALT-AFTER  and similar
-    if echo "$cmd" | grep -qE '(\.\.\./)'; then
+    if grep -qE '(\.\.\./)' <<< "$cmd"; then
         return 0
     fi
     # Also catch a standalone ... as the entire command (rare but valid placeholder)
@@ -209,7 +229,7 @@ _is_placeholder_cmd() {
     #    substitution (i.e. the command IS the variable, e.g. ${EDITOR:-vi} file.cfg)
     local first_token
     first_token="$(echo "$cmd" | awk '{print $1}')"
-    if echo "$first_token" | grep -qE '^\$\{[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\}$'; then
+    if grep -qE '^\$\{[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\}$' <<< "$first_token"; then
         return 0
     fi
 
@@ -217,13 +237,13 @@ _is_placeholder_cmd() {
     if [[ "$first_token" == '$EDITOR' ]]; then
         return 0
     fi
-    if echo "$first_token" | grep -qE '^\$\{EDITOR'; then
+    if grep -qE '^\$\{EDITOR' <<< "$first_token"; then
         return 0
     fi
 
     # e. /path/to/ fragment: generic placeholder path in any token
     #    Catches: /path/to/foo, /path/to/something, etc.
-    if echo "$cmd" | grep -qF '/path/to/'; then
+    if grep -qF '/path/to/' <<< "$cmd"; then
         return 0
     fi
 
@@ -250,7 +270,7 @@ _is_compose_exec_unavailable() {
 
     # Match: docker compose [options] exec <service> <cmd...>
     # The service name follows "exec" with optional flags (-T, -u user, etc.)
-    if ! echo "$cmd" | grep -qE '^docker\s+compose\s+.*\bexec\b'; then
+    if ! grep -qE '^docker\s+compose\s+.*\bexec\b' <<< "$cmd"; then
         return 1
     fi
 
@@ -268,7 +288,7 @@ _is_compose_exec_unavailable() {
     # Protect against docker not being installed: if docker exits with command-not-found (127),
     # treat as service unavailable.
     local probe_exit=0
-    docker compose ps --status running "$service" > /dev/null 2>&1 || probe_exit=$?
+    pgai_docker docker compose ps --status running "$service" > /dev/null 2>&1 || probe_exit=$?
 
     if [[ "$probe_exit" -ne 0 ]]; then
         # Service not running (or docker unavailable) — caller should SKIP
@@ -280,142 +300,21 @@ _is_compose_exec_unavailable() {
 }
 
 # ---------------------------------------------------------------------------
-# Python fenced-block extractor
+# Fenced-block extractor
 #
-# Reads a Markdown file and yields fenced bash/sh command blocks with their
-# metadata:
-#   - block_skip: true if immediately preceded by <!-- doc-lint: skip ... -->
-#   - docker_gate: true if immediately preceded by <!-- doc-lint: docker -->
-#   - commands: list of logical commands (backslash continuations joined)
-#
-# Output format (one JSON object per block, newline-delimited):
-#   {"block_skip": bool, "docker_gate": bool, "commands": ["cmd1", "cmd2"]}
-#
-# Inline skip: a command line ending with  # doc-lint: skip  is emitted with
-# the "inline_skip" key set to true.
+# The fenced bash/sh commands of a Markdown file, with their annotations
+# (pgai_agent_kanban.lint.doc_commands): one line per command,
+#   <block number>\t<block_skip>\t<docker_gate>\t<inline_skip>\t<command>
+# with the flags "true" or "false" --
+#   - block_skip: the block is preceded by <!-- doc-lint: skip ... -->
+#   - docker_gate: the block is preceded by <!-- doc-lint: docker -->
+#   - inline_skip: the command line ends with  # doc-lint: skip  (removed
+#     from the command text)
+# Backslash continuations are joined into one command.
 # ---------------------------------------------------------------------------
 _extract_fenced_blocks() {
     local filepath="$1"
-    python3 - "$filepath" <<'PYEOF'
-import sys
-import json
-import re
-
-filepath = sys.argv[1]
-try:
-    text = open(filepath, encoding="utf-8").read()
-except OSError as e:
-    print(f"doc-lint.sh: cannot read {filepath}: {e}", file=sys.stderr)
-    sys.exit(1)
-
-lines = text.splitlines()
-
-def join_continuations(raw_lines):
-    """Join backslash-continuation lines into logical commands."""
-    joined = []
-    buf = ""
-    for line in raw_lines:
-        if line.endswith("\\"):
-            buf += line[:-1] + " "
-        else:
-            buf += line
-            joined.append(buf.strip())
-            buf = ""
-    if buf.strip():
-        joined.append(buf.strip())
-    return [l for l in joined if l]
-
-i = 0
-while i < len(lines):
-    line = lines[i]
-
-    # Detect block-level annotations on the line immediately before a fence
-    block_skip = False
-    docker_gate = False
-    if re.match(r'<!--\s*doc-lint:\s*skip', line, re.IGNORECASE):
-        block_skip = True
-    elif re.match(r'<!--\s*doc-lint:\s*docker\s*-->', line, re.IGNORECASE):
-        docker_gate = True
-
-    # Look for a fenced code block opening (``` or ~~~ with optional lang)
-    fence_match = None
-    if block_skip or docker_gate:
-        # The fence must be on the very next non-blank line
-        j = i + 1
-        while j < len(lines) and lines[j].strip() == "":
-            j += 1
-        if j < len(lines):
-            fence_match = re.match(r'^(`{3,}|~{3,})\s*(bash|sh)?\s*$', lines[j])
-            if fence_match:
-                i = j  # advance to the fence line
-    else:
-        fence_match = re.match(r'^(`{3,}|~{3,})\s*(bash|sh)?\s*$', line)
-        if not fence_match:
-            i += 1
-            continue
-
-    if not fence_match:
-        i += 1
-        continue
-
-    # Fence detected — determine if it's a bash/sh block
-    fence_char = fence_match.group(1)[0]
-    fence_len = len(fence_match.group(1))
-    lang = (fence_match.group(2) or "").strip().lower()
-
-    if lang not in ("bash", "sh", ""):
-        # Non-bash block; skip to closing fence
-        i += 1
-        while i < len(lines):
-            if re.match(rf'^[{re.escape(fence_char)}]{{{fence_len},}}\s*$', lines[i]):
-                break
-            i += 1
-        i += 1
-        continue
-
-    # Only process bash/sh blocks (lang == "bash" or "sh")
-    # Empty lang is ambiguous — include it if the annotation context marked it,
-    # otherwise include it only if block_skip / docker_gate
-    if lang == "" and not block_skip and not docker_gate:
-        # Unlabelled block: include it only if it's being annotated; otherwise skip
-        i += 1
-        while i < len(lines):
-            if re.match(rf'^[{re.escape(fence_char)}]{{{fence_len},}}\s*$', lines[i]):
-                break
-            i += 1
-        i += 1
-        continue
-
-    # Collect raw lines until closing fence
-    i += 1
-    raw_lines = []
-    while i < len(lines):
-        if re.match(rf'^[{re.escape(fence_char)}]{{{fence_len},}}\s*$', lines[i]):
-            break
-        raw_lines.append(lines[i])
-        i += 1
-    i += 1  # skip closing fence
-
-    # Parse inline skips and filter comment-only lines
-    commands = []
-    for raw in join_continuations(raw_lines):
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        inline_skip = bool(re.search(r'#\s*doc-lint:\s*skip', stripped))
-        # Strip the inline skip annotation from the command text
-        cmd_text = re.sub(r'\s*#\s*doc-lint:\s*skip.*$', '', stripped).strip()
-        if cmd_text:
-            commands.append({"cmd": cmd_text, "inline_skip": inline_skip})
-
-    if commands or block_skip or docker_gate:
-        print(json.dumps({
-            "block_skip": block_skip,
-            "docker_gate": docker_gate,
-            "commands": commands
-        }))
-
-PYEOF
+    pp_run_ops pgai_agent_kanban.lint.doc_commands "$filepath"
 }
 
 # ---------------------------------------------------------------------------
@@ -435,101 +334,88 @@ _suite_cmd() {
         total_files=$((total_files + 1))
         local file_pass=0 file_skip=0 file_fail=0
 
-        # Run the Python extractor and process each block
-        while IFS= read -r block_json; do
-            local block_skip docker_gate
-            block_skip=$(echo "$block_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print('true' if d['block_skip'] else 'false')")
-            docker_gate=$(echo "$block_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print('true' if d['docker_gate'] else 'false')")
-
+        # Process each command the extractor reports. A block-skip block's
+        # commands are all skipped; a docker-gated block's are all skipped
+        # when no container engine answers (asked once per block). The
+        # extractor's lines arrive on fd 3, so a command that reads stdin
+        # cannot consume them.
+        local gated_block="" docker_down=false
+        local block_no block_skip docker_gate inline_skip cmd_text
+        while IFS=$'\t' read -r -u 3 block_no block_skip docker_gate inline_skip cmd_text; do
             # Block-level skip annotation
             if [[ "$block_skip" == "true" ]]; then
-                local cmd_count
-                cmd_count=$(echo "$block_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['commands']))")
-                for ((n=0; n<cmd_count; n++)); do
-                    local cmd_text
-                    cmd_text=$(echo "$block_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['commands'][$n]['cmd'])")
-                    [[ "$VERBOSE" == "true" ]] && echo "  SKIP-BLOCK: ${cmd_text}"
-                    file_skip=$((file_skip + 1))
-                done
+                [[ "$VERBOSE" == "true" ]] && echo "  SKIP-BLOCK: ${cmd_text}"
+                file_skip=$((file_skip + 1))
                 continue
             fi
 
             # Block-level docker gate
             if [[ "$docker_gate" == "true" ]]; then
-                if ! docker info > /dev/null 2>&1; then
-                    local cmd_count
-                    cmd_count=$(echo "$block_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['commands']))")
-                    for ((n=0; n<cmd_count; n++)); do
-                        local cmd_text
-                        cmd_text=$(echo "$block_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['commands'][$n]['cmd'])")
-                        [[ "$VERBOSE" == "true" ]] && echo "  SKIP-DOCKER: ${cmd_text}"
-                        file_skip=$((file_skip + 1))
-                    done
+                if [[ "$block_no" != "$gated_block" ]]; then
+                    gated_block="$block_no"
+                    docker_down=false
+                    pgai_docker docker info > /dev/null 2>&1 || docker_down=true
+                fi
+                if [[ "$docker_down" == "true" ]]; then
+                    [[ "$VERBOSE" == "true" ]] && echo "  SKIP-DOCKER: ${cmd_text}"
+                    file_skip=$((file_skip + 1))
                     continue
                 fi
                 # Docker is available — fall through to per-command execution
             fi
 
             # Per-command processing
-            local cmd_count
-            cmd_count=$(echo "$block_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['commands']))")
-            for ((n=0; n<cmd_count; n++)); do
-                local cmd_text inline_skip
-                cmd_text=$(echo "$block_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['commands'][$n]['cmd'])")
-                inline_skip=$(echo "$block_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print('true' if d['commands'][$n]['inline_skip'] else 'false')")
+            [[ "$VERBOSE" == "true" ]] && echo "  CMD: ${cmd_text}"
 
-                [[ "$VERBOSE" == "true" ]] && echo "  CMD: ${cmd_text}"
+            # Inline skip annotation
+            if [[ "$inline_skip" == "true" ]]; then
+                [[ "$VERBOSE" == "true" ]] && echo "  SKIP-INLINE: ${cmd_text}"
+                file_skip=$((file_skip + 1))
+                continue
+            fi
 
-                # Inline skip annotation
-                if [[ "$inline_skip" == "true" ]]; then
-                    [[ "$VERBOSE" == "true" ]] && echo "  SKIP-INLINE: ${cmd_text}"
-                    file_skip=$((file_skip + 1))
-                    continue
-                fi
+            # Auto-placeholder heuristic (extended)
+            if _is_placeholder_cmd "$cmd_text"; then
+                [[ "$VERBOSE" == "true" ]] && echo "  SKIP-PLACEHOLDER: ${cmd_text}"
+                file_skip=$((file_skip + 1))
+                continue
+            fi
 
-                # Auto-placeholder heuristic (extended)
-                if _is_placeholder_cmd "$cmd_text"; then
-                    [[ "$VERBOSE" == "true" ]] && echo "  SKIP-PLACEHOLDER: ${cmd_text}"
-                    file_skip=$((file_skip + 1))
-                    continue
-                fi
+            # Compose-exec skip class — probe service availability
+            if _is_compose_exec_unavailable "$cmd_text"; then
+                [[ "$VERBOSE" == "true" ]] && echo "  SKIP-SERVICE: ${cmd_text}"
+                file_skip=$((file_skip + 1))
+                continue
+            fi
 
-                # Compose-exec skip class — probe service availability
-                if _is_compose_exec_unavailable "$cmd_text"; then
-                    [[ "$VERBOSE" == "true" ]] && echo "  SKIP-SERVICE: ${cmd_text}"
-                    file_skip=$((file_skip + 1))
-                    continue
-                fi
+            # Execute the command in a subshell
+            local exit_code=0
+            (eval "$cmd_text") > /dev/null 2>&1 || exit_code=$?
 
-                # Execute the command in a subshell
-                local exit_code=0
-                (eval "$cmd_text") > /dev/null 2>&1 || exit_code=$?
-
-                if [[ "$exit_code" -eq 0 ]]; then
-                    [[ "$VERBOSE" == "true" ]] && echo "  PASS: ${cmd_text}"
-                    file_pass=$((file_pass + 1))
-                else
-                    # Non-deterministic (exempt): a non-zero exit can arise from a
-                    # stale command, a missing skip annotation, or absent external
-                    # state — the correct resolution is not computable at
-                    # detection. Per docs/coding-standards.md "The
-                    # non-deterministic exemption", this is exempt from a numbered
-                    # fix-command block but never exempt from naming the next
-                    # diagnostic step.
-                    echo "  FAIL (exit ${exit_code}): ${cmd_text}"
-                    echo "    in: ${rel_path}"
-                    echo "    Cause: this fenced command exited ${exit_code} when executed verbatim from ${DOC_ROOT}."
-                    echo "    Next diagnostic step: re-run it directly to see its full output:"
-                    echo "      (cd \"${DOC_ROOT}\" && ${cmd_text})"
-                    echo "    If it legitimately requires unavailable external state (a running service, an"
-                    echo "    interactive editor, credentials), mark it non-executable with one of the three"
-                    echo "    doc-lint skip mechanisms documented in this script's --help output, rather than"
-                    echo "    leaving the doc fixture failing."
-                    file_fail=$((file_fail + 1))
-                    any_fail=true
-                fi
-            done
-        done < <(_extract_fenced_blocks "$filepath")
+            if [[ "$exit_code" -eq 0 ]]; then
+                [[ "$VERBOSE" == "true" ]] && echo "  PASS: ${cmd_text}"
+                file_pass=$((file_pass + 1))
+            else
+                # Non-deterministic (exempt): a non-zero exit can arise from a
+                # stale command, a missing skip annotation, or absent external
+                # state — the correct resolution is not computable at
+                # detection. Per docs/coding-standards.md "The
+                # non-deterministic exemption", this is exempt from a numbered
+                # fix-command block but never exempt from naming the next
+                # diagnostic step.
+                echo "  FAIL (exit ${exit_code}): ${cmd_text}"
+                echo "    in: ${rel_path}"
+                echo "    Cause: this fenced command exited ${exit_code} when executed verbatim from ${DOC_ROOT}."
+                echo "    Next diagnostic step: re-run it directly to see its full output:"
+                echo "      (cd \"${DOC_ROOT}\" && ${cmd_text})"
+                echo "    If it legitimately requires unavailable external state (a running service, an"
+                echo "    interactive editor, credentials), mark it non-executable with one of the three"
+                echo "    doc-lint skip mechanisms documented in this script's --help output, rather than"
+                echo "    leaving the doc fixture failing."
+                file_fail=$((file_fail + 1))
+                any_fail=true
+            fi
+        done 3< <(_extract_fenced_blocks "$filepath")
 
         total_pass=$((total_pass + file_pass))
         total_skip=$((total_skip + file_skip))
@@ -627,9 +513,13 @@ _suite_fossil_greps() {
             local filepath="${DOC_ROOT}/${rel_path}"
             [[ ! -f "$filepath" ]] && continue
             local hits
-            hits=$(grep -nE "$pattern" "$filepath" 2>/dev/null || true)
+            hits=$(grep -nP "$pattern" "$filepath" 2>/dev/null || true)
             if [[ -n "$hits" ]]; then
-                echo "  FOSSIL HIT: pattern=${pattern}  file=${rel_path}"
+                # The header names the residue actually found (the first
+                # match); the Cause line below names the pattern it matched.
+                local found
+                found=$(grep -oP -m1 "$pattern" "$filepath" 2>/dev/null | head -n1 || true)
+                echo "  FOSSIL HIT: pattern=${found:-$pattern}  file=${rel_path}"
                 # Partial: the gate names the exact file:line and matched
                 # pattern deterministically, but the surrounding rewrite that
                 # removes the residue is author content — print a filled-in
@@ -723,6 +613,10 @@ case "$SUITE" in
     *)
         echo "doc-lint.sh: unknown suite: ${SUITE}" >&2
         echo "  Valid suites: cmd, links, fossil-greps, feature-greps" >&2
+        # CONVERT: quality-class harness precondition -- same reasoning as
+        # doc-lint-suite-required-01, for an unrecognized (not merely absent)
+        # suite name.
+        # CENSUS-ANCHOR: doc-lint-suite-unknown-01
         exit 2
         ;;
 esac

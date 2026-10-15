@@ -4,6 +4,12 @@
 # Shared helpers for managing the projects.cfg registry — the central list
 # of projects this kanban installation knows about.
 #
+# The registry verbs themselves (create-project, add-project, remove-project)
+# run in Python, pgai_agent_kanban/ops/projects.py, whose registry helpers
+# read and write projects.cfg by the same line rules as the functions here,
+# so a registry either side wrote reads back the same on the other. A change
+# to a rule here needs the same change there.
+#
 # Supported formats
 # -----------------
 #
@@ -127,7 +133,7 @@ _projects_cfg_emit_deprecation_warning() {
     if [[ "$_projects_cfg_deprecation_warned" -eq 0 ]]; then
         echo "[projects.cfg] WARNING: colon-format detected. This format is deprecated." >&2
         echo "[projects.cfg] WARNING: Run 'scripts/migrate/projects-cfg.sh' to convert to INI format." >&2
-        echo "[projects.cfg] WARNING: Old format will be removed in v1.0.0." >&2
+        echo "[projects.cfg] WARNING: Old format will be removed in a future major release." >&2
         _projects_cfg_deprecation_warned=1
     fi
 }
@@ -718,7 +724,9 @@ projects_cfg_migrate_comment_block() {
 # Works with both INI and colon-legacy formats (format detected automatically).
 #
 # Sort order:
-#   Primary key:   priority (ascending, numeric).
+#   Primary key:   priority (ascending, numeric). An absent or non-integer
+#                  priority reads as 999 (sorted last), as the Python
+#                  registry (ini.projects_registry) reads it.
 #   Tie-break key: registration order — the order entries appear in
 #                  projects.cfg (earlier file position = higher priority
 #                  among equal-priority projects).
@@ -762,8 +770,12 @@ projects_cfg_list() {
                 }
                 END {
                     for (i = 1; i <= n_sections; i++) {
-                        nm = section_order[i]
-                        p  = (prio[nm] == "" ? 999 : prio[nm])
+                            nm = section_order[i]
+                        # Only a plain integer is a priority; an absent or
+                        # non-integer value (priority=abc) reads as 999 and
+                        # sorts last -- as ini.projects_registry reads it.
+                        # (printf %d alone would turn "abc" into 0, first.)
+                        p  = (prio[nm] ~ /^[+-]?[0-9]+$/ ? prio[nm] : 999)
                         printf "%010d\t%d\t%s\n", section_line[nm], p, nm
                     }
                 }
@@ -780,7 +792,7 @@ projects_cfg_list() {
                     prio = $2
                     gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
                     gsub(/^[[:space:]]+|[[:space:]]+$/, "", prio)
-                    if (prio == "") prio = 999
+                    if (prio !~ /^[+-]?[0-9]+$/) prio = 999
                     printf "%010d\t%d\t%s\n", NR, prio, name
                 }
             ' "$cfg" | sort -k2,2n -k1,1n | awk -F'\t' '{ print $3 }')"
@@ -816,6 +828,56 @@ projects_cfg_active() {
             echo "$project"
         fi
     done < <(projects_cfg_list)
+}
+
+# ---------------------------------------------------------------------------
+# projects_cfg_enabled <name> — return 0 when <name> is enabled, 1 when
+# projects.cfg sets enabled=false for it.
+#
+# The one answer the wake loop, PM discovery, the OVERWATCH sweep and the
+# daily OVERWATCH wake skip a project on; `why` (pgai_agent_kanban/ops/
+# verdict.py) reads the same rule through the Python twin,
+# pgai_agent_kanban.lib.ini.project_enabled -- a change to the rule here
+# needs the same change there.
+#
+# Only the value false disables (any case, surrounding whitespace ignored).
+# An absent key, an empty value, true, an unregistered project and a
+# colon-legacy registry (which has no enabled field) all read as enabled.
+# Any other value reads as enabled and prints one warning per process on
+# stderr naming the value and the fix. Read-only listings
+# (projects_cfg_list and every dashboard built on it) still list a
+# disabled project; only the loops that do work skip it.
+# ---------------------------------------------------------------------------
+declare -gA _PROJECTS_CFG_ENABLED_WARNED 2>/dev/null || true
+
+projects_cfg_enabled() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && return 0
+
+    local raw
+    raw="$(projects_cfg_field "$name" enabled 2>/dev/null)" || return 0
+    # projects_cfg_field strips surrounding whitespace; compare lowercased.
+    case "${raw,,}" in
+        false) return 1 ;;
+        ""|true) return 0 ;;
+    esac
+    local warn_key
+    warn_key="$(projects_cfg_path)|${name}|${raw}"
+    if [[ -z "${_PROJECTS_CFG_ENABLED_WARNED[$warn_key]:-}" ]]; then
+        _PROJECTS_CFG_ENABLED_WARNED[$warn_key]=1
+        echo "[projects.cfg] WARNING: enabled for '${name}' is '${raw}' (only true or false are recognised); treating the project as enabled -- set enabled=false to pause it or enabled=true to silence this warning" >&2
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# projects_cfg_disabled_skip_line <name> — echo the one line a loop narrates
+# when it skips <name> because projects_cfg_enabled returned 1. Each loop
+# prefixes it in its own log style; the text after the prefix is the same
+# everywhere, so one grep finds every skip.
+# ---------------------------------------------------------------------------
+projects_cfg_disabled_skip_line() {
+    echo "project ${1:-}: disabled in projects.cfg (enabled=false) — skipped"
 }
 
 # ---------------------------------------------------------------------------
@@ -1430,34 +1492,4 @@ _require_flag_value() {
         esac
         exit 1
     fi
-}
-
-# ---------------------------------------------------------------------------
-# _validate_color_flag <flag-name> <value>
-#
-# Shared validator for --color / --dashboard-color flags.
-# Exits 1 with a descriptive error when the value is not a valid #RRGGBB
-# hex color string.
-#
-# Accepted: #RRGGBB (e.g. #378ADD)
-# Rejected with specific guidance:
-#   - 0xRRGGBB  → "use #RRGGBB format (not 0xRRGGBB)"
-#   - #RGB       → "short-form #RGB is not supported; use full #RRGGBB"
-#   - anything else → generic #RRGGBB guidance
-#
-# Shared by create-project.sh and add-project.sh so both call one implementation.
-# ---------------------------------------------------------------------------
-_validate_color_flag() {
-    local flag="$1" color="$2"
-    if [[ "$color" =~ ^#[0-9A-Fa-f]{6}$ ]]; then
-        return 0
-    fi
-    if [[ "$color" =~ ^0[xX][0-9A-Fa-f]{6}$ ]]; then
-        echo "ERROR: ${flag} got '${color}': use #RRGGBB format (not 0xRRGGBB)" >&2
-    elif [[ "$color" =~ ^#[0-9A-Fa-f]{3}$ ]]; then
-        echo "ERROR: ${flag} got '${color}': short-form #RGB is not supported; use full #RRGGBB" >&2
-    else
-        echo "ERROR: ${flag} requires a color in #RRGGBB format (e.g. #378ADD); got: '${color}'" >&2
-    fi
-    exit 1
 }

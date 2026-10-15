@@ -5,6 +5,15 @@ aggregate_tokens.py -- Token usage roll-up aggregator for pgai-agent-kanban.
 Produces per-RC and per-day token usage roll-up files from per-task tokens.json
 artifacts written by the wake script (via team/scripts/lib/token_capture.sh).
 
+ARCHIVED TASKS:
+  Every scan reads the project's live task folders and its archived ones
+  (archive/<project>/tasks/<ID>/, written by the archive run after a
+  release ships), merged in task-ID order. An archived task folder keeps
+  its README.md, status.md and artifacts/tokens.json, so a roll-up rebuilt
+  after an archive run (--all, or a missing roll-up cost-report.sh builds
+  on demand) carries the same totals as one built before. A task that is
+  live is read from its live folder only.
+
 RC ATTRIBUTION SIGNAL:
   A task is attributed to a release candidate (RC) by reading the
   "## Release Version" field from the task's README.md file.  This field
@@ -210,6 +219,12 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, NamedTuple
 
+# The pgai_agent_kanban package sits one level up from pm-agent/ in the same
+# tree (the pm_status.py idiom), dev tree and live install alike; the
+# archive lookup there lists the archived task folders the scan reads.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+from pgai_agent_kanban.archive.lookup import task_dirs_with_archived  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -346,6 +361,7 @@ class CategoryCosts(NamedTuple):
 
     @property
     def total_cost_usd(self) -> float:
+        """Return the sum of the input, cache-creation, cache-read and output costs, in USD."""
         return self.input_cost_usd + self.cache_creation_cost_usd + self.cache_read_cost_usd + self.output_cost_usd
 
 
@@ -562,7 +578,10 @@ def read_agent(task_dir: pathlib.Path) -> str:
 def scan_tasks(tasks_dir: pathlib.Path) -> list[dict[str, Any]]:
     """
     Walk the tasks/ directory and collect metadata for every task that has
-    a tokens.json file.
+    a tokens.json file. The project's archived task folders
+    (archive/<project>/tasks/<ID>/, for IDs with no live folder) are walked
+    too, merged with the live ones in task-ID order, so a roll-up rebuilt
+    after an archive run is the roll-up built before it.
 
     Returns a list of records:
       {
@@ -576,16 +595,7 @@ def scan_tasks(tasks_dir: pathlib.Path) -> list[dict[str, Any]]:
     """
     records: list[dict[str, Any]] = []
 
-    if not tasks_dir.is_dir():
-        return records
-
-    for entry in sorted(tasks_dir.iterdir()):
-        if not entry.is_dir():
-            continue
-        # Skip queue subdirectory and similar non-task dirs
-        if entry.name in ("queues", "queue"):
-            continue
-
+    for entry in task_dirs_with_archived(tasks_dir):
         tokens = load_tokens_json(entry)
         if tokens is None:
             continue  # No tokens.json or malformed (warning already emitted)
@@ -1064,6 +1074,14 @@ def all_days(records: list[dict[str, Any]]) -> list[str]:
 
 
 def main() -> None:
+    """Run the token aggregator CLI: build per-RC and per-day token roll-ups.
+
+    ``--project NAME`` with at least one of ``--rc VERSION``, ``--day DATE`` or
+    ``--all`` (``--kanban-root`` overrides the root). Exit codes: 0 success,
+    warnings possibly on stderr; 1 the kanban root or project directory is
+    missing, or ``--day`` is not YYYY-MM-DD; 2 usage error (argparse,
+    including none of --rc/--day/--all).
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Aggregate per-task token usage into per-RC and per-day roll-ups."

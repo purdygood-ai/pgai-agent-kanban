@@ -1,0 +1,393 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "v2.15.4 is a two-item bug bundle against the release-notes \"Bugs Skipped\" table:\nBUG-0235 (rendered table cells were not table-safe — the severity cell carried the\nwhole `## Severity` section body, uppercased, newlines and `---` rules intact, and no\ncell was sanitised for `|`) and BUG-0233 (the new end-to-end test for the\nauto-generated notes path stayed green when the rendered block stopped reaching the\ngenerator, because it asserted only on the heading and on the absence of a leaked\nidentifier). The RC's whole diff is three files, 138 insertions / 5 deletions:\n`team/scripts/lib/cm/release_known_issue.sh` (a `first_token` severity read plus a\n`table_cell` normaliser applied to all four cells), the integration test's new\npositive content assertion, and three new unit tests. Both gated runners exited 0.\nBoth bugs' acceptance lists were verified behaviourally, each by reproducing the exact\nnegative control the bug report specifies in an isolated scratch copy of the tree: the\nthree new unit tests all fail against the reverted library, and all six parametrized\nauto-generate cases fail when the tenth positional argument to\n`cm_release_generate_notes` is emptied — failing on the new content assertion, not the\nheading. The fix was additionally exercised against production-shape input: all 74\nreal bug files in the project's ledger now render as exactly 74 single-line, four-cell\nrows with a valid one-word severity token, and a bare-value bug file renders\nbyte-identically to the pre-fix code. No bugs, gaps, or stale assertions were found.\nOne pre-existing quality-class lint finding (10 `comment_provenance` instances, all in\nfiles this RC did not touch) is already tracked by open BUG-0230 and is cited rather\nthan re-filed.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Requirements acceptance criterion 1 — each bundled item is addressed",
+      "heading": "Finding 1: Requirements acceptance criterion 1 — each bundled item is addressed",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth bundled items are addressed by exactly one commit each on the RC, and each\ncommit's subject names the behaviour rather than the ticket:\n\n- BUG-0235 → `c5b08ec` \"Normalise every Bugs-Skipped table cell to one pipe-safe line\"\n  (`team/scripts/lib/cm/release_known_issue.sh` + 3 new unit tests).\n- BUG-0233 → `1b668a7` \"Add positive assertion on rendered Bugs-Skipped substance to\n  auto-generated notes test\" (`team/tests/integration/test_cm_release_known_issue_carry_forward.py`).\n\nDiff scope is exactly three files and nothing else:\n\n```\nteam/scripts/lib/cm/release_known_issue.sh\nteam/tests/integration/test_cm_release_known_issue_carry_forward.py\nteam/tests/unit/test_cm_known_issue_carry_forward_bash.py\n```",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Requirements acceptance criterion 2 — all Python files compile cleanly",
+      "heading": "Finding 2: Requirements acceptance criterion 2 — all Python files compile cleanly",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 -m py_compile` over all 392 tracked `.py` files: clean, exit 0.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Requirements acceptance criterion 3 — all bash files pass syntax check",
+      "heading": "Finding 3: Requirements acceptance criterion 3 — all bash files pass syntax check",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash -n` over all 256 tracked `.sh` files: zero syntax failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0235 acceptance — multi-line severity renders one line, severity word only",
+      "heading": "Finding 4: BUG-0235 acceptance — multi-line severity renders one line, severity word only",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehavioural, on the real production shape. Rendering a row from a bug file whose\n`## Severity` section holds the value, a blank line, an explanatory paragraph and a\n`---` rule (this project's prevailing convention — the report measured 33 of 72 files\nin that shape) now produces exactly one line whose severity cell is a single word.\n\nRendered live from the actual ledger's BUG-0233 and BUG-0235 files (each of which has\na multi-line `## Severity`):\n\n```\n| The end-to-end test for the auto-generated release notes stays green when the rendered bugs-skipped table stops reaching the generator. | internal-only | MEDIUM | Deferred to the next iteration. |\n| The rendered bugs-skipped table puts multi-line prose inside a single table cell, which breaks the row. | internal-only | MEDIUM | Deferred to the next iteration. |\n```\n\nAgainst the pre-fix library the same input produces the reported defect — the severity\ncell begins `MEDIUM THE RATING IS EXPLAINED...` and the row continues over further\nlines ending `... --- |`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0235 acceptance — a `|` in the source Symptom still yields four cells",
+      "heading": "Finding 5: BUG-0235 acceptance — a `|` in the source Symptom still yields four cells",
+      "level": 3,
+      "body": "**Category:** pass\n\nRendering `BUG-0182-harness-help-cites-ticket.md` (one of the three real files with a\n`|` in the first sentence of its `## Symptom`) yields one line that splits into exactly\nfour cells, with the literal pipe backslash-escaped (`\\|`) rather than dropped or\nsubstituted. The same holds for a synthesised file carrying a `|` in the Public ID cell\nand for a caller-supplied rationale carrying both a `|` and a newline — all four cells\nare normalised, satisfying the ticket constraint \"normalise every cell, not only the\none the report opened on\":\n\n```\n| A defect where the value \\| carries a pipe and the sentence ends here. | KI-00\\|09 | HIGH | Deferred because the pipe \\| character and a newline both appear in this rationale. |\n```",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0235 acceptance — N pairs of multi-line-severity files give N + 2 lines",
+      "heading": "Finding 6: BUG-0235 acceptance — N pairs of multi-line-severity files give N + 2 lines",
+      "level": 3,
+      "body": "**Category:** pass\n\n`test_bugs_skipped_ship_block_has_n_plus_2_lines_for_multiline_severity_pairs` covers\nthis with N=3 and passes. Confirmed independently at production scale: rendering all\n**74** bug files in `projects/pgai-agent-kanban/bugs/` produces exactly **74** lines,\nevery one splitting into exactly 4 cells (escaped-pipe-aware split), with every\nseverity cell drawn from the expected vocabulary — `HIGH` 11, `LOW` 41, `MEDIUM` 21,\n`UNSPECIFIED` 1. Zero anomalies. Every row carries exactly 5 unescaped `|` delimiters.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0235 acceptance — new unit tests fail if the normalisation is reverted",
+      "heading": "Finding 7: BUG-0235 acceptance — new unit tests fail if the normalisation is reverted",
+      "level": 3,
+      "body": "**Category:** pass\n\nNegative control run in an isolated `cp -a` copy of the worktree (the RC worktree was\nnever modified; `git status --short` on it is empty before and after). Replacing\n`team/scripts/lib/cm/release_known_issue.sh` with its `ai_main` (pre-fix) content and\nre-running the unit file:\n\n```\n3 failed, 58 passed in 3.05s\nFAILED test_bugs_skipped_ship_block_has_n_plus_2_lines_for_multiline_severity_pairs\nFAILED test_bugs_skipped_block_splits_into_four_cells_when_symptom_carries_a_pipe\nFAILED test_bugs_skipped_block_flattens_multiline_severity_to_one_line_word\n```\n\nThe first failure's message is the reported defect verbatim — `assert 2 == 1`, with the\nseverity cell reading `MEDIUM THE RATING IS EXPLAINED... ONTO A SECOND PHYSICAL LINE,\nWHICH A TABLE CELL MUST NEVER ABSORB. --- |`. All three new tests are therefore real\nregression guards, not tautologies. On the unmodified RC the same file is 61 passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0235 constraint — bare-value bug files render byte-identically",
+      "heading": "Finding 8: BUG-0235 constraint — bare-value bug files render byte-identically",
+      "level": 3,
+      "body": "**Category:** pass\n\nA bug file in the template's bare-value shape rendered through the pre-fix library and\nthrough the RC library produces byte-identical output (`cmp -s` equal):\n\n```\n| A plain defect with a single-sentence symptom. | KI-0009 | MEDIUM | Deferred: low impact. |\n```\n\nCorroborated from the other direction by Finding 7: the 58 pre-existing tests in the\nunit file pass unchanged both with and without the fix, so no existing expectation was\nadjusted to accommodate the change.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "BUG-0235 constraint — `build_known_issue_notes_block` checked for the same exposure",
+      "heading": "Finding 9: BUG-0235 constraint — `build_known_issue_notes_block` checked for the same exposure",
+      "level": 3,
+      "body": "**Category:** pass\n\nVerified independently of CODER's completion note. `build_known_issue_notes_block`\n(`team/scripts/lib/cm/release_known_issue.sh`, from line 300) assembles a bullet list,\nnever a table, and never calls `parse_section(text, \"Severity\")` — its only reads are\n`Symptom` (via `first_sentence`, which already flattens whitespace) and `Public ID`. It\ndoes not share the defect, so leaving it unchanged is correct, and the finding is\nrecorded as the ticket's constraint required.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "BUG-0233 acceptance — six cases fail under the block-never-arrives control",
+      "heading": "Finding 10: BUG-0233 acceptance — six cases fail under the block-never-arrives control",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe finer negative control, run in the same isolated scratch copy: with the tenth\npositional argument to `cm_release_generate_notes`\n(`team/scripts/lib/cm/release_notes.sh`) changed from `\"${_BUGS_SKIPPED_NOTES_BLOCK:-}\"`\nto `\"\"` — section still emitted, only the value's arrival removed —\n\n```\n6 failed, 5 deselected in 13.20s\nFAILED ...auto_generated_notes_path[CODER] [WRITER] [TESTER] [PM] [CM] [PO]\n```\n\nEvery failure is on the new assertion and names rendered content, not the heading:\n`assert 'A defect quoting task another item inline in its own text.' in '...## Bugs\nSkipped\\nNone\\n...'`. This is the exact shape BUG-0233 measured as passing (`6 passed,\n5 deselected`) before the fix, so the hole is closed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "BUG-0233 acceptance — unmodified tree passes all six cases",
+      "heading": "Finding 11: BUG-0233 acceptance — unmodified tree passes all six cases",
+      "level": 3,
+      "body": "**Category:** pass\n\nOn the RC worktree with no modifications, `pytest -k auto_generated_notes_path -v`\nreports 6 PASSED / 5 deselected, one per agent prefix (CODER, WRITER, TESTER, CM, PM,\nPO). The existing three assertions were kept; the new one is additive.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "BUG-0233 acceptance — diff touches only the test file; `release_notes.sh` unmodified",
+      "heading": "Finding 12: BUG-0233 acceptance — diff touches only the test file; `release_notes.sh` unmodified",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git diff --quiet ai_main..ai_rc/v2.15.4 -- team/scripts/lib/cm/release_notes.sh`\nreturns 0 — the subject of the assertion is unchanged by the RC, so the temporary\ncontrol CODER applied was fully reverted. The RC worktree is clean\n(`git status --short` empty), and the negative controls in this verification were run\non a scratch copy, never on the RC tree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Internal-ID scrub still applies after normalisation (BUG-0231 regression control)",
+      "heading": "Finding 13: Internal-ID scrub still applies after normalisation (BUG-0231 regression control)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe normalisation composes with the scrub rather than replacing it, and the scrub runs\nfirst. None of the 74 rendered production rows contains an agent-prefixed task ID, a\n`BUG-NNNN`, or a `PRIORITY-NNNN`. A rationale deliberately seeded with a task ID, a\npipe, and a newline renders as\n`Deferred per another item finding \\| with a pipe and a newline.` — scrubbed, escaped,\nand flattened.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Step 6.1 — release-state drift check",
+      "heading": "Finding 14: Step 6.1 — release-state drift check",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_last_released_version pgai-agent-kanban` = `v2.15.3`; `semver_gt v2.15.4 v2.15.3`\nholds. `release-state.md` shows `Active RC: v2.15.4`, `RC Opened At\n2026-09-10T20:03:17+00:00`, `RC Opened By Task CM-20260910-058-open-rc-2-15-4`, and a\nwell-formed `## Last Released: v2.15.3`. `ai_rc/v2.15.4` exists locally — Active RC and\nbranch state agree. No drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Step 6.8 — synthetic release simulation",
+      "heading": "Finding 15: Step 6.8 — synthetic release simulation",
+      "level": 3,
+      "body": "**Category:** pass\n\nTrigger condition met (the diff touches `team/scripts/lib/cm/release_known_issue.sh`, a\nrelease-lifecycle participant). `tests/integration/test_cm_release_synthetic.py`:\n15 passed in 30.94s.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "Step 6.9 / 6.13 / 6.14 — constraint, skip-gate, and standards checks",
+      "heading": "Finding 16: Step 6.9 / 6.13 / 6.14 — constraint, skip-gate, and standards checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- No secret-shaped strings (`password`, `api_key`, `secret`, `token =`) anywhere in the\n  RC diff.\n- Skip-cites-real-bug: no placeholder skip IDs in `team/tests/` (the only grep hits are\n  archived runner logs under `team/tests/artifacts/` quoting the gate's own output);\n  no skip annotation cites a `BUG-NNNN`, so there is no missing bug file. The gated\n  runner's own `lint_skip_bug_gate` agrees: `0 missing files`, `OK`.\n- Standards spot-check: the RC adds no new script and no new `--help` surface; the new\n  comments describe behaviour and name no bug, task, or version identifier; the\n  severity vocabulary and the `unspecified` fallback are not hardcoded anew, and the\n  new helpers live beside the code they serve rather than duplicating a `lib/`\n  primitive. `lint_test_anti_patterns.py` exit 0 (0 findings / 434 files) and\n  `lint_orphan_tests.py` exit 0 (256 test files covered, no orphans).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 17,
+      "label": "17",
+      "title": "Step 6.10 — prereq dependency graph",
+      "heading": "Finding 17: Step 6.10 — prereq dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe v2.15.4 task set is `PM-20260910-007` (DONE), `CM-20260910-058-open-rc-2-15-4`\n(DONE), `CODER-20260910-056` (DONE), `CODER-20260910-057` (DONE),\n`TESTER-20260910-059` (WORKING — this task), `CM-20260910-061-release-2-15-4`\n(WAITING). No cycles; every referenced prerequisite task ID exists; the lifecycle\nbookends are correctly linked (CM-open first, TESTER + CM-release last, CM-release\ngated on both CODERs and TESTER). Sequence numbers 056–059 and 061 do not collide —\n060 belongs to an earlier dated task (`CODER-20260907-060`), consistent with a\nproject-global counter. Queue markers agree with task states: `[x]` on the four DONE\ntasks, `[A]` on this WORKING task, `[W]` on the WAITING CM release task.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 18,
+      "label": "18",
+      "title": "Step 6.11 — spot-checks outside the spec",
+      "heading": "Finding 18: Step 6.11 — spot-checks outside the spec",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **State drift:** none (Finding 14). The canonical dev tree at\n  `$HOME/develop/pgai-agent-kanban` is parked on `ai_main` and clean.\n- **Untested new mechanisms:** the two new helpers (`first_token`, `table_cell`) are\n  both covered by tests that demonstrably fail without them (Finding 7).\n- **Regressions of prior gaps:** the BUG-0219 stray-empty-commit pattern is absent —\n  both non-merge commits on the RC carry real diffs. The BUG-0231 scrub is intact\n  (Finding 13). `VERSION` still reads `v2.15.3` and `CHANGELOG.md` is unstamped, which\n  is the expected pre-release state (CM writes both at release time).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "state_drift": "none (Finding 14). The canonical dev tree at",
+        "untested_new_mechanisms": "the two new helpers (`first_token`, `table_cell`) are",
+        "regressions_of_prior_gaps": "the BUG-0219 stray-empty-commit pattern is absent —"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

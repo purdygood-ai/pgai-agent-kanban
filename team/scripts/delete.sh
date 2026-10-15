@@ -38,6 +38,10 @@ source "${_DELETE_LIB_DIR}/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
 source "${_DELETE_LIB_DIR}/project_paths.sh"
 
+# --- Source operator_ops.sh for the resolve_item shim path (dry-run preview) ---
+# shellcheck source=lib/operator_ops.sh
+source "${_DELETE_LIB_DIR}/operator_ops.sh"
+
 # --- Source the shared Python invocation helper ---
 # shellcheck source=lib/pp_run_ops.sh
 source "${_DELETE_LIB_DIR}/pp_run_ops.sh"
@@ -68,11 +72,14 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
 # --- Resolve project ---
-_project="$(operator_args_project)"
-if [[ -z "${_project}" ]]; then
+_project_raw="$(operator_args_project)"
+if [[ -z "${_project_raw}" ]]; then
     printf 'delete.sh: --project is required (or set $PGAI_PROJECT_NAME)\n' >&2
     exit 1
 fi
+
+# --- Resolve project name by exact match then unambiguous prefix ---
+_project="$(pp_resolve_project_name "${_project_raw}")" || exit 1
 
 # --- Validate --key (required) ---
 _key="$(operator_args_get key)"
@@ -98,53 +105,33 @@ _project_root="$(pp_project_root "${_project}")" || exit 1
 
 # --- Dry-run mode: report what would be deleted without deleting ---
 if [[ "${_dry_run}" -eq 1 ]]; then
-    # Locate the item the same way delete_item would, then print it.
-    _found_path=""
-    _found_type=""
-    _found_state=""
+    # Locate the item via the shared resolve_item shim -- the same
+    # exact-then-prefix resolution delete_item itself uses -- rather than a
+    # local ad-hoc exact-only lookup, so a dry-run preview and the real
+    # delete always agree on which item a prefix key resolves to.
+    _resolve_out=""
+    _resolve_rc=0
+    if _resolve_out="$(python3 "${_OPERATOR_OPS_SHIM}" "${_project_root}" "${_key}")"; then
+        _resolve_rc=0
+    else
+        _resolve_rc=$?
+    fi
 
-    # Check task folder first.
-    _task_dir="${_project_root}/tasks/${_key}"
-    if [[ -d "${_task_dir}" ]]; then
-        _status_file="${_task_dir}/status.md"
-        if [[ -f "${_status_file}" ]]; then
-            _found_state="$(python3 - "${_status_file}" <<'_DRY_RUN_STATE_PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
-m = re.search(r'## State\n(?:[ \t]*\n)*([^\n]+)', text)
-print(m.group(1).strip() if m else '(unknown)', end='')
-_DRY_RUN_STATE_PY
-            )"
+    # rc=2 means "ambiguous match, resolved to first" -- the shim already
+    # printed the warning and candidate list to stderr; dry-run previews the
+    # first match the same way the real delete would proceed if re-run
+    # without --dry-run. rc=3 (not found) and rc=1 (argument/filesystem
+    # error) are genuine failures.
+    if [[ "${_resolve_rc}" -ne 0 && "${_resolve_rc}" -ne 2 ]]; then
+        if [[ "${_resolve_rc}" -eq 3 ]]; then
+            printf 'delete.sh (dry-run): item not found for key: %s\n' "${_key}" >&2
         fi
-        _found_path="${_task_dir}"
-        _found_type="task directory"
+        exit "${_resolve_rc}"
     fi
 
-    # If not a task, check intake files.
-    if [[ -z "${_found_path}" ]]; then
-        for _intake_dir in bugs priority requirements; do
-            _candidate="${_project_root}/${_intake_dir}/${_key}.md"
-            if [[ -f "${_candidate}" ]]; then
-                _found_state="$(python3 - "${_candidate}" <<'_DRY_RUN_INTAKE_PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
-m = re.search(r'## Status\n(?:[ \t]*\n)*([^\n]+)', text)
-if not m:
-    m = re.search(r'## State\n(?:[ \t]*\n)*([^\n]+)', text)
-print(m.group(1).strip() if m else '(unknown)', end='')
-_DRY_RUN_INTAKE_PY
-                )"
-                _found_path="${_candidate}"
-                _found_type="intake file"
-                break
-            fi
-        done
-    fi
-
-    if [[ -z "${_found_path}" ]]; then
-        printf 'delete.sh (dry-run): item not found for key: %s\n' "${_key}" >&2
-        exit 3
-    fi
+    _found_type="$(printf '%s\n' "${_resolve_out}" | sed -n '1p')"
+    _found_path="$(printf '%s\n' "${_resolve_out}" | sed -n '2p')"
+    _found_state="$(printf '%s\n' "${_resolve_out}" | sed -n '3p')"
 
     printf 'delete.sh (dry-run): would delete %s: %s (state: %s)\n' \
         "${_found_type}" "${_found_path}" "${_found_state}"

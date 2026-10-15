@@ -13,8 +13,27 @@
 #     Returns default (or empty string) with exit 0 if section/key is absent.
 #     Returns exit 1 and writes to stderr only on file I/O errors (unreadable).
 #     Comments (#, ;) and blank lines are ignored.
+#     An inline comment -- whitespace followed by '#' or ';' after the value
+#     ("key = 300 # five minutes") -- is stripped from the value. A value
+#     that itself BEGINS with '#' or ';' is kept as-is (a status glyph of
+#     "#" is a value, not a comment), because the strip requires at least
+#     one whitespace character between the value and the comment marker.
+#     A carriage return ending a line (a file saved with CRLF endings) is
+#     stripped before any other handling, so every key, section, and
+#     value reads the same as it would from an LF file.
 #     Section names may contain dots (e.g., [project.foo]).
 #     Values may contain '=' characters.
+#
+#   list_ini_sections <file>
+#     Print every section name in the file, one per line, in file order
+#     (duplicates included). Prints nothing for a missing file.
+#
+#   list_ini_keys <file>
+#     Print every key=value line as "<section><TAB><key>", one per line, in
+#     file order. A key above the first section header carries an empty
+#     section name. Applies the same comment, CRLF, and whitespace rules as
+#     read_ini, so what this lists is exactly what read_ini would resolve.
+#     Prints nothing for a missing file.
 #
 #   write_ini <file> <section> <key> <value>
 #     Update an existing key or add a new key=value under [section].
@@ -56,6 +75,11 @@ read_ini() {
         -v target_section="$section" \
         -v target_key="$key" \
         '
+        # A CRLF-saved file ends every line in \r; drop it before any other
+        # rule looks at the line so keys, sections, and values match an LF
+        # file byte-for-byte.
+        { sub(/\r$/, "") }
+
         # Track whether we are inside the target section.
         /^\[/ {
             # Strip brackets and surrounding whitespace to get section name.
@@ -82,8 +106,13 @@ read_ini() {
 
             # Strip leading and trailing whitespace from key.
             gsub(/^[ \t]+|[ \t]+$/, "", raw_key)
-            # Strip leading and trailing whitespace from value.
-            gsub(/^[ \t]+|[ \t]+$/, "", raw_val)
+            # Strip leading whitespace from value, then an inline comment
+            # (whitespace followed by # or ;), then trailing whitespace.
+            # Requiring the whitespace means a value that starts with # or ;
+            # survives intact.
+            sub(/^[ \t]+/, "", raw_val)
+            sub(/[ \t]+[#;].*$/, "", raw_val)
+            sub(/[ \t]+$/, "", raw_val)
 
             if (raw_key == target_key) {
                 # Print sentinel + value so blank values are distinguishable
@@ -103,6 +132,70 @@ read_ini() {
         printf '%s' "$default"
     fi
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# list_ini_sections <file>
+# Prints every section name, one per line, in file order.
+# ---------------------------------------------------------------------------
+list_ini_sections() {
+    local file="$1"
+
+    if [[ ! -e "$file" ]]; then
+        return 0
+    fi
+    if [[ ! -r "$file" ]]; then
+        printf 'list_ini_sections: cannot read file: %s\n' "$file" >&2
+        return 1
+    fi
+
+    awk '
+        { sub(/\r$/, "") }
+        /^\[/ {
+            secname = $0
+            sub(/^\[[ \t]*/, "", secname)
+            sub(/[ \t]*\].*$/, "", secname)
+            print secname
+        }
+        ' "$file"
+}
+
+# ---------------------------------------------------------------------------
+# list_ini_keys <file>
+# Prints "<section><TAB><key>" for every key=value line, in file order,
+# under the same comment / CRLF / whitespace rules read_ini applies.
+# ---------------------------------------------------------------------------
+list_ini_keys() {
+    local file="$1"
+
+    if [[ ! -e "$file" ]]; then
+        return 0
+    fi
+    if [[ ! -r "$file" ]]; then
+        printf 'list_ini_keys: cannot read file: %s\n' "$file" >&2
+        return 1
+    fi
+
+    awk '
+        BEGIN { secname = "" }
+        { sub(/\r$/, "") }
+        /^\[/ {
+            secname = $0
+            sub(/^\[[ \t]*/, "", secname)
+            sub(/[ \t]*\].*$/, "", secname)
+            next
+        }
+        /^[ \t]*$/ { next }
+        /^[ \t]*[#;]/ { next }
+        {
+            eq_pos = index($0, "=")
+            if (eq_pos == 0) { next }
+            raw_key = substr($0, 1, eq_pos - 1)
+            gsub(/^[ \t]+|[ \t]+$/, "", raw_key)
+            if (raw_key == "") { next }
+            printf "%s\t%s\n", secname, raw_key
+        }
+        ' "$file"
 }
 
 # ---------------------------------------------------------------------------

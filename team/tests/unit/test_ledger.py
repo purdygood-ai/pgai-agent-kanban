@@ -1,10 +1,10 @@
 """
 test_ledger.py
 ================
-Unit tests for pgai_agent_kanban.overwatch.ledger — the v2.0.0 Goal 5
-("the ledger") append-only auto-resolutions ledger.
+Unit tests for pgai_agent_kanban.overwatch.ledger — the append-only
+auto-resolutions ledger.
 
-Coverage (mirrors the task's Acceptance Criteria):
+Coverage:
   - One append-only entry per resolution event carries every required
     field (timestamp, RC, attempt N -> N+1, trigger, findings, matrix row
     matched, actions taken, evidence paths, Outcome).
@@ -26,7 +26,7 @@ Coverage (mirrors the task's Acceptance Criteria):
   - No field other than Outcome is ever rewritten by a backfill.
 
 All tests use tmp_path; no live filesystem paths. Function names describe
-behaviour under test, never bug/task IDs (SOP.md "Test Authoring
+behaviour under test, never bug/task IDs (roles/TESTER.md "Test Authoring
 Guidelines", Anti-pattern 6).
 """
 

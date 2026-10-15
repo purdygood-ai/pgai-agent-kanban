@@ -32,9 +32,9 @@ Criteria 1-6, 8):
        completes the drill and reconciles real state.
   AC5  Counter keying — the same cargo set increments the family's attempt
        counter; a different cargo set starts a fresh family at 1.
-  AC6  Operator-HALT inviolability — an operator-placed HALT anywhere
-       alongside the ship-policy HALT blocks resolution outright, narrated,
-       touching neither HALT file.
+  AC6  Operator-HALT inviolability — an operator-placed fleet-wide HALT
+       alongside the project's ship-policy HALT stops the overwatch wake
+       before any resolution, narrated, touching neither HALT file.
 
 The declines (AC2, AC6) are the primary assertions per the requirements
 doc's "Notes for TESTER": a resolver that resolves too much is a worse
@@ -47,7 +47,7 @@ Design notes
   set install.sh mirrors into a live install), so the wake scripts invoked
   as subprocesses are byte-identical to production and self-locate exactly
   as they would on a real host.
-- Per SOP.md ("Enable per-project deliberately"), a project only receives
+- Per roles/OVERWATCH.md, a project only receives
   autonomous OVERWATCH resolution once its overwatch_backlog.md queue file
   exists (create-project.sh does not provision one by default — this is the
   per-project opt-in gate, reusing the existing "queue file must exist"
@@ -79,6 +79,18 @@ import pytest
 from pgai_agent_kanban.cm.bundle_family import compute_family_key
 from pgai_agent_kanban.overwatch.ledger import ledger_path_for_project, parse_entries
 from tests.integration.helpers import run_entrypoint
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="overwatch-wake-driven-fixtures")
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _WAKE_CLAUDE_REL = pathlib.Path("scripts") / "wake" / "claude.sh"
@@ -176,8 +188,8 @@ def _build_kanban_root(
     queues_dir.mkdir(parents=True, exist_ok=True)
     (root / "logs").mkdir(parents=True, exist_ok=True)
 
-    # The deliberate per-project enablement act (SOP.md "Notes for
-    # Operator"): only a project whose overwatch_backlog.md exists gets the
+    # The deliberate per-project enablement act (roles/OVERWATCH.md):
+    # only a project whose overwatch_backlog.md exists gets the
     # autonomous resolution stage invoked at all (run_project_chain's
     # backlog-file gate runs BEFORE run_overwatch_resolution_stage).
     for agent, title in (
@@ -319,15 +331,14 @@ def _build_golden_fixture(
     proj = kanban_root / "projects" / project_name
     _write_release_state_md(proj, version)
 
-    # Global scope, matching cm-release.sh's real write_halt_file(): CM
-    # ALWAYS writes the ship-policy HALT at $KANBAN_ROOT/HALT, never at
-    # projects/<name>/HALT. This matters for wake-driven fixtures: the wake
-    # loop's pre-existing per-project HALT fast-skip (pp_project_halted,
-    # checked for every agent including overwatch, BEFORE run_project_chain)
-    # only inspects the project-scoped path — a ship-policy HALT placed
-    # there (rather than the real global location) would cause the entire
-    # project to be skipped before the resolution stage ever runs.
-    halt_path = kanban_root / "HALT"
+    # Project scope, matching CM's real write_halt_file()
+    # (team/scripts/lib/cm/release_preflight.sh): CM writes the ship-policy
+    # HALT at projects/<name>/HALT, never at the fleet-wide $KANBAN_ROOT/HALT,
+    # which only an operator writes. The wake loop's overwatch carve-out lets
+    # the firing through the per-project HALT fast-exit so the resolution
+    # stage can classify this file; a fleet-wide HALT instead stops the
+    # overwatch wake outright.
+    halt_path = proj / "HALT"
     _write_ship_policy_halt(halt_path)
 
     (proj / "release-state" / f"{version}.json").write_text(
@@ -617,32 +628,18 @@ class TestCeilingFixtureWakeDriven:
 class TestOperatorHaltInviolabilityWakeDriven:
     """AC6's realistic wake-driven shape.
 
-    cm-release.sh's write_halt_file() always writes the ship-policy HALT at
-    the GLOBAL scope ($KANBAN_ROOT/HALT) — never at projects/<name>/HALT
-    (confirmed by reading team/scripts/cm/release.sh). Given that, an
-    operator wanting to place an ADDITIONAL halt "alongside" the ship-policy
-    one has exactly one other location available: projects/<name>/HALT.
+    CM's write_halt_file() writes the ship-policy HALT at the project scope
+    (projects/<name>/HALT). An operator wanting to place an ADDITIONAL halt
+    "alongside" it has one other location: the fleet-wide $KANBAN_ROOT/HALT.
 
-    That project-scoped file is also what wake_common.sh's per-project HALT
-    fast-exit inspects, and that fast-exit runs for every agent — including
-    overwatch — BEFORE run_project_chain, hence before
-    run_overwatch_resolution_stage. Left as a blanket skip, the fast-exit
-    would shadow resolution_stage.py's own operator-vs-ship-policy
-    classification and leave its dedicated project-scope decline branch
-    unreachable and untested on the production path (a dead-code /
-    duplicated-responsibility concern, not a safety gap — the coarser gate
-    still enforced the invariant either way).
-
-    The fast-exit therefore carves out overwatch specifically: an overwatch
-    firing is let through to run_project_chain despite the project-scope
-    file, so run_overwatch_resolution_stage's call into resolution_stage.py
-    can classify it itself and narrate its own decline reason. Once that
-    call returns, run_project_chain's own per-project HALT check (placed
-    immediately after the resolution-stage call) still refuses any further
-    task processing for the halted project — identical to what the fast-exit
-    already guarantees for every other agent. This test drives that full
-    path and asserts resolution_stage.py's operator_candidates branch is now
-    the one producing the narrated decline, not the outer gate.
+    A fleet-wide HALT is an operator stopping every project, and OVERWATCH
+    keeps observing read-only under it: the overwatch wake exits at its
+    startup HALT check, before block triage, the resolution stage or any
+    task processing for any project, narrating the deferral. Nothing is
+    resolved and neither HALT file is touched. (resolution_stage.py's own
+    operator_candidates decline for this shape stays covered where the stage
+    is called directly: test_overwatch_resolution_stage.py and
+    test_overwatch_lane_a_drill.py.)
     """
 
     def test_operator_halt_alongside_ship_policy_halt_declines_and_touches_neither_file(
@@ -650,31 +647,26 @@ class TestOperatorHaltInviolabilityWakeDriven:
     ) -> None:
         fx = _build_golden_fixture(tmp_path, "wd_operator_halt")
 
-        project_scope_operator_halt = fx.proj / "HALT"
-        _write_operator_halt(project_scope_operator_halt)
+        fleet_operator_halt = fx.kanban_root / "HALT"
+        _write_operator_halt(fleet_operator_halt)
         ship_halt_before = fx.halt_path.read_bytes()
-        operator_halt_before = project_scope_operator_halt.read_bytes()
+        operator_halt_before = fleet_operator_halt.read_bytes()
 
         result = _run_wake(fx.kanban_root, "overwatch")
         assert result.returncode == 0, result.stderr
 
-        # The wake loop's carve-out lets the firing through to the resolution
-        # stage instead of narrating the skip itself...
-        assert "overwatch carve-out — entering chain" in result.stdout, result.stdout
-        # ...and resolution_stage.py's own operator_candidates branch is what
-        # actually declines: its narrated reason names the project-scope file.
-        stage_log = _resolution_stage_log(fx.kanban_root)
-        assert "operator-authored HALT present alongside the ship-policy HALT" in stage_log, stage_log
-        assert str(project_scope_operator_halt) in stage_log, stage_log
-        action_log = _action_log(fx.proj)
-        assert "operator-authored HALT present alongside the ship-policy HALT" in action_log, action_log
-        # run_project_chain still refuses task processing for the halted
-        # project once the resolution stage has classified it.
-        assert "resolution stage evaluated, skipping task processing" in result.stdout, result.stdout
+        # The wake defers at its startup HALT check, narrated on the log
+        # channel (stderr), never on stdout.
+        assert f"HALT flag detected at {fleet_operator_halt}" in result.stderr, result.stderr
+        assert "fix deferred: HALT present" in result.stderr, result.stderr
+        assert "overwatch carve-out — entering chain" not in result.stderr, result.stderr
+        # The resolution stage never ran, so it narrated and logged nothing.
+        assert "resolution-stage" not in _action_log(fx.proj)
+        assert "operator-authored HALT" not in _resolution_stage_log(fx.kanban_root)
 
         # Both HALT files byte-identical to before the firing — inviolate.
         assert fx.halt_path.read_bytes() == ship_halt_before
-        assert project_scope_operator_halt.read_bytes() == operator_halt_before
+        assert fleet_operator_halt.read_bytes() == operator_halt_before
 
         # Nothing else touched.
         assert not fx.ledger_path.exists()

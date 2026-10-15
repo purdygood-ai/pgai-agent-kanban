@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# dashboard-queue-pane.sh
+# queue-pane.sh
 # Pretty-prints the content and recent task statuses for a single agent queue.
 #
-# Designed to run under `watch -n 5 -- dashboard-queue-pane.sh <queue_name>`.
+# Designed to run under `watch -n 5 -- queue-pane.sh <queue_name>`.
 #
 # Output includes:
 #   - Queue name header with counts (pending / working / done / total)
@@ -11,7 +11,7 @@
 #   - Missing-folder warnings for queue entries without a task directory
 #
 # Usage:
-#   dashboard-queue-pane.sh <queue_name> [--kanban-root <path>]
+#   queue-pane.sh <queue_name> [--kanban-root <path>]
 #
 # Arguments:
 #   queue_name   One of: pm, coder, writer, tester, cm
@@ -41,6 +41,8 @@ source "${SCRIPT_DIR}/../lib/project_paths.sh"
 source "${SCRIPT_DIR}/../lib/projects.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Valid queue names — map to their backlog filename stem
@@ -68,7 +70,12 @@ while [[ $_i -lt ${#_args[@]} ]]; do
   arg="${_args[$_i]}"
   case "$arg" in
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -40
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:27}"
       exit 0
       ;;
     --kanban-root)
@@ -139,25 +146,7 @@ COLOR_BLOCKED="${PGAI_DASHBOARD_COLOR_BLOCKED:-red}"
 COLOR_WAITING="${PGAI_DASHBOARD_COLOR_WAITING:-yellow}"
 COLOR_LABEL="${PGAI_DASHBOARD_COLOR_LABEL:-cyan}"
 
-ansi_code() {
-  local color="$1"
-  if [[ "$USE_COLOR" != "true" ]]; then echo ""; return; fi
-  case "$color" in
-    black)   echo $'\033[0;30m' ;;
-    red)     echo $'\033[0;31m' ;;
-    green)   echo $'\033[0;32m' ;;
-    yellow)  echo $'\033[0;33m' ;;
-    blue)    echo $'\033[0;34m' ;;
-    magenta) echo $'\033[0;35m' ;;
-    cyan)    echo $'\033[0;36m' ;;
-    white)   echo $'\033[0;37m' ;;
-    bold)    echo $'\033[1m' ;;
-    dim)     echo $'\033[2m' ;;
-    reset)   echo $'\033[0m' ;;
-    *)       echo "" ;;
-  esac
-}
-
+# ansi_code() is defined in lib/script_common.sh (sourced above).
 RESET="$(ansi_code reset)"
 C_DONE="$(ansi_code "$COLOR_DONE")"
 C_WORK="$(ansi_code "$COLOR_WORKING")"

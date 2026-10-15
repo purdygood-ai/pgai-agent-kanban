@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# cm-finalize.sh
+# team/scripts/cm/finalize.sh
 # CM operation: finalize a project version by packaging working/ into output/.
 #
 # Usage:
-#   cm-finalize.sh <project-name> <version>
-#   cm-finalize.sh --help
+#   cm/finalize.sh <project-name> <version>
+#   cm/finalize.sh --help
 #
 # Arguments:
 #   project-name  — project identifier (e.g. kids-story-creek)
@@ -74,7 +74,7 @@ Exit codes:
   1  Missing required arguments, validation failure, or missing deliverable
 
 Example:
-  cm-finalize.sh kids-story-creek v0.0.1
+  scripts/cm/finalize.sh kids-story-creek v0.0.1
 
 Configuration:
   PGAI_AGENT_KANBAN_ROOT_PATH       kanban root (default: ~/pgai_agent_kanban)
@@ -129,12 +129,11 @@ unset _FINALIZE_SCRIPT_DIR
 set -euo pipefail
 
 # --- Clean exit handling ---
-cleanup_on_exit() {
-  local exit_code=$?
-  jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
-  wait 2>/dev/null || true
-  exit $exit_code
-}
+# shellcheck source=../lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
+# pp_run_ops reaches cm/write_rc_state.py, the release-state.md writer.
+# shellcheck source=../lib/cm/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/common.sh"
 trap cleanup_on_exit EXIT
 
 # --- Validate project name ---
@@ -178,7 +177,7 @@ OUTPUT_DIR="${DOC_SCRATCH_DIR}/output"
 
 if [[ ! -d "$DOC_SCRATCH_DIR" ]]; then
   echo "ERROR: document scratch directory not found: $DOC_SCRATCH_DIR" >&2
-  echo "Run cm-open-doc.sh $PROJECT_NAME $TARGET_VERSION first to create the working directories." >&2
+  echo "Run scripts/cm/open-doc.sh $PROJECT_NAME $TARGET_VERSION first to create the working directories." >&2
   exit 1
 fi
 
@@ -208,17 +207,21 @@ import re, sys, pathlib
 text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 pattern = sys.argv[2]
 
-# Find the section matching the pattern and return its body.
-# The boundary lookahead stops at: the next ## heading, a horizontal rule
-# (three or more dashes on its own line), or end-of-file.  This prevents a
-# '---' markdown rule from leaking into the captured body.
+# Find the section matching the pattern and return its body (group 2).
+# Body lines never start with "##" and are never a horizontal rule (three or
+# more dashes alone on a line), so the body stops at the next ## heading, at
+# a '---' rule, or at end-of-file.  An empty section therefore reads as
+# empty rather than as the heading and text of the section after it, and a
+# '---' rule never leaks into the captured body.
 section_re = re.compile(
-    r'##\s*' + pattern + r'\s*\n(.*?)(?=\n##|\n-{3,}\s*(?:\n|\Z)|\Z)',
-    re.IGNORECASE | re.DOTALL,
+    r'(^##[^\S\n]*' + pattern + r'[^\S\n]*)'
+    r'((?:\n(?!##|-{3,}[^\S\n]*$)[^\n]*)*?)'
+    r'(\n+##|\n+-{3,}[^\S\n]*$|\n*\Z)',
+    re.IGNORECASE | re.MULTILINE,
 )
 m = section_re.search(text)
 if m:
-    body = m.group(1).strip()
+    body = m.group(2).strip()
     print(body)
 else:
     print("")
@@ -244,9 +247,10 @@ version_pattern = re.compile(
     r'^\s*' + re.escape(target) + r'\s*$',
     re.MULTILINE,
 )
+# Body stops at the next "##" line, so an empty Target Version reads empty.
 target_ver_re = re.compile(
-    r'##\s*Target\s*Version\s*\n(.*?)(?=\n##|\Z)',
-    re.IGNORECASE | re.DOTALL,
+    r'(^##[^\S\n]*Target[^\S\n]*Version[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)',
+    re.IGNORECASE | re.MULTILINE,
 )
 
 for md_file in sorted(req_dir.glob("*.md")):
@@ -259,7 +263,7 @@ for md_file in sorted(req_dir.glob("*.md")):
     m = target_ver_re.search(text)
     if not m:
         continue
-    if version_pattern.search(m.group(1)):
+    if version_pattern.search(m.group(2)):
         print(str(md_file))
         break
 PY
@@ -378,7 +382,7 @@ for FORMAT in "${OUTPUT_FORMATS[@]}"; do
       ;;
 
     *)
-      echo "NOTE: [${FORMAT}] not yet supported in v0.16.0; skipping."
+      echo "NOTE: [${FORMAT}] output format not supported; skipping."
       OUTPUTS_UNSUPPORTED+=("$FORMAT")
       ;;
   esac
@@ -429,7 +433,7 @@ if [[ ${#OUTPUTS_UNSUPPORTED[@]} -gt 0 ]]; then
   echo "" >> "$SUMMARY_PATH"
   echo "## Not Supported" >> "$SUMMARY_PATH"
   for unsupported in "${OUTPUTS_UNSUPPORTED[@]}"; do
-    echo "- ${unsupported}: not yet supported in v0.16.0" >> "$SUMMARY_PATH"
+    echo "- ${unsupported}: output format not supported" >> "$SUMMARY_PATH"
   done
 fi
 
@@ -444,7 +448,7 @@ echo "Wrote summary: $SUMMARY_PATH"
 
 # --- Print summary ---
 echo ""
-echo "cm-finalize.sh complete."
+echo "scripts/cm/finalize.sh complete."
 echo "  Project:         $PROJECT_NAME"
 echo "  Version:         $TARGET_VERSION"
 echo "  Source:          $DELIVERABLE"
@@ -611,8 +615,10 @@ else
   #
   # Failure is advisory — we warn and continue; finalize exits 0 regardless.
   #
-  # Format mirrors release.sh Step 15: the file is rewritten as a complete
-  # here-doc so there are never partial writes or stray fields.
+  # The four fields are set through the release-state writer
+  # (cm/write_rc_state.py release-state): it changes only those fields, keeps
+  # every other line (appended event blocks included), and writes atomically,
+  # so there are never partial writes or stray fields.
   _rs_path="${KANBAN_ROOT}/projects/${_pub_kanban_project}/release-state.md"
   echo ""
   echo "Recording Last Released and clearing Active RC in release-state.md..."
@@ -620,26 +626,11 @@ else
     echo "  WARNING: release-state.md not found at ${_rs_path}; cannot record Last Released." >&2
     echo "  Create the file (projects/${_pub_kanban_project}/release-state.md) and re-run finalize to record the version." >&2
   else
-    # Write the complete release-state.md with:
-    #   Active RC cleared to 'none' (mirrors release.sh Step 15)
-    #   Last Released set to the published semver
-    # Using a here-doc (no post-hoc sed/regex) mirrors the canonical format
-    # established by release.sh Step 15.
-    if cat > "$_rs_path" <<EOF
-# Release State
-
-## Active RC
-none
-
-## RC Opened At
-none
-
-## RC Opened By Task
-none
-
-## Last Released
-${_pub_ver}
-EOF
+    # Active RC and the two RC-tracking fields cleared to 'none' (mirrors
+    # release.sh Step 15); Last Released set to the published semver.
+    if pp_run_ops pgai_agent_kanban.cm.write_rc_state release-state "$_rs_path" \
+        --active-rc none --rc-opened-at none --rc-opened-by-task none \
+        --last-released "${_pub_ver}"
     then
       echo "  release-state.md updated: Active RC -> none, Last Released -> ${_pub_ver}"
       echo "  Path: ${_rs_path}"
@@ -680,7 +671,7 @@ _finalize_promote_script="$(dirname "${BASH_SOURCE[0]}")/promote_bundled_items.p
 if [[ -z "$_finalize_kanban_project" ]]; then
   echo "  WARNING: PGAI_PROJECT_NAME is not set; cannot locate requirements directory." >&2
   echo "  The requirement file's ## Status will remain at 'running'." >&2
-  echo "  Set PGAI_PROJECT_NAME before invoking cm-finalize.sh to enable auto-promotion." >&2
+  echo "  Set PGAI_PROJECT_NAME before invoking scripts/cm/finalize.sh to enable auto-promotion." >&2
 elif [[ ! -f "$_finalize_promote_script" ]]; then
   echo "  WARNING: promote_bundled_items.py not found at $_finalize_promote_script" >&2
   echo "  The requirement file's ## Status will remain at 'running'." >&2

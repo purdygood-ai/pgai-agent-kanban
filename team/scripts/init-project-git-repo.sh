@@ -2,7 +2,10 @@
 # scripts/init-project-git-repo.sh
 #
 # Operator-run script: establish the git branch topology a project's chain
-# requires on origin, BEFORE the first release.
+# requires on its git remote, BEFORE the first release. The remote is
+# project.cfg [project] git_remote_name, origin when absent or blank
+# (pp_git_remote_name); "origin" below means that remote. A git_remote_name
+# that is not a valid remote name refuses dual-channel and exits 2.
 #
 # This closes the first-release block where cm/open-rc.sh fails with
 # "origin/<branch> does not exist" because the operator created the base
@@ -40,10 +43,11 @@
 # Idempotent: safe to re-run. Existing remote branches are left untouched.
 #
 # Exit codes:
-#   0  — the required branch is present on origin (created/pushed or
+#   0  — the required branch is present on the remote (created/pushed or
 #         already existed); repo is ready for the chain's first release.
 #   1  — usage error or missing required arguments
-#   2  — project.cfg not found or required fields missing
+#   2  — project.cfg not found, required fields missing, or git_remote_name
+#         is not a valid remote name
 #   3  — git operations failed (push error, invalid dev_tree_path, etc.)
 
 # --- Source helpers and parse arguments (before strict mode for clean error messages) ---
@@ -57,12 +61,12 @@ OPERATOR_VALID_FLAGS=(project help h)
 
 # Value-taking flags: project.
 # Boolean flags: help.
-argparse_parse --value-flags "project" -- "$@"
+operator_args_argparse --value-flags "project" -- "$@"
 
 # Handle --help / -h.
 if argparse_has "help" || argparse_has "h"; then
     operator_args_render_help_for_flags "init-project-git-repo.sh" \
-        "Establish git branch topology on origin before a project's first release." \
+        "Establish git branch topology on the project's git remote (git_remote_name, default origin) before its first release." \
         OPERATOR_VALID_FLAGS
     exit 0
 fi
@@ -170,6 +174,16 @@ fi
 
 echo "Dev tree:  $DEV_TREE"
 
+# --- Resolve the git remote (project.cfg [project] git_remote_name) ---
+if ! GIT_REMOTE="$(pp_git_remote_name "$PROJECT_NAME")"; then
+    # BLOCK-WORTHY (docs/blocking-site-census.md): a git_remote_name that
+    # cannot name a remote would hand git push an option, a path or a URL;
+    # pp_git_remote_name has printed the dual-channel block naming the key.
+    # CENSUS-ANCHOR: init-project-git-repo-git-remote-name-01
+    exit 2
+fi
+echo "Remote:    $GIT_REMOTE"
+
 # --- Resolve the chain base branch name via pp_prefix_branch ---
 # Single source of truth for branch naming — same helper CM scripts use.
 MAIN_BRANCH="$(pp_prefix_branch "$PROJECT_NAME" "main")"
@@ -180,17 +194,18 @@ echo ""
 
 # --- Process each base branch ---
 # Returns:
-#   0 — branch present on origin (existed or just pushed)
+#   0 — branch present on the remote (existed or just pushed)
 #   3 — push failed
-_ensure_branch_on_origin() {
+_ensure_branch_on_remote() {
     local branch="$1"
     local dev_tree="$2"
+    local remote="$3"
 
     echo "--- Branch: $branch ---"
 
-    # Step 1: Check if branch already exists on origin.
-    if git -C "$dev_tree" ls-remote --exit-code --heads origin "$branch" &>/dev/null 2>&1; then
-        echo "  [SKIP]   already present on origin/$branch — no action needed."
+    # Step 1: Check if branch already exists on the remote.
+    if git -C "$dev_tree" ls-remote --exit-code --heads "$remote" "$branch" &>/dev/null 2>&1; then
+        echo "  [SKIP]   already present on $remote/$branch — no action needed."
         return 0
     fi
 
@@ -209,14 +224,14 @@ _ensure_branch_on_origin() {
         echo "  [EXISTS] branch '$branch' exists locally."
     fi
 
-    # Step 3: Push to origin with upstream tracking.
-    echo "  [PUSH]   pushing $branch to origin..."
-    if git -C "$dev_tree" push -u origin "$branch"; then
-        echo "  [DONE]   $branch pushed to origin and upstream tracking set."
+    # Step 3: Push to the remote with upstream tracking.
+    echo "  [PUSH]   pushing $branch to $remote..."
+    if git -C "$dev_tree" push -u "$remote" "$branch"; then
+        echo "  [DONE]   $branch pushed to $remote and upstream tracking set."
     else
-        echo "ERROR: failed to push '$branch' to origin" >&2
+        echo "ERROR: failed to push '$branch' to $remote" >&2
         echo "  Verify you have push credentials for the remote." >&2
-        echo "  Remote: $(git -C "$dev_tree" remote get-url origin 2>/dev/null || echo '<unresolvable>')" >&2
+        echo "  Remote: $(git -C "$dev_tree" remote get-url "$remote" 2>/dev/null || echo '<unresolvable>')" >&2
         return 3
     fi
 
@@ -225,19 +240,19 @@ _ensure_branch_on_origin() {
 
 # --- Process main branch ---
 main_status="error"
-if _ensure_branch_on_origin "$MAIN_BRANCH" "$DEV_TREE"; then
+if _ensure_branch_on_remote "$MAIN_BRANCH" "$DEV_TREE" "$GIT_REMOTE"; then
     main_status="ok"
 else
     echo "" >&2
-    echo "FAILED to ensure $MAIN_BRANCH on origin. See errors above." >&2
+    echo "FAILED to ensure $MAIN_BRANCH on $GIT_REMOTE. See errors above." >&2
     exit 3
 fi
 echo ""
 
 # --- Verify final state (informational only — we just pushed, so this should succeed) ---
 echo "=== Verification ==="
-echo "Checking origin branch state..."
-remote_branches="$(git -C "$DEV_TREE" ls-remote --heads origin "$MAIN_BRANCH" 2>/dev/null || true)"
+echo "Checking $GIT_REMOTE branch state..."
+remote_branches="$(git -C "$DEV_TREE" ls-remote --heads "$GIT_REMOTE" "$MAIN_BRANCH" 2>/dev/null || true)"
 echo "$remote_branches" | while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     sha="${line%%$'\t'*}"

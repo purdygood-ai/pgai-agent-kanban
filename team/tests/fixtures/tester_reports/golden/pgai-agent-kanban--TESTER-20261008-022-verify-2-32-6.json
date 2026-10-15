@@ -1,0 +1,63 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified RC `ai_rc/v2.32.6` (HEAD 2dbeff50, three --no-ff merges over ai_main d93134c2) against `requirements/v2.32.6-bugfix-bundle-20261008.md` and its four bundled items: BUG-0619 (release-notes Status reader crashes when run by path), BUG-0620 and BUG-0621 (two stale OVERWATCH Lane A test assertions), and BUG-0622 (inline-Python lint over its allowlist). All four are fixed, and every acceptance criterion in the bug files and CODER tickets passes. I re-ran each one, triggered the original failure mode where one applied, and ran an old-vs-new differential over all 92 real TESTER reports in the install. The gated unit runner exited 0. The gated integration runner exited 1 on a single wall-clock budget assertion in a PM-wake test that this RC does not touch. That test passes in isolation on both the RC and ai_main with the same timing, so the failure predates this RC. A spot-check also found a pre-existing heading-depth gap in the Bugs Skipped reader this RC relocated. Both are filed via Path C (autonomous follow-up filing — non-blocking). Neither affects the bundle's deliverables.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Gated integration runner red on a load-sensitive wall-clock assertion (pre-existing)",
+      "heading": "Finding 1: Gated integration runner red on a load-sensitive wall-clock assertion (pre-existing)",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (could recur on any RC whose certification run meets host load)\n**Filed As:** BUG-0624 (Path C-A, filed as BUG — test failure)\n**Regression:** no\n**Integrity:** none\n\n- `run-integration-tests.sh --coverage` INTEGRATION_EXIT=1: 1 failed / 958 passed / 1 skipped (15m56s). The lint pre-flight passed (findings-integration.json: 0 findings); the failure came from pytest.\n- Failing test: `tests/integration/test_pm_wake_discovery_lock_scope.py::test_busy_chain_pm_wake_exits_fast_logs_busy_exit_first_and_never_holds_the_lock`, line 245: `AssertionError: busy-chain PM wake took 12.9s` / `assert 12.867894924012944 < 10`. Every behavioural assertion before it passed.\n- Why it predates this RC: the 7 changed files do not touch the PM wake path, the test file is unchanged since v2.31.4, and the v2.32.4 certification run passed it. Isolated gated reruns pass 2/2 on the RC and 2/2 on ai_main d93134c2. The busy test's call time is 5.99/5.70/5.89 s on the RC and 6.47/5.85/5.80 s on ai_main, so the timing is the same on both. Host: 8 cores, load average about 4-5.\n- Category is `pre-existing-bug` under Step 5a. It is recorded as `bug` here because Step 7 has no separate pre-existing label. SOP-core severity: medium (the gated runner turns red, and an isolated rerun is the workaround). Not a regression.",
+      "filed_as": "BUG-0624",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (could recur on any RC whose certification run meets host load)",
+        "filed_as": "BUG-0624 (Path C-A, filed as BUG — test failure)",
+        "regression": "no",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Bugs Skipped reader ignores level-4-or-deeper Finding headings (pre-existing)",
+      "heading": "Finding 2: Bugs Skipped reader ignores level-4-or-deeper Finding headings (pre-existing)",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one reader; no real report has used the shape yet)\n**Filed As:** BUG-0623 (Path C-A, filed as BUG — code defect)\n**Regression:** no\n**Integrity:** none\n\n- Found in the Step 6.11 spot-check (an untested mechanism in a module this RC added). `skipped_bug_pairs._FINDING_HEADING_RE` opens a finding only at exactly `###`. `roles/TESTER.md` Step 9 sanctions `#### Finding` and deeper, and `stop_bug_files.finding_blocks` and `read_ship_policy_finding_dimensions` both read that shape.\n- Demonstrated in a sandbox: a report whose only finding sits at `#### Finding 1:` under `### Step 6.4` gives 0 Bugs Skipped rows. `resolve_stop_bug_files` returns that bug and the ship-policy parser reads `no none` from it. Changing only the heading to `###` produces the row.\n- This RC ported the regex byte-for-byte from the ai_main heredoc (P13), so the behaviour is not a regression. A check of all 92 real reports found no `####` findings, so the gap has not yet affected shipped notes. SOP-core severity: medium (a real but unexercised defect).\n- This report keeps its own findings at `###` so every reader sees them.",
+      "filed_as": "BUG-0623",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one reader; no real report has used the shape yet)",
+        "filed_as": "BUG-0623 (Path C-A, filed as BUG — code defect)",
+        "regression": "no",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

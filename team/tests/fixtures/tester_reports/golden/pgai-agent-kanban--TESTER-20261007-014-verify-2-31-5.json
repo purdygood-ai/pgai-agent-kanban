@@ -1,0 +1,65 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "I verified RC `ai_rc/v2.31.5` (HEAD 337b3784) against `requirements/v2.31.5-bugfix-bundle-20261007.md`, which bundles BUG-0593 (the doc-lint command reader drops bash blocks that follow a tagged fence) and BUG-0594 (a registry spacing slip hides `lock_starvation_firings` from the doc-truth lint, and the OPERATIONS `[wake]` table lacks the row). The bundle was implemented by three tickets: CODER-20261007-010, CODER-20261007-011 and WRITER-20261007-012.\n\nEvery functional acceptance criterion of both bugs is met, and I re-ran each one:\n- the fence reproduction now prints exactly one command;\n- `extract_blocks()` returns exactly the six previously dropped blocks on the audited docs, confirmed against an independent CommonMark pairing;\n- the doc-lint cmd suite's runnable result is unchanged, with only the SKIP count rising (125 to 135);\n- a harness-level probe shows the false green on ai_main is gone on the RC;\n- the doc-truth lint is at 0 findings, and fault injection proves it reads both the registry line and the new table row.\n\nBoth gated runners exited non-zero, so PASS is not available:\n- **`run-unit-tests.sh` (exit 1)** fails because of a regression this RC introduced. `doc_commands.py` gained a package import without the run-by-file-path self-location guard. The module's production consumer (`doc-lint.sh`, which uses `-m`) is unaffected.\n- **`run-integration-tests.sh` (exit 1)** fails for a pre-existing reason. Five wake-lock tests inherit `LOCK_WAIT_SECONDS=120` from the live v2.31.4 wake's environment. The same failures occur on ai_main, and the tests pass on the RC once the variable is unset.\n\nBoth defects are filed via Path C (autonomous follow-up filing — non-blocking) as Path C-A (filed as BUG — code defect / regression / test failure). Neither is severe, so the recommendation is SHIP-WITH-CONCERNS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "doc_commands.py crashes when run by file path (unit runner red)",
+      "heading": "Finding 1: doc_commands.py crashes when run by file path (unit runner red)",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** medium (a recurrence of the BUG-0533 / 0537 / 0541 / 0561 / 0575 class; the package-wide contract test caught it, but the ticket's targeted `--files` run did not include that test)\n**Regression:** yes\n**Integrity:** breakage\n**Filed As:** BUG-0595-doc-commands-crashes-by-path (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the doc-lint command reader now imports the shared fence helper from its own package without the self-location guard, so starting it by its file path crashes with \"module not found\" and the unit runner is red.\n\n`run-unit-tests.sh --coverage` exited 1. The lint pre-flight was clean, and pytest gave 2 failed, 10145 passed, 41 skipped (plus 5 serial passes). Both failures are `tests/unit/test_package_modules_run_by_path.py` parametrised on `pgai_agent_kanban.lint.doc_commands`:\n- `test_help_by_file_path_runs_without_pythonpath`\n- `test_file_load_binds_the_package_of_its_own_tree`\n\nBoth raise `ModuleNotFoundError: No module named 'pgai_agent_kanban'` at doc_commands.py:54, the import this RC added (`from pgai_agent_kanban.lib.markdown_fence import ...`). The package's other by-path modules carry an `if not __package__:` sys.path guard for this case (for example `lint/bug_filer.py:215`); this module does not.\n\nRegression: on ai_main, `env -u PYTHONPATH python3 team/pgai_agent_kanban/lint/doc_commands.py --help` exits 0. On the RC it exits 1. A targeted `--files tests/unit/test_package_modules_run_by_path.py` reproduces the result (2 failed, 138 passed).\n\nImpact: the production caller `doc-lint.sh` starts the module with `-m` and works (row 6), and the module's documented usage is the `-m` form, so nothing in the shipped system depends on the broken path today. That makes it medium on the \"Rating a Finding\" rubric rather than high, consistent with the five earlier instances of this class (all rated medium). The cost is a red gated unit runner.",
+      "filed_as": "BUG-0595",
+      "filed_by": "TESTER (autonomous Path C) — the doc-lint command reader now imports the shared fence helper from its own package without the self-location guard, so starting it by its file path crashes with \"module not found\" and the unit runner is red.",
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "breakage",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "medium (a recurrence of the BUG-0533 / 0537 / 0541 / 0561 / 0575 class; the package-wide contract test caught it, but the ticket's targeted `--files` run did not include that test)",
+        "regression": "yes",
+        "integrity": "breakage",
+        "filed_as": "BUG-0595-doc-commands-crashes-by-path (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the doc-lint command reader now imports the shared fence helper from its own package without the self-location guard, so starting it by its file path crashes with \"module not found\" and the unit runner is red."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "wake-lock integration tests inherit the live wake's LOCK_WAIT_SECONDS (integration runner red, pre-existing)",
+      "heading": "Finding 2: wake-lock integration tests inherit the live wake's LOCK_WAIT_SECONDS (integration runner red, pre-existing)",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (deterministic in every agent-run verification until fixed; nothing outside the test harness is affected)\n**Regression:** no\n**Integrity:** breakage\n**Filed As:** BUG-0596-lock-tests-inherit-wake-env (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — five wake-lock integration tests fail whenever the suite runs inside an agent wake, because the live wake exports its lock-wait setting and the tests' sandboxed wakes obey that inherited value instead of their own configuration.\n\n`run-integration-tests.sh --coverage` exited 1. The lint pre-flight was clean, and pytest gave 5 failed, 941 passed, 1 skipped. The failures:\n- `test_wake_contention_retry.py`: three tests\n- `test_chain_lock_held_through_agent.py`: `test_lock_held_through_agent_sibling_defers_and_losing_chain_abandons`\n- `test_single_truth_state_integrity.py`: `TestContendedProjectRetriedSameIteration`\n\nFour fail with 60 s `TimeoutExpired`. The fifth fails because the contending chain logs `waiting up to 120s ... (lock_wait_seconds=120 ...)` where the test pinned `lock_wait_seconds = 0`.\n\nRoot cause, established by experiment:\n- The agent environment carries `LOCK_WAIT_SECONDS=120` and `LOCK_STARVATION_FIRINGS=3`, exported by the live v2.31.4 wake's config load.\n- `_config_loader_export_wake_integer` gives a set environment variable precedence over the cfg value. That precedence is the documented operator override.\n- Neither the gated runner nor these tests scrub the variables.\n\nEvidence:\n- The same three files on the RC: 5 failed, 5 passed (deterministic).\n- On the ai_main clone: 5 failed, 5 passed (identical, so pre-existing).\n- On the RC with `env -u LOCK_WAIT_SECONDS -u LOCK_STARVATION_FIRINGS`: 10 passed, exit 0.\n\nThe same tests passed in the v2.31.4 verification because the live install then was v2.31.3, which did not export the variable. Nothing in this RC touches lock code; its only config_loader change is one comment line.\n\nThis finding does not stop this release on its own merits. But until it is fixed, every agent-run verification will report `INTEGRATION_EXIT=1`, and a PASS recommendation is impossible.",
+      "filed_as": "BUG-0596",
+      "filed_by": "TESTER (autonomous Path C) — five wake-lock integration tests fail whenever the suite runs inside an agent wake, because the live wake exports its lock-wait setting and the tests' sandboxed wakes obey that inherited value instead of their own configuration.",
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "breakage",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (deterministic in every agent-run verification until fixed; nothing outside the test harness is affected)",
+        "regression": "no",
+        "integrity": "breakage",
+        "filed_as": "BUG-0596-lock-tests-inherit-wake-env (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — five wake-lock integration tests fail whenever the suite runs inside an agent wake, because the live wake exports its lock-wait setting and the tests' sandboxed wakes obey that inherited value instead of their own configuration."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

@@ -1,0 +1,248 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.23.10 is a one-item bug bundle: the next-fire schedule roster rendered taller\nthan the two panes that display it, so rows scrolled off the top with no signal\nanything had been cut. The RC fixes it in three layers — the roster is now read\nfrom the parsed crontab instead of a hardcoded six-name tuple, both renderers\nfit their rows to the hosting tmux pane's queryable height and narrate any drop\nwith a `+N more` marker, and `create.sh` floors both panes at creation time to\nroster length plus each renderer's reserved-row count. Both gated runners are\ngreen. I exercised the guard behaviorally in real tmux panes at seven different\nheights in both display homes: every row is either visible or counted, and at\neach pane's creation-time floor the full seven-row roster renders untruncated.\nTwo gaps remain, both minor and both filed: window 4 still sorts soonest-first\nrather than pinning `pm` to the top row (the bug's acceptance asked for `pm`\nfirst; PM flagged the conflict at decomposition and no ticket changed the sort),\nand the creation-time pane floors ship with no automated coverage. Neither\nthreatens the release. Recommendation: SHIP-WITH-CONCERNS.\n\n---",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight — RC intact and worktree clean",
+      "heading": "Finding 1: Pre-flight — RC intact and worktree clean",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `git rev-parse HEAD` = `git rev-parse ai_rc/v2.23.10` = `ca59e3e4b5680526855aa01635a442da35acafcd`.\n- `git status --porcelain` empty; `git stash list` empty.\n- All three prerequisite CODER tasks read `## State: DONE`. All three feature\n  branches are absent locally (`git branch --list 'ai_feature/*'` returns zero),\n  the normal post-merge shape, so Step-2 checks 1 and 2 pass trivially. No\n  `ai_feature/*` branch exists anywhere in the repo, so no DONE task anywhere in\n  the project has an unmerged branch.\n- `git log --oneline ai_main..ai_rc/v2.23.10` shows the expected three\n  `--no-ff` merge commits plus their four content commits, nothing else.\n- Diff scope: 9 files, +794/−23 — `docs/DASHBOARD-PANES.md`,\n  `team/config/dashboard_windows.census`, `create.sh`,\n  `lib/next_fire_viewport.sh` (new), `next-cron-firings.sh`, `show-header.sh`,\n  `show-multi.sh`, `lib/dashboard_constants.sh`,\n  `team/tests/unit/test_schedule_roster_completeness.py` (new).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "The viewport-fit guard fires correctly — every row visible or counted",
+      "heading": "Finding 2: The viewport-fit guard fires correctly — every row visible or counted",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.5 behavioral verification. The guard exists to *prevent* silent row loss,\nso I triggered the loss rather than reading the code for it. Real tmux panes on a\nprivate socket under `$PGAI_AGENT_KANBAN_TEMP_DIR`, not the stubbed `tmux` the\nRC's own tests use; the installed roster is 7 agents\n(`dashboard_schedule_roster_count` → `7`, matching the live crontab).\n\n**Window 4 — `next-cron-firings.sh`** (`SCHED_FIRINGS_MIN_H` = 7 + 2 = 9):\n\n| pane height | rows shown | marker | shown + dropped |\n|---|---|---|---|\n| no tmux (piped) | 7 | none | 7 ✓ |\n| 40 | 7 | none | 7 ✓ |\n| 10 | 7 | none | 7 ✓ |\n| **9 (the floor)** | **7** | **none** | **7 ✓** |\n| 8 | 5 | `+2 more` | 7 ✓ |\n| 5 | 2 | `+5 more` | 7 ✓ |\n| 3 | 0 | `+7 more` | 7 ✓ |\n\n**Window 0 — `show-multi.sh --mode header`** (delegates to `show-header.sh`;\n`projects.cfg` holds exactly one project, so this delegation is the live path;\n`HEADER_MIN_H` = 7 + 3 = 10):\n\n| pane height | rows shown | marker | shown + dropped |\n|---|---|---|---|\n| 40 | 7 (`pm` first) | none | 7 ✓ |\n| **10 (the floor)** | **7 (`pm` first)** | **none** | **7 ✓** |\n| 9 | 5 | `+2 more` | 7 ✓ |\n| 6 | 2 | `+5 more` | 7 ✓ |\n| 4 | 0 | `+7 more` | 7 ✓ |\n\nEvery case reconciles exactly. At each home's creation-time floor the full roster\nrenders with no marker, which is the point of the floors. Truncation drops from\nthe bottom, so the top rows — the ones BUG-0306 reported losing — always survive.\n`OVERWATCH` now appears in window 0, which it never did before: the stale\n`CRON_AGENTS=(\"pm\" \"coder\" \"writer\" \"tester\" \"cm\" \"cleanup\")` tuple in\n`show-header.sh` is gone, replaced by first-seen key order captured live from\n`cron_firings.py`'s JSON.\n\nI also confirmed the \"cannot query\" path does not truncate to a guess: with\n`TMUX_PANE` unset the budget is empty and `next_fire_fit_lines` prints every line\nunchanged.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "The roster count is derived from the schedule source, not hardcoded",
+      "heading": "Finding 3: The roster count is derived from the schedule source, not hardcoded",
+      "level": 3,
+      "body": "**Category:** pass\n\n`dashboard_schedule_roster_count()` exercised directly against a PATH-shimmed\n`crontab` so the synthetic-8th-entry case from BUG-0306's acceptance could be\nreached without touching the host crontab:\n\n| crontab fed to the helper | result |\n|---|---|\n| the real installed crontab (7 agent entries) | `7` |\n| shimmed, 8 entries (synthetic `extra`) | `8` |\n| shimmed, empty | `0` |\n| real crontab, `cron_parser.py` path missing | `0` |\n| shimmed `crontab -l` exiting non-zero | `0` |\n\nThe degradation cases all return `0` rather than the pre-OVERWATCH literal five,\nexactly as the function's contract comment states. No literal roster count\nsurvives anywhere: `create.sh` derives `SCHEDULE_ROSTER_COUNT` once, and\n`show-multi.sh`'s multi-project block now iterates `result.items()` instead of its\nown six-name tuple. That multi-project block is a single joined text line rather\nthan a row list, so no viewport fit applies to it and none is owed.\n\nI also verified the sourcing order that makes this work: `create.sh` sources\n`lib/dashboard_constants.sh` at line 170 and first calls the helper at line 490.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Window 4 renders soonest-first, not `pm`-first",
+      "heading": "Finding 4: Window 4 renders soonest-first, not `pm`-first",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one pane's sort order; every row is visible)\n**Filed As:** BUG-0308 (Path C-A: filed as BUG — code defect / regression / test failure)\n\nBUG-0306's acceptance criterion 1 reads \"Window 0 tile and window 4 header each\nshow all 7 current rows, **pm first**\". Window 0 satisfies both halves. Window 4\nsatisfies the visibility half but keeps its pre-existing soonest-first sort, so\nits top row is whichever agent is nearest its next stagger slot and changes every\nfew seconds:\n\n```\n$ bash team/scripts/dashboard/next-cron-firings.sh --no-color\n=== Next Agent Wake (incl. stagger) ===\n\nWRITER   in 0:01\nTESTER   in 0:13\nPM       in 0:25\nCODER    in 0:37\nCM       in 0:49\nOVERWATCH Thu 3am\nCLEANUP  Sun 4am\n```\n\nThe criterion is genuinely ambiguous and I am recording the ambiguity rather than\nresolving it. \"Top row first\" in the bug's Expected section reads as *do not lose\nthe top rows*, which is satisfied; \"pm first\" in Acceptance reads as an ordering\npromise, which is not. The ambiguity is not mine alone: the decomposition already\nnamed it — `tasks/PM-20260917-001-.../status.md` records \"The bug's acceptance\n'pm first' changes next-cron-firings.sh's current soonest-first sort to a fixed\nroster order; the plan states the required end state and leaves the ordering\nmechanism to CODER.\" No CODER ticket then changed the sort, and\n`next-cron-firings.sh`'s file header has documented soonest-first since before\nthis RC. Categorized `gap` per the conservative default.\n\nOne test-fidelity note, since it would otherwise look like coverage:\n`test_schedule_roster_completeness.py::TestFullRosterRendersEveryRow::test_next_cron_firings_renders_seven_rows_pm_first`\ndoes assert `pm` first for window 4, but reaches that order by pinning\n`date +%s` to an epoch whose within-the-minute second is 59, at which instant\npm's unstaggered remaining time happens to be smallest. The assertion passes\nwhile production ordering stays soonest-first. The module docstring is explicit\nabout the mechanism, so this is a scope question rather than a concealed test —\nbut it means the suite does not currently pin the ordering criterion either way.",
+      "filed_as": "BUG-0308",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one pane's sort order; every row is visible)",
+        "filed_as": "BUG-0308 (Path C-A: filed as BUG — code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "The creation-time pane floors ship with no automated coverage",
+      "heading": "Finding 5: The creation-time pane floors ship with no automated coverage",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (behavior is correct today; the risk is future regression, and the runtime marker means any regression is visible rather than silent)\n**Filed As:** BUG-0309 (Path C-A)\n\nStep 6.11 \"untested new mechanisms\". Three new production mechanisms have zero\ntest references:\n\n```\n$ grep -rn \"dashboard_schedule_roster_count\" --include='*.py' team/tests/     -> no hits\n$ grep -rn \"HEADER_MIN_H\\|SCHED_FIRINGS_MIN_H\" --include='*.py' team/tests/   -> no hits\n$ grep -rn \"PGAI_SCHEDULE_.*_RESERVED_ROWS\" --include='*.py' team/tests/      -> no hits\n```\n\nThe shipped test module covers the *renderers* (runtime viewport fit, with a\nstubbed tmux pane height). It never covers the *allotment* — the creation-time\nfloors whose whole purpose is to make the runtime marker unnecessary on a\nfreshly-built dashboard. That is BUG-0306's Fix item 2, and Fix item 3 asked for\ncoverage of \"both homes\". Delete both floor guards from `create.sh` and\n`run-unit-tests.sh` still exits 0.\n\nThe behavior is correct — I verified all of it by hand (Findings 2 and 3), and the\nCODER's own pre-DONE check is recorded in\n`tasks/CODER-20260917-003-schedule-pane-allotment/status.md`. It is simply\nunpinned. BUG-0309 carries the concrete assertions worth encoding and notes that\nthe team test tree's autouse `_sandbox_crontab` fixture already provides the\ncrontab-shim mechanism a test would need.",
+      "filed_as": "BUG-0309",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (behavior is correct today; the risk is future regression, and the runtime marker means any regression is visible rather than silent)",
+        "filed_as": "BUG-0309 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Doc truth is in sync; the tour carries no row list to drift",
+      "heading": "Finding 6: Doc truth is in sync; the tour carries no row list to drift",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`python3 team/scripts/dashboard/generate_window_docs.py` re-run against the RC\nreports all three targets \"already up to date\" and leaves the tree clean\n(`git status --porcelain` empty afterwards), so `create.sh`'s window-order\ncomment, `docs/DASHBOARD-PANES.md` and `docs/dashboard.md` all match\n`team/config/dashboard_windows.census` byte-for-byte. The census pane-0 text for\nboth windows 0 and 4 was updated to state the roster-sized floor, and the\ngenerated tables carry it.\n\nCaveat, so the PASS is not read as stronger than it is: BUG-0306 acceptance 3\nasks that the \"doc-truth tour matches the as-built row list\", but\n`docs/dashboard.md`'s window-0 and window-4 entries never enumerate the roster\nrows — window 4 is described only as \"when the agents fire next\". So there was no\nstale row list to correct and the criterion is satisfied vacuously rather than by\na change. Nothing to fix; recorded so a later reader does not assume the tour was\naudited against a list it does not contain.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "New-file close reading — `lib/next_fire_viewport.sh`",
+      "heading": "Finding 7: New-file close reading — `lib/next_fire_viewport.sh`",
+      "level": 3,
+      "body": "**Category:** pass\n\nRead top to bottom (new file, 69 lines, Principle 3). Source guard present and\nidempotent. `next_fire_pane_height` queries only through `$TMUX_PANE` plus a\n`command -v tmux` check and validates the result against `^[0-9]+$` before\nechoing — no `tput lines` terminal-size guess, which is what makes the piped and\n`--no-tmux` paths print in full instead of truncating to something wrong.\n`next_fire_fit_lines` treats an empty or non-numeric budget as \"unknowable\" and\nprints everything; the `show = budget - 1` arithmetic reserves exactly one row\nfor the marker so total output never exceeds the budget; `dropped` is computed\nfrom `total - show`, so the marker count and the visible rows always reconcile to\nthe roster size, which is the invariant Finding 2 confirms empirically at seven\nheights. `(( show < 0 )) && show=0` covers `budget=0`. The reserved-row accounting\nin both callers matches the named constants (`next-cron-firings.sh` base 2, +2\nmore only while the HALT footer prints; `show-header.sh` 3), and those constants\ncarry comments stating they must stay equal to the callers' own accounting.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Autonomous operation criterion — no manual intervention",
+      "heading": "Finding 8: Autonomous operation criterion — no manual intervention",
+      "level": 3,
+      "body": "**Category:** pass\n\nSee the dedicated section below.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Skip-cites-a-real-bug gate",
+      "heading": "Finding 9: Skip-cites-a-real-bug gate",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/lint_skip_bug_gate.sh` exit 0 — \"all skip annotations are\ncompliant\", 0 missing `BUG-NNNN` files. Independent grep for placeholder shapes\n(`BUG-SKIP`) across `team/tests/`: zero hits. The RC's new test module adds no\nskips.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Coding-standards spot-check",
+      "heading": "Finding 10: Coding-standards spot-check",
+      "level": 3,
+      "body": "**Category:** pass\n\nFive minutes against `docs/coding-standards.md`. `next_fire_viewport.sh` is a\nsourced library with no executable entry point, so no `--help` is owed; the two\ncallers' existing `--help` handlers are unchanged. No bug, task, RC or version\nidentifier reaches any shipped comment, docstring, log line or output string (the\nscan under Constraint Verification). The two new reserved-row values are named\nconstants in `lib/dashboard_constants.sh` with inline documentation, consistent\nwith the file's existing entries, and they are internal accounting rather than\noperator tunables, so no `*_example` update is owed under the Documentation\nDiscipline Rule. The two viewport helpers are new behavior with no existing\n`lib/` equivalent, so no duplicate implementation; the gated `lint_lib_function_dedupe`\npre-flight agrees.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Release-state sanity and prerequisite graph",
+      "heading": "Finding 11: Release-state sanity and prerequisite graph",
+      "level": 3,
+      "body": "**Category:** pass\n\n`release-state.md` holds all four fields, well-formed: `Active RC` `v2.23.10`\n(consistent with the actual `ai_rc/v2.23.10` branch — no state drift),\n`RC Opened At` `2026-09-17T00:42:12+00:00`, `RC Opened By Task`\n`CM-20260917-005-open-rc-2-23-10`, `Last Released` `v2.23.9`.\n`## Last Released` is written by `cm/release.sh` by design and is not reported as\ndrift. Version answers came from `pp_last_released_version`, and the\ngreater-than check used `semver_gt`.\n\nPrerequisite graph over the seven cycle tasks: acyclic, every referenced task ID\nresolves to an existing folder, bookends correctly linked — `CM-...-005-open-rc`\nwith no prerequisites at the head, this TESTER task gated on all three CODER\ntickets, `CM-...-008-release` gated on the three CODER tickets plus TESTER at the\ntail. Queue markers all render their task's own state correctly: `[x]` on the five\nfinished tasks, `[A]` on this one, `[W]` on the waiting release task.\n\n---",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

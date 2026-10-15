@@ -1,0 +1,164 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "I verified RC v2.31.3 (`ai_rc/v2.31.3` at `992504126343372a2f0a616e72b529dd458cd515`) against `requirements/v2.31.3-bugfix-bundle-20261006.md`, which bundles four bugs: BUG-0587 (unwind-rc ignores the shared push rule), BUG-0590 (board_gather inlines the campaign filename and turns the unit suite red), BUG-0588 (llm_effort example states the wrong narration count) and BUG-0589 (the doc-truth lint stops scanning prose after a tagged code fence). Pre-flight passed. Both gated runners exited 0: unit 10070 + 5 passed, 41 skipped; integration 942 passed, 1 skipped; 0 lint findings in either. Each bundled bug was exercised behaviorally in a sandbox against both the RC and an `ai_main` extract, so the original failure and the fix were both observed. All four are fixed and every Acceptance bullet in their files is met. The requirements doc's own criteria (Python compiles, bash syntax) pass across the whole tree. The Step 6.11 spot-check found one pre-existing, currently unexercised defect: the BUG-0589 fence regex survives in a second copy, `team/scripts/harness/lib/doc_step_extract.py`. It is filed as BUG-0592 (medium, `Regression: no`). Because a bug was filed, the recommendation is SHIP-WITH-CONCERNS rather than PASS. Nothing this RC introduced is defective.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0587 — unwind-rc gates every origin call on the shared push decision",
+      "heading": "Finding 1: BUG-0587 — unwind-rc gates every origin call on the shared push decision",
+      "level": 3,
+      "body": "**Category:** pass\n\nSandbox repro with a network stub ahead of git. On `ai_main` a `push_to_remote = false` project made 3 network calls (ls-remote x2, `push origin --delete`). On the RC it makes 0, and so does each unresolved shape (no project.cfg; not registered; project.cfg without dev_tree_path while `PGAI_DEV_TREE_PATH` is set), in both `--confirm` and `--dry-run`. Each unresolved shape prints exactly one `[unwind-rc] skipped-unresolved-project` line naming the missing piece, and the local unwind completes (RC branch deleted locally, Active RC `none`). A registered project with no `push_to_remote` key still runs ls-remote and `push origin --delete`. Its dry-run makes exactly one ls-remote call. The REST twin shares `cm.unwind.unwind_rc`. Header, module docstring and `docs/cm-release-reference.md` updated. Details are in the BUG-0587 evidence section below.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0590 — board_gather names the campaign file only through defer_posture",
+      "heading": "Finding 2: BUG-0590 — board_gather names the campaign file only through defer_posture",
+      "level": 3,
+      "body": "**Category:** pass\n\n`_defer_line` uses `campaign_file_path(kanban_root)`. The fallback root (kanban root) matches the bash twin at `team/scripts/dashboard/lib/defer_scope.sh:214`. The full gated unit run is green, including the AST invariant `test_no_python_module_but_the_posture_reader_names_the_campaign_file`. The acceptance's targeted runs are green too: `--files tests/unit/test_defer_posture_reader.py` gave 41 passed, and the three board parity/prerender/snapshot files gave 36 passed (supplemental only, the verdict is the full run). A malformed-campaign parity test against the bash full path, including the no-file fallback, was added.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0589 — doc-truth lint pairs every CommonMark fence",
+      "heading": "Finding 3: BUG-0589 — doc-truth lint pairs every CommonMark fence",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe bug's `a.md` repro goes from `scanned 0 citation(s)` on ai_main to `scanned 1` plus `MISSING COMMAND` on the RC. `~~~python`, ` ```ini `, nested 4/3-backtick fences and ` ```bash title=x ` behave the same way. The full manifest now scans 1141 citations, up from 864, with 0 findings and exit 0. Newly surfaced citations were fixed (OPERATIONS.md wake citation, which I confirmed accurate) or baselined with reasons (three test-fixture modules in the help-exempt list). A parametrized unit test pins `text`/`ini`/`python`/`~~~`/`~~~yaml`/4-backtick fences.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0588 — llm_effort example states the per-role narration count",
+      "heading": "Finding 4: BUG-0588 — llm_effort example states the per-role narration count",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe bug's repro prints 6 narration lines, both for six exported `PGAI_<ROLE>_EFFORT` and for one `llm_effort` value. The `kanban.cfg_example` comment now says one line per role resolved (up to six), consistent with `docs/OPERATIONS.md:2670`. Doc-truth key-parity reports 0 findings.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Requirements-doc acceptance criteria",
+      "heading": "Finding 5: Requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll 800 `.py` files parse (0 failures). All 330 tracked `.sh` files pass `bash -n` (0 failures). Each bundled item is addressed (Findings 1-4).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Gated suites",
+      "heading": "Finding 6: Gated suites",
+      "level": 3,
+      "body": "**Category:** pass\n\n`UNIT_EXIT=0` (`run-unit-tests.sh --coverage`: 10070 passed, 41 skipped in the parallel lane; 5 passed in the serial lane). `INTEGRATION_EXIT=0` (`run-integration-tests.sh --coverage`: 942 passed, 1 skipped, including `test_cm_release_synthetic.py`). Both were recorded green in the per-RC green ledger at commit 992504126343. Logs: `/tmp/pgai_kanban_tmp/tester/058-unit.log`, `/tmp/pgai_kanban_tmp/tester/058-integration.log`. Coverage: unavailable. Both runners printed `coverage disabled by config ([testing] coverage)`, and the JSON files under `/tmp/pgai_kanban_tmp/coverage/` date from 2026-10-04, not this run. This is informational only.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Step-extractor fence regex still hides blocks after a tagged fence (spot-check, pre-existing)",
+      "heading": "Finding 7: Step-extractor fence regex still hides blocks after a tagged fence (spot-check, pre-existing)",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one harness helper; latent today)\n**Filed As:** BUG-0592 (Path C-A — filed as BUG: code defect)\n**Regression:** no\n**Integrity:** none\n**Filed By:** TESTER (autonomous Path C) — the step extractor the documentation install-path check uses still only recognises bare and bash/sh code-block openers, so a guide step with any other tagged code block before its bash block hands the check the literal fence line as a command and misses the real one.\n\nStep 6.11 (regression of a prior gap). `team/scripts/harness/lib/doc_step_extract.py:159` carries the exact regex BUG-0589 replaced in the citation lint: `^(`{3,}|~{3,})\\s*(bash|sh)?\\s*$`. A scratch doc with a ` ```text ` block before a ` ```bash ` block under `## Step 1` makes `doc_step_extract.py <doc> \"Step 1\" --block-index 0` exit 0 with `\"block_fence_line\": 7` (the text block's closer) and a first command of the literal \"```bash\". Its consumer, `strangers-path-check.sh`, runs extracted commands for real. It is not exercised today: the five `docs/docker.md` steps the harness extracts use only bash fences, and none of them yields a fence line. Rated **medium** per SOP-core \"Rating a Finding\" calibration (a real but unexercised defect in a shipped artifact). It predates this RC (`doc_step_extract.py` is untouched by the diff). It does not block shipping v2.31.3.",
+      "filed_as": "BUG-0592",
+      "filed_by": "TESTER (autonomous Path C) — the step extractor the documentation install-path check uses still only recognises bare and bash/sh code-block openers, so a guide step with any other tagged code block before its bash block hands the check the literal fence line as a command and misses the real one.",
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one harness helper; latent today)",
+        "filed_as": "BUG-0592 (Path C-A — filed as BUG: code defect)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_by": "TESTER (autonomous Path C) — the step extractor the documentation install-path check uses still only recognises bare and bash/sh code-block openers, so a guide step with any other tagged code block before its bash block hands the check the literal fence line as a command and misses the real one."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

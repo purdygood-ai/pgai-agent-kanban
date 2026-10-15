@@ -1,0 +1,212 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.23.2 is a single-item priority bundle whose job is to give the docs-manifest\ninvariant an authoring-time signal instead of leaving it to a twelve-minute unit\nsuite at release-candidate time. The RC extracts the `docs/` citation regex,\nseed-file rule, and transitive-closure walk out of the backstop test into a\nshared module (`team/pgai_agent_kanban/lib/docs_citation_scan.py`), adds a\nseconds-fast install-free source-tree check (`team/scripts/check_docs_citations.py`),\nregisters that check in `run-unit-tests.sh`'s quality-class lint block, adds a\nred/green/wrapper test suite for it, and adds a pre-completion self-check bullet\nto `team/roles/CODER.md` and `team/roles/WRITER.md`. Nine files, +975/-91, three\nmerge commits, one per ticket.\n\nEvery acceptance criterion in the bundled priority is met, and both gated\nrunners exit 0. All seven criteria were verified by running the check rather\nthan reading it, including three failure modes triggered by hand: a removed\nmanifest entry cited from a seed file, a removed entry cited only transitively\nfrom another `docs/` page, and a brand-new citation added to a role file. Two\ndefects were found outside the criteria and are filed; both are hygiene-class,\nneither touches behaviour an operator or agent depends on, and the release is\nnot made worse by shipping them. Hence SHIP-WITH-CONCERNS at `low` systemic\nrisk rather than PASS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "the seconds-fast check exists, is install-free, and completes in well under a second",
+      "heading": "Finding 1: the seconds-fast check exists, is install-free, and completes in well under a second",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority AC 1. `team/scripts/check_docs_citations.py` exists, is executable\n(`-rwxr-xr-x`), imports the shared module, and runs no subprocess and no\ninstall. Timed from the worktree root: elapsed 0s (sub-second; the authoring\nsession measured ~0.1s on the same host). Output:\n\n```\ncheck_docs_citations: ok — 24 governance file(s) scanned, 13 docs/ citation(s) checked, all named in .../team/config/docs-manifest.txt.\n```\n\n24 scanned = 4 flat root governance files + 7 `team/roles/*.md` + the 13 manifest\ndocuments the walk followed one hop into. 13 citations checked = the 13 manifest\nentries. `--help` names every one of its three flags (`--repo-root`,\n`--team-dir`, `--manifest`), satisfying the coding-standards help directive.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "each finding names the citing file, the line, the cited path, and the exact manifest line to add",
+      "heading": "Finding 2: each finding names the citing file, the line, the cited path, and the exact manifest line to add",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority AC 2. Triggered by removing `read-order-manifests.md` from a throwaway\ncopy of the tree under `$PGAI_AGENT_KANBAN_TEMP_DIR` (the dev tree's own\nmanifest was never opened for writing):\n\n```\ncheck_docs_citations: FAIL — 1 docs/ citation(s) reachable from the governance files are not named in .../docs-manifest.txt.\n\nCause(s):\n  - team/README.md:43 cites 'docs/read-order-manifests.md', which .../docs-manifest.txt does not name\n\nTo fix:\n  1. Add the following line(s) to .../docs-manifest.txt:\n       read-order-manifests.md\n  2. Re-run: python3 team/scripts/check_docs_citations.py\n```\n\nCiting file, 1-based line, cited path, and the verbatim remedy line are all\npresent, and the remedy is the exact text the manifest needs. Exit code 1.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "zero findings against the tree as shipped",
+      "heading": "Finding 3: zero findings against the tree as shipped",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority AC 3. Exit 0 both standalone and inside the gated runner (quoted\nabove). Independently corroborated by\n`test_check_docs_citations_is_silent_against_the_shipped_tree`, which also\nguards `citations_checked > 0` so a broken seed list cannot masquerade as a\nclean tree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "the red case is proven by a test, and by two further failure modes triggered by hand",
+      "heading": "Finding 4: the red case is proven by a test, and by two further failure modes triggered by hand",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority AC 4. `team/tests/unit/test_docs_citation_manifest_lint_wired.py`\ncopies `team/` to a throwaway root under `tmp_path`, deletes exactly one\nmanifest entry, and asserts the check reports exactly one finding whose\n`cited`, `source` and `line` are all checked by identity — not merely a non-zero\nexit — and then asserts the dev tree's manifest is byte-identical afterwards. A\nsecond test drives the same fixture through the real\n`gated_runner_run_quality_lint` call shape and asserts the wrapper still returns\n0 while exactly one `docs_citation_manifest` finding lands in the findings file\nwith `severity: quality`. Both passed in the gated run.\n\nBeyond the shipped tests, I triggered two failure modes the tests do not cover,\nper Step 6.5:\n\n1. **Second-hop citation.** Removing `audits/v1.27.2-gate-remedy-census.md` —\n   cited only from `docs/blocking-site-census.md`, itself reached transitively —\n   produced `docs/blocking-site-census.md:81 cites 'docs/audits/v1.27.2-gate-remedy-census.md'`,\n   exit 1. The closure walk really is transitive, not seed-only.\n2. **The historical failure class.** Appending `See docs/brand-new-thing.md for\n   details.` to `team/roles/CODER.md` in the throwaway copy produced\n   `team/roles/CODER.md:178 cites 'docs/brand-new-thing.md'` with remedy line\n   `brand-new-thing.md`, exit 1. This is exactly the shape of BUG-0227,\n   BUG-0244 and BUG-0266 — the three instances that motivated the priority — and\n   the check catches it in under a second.\n\nThe three usage/internal failure paths also behave as documented: missing\nmanifest → exit 2 with a named path, comment-only manifest → exit 2 \"empty or\ncontains only comments\", missing team dir → exit 2 with the `--team-dir` remedy.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "an authoring agent meets the check on both surfaces",
+      "heading": "Finding 5: an authoring agent meets the check on both surfaces",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority AC 5 asks for the gated-runner lint set, or a role-file self-check, or\nboth. The RC ships both.\n\n- `team/scripts/run-unit-tests.sh` registers it once as\n  `gated_runner_run_quality_lint \"docs_citation_manifest\" -- python3 scripts/check_docs_citations.py`,\n  placed in the pre-pytest quality-lint block after `cd \"$REPO_ROOT/team\"`, with\n  a comment declaring the site CONVERT-class and explaining why. It is\n  deliberately absent from `check_breakage_class.py` and from\n  `run-integration-tests.sh`, and a test asserts the former.\n- `team/roles/CODER.md` and `team/roles/WRITER.md` each gain one bolded\n  pre-completion bullet in the PHASE 2 delivery section, immediately after the\n  provenance-litter bullet, naming the command, what it prints, the remedy, and\n  the fact that a finding is an authoring chore rather than a BLOCK. Read in\n  full: both are accurate, both cross-reference the manifest header rather than\n  duplicating it, and both name the gated runner and the unit suite as the later\n  surfaces, so neither overclaims. The bare relative command path\n  (`python3 team/scripts/check_docs_citations.py`) matches the adjacent\n  pre-existing `lint_hygiene.py` bullet's convention and is correct for the dev\n  tree worktree where CODER and WRITER actually work.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "the backstop test still exists, still proves the invariant, and was refactored without weakening",
+      "heading": "Finding 6: the backstop test still exists, still proves the invariant, and was refactored without weakening",
+      "level": 3,
+      "body": "**Category:** pass\n\nPriority AC 6, and the priority's \"out of scope: removing or weakening the\nbackstop\". `team/tests/unit/test_installed_governance_docs_citations_resolve.py`\nis present and passed inside the gated unit run. Its diff was read line by line:\nthe private `_DOCS_CITATION_RE`, `_ROOT_GOVERNANCE_FILES`, `_governance_seed_files`\nand BFS loop were deleted and replaced by calls into the shared module with\n`is_resolved` = \"is a real file under the installed root\". The regex is\ncharacter-identical, the seed set is identical, and the walk is the same BFS;\ndimension 3 (root-variable command paths) was left local and untouched, as the\nmodule docstring states. The red-case tests still assert on the injected bogus\ncitation and its attribution to `roles/TESTER.md`. Duplication — the risk the\npriority's own risk assessment names — is genuinely gone: the citation regex now\nappears in exactly one source file.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "the requirements document's own three criteria",
+      "heading": "Finding 7: the requirements document's own three criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"Each bundled item is addressed in the implementation\" — PRIORITY-0003's four\n  goals and seven criteria are all met (Findings 1–6).\n- \"All Python files compile cleanly\" — `python3 -m py_compile` clean on all four\n  added/changed Python files; the unit suite's own import-completeness lint is OK.\n- \"All bash files pass syntax check\" — `bash -n team/scripts/run-unit-tests.sh`\n  clean (the only changed shell file); `set -euo pipefail` and the\n  `trap cleanup_on_exit EXIT` are preserved, and the new block sits before the\n  findings-file write hook it depends on.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "the shared walk's docstring describes a call contract the code does not honour",
+      "heading": "Finding 8: the shared walk's docstring describes a call contract the code does not honour",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task — reword one docstring paragraph, add one spy test)\n**Systemic Risk:** low (hygiene; documentation that could steer a future third caller wrong, no effect on either shipped caller)\n**Regression:** yes (the text is new in this RC; this RC's changes produced it)\n**Integrity Damage:** no\n**Filed As:** BUG-0294 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`walk_docs_citation_closure` in `team/pgai_agent_kanban/lib/docs_citation_scan.py`\ndocuments `resolved_target` as \"Called for every citation regardless of\n`is_resolved`'s answer — a caller that wants the walk to stop at an unresolved\ncitation returns `None` for it.\" The loop calls `resolved_target` only inside the\n`if is_resolved(...)` branch, so it is never called for a citation that produced\na finding, and the documented way to \"stop the walk at an unresolved citation\"\ncontrols nothing (the walk already stops there unconditionally). Verified by\nreading both, and by the fact that both shipped callers carry a now-dead\nresolution re-check inside their own `resolved_target` — which is why neither is\naffected today. A third caller written against the documented contract would get\nbehaviour it did not read about. This is a new shared module whose whole purpose\nis to be the one implementation two-plus callers share, so its contract prose is\nload-bearing.",
+      "filed_as": "BUG-0294",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task — reword one docstring paragraph, add one spy test)",
+        "systemic_risk": "low (hygiene; documentation that could steer a future third caller wrong, no effect on either shipped caller)",
+        "regression": "yes (the text is new in this RC; this RC's changes produced it)",
+        "filed_as": "BUG-0294 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "three bug files entered the project's bug folder outside the session that claims to have filed them, one staged through bare `/tmp`",
+      "heading": "Finding 9: three bug files entered the project's bug folder outside the session that claims to have filed them, one staged through bare `/tmp`",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1–2 CODER tasks — litter-check cleanup or runnable remedy, plus a provenance record at claim time)\n**Systemic Risk:** low (no effect on the RC tree or on any shipped behaviour; it degrades the trustworthiness of the bug ledger's provenance headers)\n**Regression:** yes (the events occurred inside this RC's build window; I could not establish that the pattern predates it)\n**Integrity Damage:** no (nothing was lost or corrupted — the three bug files are well-formed and their content is valid; both copies of the stray file are byte-identical)\n**Filed As:** BUG-0295 (Path C-A)\n\nThe wake log records\n`litter check: CODER-20260915-058-docs-citation-check-wired left 1 bare /tmp entry(ies): /tmp/BUG-0293-provenance-sweep-convergence.md`.\nThat file is still on disk and is byte-identical, with the same\n`2026-09-16T00:01:01Z` mtime, to\n`projects/pgai-agent-kanban/bugs/BUG-0293-provenance-sweep-convergence.md`.\nWriting to bare `/tmp` is forbidden by the temp-file convention, and the litter\ncheck narrates the violation but leaves the file in place.\n\nSeparately, `BUG-0290` (23:54:53Z), `BUG-0291` (23:54:48Z) and `BUG-0293`\n(00:01:01Z) all carry `Source Task: TESTER-20260915-054-verify-2-23-1`, a task\nthat finished at `22:25:39Z`. The only agent session running in that window was\n`CODER-20260915-058-docs-citation-check-wired` (22:54:31 → 00:26:54); CM's wakes\nin the window all exited early on `lock.contended`, and the PM, writer, overwatch\nand cleanup logs record nothing. `BUG-0293` is not cited anywhere in TESTER-054's\nown report, so it cannot have been authored by the session it names. No log line\nrecords any of the three filings.\n\n**Attribution is undetermined and the bug says so.** Either the CODER session\nwrote into `bugs/` (a swim-lane violation — CODER does not file bugs), or an\noperator hand-filed them from TESTER-054's report while that session happened to\nbe running (a manual intervention in a chain premised on needing none). Either\nway the `Filed By` / `Source Task` headers are not a reliable provenance record,\nand discovery and PM act on exactly those headers. Nothing about the RC tree is\nimplicated.",
+      "filed_as": "BUG-0295",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no (nothing was lost or corrupted — the three bug files are well-formed and their content is valid; both copies of the stray file are byte-identical)"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1–2 CODER tasks — litter-check cleanup or runnable remedy, plus a provenance record at claim time)",
+        "systemic_risk": "low (no effect on the RC tree or on any shipped behaviour; it degrades the trustworthiness of the bug ledger's provenance headers)",
+        "regression": "yes (the events occurred inside this RC's build window; I could not establish that the pattern predates it)",
+        "filed_as": "BUG-0295 (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

@@ -27,6 +27,9 @@ Collected roots (paths relative to team/):
   Integration runner (run-integration-tests.sh PYTEST_ARGS):
     - tests/integration/
 
+  Cold-build runner (run-cold-build-tests.sh PYTEST_ARGS):
+    - tests/cold/
+
 Exclusions
 ----------
 The following directories are excluded from the "all test files" enumeration:
@@ -80,6 +83,8 @@ _COLLECTED_ROOTS: list[str] = [
     "pgai_agent_kanban/api/tests",
     # run-integration-tests.sh PYTEST_ARGS
     "tests/integration",
+    # run-cold-build-tests.sh PYTEST_ARGS
+    "tests/cold",
 ]
 
 # ---------------------------------------------------------------------------
@@ -169,6 +174,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the orphan-test lint: report test files no gated runner collects.
+
+    Exit codes: 0 no orphan test file; 1 one or more (listed); 2 usage error
+    or internal failure, such as the team directory not found.
+    """
     args = _parse_args(argv)
 
     # Resolve team_dir: explicit arg > default (parent of this script).

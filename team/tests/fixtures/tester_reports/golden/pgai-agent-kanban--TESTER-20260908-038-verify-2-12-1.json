@@ -1,0 +1,350 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `ai_rc/v2.12.1` (worktree HEAD `2d1f295`, clean, no\nstashes) against `projects/pgai-agent-kanban/requirements/v2.12.1-bugfix-bundle-20260908.md`\n— a thirteen-item BUG bundle (BUG-0199, BUG-0200, BUG-0201 plus ten hygiene\nride-alongs: BUG-0188/0189/0190/0191/0192/0194/0195/0196/0197/0198). Pre-flight\nmerge verification passed (no live feature branches; all five prerequisite tasks\nare DONE with their branches merged and deleted). Every bundled item's own\n`## Acceptance` list was executed, not read: guard logic was exercised by\ntriggering the failure mode it prevents — declaration-prefixed HALT writes, an\nempty non-merge commit planted on a throwaway branch, a contended provenanced\nlock, a stray unprefixed `rc/*` branch, a scratch-repo init pointed at a real\ncheckout, a census anchor displaced by an inserted line, and the provenance\nlint's own printed remedy re-run verbatim. Both gated runners exited 0 with\nempty findings files. Eleven of the thirteen bundled items are fully met; two\ncarry an acceptance criterion that is still unmet, and two further defects\nsurfaced from the outside-the-spec spot-check. All four are low-severity, all\nfour demonstrably predate this RC, and all four are filed via Path C\n(autonomous follow-up filing — non-blocking).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0199 — governance byte budgets re-baselined",
+      "heading": "Finding 1: BUG-0199 — governance byte budgets re-baselined",
+      "level": 3,
+      "body": "**Category:** pass\n\n`cd team && bash scripts/lint_governance_byte_budgets.sh --kanban-cfg ../kanban.cfg_example`\nprints `under` for all seven roles (po 58124/65536, pm 68753/73728, coder\n63715/69632, writer 63465/69632, tester 96373/102400, cm 78093/86016, overwatch\n68948/73728) — AC2. Every changed `budget_bytes_*` key carries a comment naming\nthe assembled total it is based on and the shared 4KB-headroom policy — AC3 —\nand the diff touches only `kanban.cfg_example`, so no governance text was\ntrimmed, honouring the constraint that the v2.12.0 text is shipped law. AC1\n(`run-unit-tests.sh` exit 0) is confirmed by the gated runner above; the\nenforcing test `test_every_role_governance_assembly_stays_under_configured_budget`\nis green.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0200 — HALT-scope lint sees declaration-prefixed assignments",
+      "heading": "Finding 2: BUG-0200 — HALT-scope lint sees declaration-prefixed assignments",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nBehavioral verification against a synthetic `--team-dir` tree: all five\ndeclaration keywords (`local`, `declare`, `typeset`, `export`, `readonly`) in\nfront of `halt_flag=\"${KANBAN_ROOT}/HALT\"` inside a non-`global`-named function\nare now reported, exit 1 (AC1, AC2). A `global`-named scope and a\n`# halt-scope-allowlist:` marker are still not flagged (AC3, two of its three\ncases). `python3 team/scripts/lint_halt_scope_writers.py` exits 0 against the\nshipped tree (AC4), and the unit file gained a parametrized five-keyword\npositive case plus three declaration-prefixed negative cases.\n\nCaveat, carried as Finding 14: AC3's third case — a project-scoped writer —\npasses only when the project path is built through a helper\n(`$(pp_project_root ...)/HALT`, the shape the shipped test uses). Written\nliterally as `local halt_flag=\"${KANBAN_ROOT}/projects/${name}/HALT\"` it is\nstill flagged. That false positive is pre-existing and orthogonal to the\ndeclaration prefix.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0201 — operator halt playbook scoped to the project HALT file",
+      "heading": "Finding 3: BUG-0201 — operator halt playbook scoped to the project HALT file",
+      "level": 3,
+      "body": "**Category:** pass\n\n`grep -n 'PGAI_AGENT_KANBAN_ROOT_PATH/HALT' docs/OPERATIONS.md` returns 12\nlines, and every one is explicitly about the operator's fleet-wide manual pause\n(the \"Two scopes, two files\" table, the lifecycle table's operator arm, the\nglobal dashboard commands, the root-armed HALT-AFTER resume, the pre-unwind\nhalt). No line describing a CM-created halt names the root file — AC1. The CM\ntrigger list has nine entries and each maps one-to-one onto `team/roles/CM.md`\n\"The nine triggers\", which the doc names as the authority rather than\nduplicating — AC2. The response procedure locates the file with\n`ls $ROOT/projects/*/HALT`, cats it, reads the project's `release-state.md`, and\nclears `$ROOT/projects/<name>/HALT`; the lifecycle table's Create and Remove\nrows agree — AC3. Walked the procedure end to end against the shipped writer:\nthe documented header shape (`# HALT created by CM at …` plus\n`error:`/`message:`/`remedy:` and the Resolution line) matches `write_halt_file`\nin `team/scripts/lib/cm/release_preflight.sh`, including the never-overwrite\nbehaviour the doc now states — AC4.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0188 — provenance lint's printed remedy reproduces its scan set",
+      "heading": "Finding 4: BUG-0188 — provenance lint's printed remedy reproduces its scan set",
+      "level": 3,
+      "body": "**Category:** pass\n\nReproduced the original failure shape in a synthetic tree whose only violation\nis in a repository-root `install.sh`. The lint reports the finding, and its\n`To fix` step 2 is now the bare `python3 .../lint_comment_provenance.py`\nwithout `--code-dirs`. Running that command verbatim, without editing the file,\nexits **1** and reports the same violation — AC1. Before the fix the printed\ncommand exited 0 and reported the tree clean. The `scanning N file(s) in …`\nbanner now names `… (repository root, non-recursive)` alongside the code dirs —\nAC3 — visible both in the synthetic run and in the gated runner's own banner.\nUnit coverage for the property lives in\n`team/tests/unit/test_lint_comment_provenance.py`\n(`test_remedy_block_commands_clear_the_gate`,\n`test_remedy_block_confines_repair_to_the_fixture`) — AC2.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0189 — one process-history pointer still ships",
+      "heading": "Finding 5: BUG-0189 — one process-history pointer still ships",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one header comment; no runtime behaviour)\n**Regression:** no (the line is byte-identical on `ai_main`, and the file is untouched by this RC's diff)\n**Integrity Damage:** no\n**Filed As:** BUG-0202 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nThe bug's acceptance criterion 1 is a literal grep, and it does not come back\nclean on the shipped tree:\n\n```\n$ grep -nEi 'this ticket|the task this|this task.s status|a separate ticket|the ticket that' \\\n    team/scripts/*.py team/scripts/lib/*.sh install.sh\nteam/scripts/lib/wake_task_transition.sh:8:# line ceiling as this ticket's function and its documentation grew it past\n```\n\nThe two files the bug named (`lint_rc_empty_commits.py:32`,\n`lint_dockerfile_static.py:76`) are both fixed, and CODER-036 additionally\ncleared a third instance in `lint_engine_size_dupe.py`, so AC2 is met and the\nintended work landed. What was missed is a fourth instance in a file that did\nnot exist when the bug was filed: `team/scripts/lib/wake_task_transition.sh`\nshipped in v2.12.0 carrying the same unresolvable-pointer shape. The optional\ndurable half of the bug's Fix section (a phrase-pattern family in\n`lint_comment_provenance.py` for `this ticket` / `the task this` / …) was not\ntaken, which is exactly why nothing mechanical caught the new instance — the\nlint matches identifier shapes only, so this class recurs on every release\nuntil phrase patterns exist.",
+      "filed_as": "BUG-0202",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one header comment; no runtime behaviour)",
+        "regression": "no (the line is byte-identical on `ai_main`, and the file is untouched by this RC's diff)",
+        "filed_as": "BUG-0202 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0190 — explicit kanban_root outranks the user-wide cfg",
+      "heading": "Finding 6: BUG-0190 — explicit kanban_root outranks the user-wide cfg",
+      "level": 3,
+      "body": "**Category:** pass\n\nReproduced the original failure directly. With\n`$FAKEHOME/.config/pgai-kanban.cfg` holding\n`PGAI_TASKS_DIR=/ambient/user/cfg/tasks`,\n`get_config(kanban_root=$SB)['PGAI_TASKS_DIR']` now returns `$SB/tasks`\n(previously `/ambient/user/cfg/tasks`) — AC1. The old case still holds: with\n`PGAI_TASKS_DIR=/ambient/env/tasks` in the environment, the same call still\nreturns `$SB/tasks`, so the v2.10.4 environment fix is intact — AC3. The module\ndocstring now states exactly what the code does, including the one layer the\nexplicit root deliberately does not outrank (a per-install `config.cfg` read\nfrom inside the named root) and the reason for that asymmetry. AC2's cfg-file\nunit case is present at `team/tests/unit/test_config.py:349`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0191 — test-tree provenance backlog cleared",
+      "heading": "Finding 7: BUG-0191 — test-tree provenance backlog cleared",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_comment_provenance.py` reports\n`OK — 0 findings across 546 file(s)` — AC1 — down from 1043 findings. Neither\ngated runner's findings file contains a `comment_provenance` entry; both files\nare `\"findings\": []` — AC2. No `# provenance-allowlist:` marker was added under\n`team/tests/`: the marker count there is 9, identical on `ai_main` and on the RC\n(1 in `tests/artifacts/…/README.md`, 4 in `test_ship_policy_acceptance.py`, 4 in\n`test_lint_comment_provenance.py`) — AC3. Both gated runners exit 0 — AC4.\n\nRecorded, not a finding: CODER-036 narrowed the true rewrite set from 1043 to\n234 by implementing a tokenize-based, column-precise classifier so bug-shaped\nvalues used as legitimate test *data* are no longer counted as citations. That\nchanges what the lint asserts. It was done deliberately and described in the\ntask record, and the SOP's Test Authoring Guidelines do sanction bug-shaped\nfixture data, so the narrowing is defensible — but the bundled bug's premise\n(1043 genuine citations) was revised during the fix, which is worth a reader\nknowing.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0192 — empty commits caught at completion time; boilerplate guarded",
+      "heading": "Finding 8: BUG-0192 — empty commits caught at completion time; boilerplate guarded",
+      "level": 3,
+      "body": "**Category:** pass\n\nCompletion-time detection (AC1): `coder_writer_completion_gate` in\n`team/scripts/lib/wake_lifecycle.sh` gained a third check that calls\n`lint_rc_empty_commits.py`'s own detection logic rather than reimplementing it,\nrefuses the DONE-claim dual-channel, and is censused as an AGENT-RESOLVABLE\nsite with `# CENSUS-ANCHOR: completion-gate-empty-commit-01` plus its Locator\nIndex entry. The underlying detector was exercised on a synthetic repo in both\ndirections: a branch carrying one `--allow-empty` commit is reported and exits\n1; a branch with only real commits reports OK and exits 0.\n\nBoilerplate guard (AC2): `harness_init_scratch_repo` pointed at a directory\ninside this repository refuses with a three-line explanation and returns 1,\nleaving `git status` clean; pointed at a fresh throwaway directory it still\ncreates the scratch repo and its initial empty commit. AC3's literal range\n(`ai_main..ai_rc/v2.10.4`) can no longer be evaluated — that RC branch was\ndeleted at release — so the detector's both-cases behaviour was verified on an\nequivalent synthetic range instead. `python3 team/scripts/lint_rc_empty_commits.py\n--range ai_main..ai_rc/v2.12.1` reports no empty non-merge commits in this RC's\nown history.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "BUG-0194 — harness repo lock routed through pgai_lock_acquire",
+      "heading": "Finding 9: BUG-0194 — harness repo lock routed through pgai_lock_acquire",
+      "level": 3,
+      "body": "**Category:** pass\n\n`grep -nE 'exec \\{[A-Za-z_]+\\}>' team/scripts/wake/harness.sh` returns nothing;\nthe acquisition is now\n`pgai_lock_acquire \"$_lock_file\" \"$AGENT\" \"$$\" \"wake-chain:${project_name}\" \"none\" _lock_fd`\ninside a `set +e` bracket, with `pgai_lock_release` on the way out, matching\n`wake_driver.sh`'s reference call site — AC1. The no-destruction property was\nexercised directly: a provenanced lock was taken, a second acquisition attempted\nagainst it, and the incumbent's four provenance lines\n(`holder=` / `pid=` / `op=` / `task=`) were byte-identical after the declined\nattempt — AC2. Before the fix the file was left empty by that attempt. The\ncontention branch now reports the live holder by name instead of\n`(no provenance recorded)`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "BUG-0195 — queue legend names all five markers",
+      "heading": "Finding 10: BUG-0195 — queue legend names all five markers",
+      "level": 3,
+      "body": "**Category:** pass\n\n`create-project.sh`'s heredoc now lists `[ ]`, `[W]`, `[A]`, `[B]` (blocked,\nneeds human intervention), and `[x]`, matching `team/SOP-core.md`'s five-row\ntable — AC1. Verified behaviorally by creating project `demo195` into a\nthrowaway kanban root: all seven generated queue files (`bug`, `cm`, `coder`,\n`pm`, `priority`, `tester`, `writer`) contain `[B]` — AC2. The live install was\nnot touched: `demo195` appears in neither `projects.cfg` nor `projects/` under\n`$HOME/pgai_agent_kanban`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "BUG-0196 — census anchors resolve by name, not position",
+      "heading": "Finding 11: BUG-0196 — census anchors resolve by name, not position",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_gate_census_compliance.py` reports\n`OK -- 32 file(s) checked, 0 offenders` with 95 census-anchored sites exempted,\nand neither gated runner's findings file carries a `gate_census_compliance`\nentry — AC1, AC2. Both sites now use the token form: a\n`# CENSUS-ANCHOR: wake-common-01` marker was authored above the\n`python3`-not-found refusal, and the Locator Index holds\n`team/scripts/lib/wake_common.sh:wake-common-01 BLOCK-WORTHY` and\n`team/scripts/run-unit-tests.sh:run-unit-tests-pytest-failure-01 BLOCK-WORTHY`\n— AC3. Position-independence was exercised rather than assumed: a blank line was\ninserted directly above each of the two anchor markers and the lint re-run still\nreported 0 offenders — AC4. The tree was restored afterwards and\n`git status --short` verified clean.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "BUG-0197 — Check e surfaces stray unprefixed RC branches",
+      "heading": "Finding 12: BUG-0197 — Check e surfaces stray unprefixed RC branches",
+      "level": 3,
+      "body": "**Category:** pass\n\nVerified against synthetic projects and git repos in throwaway kanban roots. On\na project configured `branch_prefix = ai_` with `## Active RC` = `none` and a\nlocal `rc/v0.0.9`, Check e now prints `[WARN] Stray unprefixed rc/* branch found\non a project configured with branch_prefix: rc/v0.0.9 …` — AC1; before the fix\nthis arm printed a bare all-clear. With `## Active RC` = `v2.0.0`,\n`ai_rc/v2.0.0` present and `rc/v0.0.9` stray, Check e prints\n`[OK] Active RC v2.0.0 has matching local branch: ai_rc/v2.0.0` *and* the stray\nWARN — AC2. The prefixed-only behaviour is unchanged — AC3. On a project with an\nempty `branch_prefix`, the single `rc/v0.0.9` is reported exactly once, with the\noriginal message and no duplicate — AC4. The integration file gained both the\nprefixed-stray case and the unprefixed-report-once case — AC5.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "BUG-0198 — two prefix-blind sites fixed; the tree-wide grep is not clean",
+      "heading": "Finding 13: BUG-0198 — two prefix-blind sites fixed; the tree-wide grep is not clean",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (affects only a project whose `branch_prefix` is neither empty nor `ai_`; no such project exists today)\n**Regression:** no (every remaining site is byte-identical on `ai_main` and untouched by this RC's diff)\n**Integrity Damage:** no\n**Filed As:** BUG-0203 (Path C-A)\n\nThe two sites the bug names are fixed, and both were verified behaviorally.\n`_warn_if_merged(Path(repo), 'ai_feature/X', 'ai_')` against a synthetic repo in\nwhich `ai_feature/X` is merged into `ai_rc/v1.0.0` now prints\n`WARNING: feature branch 'ai_feature/X' is already merged into 'ai_rc/v1.0.0'.`;\nthe same call with `branch_prefix=''` is silent, proving the glob is what\ncontrols it — AC1. Both production callers (`ops/write.py:899` and `:1771`, via\n`_git_delete_feature_branch`) pass the resolved `branch_prefix`, so the fix is\nlive rather than inert. `cleanup-stale-artifact-only-branches.sh` now reads\n`[project] branch_prefix` from the resolved project's own `project.cfg`, globs\n`<prefix>rc/*`, falls back to bare `rc/*`, and keeps its exit-3 remedy — AC2.\nNew tests cover both sites — AC4.\n\nAC3 is not met. `grep -rn \"ai_rc/\\*\" team/scripts/` returns 18 lines, and three\nof them are functional code — not prose, not test fixtures:\n\n- `team/scripts/lint_changelog_freshness.py:717` — `re.match(r\"^(rc/|ai_rc/)\", branch)`, the `_is_rc_branch` predicate that gates RC-mode CHANGELOG tolerance.\n- `team/scripts/run-unit-tests.sh:429` and the identical block in `team/scripts/run-integration-tests.sh` — `grep -E '^(rc/|ai_rc/)'` in the detached-HEAD RC-mode probe.\n- `team/scripts/lib/overwatch-checks/check-stale-worktrees.sh:275` — the `rc/*|ai_rc/*)` case arm that selects integration branches.\n\nCODER-035 recorded this scope decision explicitly in its task summary (the\nticket named two files; the rest were outside its declared scope), so this is an\nunder-scoped ticket rather than a botched fix. The remaining sites still\nhardcode one project's prefix in shared tooling, which is the defect class the\nbug was filed about.",
+      "filed_as": "BUG-0203",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (affects only a project whose `branch_prefix` is neither empty nor `ai_`; no such project exists today)",
+        "regression": "no (every remaining site is byte-identical on `ai_main` and untouched by this RC's diff)",
+        "filed_as": "BUG-0203 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "HALT-scope lint false-positives a literal project-scoped path",
+      "heading": "Finding 14: HALT-scope lint false-positives a literal project-scoped path",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (no shipped site trips it; the lint exits 0 on the tree)\n**Regression:** no (reproduced identically with `git show ai_main:team/scripts/lint_halt_scope_writers.py` against the same fixture)\n**Integrity Damage:** no\n**Filed As:** BUG-0204 (Path C-A)\n\n`_BASH_ROOT_HALT_ASSIGN_RE` is\n`^\\s*<decl-prefix>?([A-Za-z_][A-Za-z0-9_]*)=.*\\bKANBAN_ROOT\\b.*?/HALT(?!-)\\b`.\nThe `.*` between `KANBAN_ROOT` and the `/HALT` suffix accepts any intervening\npath segments, so a correctly *project*-scoped assignment written literally —\n`local halt_flag=\"${KANBAN_ROOT}/projects/${name}/HALT\"` — matches, and the\nfollowing `touch \"$halt_flag\"` is reported as an unnamed fleet-scope write.\nConfirmed on a synthetic tree: that fixture yields `FAIL — 1 violation(s)`\nnaming the project-scoped writer. The same fixture written without the\ndeclaration keyword fails identically under `ai_main`'s copy of the lint, which\nis how the defect was established as pre-existing rather than introduced by\nBUG-0200's widening. The practical effect is that a correct fix is refused: an\nauthor who moves a fleet-wide write to the project scope in the literal form is\ntold the lint still fails, and the lint's own printed remedy #1 is exactly what\nthey already did.",
+      "filed_as": "BUG-0204",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (no shipped site trips it; the lint exits 0 on the tree)",
+        "regression": "no (reproduced identically with `git show ai_main:team/scripts/lint_halt_scope_writers.py` against the same fixture)",
+        "filed_as": "BUG-0204 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "mechanical provenance rewording left placeholder text in shipped help and docstrings",
+      "heading": "Finding 15: mechanical provenance rewording left placeholder text in shipped help and docstrings",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** medium (3-5 CODER tasks — 163 sites across 52 files)\n**Systemic Risk:** low (documentation and help text only; no runtime behaviour)\n**Regression:** no (counts are identical on `ai_main` and on the RC — 163 occurrences across 52 files on both)\n**Integrity Damage:** no\n**Filed As:** BUG-0205 (Path C-A)\n\nEarlier releases' provenance cleanups replaced `BUG-NNNN` identifiers with the\nliteral phrase `an earlier defect` at every occurrence, including inside strings\nthat were never prose. The result is text that is meaningless at best and\nunusable at worst:\n\n- `team/scripts/intake.sh:84` — the `--help` Examples block prints\n  `intake.sh --project myproject /tmp/an earlier defect-some-slug.md`, a path\n  with spaces in it that cannot be typed as shown (and a bare `/tmp/` literal\n  besides).\n- `team/pgai_agent_kanban/dashboard/_rejected.py:28,108-109` — the docstring\n  example reads `read_reason_sidecar(\"/path/to/rejected/an earlier defect-foo.md.reason\")`.\n- `team/pgai_agent_kanban/api/routers/operations.py:385,943` — the API parameter\n  doc reads ``bug: Bug intake key (e.g. ``an earlier defect``)``.\n- `team/scripts/lib/wake_lifecycle.sh:477` — `# Reference: an earlier defect\n  (this fix), an earlier defect (original helper), an earlier defect (report\n  half), an earlier defect (design).`\n- `team/pgai_agent_kanban/lib/filename_contract.py:38,81,153` — three sentences\n  of the form `an earlier defect acceptance criterion 3`.\n\nThis RC introduced none of them, and the provenance lint is green because the\nphrase carries no identifier. It is recorded here because this bundle is the\nprovenance-hygiene bundle, and because one instance degrades a user-facing\n`--help` surface, which `docs/coding-standards.md` names explicitly.",
+      "filed_as": "BUG-0205",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "medium (3-5 CODER tasks — 163 sites across 52 files)",
+        "systemic_risk": "low (documentation and help text only; no runtime behaviour)",
+        "regression": "no (counts are identical on `ai_main` and on the RC — 163 occurrences across 52 files on both)",
+        "filed_as": "BUG-0205 (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

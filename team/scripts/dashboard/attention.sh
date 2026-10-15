@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# dashboard-attention.sh
+# attention.sh
 # Window 4 attention panel — shows BLOCKED tasks, quarantine alerts, and
 # active halt scopes.
 #
-# Designed to be run under `watch -c -n N -- dashboard-attention.sh`.
+# Designed to be run under `watch -c -n N -- attention.sh`.
 #
 # BLOCKED TASKS section:
 #   ⚠ BLOCKED TASKS
@@ -21,13 +21,14 @@
 # Warning entry (count 1..threshold-1 — file approaching quarantine):
 #   ⚠ QUARANTINE ALERTS
 #   ──────────────────────────────────────────────────────────────
-#   ⚠ pgai-video-generator [priority]: 1 file(s) approaching quarantine
+#   ⚠ pgai-chomp-man [priority]: 1 file(s) approaching quarantine
 #       PRIORITY-foo.md  (2/3)  malformed filename (expected pattern: ...)
 #
-# Terminal entry (file already in .rejected/):
-#   🔴 pgai-video-generator [bugs]: 1 file(s) quarantined
-#       bad-name.md
-#       Recover: scripts/recover-rejected.sh pgai-video-generator bad-name.md
+# Terminal entry (file already quarantined — in projects/<name>/rejected/, or a
+# legacy <intake>/.rejected/ dir), grouped by the intake directory it came from:
+#   🔴 pgai-chomp-man [bugs]: 1 file(s) quarantined
+#       BUG-bad-name.md
+#       Recover: scripts/recover-rejected.sh --project pgai-chomp-man --file <filename> [--rename NEW]
 #
 # Display when no quarantine signals:
 #   ⚠ QUARANTINE ALERTS
@@ -46,15 +47,36 @@
 # then each projects/<name>/HALT by project name.
 #
 # Usage:
-#   dashboard-attention.sh [--kanban-root <path>]
+#   attention.sh [--kanban-root <path>] [-h|--help]
 #
 # Environment:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: ~/pgai_agent_kanban)
 #   NO_COLOR                            — set to suppress ANSI colors
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:53}"
+      exit 0
+      ;;
+  esac
+done
+
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh).
+# shellcheck source=../lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -84,21 +106,12 @@ if [[ -n "${NO_COLOR:-}" ]] || [[ "${TERM:-}" == "dumb" ]]; then
   USE_COLOR=false
 fi
 
-if [[ "$USE_COLOR" == "true" ]]; then
-  C_RED=$'\033[0;31m'
-  C_GREEN=$'\033[0;32m'
-  C_YELLOW=$'\033[0;33m'
-  C_BOLD=$'\033[1m'
-  C_RESET=$'\033[0m'
-  C_GRAY_BG=$'\033[47;30m'
-else
-  C_RED=""
-  C_GREEN=""
-  C_YELLOW=""
-  C_BOLD=""
-  C_RESET=""
-  C_GRAY_BG=""
-fi
+C_RED="$(ansi_code red)"
+C_GREEN="$(ansi_code green)"
+C_YELLOW="$(ansi_code yellow)"
+C_BOLD="$(ansi_code bold)"
+C_RESET="$(ansi_code reset)"
+C_GRAY_BG="$(ansi_code gray_bg)"
 
 # ---------------------------------------------------------------------------
 # Status bar: [PM:mode] [HALT:<state>]
@@ -262,8 +275,11 @@ if [[ "$USE_COLOR" != "true" ]]; then
 fi
 # Resolve scan_attention.py via shared helper resolver (live-install anchor first \u2014 D3 fix).
 _SCAN_ATTENTION_PY="$(resolve_dashboard_helper "$KANBAN_ROOT" "${PGAI_DEV_TREE_PATH:-}" "dashboard/scan_attention.py")"
+# PYTHONPATH must point at the parent of pgai_agent_kanban/ so the scanner's
+# package imports (task_status) resolve; same idiom as human-review.sh.
+_ATTN_PYTHONPATH="$(dirname "$(dirname "$(dirname "$_SCAN_ATTENTION_PY")")")"
 for _attn_root in "${_ATTN_TASK_ROOTS[@]}"; do
-    python3 "$_SCAN_ATTENTION_PY" \
+    PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
       blocked-tasks "$_attn_root" "$_COLOR_ARG"
 done
 
@@ -279,7 +295,7 @@ else
 fi
 printf '%s\n' "$DIVIDER"
 for _attn_root in "${_ATTN_TASK_ROOTS[@]}"; do
-    python3 "$_SCAN_ATTENTION_PY" \
+    PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
       transient-tasks "$_attn_root" "$_COLOR_ARG"
 done
 
@@ -301,7 +317,7 @@ else
 fi
 printf '%s\n' "$DIVIDER"
 for _attn_root in "${_ATTN_TASK_ROOTS[@]}"; do
-    python3 "$_SCAN_ATTENTION_PY" \
+    PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
       stale-working-tasks "$_attn_root" "$_COLOR_ARG" \
       --max-task-seconds "${_MAX_TASK_SEC}"
 done
@@ -312,7 +328,7 @@ unset _MAX_TASK_SEC
 # type, filename, reason, and retry count.
 # Section is suppressed entirely when no files are quarantined.
 # ---------------------------------------------------------------------------
-python3 "$_SCAN_ATTENTION_PY" \
+PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
   rejected-files "$KANBAN_ROOT" "$_COLOR_ARG"
 
 # ---------------------------------------------------------------------------
@@ -325,7 +341,7 @@ else
 fi
 printf '%s\n' "$DIVIDER"
 
-python3 "$_SCAN_ATTENTION_PY" \
+PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
   quarantine "$KANBAN_ROOT" "$_COLOR_ARG" \
   --threshold "${PGAI_DISCOVERY_REJECT_THRESHOLD:-3}"
 
@@ -485,7 +501,7 @@ done
 
 if [[ "$_stale_found_any" == "false" ]]; then
   if [[ "$USE_COLOR" == "true" ]]; then
-    printf '\n  \033[2m(no stale requirements)\033[0m\n'
+    printf '\n  %s(no stale requirements)%s\n' "$(ansi_code dim)" "$(ansi_code reset)"
   else
     printf '\n  (no stale requirements)\n'
   fi
@@ -504,7 +520,7 @@ else
 fi
 printf '%s\n' "$DIVIDER"
 
-python3 "$_SCAN_ATTENTION_PY" \
+PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
   pending-approvals "$KANBAN_ROOT" "$_COLOR_ARG"
 
 # ---------------------------------------------------------------------------
@@ -520,6 +536,6 @@ else
 fi
 printf '%s\n' "$DIVIDER"
 
-python3 "$_SCAN_ATTENTION_PY" \
+PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
   overwatch-section "$KANBAN_ROOT" "$_COLOR_ARG"
-unset _SCAN_ATTENTION_PY
+unset _SCAN_ATTENTION_PY _ATTN_PYTHONPATH

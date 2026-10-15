@@ -4,12 +4,17 @@
 # OVERWATCH revert tool — restore files from a timestamped backup directory.
 #
 # Each OVERWATCH action that modifies a file first calls overwatch_backup_file,
-# which stores a copy in:
-#   $KANBAN_ROOT/projects/<project>/overwatch/backups/<TIMESTAMP>/<basename>
+# which stores a copy keyed on the source's own path:
+#   $KANBAN_ROOT/projects/<project>/overwatch/backups/<TIMESTAMP>/project-root/<path in the project>
+#   $KANBAN_ROOT/projects/<project>/overwatch/backups/<TIMESTAMP>/absolute/<absolute path>
 #
 # This script is the operator escape hatch: given a TIMESTAMP, it reads the
-# matching entries from actions.log and copies each backed-up file back to its
-# original location.
+# matching entries from actions.log and copies each backed-up file back to
+# the source path recorded in its backup path (older backups, stored by
+# basename, fall back to locating the original from the row's target). A row
+# whose backup column lists several comma-separated backups restores every
+# one of them, and rows are undone newest first, so a file two actions in
+# one firing touched ends at its pre-firing content.
 #
 # Usage:
 #   overwatch-revert.sh [OPTIONS] <TIMESTAMP>
@@ -27,6 +32,7 @@
 #   --kanban-root <path> Kanban root directory (default: $PGAI_AGENT_KANBAN_ROOT_PATH
 #                        or $HOME/pgai_agent_kanban)
 #   --dry-run            Show what would be restored without making any changes
+#   -h, --help           Print the usage summary to stdout and exit 0
 #
 # Idempotency:
 #   Running twice with the same TIMESTAMP is safe. On the second run the script
@@ -70,11 +76,11 @@ SCRIPT_NAME="$(basename "${BASH_SOURCE[0]:-$0}")"
 readonly SCRIPT_NAME
 
 # ---------------------------------------------------------------------------
-# _or_usage
-# Print usage summary to stderr and exit 1.
+# _or_usage_text
+# Print the usage summary to stdout.
 # ---------------------------------------------------------------------------
-_or_usage() {
-    cat >&2 <<EOF
+_or_usage_text() {
+    cat <<EOF
 Usage: ${SCRIPT_NAME} [OPTIONS] <TIMESTAMP>
        ${SCRIPT_NAME} --list
        ${SCRIPT_NAME} --show <TIMESTAMP>
@@ -90,6 +96,7 @@ Options:
   --project <name>     Project name (required unless \$OVERWATCH_PROJECT is set)
   --kanban-root <path> Kanban root directory
   --dry-run            Show what would be restored; make no changes
+  -h, --help           Print this help and exit 0
 
 Examples:
   ${SCRIPT_NAME} --list
@@ -97,6 +104,15 @@ Examples:
   ${SCRIPT_NAME} 2026-05-10T12:00:00Z
   ${SCRIPT_NAME} --dry-run 2026-05-10T12:00:00Z
 EOF
+}
+
+# ---------------------------------------------------------------------------
+# _or_usage
+# Print the usage summary to stderr and exit 1 — the response to a usage
+# error (missing argument, unknown option, no mode).
+# ---------------------------------------------------------------------------
+_or_usage() {
+    _or_usage_text >&2
     exit 1
 }
 
@@ -255,7 +271,7 @@ _or_show_timestamp() {
         echo ""
         echo "Note: backup directory exists but no action-log entries reference it."
         echo "      Files in the backup directory:"
-        find "${backup_dir}" -maxdepth 1 -type f 2>/dev/null | sort | while IFS= read -r f; do
+        find "${backup_dir}" -type f 2>/dev/null | sort | while IFS= read -r f; do
             echo "  ${f}"
         done
     fi
@@ -289,6 +305,27 @@ _or_find_original_path() {
     basename="$(basename "${backup_path}")"
 
     local project_root="${KANBAN_ROOT}/projects/${OVERWATCH_PROJECT}"
+
+    # Strategy 0: the backup path records its own source (the path-keyed
+    # layout overwatch_backup_file writes): .../backups/<ts>/project-root/<rel>
+    # or .../backups/<ts>/absolute/<abs>. The first such segment after
+    # /backups/ wins.
+    local rest="${backup_path#*/backups/}" best="" best_len=-1 marker before
+    for marker in project-root absolute; do
+        before="${rest%%/${marker}/*}"
+        [[ "${before}" == "${rest}" ]] && continue
+        if (( best_len < 0 || ${#before} < best_len )); then
+            best_len=${#before}
+            best="${marker}:${rest#"${before}/${marker}/"}"
+        fi
+    done
+    if [[ -n "${best}" ]]; then
+        case "${best}" in
+            project-root:*) echo "${project_root}/${best#project-root:}" ;;
+            absolute:*)     echo "/${best#absolute:}" ;;
+        esac
+        return 0
+    fi
 
     # Strategy 1: target is an absolute path.
     # The file might not exist yet (it was moved/deleted), but the parent dir should.
@@ -469,26 +506,34 @@ _or_do_revert() {
     local restore_pairs=()   # interleaved: restore_pairs[i]=backup_path, restore_pairs[i+1]=target
     local line ts_field name target action backup_path reason
 
-    while IFS=$'\t' read -r ts_field name target action backup_path reason; do
-        # Skip entries that don't reference this timestamp's backup dir
-        if [[ "${backup_path}" != *"/backups/${ts}/"* ]] && \
-           [[ "${backup_path}" != *"/backups/${ts}" ]]; then
-            continue
-        fi
-
+    local backup_list one_backup
+    local -a row_backups=()
+    while IFS=$'\t' read -r ts_field name target action backup_list reason; do
         # Skip entries that are themselves revert actions (don't recurse)
         if [[ "${name}" == "overwatch-revert" ]]; then
             continue
         fi
 
-        # Skip entries where backup_path doesn't exist (file may have been cleaned up)
-        if [[ ! -f "${backup_path}" ]]; then
-            _or_info "Backup file not found (skipping): ${backup_path}"
-            skipped_count=$(( skipped_count + 1 ))
-            continue
-        fi
+        # A row's backup column holds one backup path, or several separated
+        # by commas when the fix backed up more than one file.
+        IFS=',' read -r -a row_backups <<< "${backup_list}"
+        for one_backup in "${row_backups[@]}"; do
+            backup_path="${one_backup#"${one_backup%%[![:space:]]*}"}"
+            # Skip entries that don't reference this timestamp's backup dir
+            if [[ "${backup_path}" != *"/backups/${ts}/"* ]] && \
+               [[ "${backup_path}" != *"/backups/${ts}" ]]; then
+                continue
+            fi
 
-        restore_pairs+=("${backup_path}" "${target}")
+            # Skip entries where backup_path doesn't exist (file may have been cleaned up)
+            if [[ ! -f "${backup_path}" ]]; then
+                _or_info "Backup file not found (skipping): ${backup_path}"
+                skipped_count=$(( skipped_count + 1 ))
+                continue
+            fi
+
+            restore_pairs+=("${backup_path}" "${target}")
+        done
     done < "${log_file}"
 
     # If no log entries found, still try to restore files directly from backup dir
@@ -501,7 +546,7 @@ _or_do_revert() {
         while IFS= read -r f; do
             [[ -z "${f}" ]] && continue
             backup_files_count=$(( backup_files_count + 1 ))
-        done < <(find "${backup_dir}" -maxdepth 1 -type f 2>/dev/null)
+        done < <(find "${backup_dir}" -type f 2>/dev/null)
 
         if (( backup_files_count == 0 )); then
             _or_info "Backup directory is empty: ${backup_dir}"
@@ -514,12 +559,14 @@ _or_do_revert() {
         return 2
     fi
 
-    # Process each (backup_path, target) pair
-    local i=0
-    while (( i < ${#restore_pairs[@]} )); do
+    # Process each (backup_path, target) pair, newest row first: undoing the
+    # firing's actions in reverse order leaves a file that two actions
+    # touched at the content its earliest backup holds.
+    local i=$(( ${#restore_pairs[@]} - 2 ))
+    while (( i >= 0 )); do
         local bp="${restore_pairs[$i]}"
         local tgt="${restore_pairs[$((i + 1))]}"
-        i=$(( i + 2 ))
+        i=$(( i - 2 ))
 
         # Determine the original file path
         local orig_path
@@ -661,7 +708,8 @@ main() {
                 kanban_root_override="${args[$i]}"
                 ;;
             --help|-h)
-                _or_usage
+                _or_usage_text
+                exit 0
                 ;;
             -*)
                 _or_err "Unknown option: ${arg}"

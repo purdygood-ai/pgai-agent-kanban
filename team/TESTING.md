@@ -2,7 +2,7 @@
 
 ## Why this file exists
 
-The v1.0.0 moat is autonomous reliability — the system must run unattended without an operator catching its mistakes. Tests are the only thing standing between an autonomous chain and a regression that ships. Six recurring failure modes shipped because tests passed against a *convenient* condition rather than the *real* breaking condition. This document names those six failure modes, fixes the convention for each, and points at the reusable helper that makes the correct-fidelity test the easy one to write. The conventions close the class. For test authoring anti-patterns that live alongside these (pattern-scan, environment-coupling, order-dependence, production-coupling, side-effect leakage) see the **Test Authoring Guidelines** section of `team/SOP.md` — do not duplicate it here.
+The v1.0.0 moat is autonomous reliability — the system must run unattended without an operator catching its mistakes. Tests are the only thing standing between an autonomous chain and a regression that ships. Six recurring failure modes shipped because tests passed against a *convenient* condition rather than the *real* breaking condition. This document names those six failure modes, fixes the convention for each, and points at the reusable helper that makes the correct-fidelity test the easy one to write. The conventions close the class. Test authoring policy itself lives in `docs/test-authoring-guidelines.md` — the anti-patterns that sit alongside these failure modes (pattern-scan, environment-coupling, order-dependence, production-coupling, side-effect leakage), and the contracts binding a test that reaches outside its own process (guarded external binaries, explicit subprocess cwd, subprocess output surfaced on failure, entry-point acceptance coverage, framework temp paths, order independence). Read the rules there; do not duplicate them here.
 
 ## The six failure modes
 
@@ -134,7 +134,7 @@ This applies to any project that has shared logic behind multiple callers. A pro
 - **The shared unit owns the invariants; assert them at the shared unit.** A refusal guard, a terminal-state check, an atomic write, an input-validation rule — if the shared logic enforces it, every adapter inherits it and none may bypass it. A new caller (a button, an endpoint) must not be able to reach a state the existing caller refuses, so the test that proves the guard must sit at the shared unit, not at one caller.
 - **Build the test context against the same layout the callers run in** (e.g. the installed layout, not a dev-only tree — failure mode 2). A future adapter will run against the real layout, so the contract test should too.
 - **Cover multi-subject isolation where the shared logic iterates or isolates** (failure mode 3) — isolation guarantees are part of the contract every adapter exposes.
-- **Name by behavior, not by caller or provenance** (see SOP.md "Test Authoring Guidelines", Anti-pattern 6): `test_archive_record_refuses_active_record`, not `test_archive_cli_exit_2` and not `test_bug1234_fix`.
+- **Name by behavior, not by caller or provenance** (see `roles/TESTER.md` "Test Authoring Guidelines", Anti-pattern 6): `test_archive_record_refuses_active_record`, not `test_archive_cli_exit_2` and not `test_bug1234_fix`.
 
 ### Why this matters before the next caller exists
 
@@ -146,11 +146,41 @@ Every interface-layer test written now is a test the next adapter — a web laye
 | --- | --- | --- |
 | `build_installed_root(parent)` / `installed_root` fixture | `team/tests/fixtures/installed_root.py` | 2 (installed tree); supports 5 (fresh-install env case) |
 | `build_two_project_root(parent)` / `two_project_root` fixture | `team/tests/fixtures/two_project.py` | 3 (multi-project) |
+| `ArchiveSandbox(parent, ...)` / `build_acceptance_scenario(parent)` | `team/tests/fixtures/archive_sandbox.py` | 6 (live-install pollution) for archive tests: a sandbox root whose bugs, priorities, requirements, tasks, queue lines and training logs are written in the live on-disk shapes, plus `snapshot()` to prove a step changed nothing. Every archive test (plan, move, restore, archive-reading fallbacks) builds its before-state here and hands `sandbox.root` to the code under test explicitly |
 | `make_log_stub_fragment(log_file)` / `log_stub_fragment` fixture / `LogStubCapture` | `team/tests/fixtures/log_stub.py` | 4 (faithful primitive stub); supports 1 (inject inside real strict-mode bash) |
 | `monkeypatch` + `_block_live_kanban_writes` autouse fixture in `team/tests/conftest.py` | `team/tests/conftest.py` | 5 (env-var resolution); enforces in-harness sandbox for all six modes |
 | Temp-root discipline: `PGAI_AGENT_KANBAN_ROOT_PATH="$(mktemp -d)"` | operator practice (see role files) | 6 (live-install pollution) |
+| `require_binary(name, label=...)` / `require_docker_daemon(label=...)` / `BinaryGuard.teardown()` | `team/tests/fixtures/binary_guard.py` | host portability: an external binary or container daemon the host lacks |
+| `build_scrubbed_env(home_dir=..., extra_path_dirs=..., lang=..., extra_env=...)` | `team/tests/fixtures/scrubbed_subprocess_env.py` | environment-coupled fixtures (test-authoring-guidelines anti-pattern 2): any test that launches a subprocess and needs its environment decided by the tree, not by the invoking shell. Reach for it whenever the test asserts against what the subprocess produced — most of all when the assertion is a comparison against a committed golden, which is the pairing `lint_test_anti_patterns.py` flags as `AP7`. It builds `PATH`/`HOME`/`LANG` from an explicit set and layers case-specific values on top; it never merges `os.environ` |
+| `build_synthetic_kanban_root` / `scrubbed_wake_env` / `run_wake_entrypoint` / `make_foreign_cwd` | `team/tests/integration/wake_entrypoint_acceptance_harness.py` | 1, 5 and 6 at the acceptance layer: the real entry point, foreign cwd, rebuilt environment. `scrubbed_wake_env` is the wake-specific layer built on top of `build_scrubbed_env` above. |
+
+The rule each of those helpers exists to satisfy is in `docs/test-authoring-guidelines.md`, not here.
+
+The three subprocess-facing helpers divide cleanly, and picking the wrong one is the common mistake. `binary_guard` decides whether the subprocess can run at all on this host. `build_scrubbed_env` decides what that subprocess can *see* once it does — it is the general builder, and the one a new test reaches for. `scrubbed_wake_env` is not an alternative to it but a caller of it: the wake-entrypoint-specific layer that adds the stub-provider PATH entry and the synthetic kanban root the real entry point needs, so reach for it only when the subprocess under test is the wake entry point. `docs/inherited-environment-exposure-survey.md` records how widely the inherited-environment shape the builder replaces still appears across `team/tests/`, and why converting all of it is not the intended follow-up.
 
 Modes 1 and 6 have no dedicated Python fixture: mode 1 is solved by invoking the real bash script under its real strict mode (optionally with the `log_stub.py` fragment injected), and mode 6 is solved by always routing state-mutating scripts through a throwaway temp root or the test runners.
+
+## Which check answers "did agent behaviour change"
+
+`team/scripts/harness/helloworld-flow-check.sh`.
+
+**The question it answers.** Does the shipped `team/demos/helloworld-demo` flow — decompose, CODER, verify, ship — still produce the same outcomes it produced before this change?
+
+**How to run it.** One command from the repo root. No `projects.cfg` edit, no registered `pgai-helloworld` project, nothing read or written under the live install:
+
+```bash
+bash team/scripts/harness/helloworld-flow-check.sh --compare "$(mktemp -d)"
+```
+
+Exit 0 means the run matched the golden; exit 1 means it diverged and the printed diff names the outcome file; exit 2 is an invocation error or a flow that failed before any outcome existed. A bare invocation with no flags runs the same flow and prints a per-stage pass/fail summary without writing captures. Every run builds its own throwaway kanban root under `$PGAI_AGENT_KANBAN_TEMP_DIR`, so consecutive runs never collide and need no cleanup.
+
+**Where the golden lives.** `team/tests/fixtures/helloworld-flow/` — `decompose.txt`, `verify.txt`, `ship.txt`. `team/tests/integration/test_helloworld_flow_harness.py` runs the compare inside the integration suite, so a divergence fails the suite as well as the ad-hoc command.
+
+**What it covers, and what it does not.** It covers what the pipeline *produces*: the count, role, and slug of the tickets `pm_materialize.py` materializes; the verdict of the intake doc's own acceptance commands; the release tag `cm/release.sh` cuts. The CM legs are real production scripts, not simulations.
+
+It invokes no model. The harness performs the CODER and TESTER legs itself — writing the `hello.py` / `test_hello.py` content the intake doc already fixes, and running the intake's acceptance commands directly — rather than dispatching through a role prompt, because a live model on a suite path would be slow and non-deterministic. That bounds the claim. A green run says the engine still turns the crank the same way; it does not say a role file still tells its agent everything that agent needed. **A rewritten role file that quietly drops a procedure is not caught here.**
+
+**It is not `engine-behavior-baseline.sh`.** That harness is kept, not superseded, and answers a narrower question: did three operator-facing *render* surfaces — the dashboard queue render, wake-log line shapes, the CM ship-summary text — change byte-for-byte, captured from synthetic single-step fixtures. `helloworld-flow-check.sh` exercises none of those three surfaces, and `engine-behavior-baseline.sh` runs no end-to-end flow. Both scripts' headers state this resolution. If a successor ever captures the render surfaces too, retire `engine-behavior-baseline.sh` at that point rather than letting the overlap re-open.
 
 ## Verification
 

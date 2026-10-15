@@ -1,0 +1,92 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `ai_rc/v2.22.1` (worktree HEAD `37e8abc`, clean tree, no stashes)\nagainst `projects/pgai-agent-kanban/requirements/v2.22.1-bugfix-bundle-20260914.md` — a\ndiscovery-pipeline BUG bundle of thirteen items. Pre-flight merge verification passed: every\nDONE task's feature branch was already deleted post-merge (the normal lifecycle), so no\nunmerged branch and no zero-commit anomaly exists. The RC carries 24 commits across 32 files\n(+2606 / -292), all of them agent feature-branch merges in prerequisite order.\n\nEach bundled bug's own `## Acceptance` block was used as the checklist. Guard logic was\nexercised against the failure mode it prevents rather than read: the census rollup mismatch\ndetector was fed two seeded-wrong documents and a clean one; `pseudocron.py --help` was run\nagainst a kanban root holding a sentinel-writing job to prove no scheduler loop starts;\n`dashboard/create.sh --help` was run 25 times bare and 25 times piped into `head -1`, and the\npre-fix `ai_main` copy was run for contrast (it produces zero output — the original SIGPIPE\nfailure reproduced); the order-check's `-p no:randomly` was verified load-bearing by running\nthe same collection with and without it; and the engine-baseline capture was run twice under\ntwo different ambient `MAX_TASK_SECONDS` values and byte-compared.\n\nBoth gated runners exited 0. Three defects were found and filed via Path C (autonomous\nfollow-up filing — non-blocking): a provenance regression introduced by this RC's own diff, one\nunmet acceptance clause on BUG-0263, and a misattributing diagnostic message in code this RC\nshipped. All three are small, isolated, and carry no runtime or integrity risk.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "This RC introduces 23 new provenance references while fixing 3",
+      "heading": "Finding 1: This RC introduces 23 new provenance references while fixing 3",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (comment-only; no runtime path, no chain or data state involved)\n**Regression:** yes (all 23 instances are added by this RC's own diff; the same files carried zero `BUG-NNNN` strings on `ai_main`)\n**Integrity Damage:** no\n**Filed As:** BUG-0274 (Path C-A — filed as BUG — code defect / regression / test failure)\n\nThree of this bundle's thirteen items (BUG-0260, BUG-0261, BUG-0267) exist to empty the hygiene\nlint's `provenance` class so that a clean tree is distinguishable from a dirty one at a glance.\nThose three named sites are genuinely fixed. But the RC's own new code adds 23 fresh provenance\ncitations, so the class went the wrong way:\n\n```\nai_main:        lint_hygiene: 5 finding(s)\nai_rc/v2.22.1:  lint_hygiene: 25 finding(s)\n```\n\nPer-file, comparing `ai_main` against the RC:\n\n```\nteam/scripts/lint_doc_command_truth.py:        ai_main=0  rc=1\nteam/scripts/lint_gate_census_compliance.py:   ai_main=0  rc=6\nteam/scripts/dashboard/create.sh:              ai_main=0  rc=1\nteam/scripts/run-unit-tests.sh:                ai_main=0  rc=1\n```\n\nplus 14 more across four test files added or extended by this RC. Every instance cites a bug ID\nfrom this RC's own bundle (`BUG-0264`, `BUG-0268`, `BUG-0272`, `BUG-0273`) inside a comment or\ndocstring — `docs/coding-standards.md` directive 8, and the same boundary CODER/WRITER's\npre-completion self-check names. The RC's commit messages already carry the bug IDs correctly\n(e.g. `4380927 Neutralize pytest-randomly in the order-coupling self-test (BUG-0263)`), which is\nwhere they belong. BUG-0274 lists all 23 sites as `<path>:<line>` references.\n\nThis is recorded as a Step-7 finding rather than only a lint line because it is a\ncoding-standards spot-check hit (Step 6.14) inside this RC's own new code, and because it\ndirectly defeats the outcome three of the bundle's own items were bought for.",
+      "filed_as": "BUG-0274",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (comment-only; no runtime path, no chain or data state involved)",
+        "regression": "yes (all 23 instances are added by this RC's own diff; the same files carried zero `BUG-NNNN` strings on `ai_main`)",
+        "filed_as": "BUG-0274 (Path C-A — filed as BUG — code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "`PGAI_TEST_ORDER=shuffle:<seed>` is still not reproducible with pytest-randomly installed",
+      "heading": "Finding 2: `PGAI_TEST_ORDER=shuffle:<seed>` is still not reproducible with pytest-randomly installed",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (an operator debugging seam; no gated runner and no suite verdict depends on it)\n**Regression:** no (the coupling predates this RC — `pytest_collection_modifyitems` is untouched by this diff; the RC fixed the harness's two passes and left the seam as it found it)\n**Integrity Damage:** no\n**Filed As:** BUG-0275 (Path C-A)\n\nBUG-0263's third acceptance clause reads: \"`PGAI_TEST_ORDER=shuffle:<seed>` produces the same\norder on two runs with the same seed, with `pytest-randomly` installed.\" The shipped fix adds\n`-p no:randomly` to `_voi_run()`'s two pytest invocations inside\n`team/scripts/verify-test-order-independence.sh`. That covers the harness and nothing else.\n`shuffle:<seed>` is an operator-facing seam in `team/tests/conftest.py`, documented there as the\nway \"a specific divergence can be reproduced by re-running with the same seed\"; no script in the\ntree invokes it, so a hand invocation carries no flag. Measured on this host (pytest-randomly\nimportable), in `team/`:\n\n```\n# no flag — NOT reproducible\n$ for r in 1 2; do PGAI_TEST_ORDER=shuffle:1234 python3 -m pytest \\\n    tests/unit/test_pseudocron.py --collect-only -q > order-$r.txt; done\n$ diff order-1.txt order-2.txt\nFiles order-1.txt and order-2.txt differ\n\n# with -p no:randomly — reproducible\n$ ... same loop with -p no:randomly ...\n$ diff order-1.txt order-2.txt      # no output\n```\n\nThe other three clauses of BUG-0263 are met and were verified directly (see Step 6.5). Nothing in\nthe tree tells a hand-invoking engineer the flag is required.",
+      "filed_as": "BUG-0275",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (an operator debugging seam; no gated runner and no suite verdict depends on it)",
+        "regression": "no (the coupling predates this RC — `pytest_collection_modifyitems` is untouched by this diff; the RC fixed the harness's two passes and left the seam as it found it)",
+        "filed_as": "BUG-0275 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "key-parity findings name the wrong registry file",
+      "heading": "Finding 3: key-parity findings name the wrong registry file",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (diagnostic text only; the lint's verdict, counts, and the runner's exit code are all correct)\n**Regression:** yes (the two-registry merge is introduced by this RC; `ai_main`'s copy of the lint reads one registry, so its single-file message was accurate there)\n**Integrity Damage:** no\n**Filed As:** BUG-0277 (Path C-A)\n\nThis RC teaches `lint_doc_command_truth.py`'s key-parity check to read two Key Registries —\n`config_loader.sh` for `kanban.cfg` keys and the newly added block in `project_paths.sh` for\n`project.cfg` keys — and merge them into one lookup table. The lint's own inline comment states\nthe design (\"That source is TWO registries, not one\"). The three finding formatters and the\ndual-channel summary still hardcode `config_loader.sh` as the declaring file\n(`lint_doc_command_truth.py:1182,1206,1218,1937`). Ten of the thirteen key-parity findings the\nlint currently reports name a key that lives in `project_paths.sh`:\n\n```\n$ python3 team/scripts/lint_doc_command_truth.py | grep -A1 'UNDOCUMENTED CONFIG KEY: .hooks.'\nUNDOCUMENTED CONFIG KEY: [hooks] cm_release_post_tag_hook\n  Cause: config_loader.sh's Key Registry declares [hooks] cm_release_post_tag_hook ...\n$ grep -c 'cm_release_post_tag_hook' team/scripts/lib/config_loader.sh\n0\n$ grep -c 'cm_release_post_tag_hook' team/scripts/lib/project_paths.sh\n1\n```\n\nAn operator following the \"To fix\" step is sent to a file that does not contain the key — the\nrunnable-remedy property the dual-channel contract exists to guarantee.",
+      "filed_as": "BUG-0277",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (diagnostic text only; the lint's verdict, counts, and the runner's exit code are all correct)",
+        "regression": "yes (the two-registry merge is introduced by this RC; `ai_main`'s copy of the lint reads one registry, so its single-file message was accurate there)",
+        "filed_as": "BUG-0277 (Path C-A)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

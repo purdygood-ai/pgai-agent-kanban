@@ -1,0 +1,72 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "This report verifies RC v2.26.10 (`ai_rc/v2.26.10` at `768abde216fa51cded01e93eff092554f09ef371`) against `requirements/v2.26.10-bugfix-bundle-20261001.md`. The bundle carries two bugs:\n\n- **BUG-0481:** provenance hygiene-lint findings in `team/scripts/verify-blocked-task-guard.sh`.\n- **BUG-0482:** the blocked-task guard verifier does not exercise the guard's Needs Human check.\n\nBoth are addressed and both of their explicit acceptance checklists are met. I verified this behaviorally, not just by reading the diff:\n\n- **Needs Human mutation:** in a throwaway clone, replacing the guard's Needs Human check with `True` now makes the verifier exit 1 naming `AC-3 (scanner)`. The same mutation against the pre-RC verifier exits 0, which reproduces the original bug.\n- **Unit test:** the new unit test fails against the pre-RC verifier and passes against the RC.\n- **Provenance lint:** reports 0 findings. The two suppressions are hash-bound, and a planted site is still caught.\n- **Syntax checks:** all 596 Python files parse and all 306 bash files pass `bash -n`.\n\nTwo findings keep this off PASS:\n\n1. **The other half of the guard is still untested (BUG-0483).** The verifier still does not exercise the State-BLOCKED half of the guard's predicate. Its new header comment claims both halves are exercised.\n2. **The integration runner exited 1 (BUG-0485).** It failed on one intermittent, pre-existing timing race in a lock test the RC does not touch. That test passes 5/5 in isolation on both the RC and `ai_main`.\n\nThe unit gated runner exited 0.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "the guard verifier still does not exercise the State-BLOCKED half of the guard predicate",
+      "heading": "Finding 1: the guard verifier still does not exercise the State-BLOCKED half of the guard predicate",
+      "level": 4,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the same class of guard-test fidelity gap has come up in consecutive RCs: BUG-0480, BUG-0482, this one)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0483-guard-verifier-misses-state-check (Path C-A, filed as BUG: code defect / regression / test failure)\n**Filed By:** TESTER (autonomous Path C) — the blocked-task guard verifier still passes when the guard stops checking that a task is BLOCKED, even though its header now says both halves of the guard's rule are tested.\n\nThe mutation: in an RC clone, `sed -i 's/state_m.group(2).strip().upper() == \"BLOCKED\"/True/' team/scripts/lib/wake_driver.sh`. Then the verifier in a sandbox root prints `driver scanner: blocked fixture count=1  blocked-no-human fixture count=0  resolved fixture count=0` and `RESULTS: 20 passed, 0 failed`, and exits **0**.\n\nThe three fixture states (BLOCKED/yes, BLOCKED/no, DONE/no) never include a non-BLOCKED task with Needs Human yes. So the State check is never the deciding factor.\n\nThis RC's new header comment says the runs are there \"so both halves of the guard's predicate (State BLOCKED and Needs Human yes) are exercised\". That is untrue for the State half. BUG-0482's `## Expected` asks that \"the verifier should exercise both halves\". BUG-0482's own `## Acceptance` checklist covers only the Needs Human half, and that checklist is fully met. So this finding is a partially met criterion plus an inaccurate claim in a deliverable. It does not mean the Needs Human fix failed. The shipped guard is correct, and nothing fails at runtime.\n\nSeverity: low (rubric: not exercised, nothing failing). This predates the RC as a coverage gap (`Regression: no`). The inaccurate claim is new text.",
+      "filed_as": "BUG-0483",
+      "filed_by": "TESTER (autonomous Path C) — the blocked-task guard verifier still passes when the guard stops checking that a task is BLOCKED, even though its header now says both halves of the guard's rule are tested.",
+      "severity": "low",
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the same class of guard-test fidelity gap has come up in consecutive RCs: BUG-0480, BUG-0482, this one)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0483-guard-verifier-misses-state-check (Path C-A, filed as BUG: code defect / regression / test failure)",
+        "filed_by": "TESTER (autonomous Path C) — the blocked-task guard verifier still passes when the guard stops checking that a task is BLOCKED, even though its header now says both halves of the guard's rule are tested.",
+        "severity": "low (rubric: not exercised, nothing failing). This predates the RC as a coverage gap (`Regression: no`). The inaccurate claim is new text."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "integration runner red on an intermittent lock-test timing race (pre-existing)",
+      "heading": "Finding 2: integration runner red on an intermittent lock-test timing race (pre-existing)",
+      "level": 4,
+      "body": "**Category:** bug (Step 5a category: pre-existing-bug)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (an intermittently red gated runner can push any future RC off PASS without a real defect)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0485-chain-lock-test-holder-race (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — an integration test for the wake chain's lost-lock stop fails intermittently because it assumes the second chain is still holding the lock at the exact moment the first chain checks, which is a timing race, not a product defect.\n\n- **The failure:** `FAILED tests/integration/test_chain_lock_reverification.py::test_reaped_chain_stops_before_dispatch_second_chain_reaches_the_task`, at `test_chain_lock_reverification.py:342`, `assert f\"holder={_AGENT}\" in chain_a_output`.\n- **What chain A printed:** `error:   lock.provenance.reverify_lost` with `... it is now held by (no provenance recorded). Stopping this chain`.\n- **What still passed:** every earlier assertion. Chain B finished A2, chain A exited 0, chain A never dispatched A2, and the `reverify_lost` narration is present. The safety behavior is correct. Only the holder name in the narration differs.\n- **Why \"(no provenance recorded)\":** `pgai_lock_describe_provenance` prints it whenever the lock path is empty or absent. That is the case if chain B has not acquired the lock yet (the test unlinks it) or has already released it (`pgai_lock_release` removes the file) when chain A reverifies, after its fixed 2s pause.\n- **Pre-existing:** the RC diff touches none of the test, `lock_provenance.sh`, or the wake chain. Run alone, the test passed 5/5 on the RC clone and 5/5 on the `ai_main` clone. Those direct pytest runs are diagnostic only, not PASS evidence. No open bug covered it; grepping `bugs/` turned up only BUG-0416, which is closed and unrelated.\n- **Severity:** medium (rubric: incorrect, with a workaround: re-run). Not high: nothing that worked in v2.26.9 stops working here.",
+      "filed_as": "BUG-0485",
+      "filed_by": "TESTER (autonomous Path C) — an integration test for the wake chain's lost-lock stop fails intermittently because it assumes the second chain is still holding the lock at the exact moment the first chain checks, which is a timing race, not a product defect.",
+      "severity": "medium",
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "the_failure": "`FAILED tests/integration/test_chain_lock_reverification.py::test_reaped_chain_stops_before_dispatch_second_chain_reaches_the_task`, at `test_chain_lock_reverification.py:342`, `assert f\"holder={_AGENT}\" in chain_a_output`.",
+        "what_chain_a_printed": "`error:   lock.provenance.reverify_lost` with `... it is now held by (no provenance recorded). Stopping this chain`.",
+        "what_still_passed": "every earlier assertion. Chain B finished A2, chain A exited 0, chain A never dispatched A2, and the `reverify_lost` narration is present. The safety behavior is correct. Only the holder name in the narration differs.",
+        "pre_existing": "the RC diff touches none of the test, `lock_provenance.sh`, or the wake chain. Run alone, the test passed 5/5 on the RC clone and 5/5 on the `ai_main` clone. Those direct pytest runs are diagnostic only, not PASS evidence. No open bug covered it; grepping `bugs/` turned up only BUG-0416, which is closed and unrelated."
+      },
+      "raw": {
+        "category": "bug (Step 5a category: pre-existing-bug)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (an intermittently red gated runner can push any future RC off PASS without a real defect)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0485-chain-lock-test-holder-race (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — an integration test for the wake chain's lost-lock stop fails intermittently because it assumes the second chain is still holding the lock at the exact moment the first chain checks, which is a timing race, not a product defect.",
+        "severity": "medium (rubric: incorrect, with a workaround: re-run). Not high: nothing that worked in v2.26.9 stops working here."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

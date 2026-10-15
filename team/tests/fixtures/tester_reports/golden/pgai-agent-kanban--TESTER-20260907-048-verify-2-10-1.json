@@ -1,0 +1,233 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "v2.10.1 is a three-item bug bundle: BUG-0174 (the TESTER and CM governance\nreading stacks were over their configured byte budgets, which made the unit\nsuite red), BUG-0175 (four documents disagreed about whether\n`release-state.md` carries a `## Last Released` field), and BUG-0177 (a gated\nrunner whose pytest phase failed never rewrote its quality-class findings\nfile, so a verifier could read a different worktree's results as if they\ndescribed the RC under test). All three are fixed, and each was verified\nbehaviorally rather than by reading the diff: the byte-budget lint now prints\n`under` for all seven roles and the composer fixture passes; the shipped\nStep 6.1 procedure run against this project's live `release-state.md`\nproduces no drift finding and no document in the tree still carries the old\nthree-field claim; and the findings-file fix was exercised by seeding a stale\nfile, forcing a failing pytest phase, and confirming the file was replaced --\nthen re-run against the pre-fix `ai_main` runners, where the same assertions\nfail, proving the new test has teeth. Both gated runners exit 0 (unit 3225\npassed / 3 skipped; integration 337 passed / 1 skipped), every bundle\nacceptance criterion holds, and no manual intervention shows anywhere in the\nbuild. Two defects were found outside the bundle's own scope, both created or\nwidened by this RC's work: the three documents this release relocated\ngovernance content into are never installed to a kanban root, so the role\nfiles' pointers to them dangle for any agent not working inside a checkout of\nthis repository; and the new regression test names the bug ticket that\nmotivated it throughout its docstrings, which the project's own test-authoring\nrule forbids without exception. Both are filed; neither prevents the release\nfrom being used.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0174 — every role's governance stack is now under budget",
+      "heading": "Finding 1: BUG-0174 — every role's governance stack is now under budget",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/lint_governance_byte_budgets.sh --kanban-cfg kanban.cfg_example`\nexits 0 and prints `under` for all seven roles, with no `OVER` row:\n\n```\nROLE             ASSEMBLED         BUDGET   VERDICT\npo                   55722          57344   under\npm                   65535          65536   under\ncoder                61013          61440   under\nwriter               60763          61440   under\ntester               92002          92160   under\ncm                   71531          71680   under\noverwatch            66546          66560   under\n```\n\n`team/roles/TESTER.md` is 50247 bytes (ticket target 50405 or less, was 70836);\n`team/roles/CM.md` is 29776 (target 29925 or less, was 40785). The two roles that\nwere `OVER` on `ai_rc/v2.10.0` are the two that moved. The bug's central\nacceptance criterion — `run-unit-tests.sh` exits 0 with\n`test_every_role_governance_assembly_stays_under_configured_budget` passing and\nno assertion weakened — holds: the unit runner exits 0 and\n`git diff ai_main..ai_rc/v2.10.1 -- team/tests/unit/test_composer_governance_byte_budget.py kanban.cfg_example`\nis empty, so neither the measurement nor the budget was touched.\n\nContent review of both trimmed role files confirms no procedure was lost.\n`team/roles/TESTER.md` still carries Steps 1 through 11 as its own headings,\nthe Step 9 report template, all three deep-verify line forms, the Path C\ndecision rule and filename shapes, and the state vocabulary.\n`team/roles/CM.md` still carries the ship-policy matrix in full, the five\noperations, the HALT authority section, the approval gate, release notes and\nhooks. Every relocated block is named by path from the role file at the point\nit used to sit (`docs/cm-release-reference.md` at nine sites in CM.md;\n`docs/tester-verification-reference.md` and `docs/test-authoring-guidelines.md`\nat nine sites in TESTER.md). See Finding 6 for the one way that\nnaming-by-path falls short.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0175 — one release-state.md schema, stated the same everywhere",
+      "heading": "Finding 2: BUG-0175 — one release-state.md schema, stated the same everywhere",
+      "level": 3,
+      "body": "**Category:** pass\n\nEvery document in the tree that enumerates the schema now names the same four\nfields (`## Active RC`, `## RC Opened At`, `## RC Opened By Task`,\n`## Last Released`): `team/SOP-core.md:215`, `team/roles/TESTER.md:162`,\n`team/roles/PM.md:21`, `team/roles/PO.md:35`, `team/roles/CM.md:54`,\n`docs/OPERATIONS.md:319`, and `team/pm-agent/VERIFICATION-METHODOLOGY.md:57`.\nThe bug named the first three; the fix reached two more (`PO.md` and\n`VERIFICATION-METHODOLOGY.md`) that carried the same wrong claim, which is the\nright scope for an acceptance criterion reading \"every document that states\nthe schema.\"\n\nThe bug's acceptance criteria, run:\n\n- ``grep -rn 'no `Last Released`' team/ docs/`` — no match (exit 1).\n- The canonical statement landed in `team/SOP-core.md`, the one file all seven\n  read-order manifests name, at net-zero bytes (25091 before and after) — so\n  the correction is reachable by TESTER and PM, which was the whole failure\n  mode, and no role's budget moved.\n- Walking the shipped Step 6.1 against this project's live `release-state.md`\n  produces no drift finding: `pp_last_released_version pgai-agent-kanban`\n  returns `v2.10.0`, `semver_gt v2.10.1 v2.10.0` succeeds, and the file's\n  `## Last Released` value `v2.10.0` is a well-formed `vX.Y.Z`. The old check,\n  whose passing condition was the field's absence, is gone.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0177 — the findings file now describes the run that wrote it",
+      "heading": "Finding 3: BUG-0177 — the findings file now describes the run that wrote it",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe fix registers the findings-file write as a `CLEANUP_ON_EXIT_PRE_HOOK` on\neach runner's own EXIT trap, set immediately after the last quality-class lint.\n`trap cleanup_on_exit EXIT` is installed at `run-unit-tests.sh:79` and\n`trap pytest_cleanup_on_exit EXIT` at `run-integration-tests.sh:110`, both\nbefore the hook is registered, so the hook genuinely fires on every exit path\nfrom that point forward. This was the bug report's own ranked-cheapest option.\n\nBehavioral verification (Step 6.5), not structural:\n\n1. **The new normal case.** `python3 -m pytest tests/unit/test_gated_runner_findings_on_failure.py`\n   against the RC tree — 4 passed. The failure-path test seeds a\n   `findings-*.json` bearing `generated_at: 2020-01-01T00:00:00+00:00`, forces\n   a deliberate pytest failure in a throwaway fixture repo running the real\n   runner script as a bash subprocess, and asserts the file was replaced, the\n   stale finding is gone, and the `findings file written:` narration line\n   printed.\n2. **The original failure mode.** I rebuilt the same fixture with `ai_main`'s\n   pre-fix `run-unit-tests.sh`, `run-integration-tests.sh` and\n   `script_common.sh` copied in, and re-ran the identical test file:\n   `2 failed, 2 passed` — both failure-path parametrisations fail with\n   `assert '2020-01-01T00:00:00+00:00' != '2020-01-01T00:00:00+00:00'`, i.e.\n   the seeded stale file survives untouched, exactly as BUG-0177 describes.\n   The success-path tests still pass there, confirming the test discriminates\n   the fix rather than the fixture.\n3. **In production shape.** My own two runs of this verification wrote current\n   findings files: `findings-unit.json` `generated_at 2026-09-07T18:11:19+00:00`\n   with four findings, `findings-integration.json` `2026-09-07T18:15:18+00:00`\n   with one, both naming this worktree's paths. Before the fix, the file on\n   disk at the start of this run was from 17:54 and belonged to another task.\n\nExit statuses are unchanged, which the tests assert directly (`returncode == 1`\non failure, `0` on success), and both runners still pass `bash -n`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "bundle acceptance criteria",
+      "heading": "Finding 4: bundle acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- *Each bundled item is addressed in the implementation* — Findings 1, 2 and 3.\n- *All Python files compile cleanly* — `python3 -m compileall -q .` exits 0\n  with no output.\n- *All bash files pass syntax check* — `bash -n` over all 237 `*.sh` files\n  outside `.git/`: 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "gated test suites",
+      "heading": "Finding 5: gated test suites",
+      "level": 3,
+      "body": "**Category:** pass\n\nAuthoritative exit codes, from the gated runners (not direct pytest):\n\n- `bash team/scripts/run-unit-tests.sh --coverage` — **UNIT_EXIT = 0**;\n  3225 passed, 3 skipped in 407.53s.\n- `bash team/scripts/run-integration-tests.sh --coverage` — **INTEGRATION_EXIT = 0**;\n  337 passed, 1 skipped in 216.17s.\n\nThe integration suite includes `test_cm_release_synthetic.py`, which is the\nStep 6.8 synthetic release simulation. That step's trigger condition fires\nhere — this RC modifies `team/scripts/lib/script_common.sh`, whose\n`cleanup_on_exit` is sourced by 20+ scripts including `ship-rc.sh` and\n`close.sh` — so the change to the shared trap is exercised against a fresh\nisolated temp repo, and passes. The new `CLEANUP_ON_EXIT_PRE_HOOK` is read as\n`${CLEANUP_ON_EXIT_PRE_HOOK:-}` and is never exported by either runner, so no\nsourcing script inherits a hook it did not set.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "relocated governance documents are not installed to a kanban root",
+      "heading": "Finding 6: relocated governance documents are not installed to a kanban root",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the relocation pattern will be reused, and nothing in the tree checks the property)\n**Regression:** yes (this RC moved required governance out of an installed file into a file the installer does not copy)\n**Integrity Damage:** no\n**Filed As:** BUG-0178 (Path C — autonomous follow-up filing, non-blocking)\n\nThis RC moved roughly 21 KB out of `team/roles/TESTER.md` and 11 KB out of\n`team/roles/CM.md` into `docs/tester-verification-reference.md`,\n`docs/test-authoring-guidelines.md` and `docs/cm-release-reference.md`. None of\nthe three is reachable from an installed kanban root. `install.sh:714` copies\nexactly `README.md DIRECTIVES.md OVERVIEW.md SOP-core.md roles scripts pm-agent\nworkflows pgai_agent_kanban halt_after templates demos config read-order` out\nof `team/`; `docs/` is a repo-root directory and `grep -n docs install.sh`\nreturns nothing. The live install confirms it: `ls -d\n$HOME/pgai_agent_kanban/docs` -> *No such file or directory*.\n\nThe consequence is that an agent reading the installed governance stack meets\n\"the full text is in `docs/tester-verification-reference.md`\" and cannot open\nthat path — unless it happens to be working inside a worktree of this\nrepository, which is true for the kanban self-build lane and false for every\nother registered project. The relocated material includes the full text of the\nAnti-Patterns list, which `team/roles/TESTER.md` itself declares a PROTECTED\nSURFACE, and the Path C bug and priority document shapes TESTER is required to\nreproduce.\n\n`WRITER-20260907-044`'s README consciously overrode BUG-0174's last acceptance\nbullet (\"anything removed from a role file lands in a document that some\nrole's read-order manifest names\") for a sound reason — no role has 10-20 KB of\nbudget headroom — and substituted \"a named pointer from the role file is what\nkeeps the content reachable.\" It is that substitute that does not hold, and it\nfails on the installer rather than on the manifest, a consideration the ticket\nnever had in view. Recorded as a `gap` because the bug's own acceptance\ncriterion is only partially met, not as a criticism of the decomposition's\nreasoning.\n\nThe class is pre-existing — `team/roles/TESTER.md` already cited\n`docs/coding-standards.md` and `team/roles/CM.md` already cited\n`docs/OPERATIONS.md`, `docs/operator-commands.md` and\n`docs/promotion-playbook.md`, all equally uninstalled — but this release is\nwhat raised the stakes from supplementary reading to relocated governance.\n`Regression: yes` reflects that widening.",
+      "filed_as": "BUG-0178",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the relocation pattern will be reused, and nothing in the tree checks the property)",
+        "regression": "yes (this RC moved required governance out of an installed file into a file the installer does not copy)",
+        "filed_as": "BUG-0178 (Path C — autonomous follow-up filing, non-blocking)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "the new regression test names the bug ticket that motivated it",
+      "heading": "Finding 7: the new regression test names the bug ticket that motivated it",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one test file's prose; no behavior depends on it)\n**Regression:** yes (the file was added by this RC, commit `1231aac`)\n**Integrity Damage:** no\n**Filed As:** BUG-0179 (Path C)\n\n`team/tests/unit/test_gated_runner_findings_on_failure.py` cites `BUG-0177` and\nthe authoring task's own process history at eight sites in its docstrings:\nlines 4, 10, 12, 18, 20, 198, 226 and 230 (`Regression guard for BUG-0177`,\n`THE BUG`, `Before this task's fix`, `See bugs/BUG-0177-...md`, `THE FIX`,\n`shape BUG-0177 describes`, `BUG-0177 regression guard`, `before this task's\nfix`). `docs/test-authoring-guidelines.md`, Anti-pattern 6, states the rule and\nits only exception in the same tree: *\"When acceptable: never — in names,\ndocstrings, OR comments... The single exception is a skip annotation citing an\nOPEN follow-up bug.\"* None of the eight is a skip annotation, and\n`team/roles/TESTER.md` Step 9 binds the same boundary.\n\nNothing catches it mechanically:\n`team/scripts/lint_comment_provenance.py` declares in its own Scope section\nthat it excludes test files, which is why the RC author's provenance cleanup\npass (commit `974fd11`) fixed the production comments the lint flags and left\nthis file untouched — they were working from the lint, and the lint is silent\nhere.\n\nBUG-0172 (`## Status: open`) records the first instance of this class in a\ndifferent file, but its acceptance criterion greps only\n`test_project_paths_bash.py`, so closing it will not clean this file. Filed\nseparately for that reason rather than cited as a duplicate.",
+      "filed_as": "BUG-0179",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one test file's prose; no behavior depends on it)",
+        "regression": "yes (the file was added by this RC, commit `1231aac`)",
+        "filed_as": "BUG-0179 (Path C)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "pre-flight, working tree, and state drift",
+      "heading": "Finding 8: pre-flight, working tree, and state drift",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Pre-flight merge verification** — every DONE task's feature branch is\n  already deleted (normal post-merge cleanup by CODER and WRITER), so Checks 1\n  and 2 are trivially satisfied; the scan reported no anomaly. The RC's history\n  shows all four feature merges as `--no-ff` merge commits (`b3cd3c1`,\n  `0289b2c`, `c0a5e29`, `0442094`), plus `CODER-20260907-046`'s deliberate\n  no-op (a verification-only closing ticket, the same shape as the\n  `CODER-20260907-037` precedent).\n- **Working tree** — `git rev-parse HEAD` equals `git rev-parse ai_rc/v2.10.1`;\n  `git status --short` empty before and after the verification;\n  `git stash list` empty.\n- **Step 6.1 drift** — `Active RC: v2.10.1` matches an existing\n  `ai_rc/v2.10.1` branch; `## Last Released` is a well-formed `v2.10.0`;\n  `v2.10.1 > v2.10.0` under `semver_gt`. No drift. The tree's `VERSION` file\n  reads `v2.10.0`, which is correct in flight — it is written by the release\n  step, one commit per shipped version (\"Add committed VERSION for v2.10.0\").\n- **Step 6.13 skip-cites-real-bug** — no placeholder skip IDs in\n  `team/tests/`; the only matches for the placeholder grep are inside archived\n  runner logs under `team/tests/artifacts/`, which are the gate's own recorded\n  output, not skips. No cited `BUG-NNNN` resolves to a missing file.\n- **Step 6.10 prereq graph** — acyclic and correctly bookended:\n  `CM-20260907-047-open-rc-2-10-1` (no prerequisites) -> the four work tickets ->\n  `CODER-20260907-046` -> `TESTER-20260907-048` -> `CM-20260907-050-release-2-10-1`,\n  whose prerequisites include this task. All referenced task IDs exist, and\n  sequence numbers 042-050 do not collide.\n- **Step 6.9 constraint negatives** — `set -euo pipefail` is preserved at\n  `run-unit-tests.sh:74` and `run-integration-tests.sh:90`; the `set -e` /\n  `set +e` pairs around pytest are unchanged from `ai_main` except in line\n  number. No secrets or banned patterns introduced.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "test fidelity of the RC's new test",
+      "heading": "Finding 9: test fidelity of the RC's new test",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`test_gated_runner_findings_on_failure.py` scores well against the fidelity\nchecklist: it drives the real runner as a bash subprocess (real strict-mode\nbash, checklist item 1), copies the runner and the whole `scripts/lib/`\nbyte-for-byte rather than reimplementing them, points\n`PGAI_AGENT_KANBAN_ROOT_PATH` at a fresh empty directory so nothing touches the\nlive install (item 6), and verifies both the failure path and the pre-existing\nsuccess path (Anti-pattern 6 in TESTER's own list). I confirmed its liveness\nindependently rather than trusting the claim — see Finding 3.\n\nThe caveat: every lint the runner shells out to is stubbed to `exit 0`, so the\ntest asserts the findings array is empty. That is the right scope for this\ntest, but it means no test covers the case the bug actually described — a\nfailing run that *has* real quality-class findings to record. The stubs make\nthe write mechanism observable and the content untested. Noted rather than\nfiled: the mechanism is what BUG-0177 was about, and\n`gated_runner_write_findings_file` has its own coverage elsewhere.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "autonomous operation criterion",
+      "heading": "Finding 10: autonomous operation criterion",
+      "level": 3,
+      "body": "**Category:** pass\n\nSee the Autonomous criterion section below. All four checks are NO.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

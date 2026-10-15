@@ -1,0 +1,335 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "`ai_rc/v2.23.12` was verified at commit `b722dd2` in a detached, clean worktree\nwhose HEAD matches the RC tip. The RC is a seven-item bug bundle. Both gated\nrunners exited 0 (unit 4697 passed / 31 skipped; integration 515 passed / 1\nskipped), both lint findings files are empty, the worktree is clean after each\nrun, and every changed Python and shell file compiles and parses. Five of the\nseven bundled items are demonstrably fixed, and four of those five were checked\nby triggering the failure they prevent rather than by reading the code: the\nwidened provenance pattern was proved against short-form, long-form, multi-\nsegment and overlong citation shapes; `create.sh --help` was proved to name\nevery flag and to survive the pipe-closed-early case that once produced a\nSIGPIPE exit; the new pane-refresh census lint was proved to fail on a seeded\nbare-command pane with its dual-channel contract intact. Three gaps are filed\nvia Path C (autonomous follow-up filing — non-blocking): one of the five\nprovenance citations the sweep was given still ships, the lint's scan surfaces\nomit an entire second test tree that holds 67 unseen citations, and the\nbundled item `BUG-0316` will be closed as done with its reported symptom still\nreproducing on the operator's dashboard. None of the three prevents the release\nfrom being used; all three are cheap to pick up in the next loop.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Provenance lint now catches the short-form task-ID citation (BUG-0312)",
+      "heading": "Finding 1: Provenance lint now catches the short-form task-ID citation (BUG-0312)",
+      "level": 3,
+      "body": "**Category:** pass\n\nBehavioral verification, not structural. A synthetic file carrying four\ncitation shapes was scanned with\n`python3 team/scripts/lint_hygiene.py --classes provenance --code-dirs <probe>`:\n\n- `CODER-009` (short form) — FLAGGED `[task-ID]`, with a runnable remedy.\n- `CODER-20260917-009` (long form) — still FLAGGED (no regression).\n- `CODER-001-002` (multi-segment fixture name) — correctly NOT flagged.\n- `CODER-123456` (overlong digit run) — correctly NOT flagged.\n\nThe widened pattern is `\\b(?:CODER|WRITER|TESTER|CM|PM|PO)-(?:\\d{8}-\\d+|\\d{1,4}(?!-\\d))\\b`;\nthe `(?!-\\d)` guard is the collision protection BUG-0312 asked for and it\ndemonstrably works.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Tree-wide provenance sweep is clean on the scanned surfaces (BUG-0310)",
+      "heading": "Finding 2: Tree-wide provenance sweep is clean on the scanned surfaces (BUG-0310)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_hygiene.py --classes provenance` from the RC\nworktree root: `OK — 0 findings across 8 scan director(y/ies)`. The two\n`BUG-0307` citations BUG-0310 recorded at `team/tests/unit/test_agent_metrics.py:442`\nand `:518` are gone (`grep -rn \"BUG-0307\" --include='*.py' team/` returns\nnothing), and four of BUG-0311's five `CODER-009` citations were reworded to\ndescribe behavior (diff on `team/tests/unit/test_agent_metrics.py`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "One of BUG-0311's five provenance citations still ships",
+      "heading": "Finding 3: One of BUG-0311's five provenance citations still ships",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (one comment line in one test file)\n**Filed As:** BUG-0319 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nBUG-0311 named five lines. Four were fixed on this RC. The fifth is\nuntouched and still ships at RC commit `b722dd2`:\n\n```\nteam/pgai_agent_kanban/api/tests/test_cli_rest_agent_metrics_parity.py:100\n    # Per-task wall data (ticket CODER-009's field): coder averages\n```\n\n`git diff --stat ai_main..ai_rc/v2.23.12` does not list that file at all.\nThe tree-wide lint reports zero findings because the file sits in the lint's\nblind spot (Finding 4), so the green lint run does not contradict this.",
+      "filed_as": "BUG-0319",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (one comment line in one test file)",
+        "filed_as": "BUG-0319 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "The hygiene lint's scan surfaces omit the API test tree",
+      "heading": "Finding 4: The hygiene lint's scan surfaces omit the API test tree",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** medium (widen the surface, then sweep what it surfaces)\n**Systemic Risk:** medium (the gate reports green over an unscanned real test tree)\n**Filed As:** BUG-0320 (Path C-A — filed as BUG)\n\n`team/pgai_agent_kanban/api/tests/` is scanned by neither surface: the code\nsurface excludes any path segment named `tests`\n(`_CODE_EXCLUDE_SEGMENTS = {\"tests\", \"test\", \"fixtures\", \"__pycache__\"}`) and\nthe test-tree surface defaults to `team/tests/` alone. Scanning that directory\nexplicitly:\n\n```\npython3 team/scripts/lint_hygiene.py --classes provenance \\\n    --code-dirs team/pgai_agent_kanban/api/tests --test-tree-dirs --prose-dirs --config-dirs\n→ lint_hygiene: 67 finding(s)\n```\n\nThis is why Finding 3's citation survived a sweep whose own acceptance was a\ngreen tree-wide run. Pre-existing (the exclusion predates this RC), but it is\nthe mechanism that let this RC's own sweep ticket report done with work\noutstanding.",
+      "filed_as": "BUG-0320",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "medium (widen the surface, then sweep what it surfaces)",
+        "systemic_risk": "medium (the gate reports green over an unscanned real test tree)",
+        "filed_as": "BUG-0320 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "create.sh --help now names every flag (BUG-0313)",
+      "heading": "Finding 5: create.sh --help now names every flag (BUG-0313)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/dashboard/create.sh --help` exits 0 and prints the full\n`Usage:`/`Flags:`/`Environment variables`/`Requirements` block. Both of the\nbug's own reproduction commands now invert:\n\n- `--help | grep -c -- \"--print-schedule-floors\"` → `2` (was `0`).\n- `--help | grep -c -- \"--no-tmux\"` → `2` (was `0`).\n\nThe compounding defect BUG-0313 flagged — the fixed 30-line header slice that\nhid every flag — was also fixed: the help branch now locates the literal\n`Usage:` marker instead of counting lines, so a later header edit cannot push\nthe block back out of reach.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "The changelog-freshness test no longer writes into the checkout (BUG-0314)",
+      "heading": "Finding 6: The changelog-freshness test no longer writes into the checkout (BUG-0314)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`regenerate()`, `_regenerate_to_temp()`, `_diff_is_rc_tolerable()` and\n`check_freshness()` all gained an optional `extra_notes_dir` /\n`extra_release_notes_dir` overlay argument, defaulting to `None` so production\nbehavior is unchanged. `test_rc_mode_tolerates_new_release_section_addition`\nnow writes its synthetic `v99.0.0.md` under `tmp_path / \"extra_release_notes\"`\nand passes that directory in. Every remaining `write_text`/`mkdir` call in the\nmodule targets `tmp_path`; no write reaches `_RELEASE_NOTES_DIR`. Because\nnothing is written into the tree, the deterministic half of the bug (a `kill -9`\nmid-test leaving `release-notes/v99.0.0.md` untracked, which would BLOCK the\nnext verification's Step 3 pre-flight) is structurally impossible rather than\nmerely tidied up.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Schedule panes are cadence-wrapped and a census lint enforces it (BUG-0315)",
+      "heading": "Finding 7: Schedule panes are cadence-wrapped and a census lint enforces it (BUG-0315)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe five `SCHED_TAIL_*_CMD` variables now route `cron-tail.sh` through\n`cadence-loop.sh --interval ${REFRESH_INTERVAL} --`, the same wrap every other\nrenderer column uses.\n\nThe new check `team/scripts/dashboard/lint_pane_refresh_cadence.py` was\nexercised against a seeded failure, not just the happy path. Against the real\n`create.sh`: `OK -- every pane is loop-wrapped or registered` (exit 0). Against\na copy with one schedule pane reverted to a bare `cron-tail.sh` invocation it\nexits 1 and emits the dual-channel contract:\n\n```\nerror:   dashboard.pane-refresh-cadence-violation\nmessage: 1 dashboard pane(s) are neither cadence-loop.sh-wrapped nor registered ... 'schedule.1'\nremedy:  wrap the pane's command through cadence-loop.sh ...\n```\n\nThe refusal site is registered in `docs/blocking-site-census.md` as\n`lint-pane-refresh-cadence-violation-01 CONVERT`, and\n`team/tests/unit/test_dashboard_pane_refresh_cadence.py` asserts the lint\npasses against the checked-in tree, so the check is wired into the gated unit\nsuite rather than left as an unrun script.\n\nNot verified: BUG-0315's first two acceptance lines (\"panes update across two\nwake firings without recreate\", \"capture-pane shows no prompt\") need a live\ntmux dashboard against the operator's running session. TESTER does not start\none. The static evidence (the wrap is present, the census lint fires on its\nabsence) is what could be verified here.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0316 is bundled into this RC but nothing in the RC addresses it",
+      "heading": "Finding 8: BUG-0316 is bundled into this RC but nothing in the RC addresses it",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1 CODER task, mostly verification)\n**Systemic Risk:** low (one dashboard column; self-healing by design)\n**Filed As:** BUG-0321 (Path C-A — filed as BUG)\n\n`CODER-20260917-020-agent-metrics-avg-wall` closed `WONT-DO`, so `v2.23.12`\ncontains no change for `BUG-0316`. The `WONT-DO` reasoning checks out and this\nfinding does not dispute it: `compute_agent_averages()` in\n`team/pgai_agent_kanban/lib/agent_metrics.py` does pool each agent's\n`wall.by_agent` `{seconds, task_count}` across the window and divide once\n(verified by reading the function), the CLI and REST readers share it, and the\nunit and parity tests for it pass.\n\nWhat is not addressed is the reported symptom. Against the live install the\ncolumn still renders `--` for every agent, because every RC rollup in the\n10-RC window was written before the aggregator emitted the field\n(`json.load(...).get(\"wall\")` is `None` for `v2.23.9`, `v2.23.10`, `v2.23.11`).\n`cm-release.sh` Step 16b will set `BUG-0316`'s `## Status` to `done` when this\nRC ships, closing a reported behavior that still reproduces, with no open item\nleft to prompt a re-check and no observation yet of the first wall-bearing\nrollup. That is what `BUG-0321` records.\n\nAgainst the requirements doc's first acceptance criterion — \"Each bundled item\nis addressed in the implementation\" — six of seven bundled items are addressed\nin the implementation and the seventh is addressed by investigation only.",
+      "filed_as": "BUG-0321",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1 CODER task, mostly verification)",
+        "systemic_risk": "low (one dashboard column; self-healing by design)",
+        "filed_as": "BUG-0321 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Release-state and version ordering are consistent",
+      "heading": "Finding 9: Release-state and version ordering are consistent",
+      "level": 3,
+      "body": "**Category:** pass\n\n`release-state.md` holds all four fields with well-formed values:\n`Active RC: v2.23.12`, `RC Opened At: 2026-09-17T23:20:48+00:00`,\n`RC Opened By Task: CM-20260917-022-open-rc-2-23-12`, `Last Released: v2.23.11`.\n`pp_last_released_version \"pgai-agent-kanban\"` returns `v2.23.11`, and\n`semver_gt \"v2.23.12\" \"v2.23.11\"` succeeds (shared helper from\n`team/scripts/lib/semver.sh`, never an inline compare). `ai_rc/v2.23.12` exists\nlocally and the file's mtime (`23:20:48`) matches its own `RC Opened At` value\nto the second, consistent with `open-rc.sh` being the last writer.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Requirements acceptance criteria 2 and 3",
+      "heading": "Finding 10: Requirements acceptance criteria 2 and 3",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"All Python files compile cleanly\" — `python3 -m py_compile` over every `.py`\n  file in `git diff --name-only ai_main..ai_rc/v2.23.12` exits 0. The tree-wide\n  equivalent runs inside both gated runners' breakage-class pre-flight, which\n  passed.\n- \"All bash files pass syntax check\" — `bash -n team/scripts/dashboard/create.sh`\n  (the only changed shell file) exits 0; the tree-wide `bash -n` sweep in the\n  runners' pre-flight passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Constraint negative checks",
+      "heading": "Finding 11: Constraint negative checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `set -euo pipefail` is still present at `team/scripts/dashboard/create.sh:145`,\n  which matters here because the `--help` branch was rewritten under it.\n- No credential-shaped literal appears in any changed file\n  (`grep -nEi \"(api[_-]?key|password|secret|token)\\s*=\\s*['\\\"][A-Za-z0-9_/+-]{12,}\"`\n  over the diff's file list returns nothing).\n- The new script answers `--help` and names its one argument\n  (`lint_pane_refresh_cadence.py [-h] [--create-sh PATH]`), and it imports\n  `emit_error_contract` from the shared lib rather than re-implementing the\n  dual-channel shape.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "The rewritten --help branch keeps its SIGPIPE behavior",
+      "heading": "Finding 12: The rewritten --help branch keeps its SIGPIPE behavior",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nA previous RC fixed a non-deterministic exit-141 in this exact branch, so the\noriginal failure mode was re-synthesized rather than assumed. `--help` alone\nexits 0 on five consecutive runs, and `--help | head -1` produces its line\ncleanly on five consecutive runs — the pipe-closed-early case that produced the\nSIGPIPE. The unknown-argument branch still prints its one-line usage to stderr,\nnow including `--print-schedule-floors`.\n\nCaveat: the new branch prints \"the two-line script description\" as the first two\nheader lines, and the first of those is the shebang with its `#` stripped, so\n`--help` output opens with the literal `!/usr/bin/env bash`. Cosmetic, and\ninherited from the previous implementation (which passed the same `grep '^#'`\noutput through), so it is not a regression — but the rewrite chose that slice\ndeliberately and could have skipped the shebang while it was there.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Prerequisite graph and RC bookends",
+      "heading": "Finding 13: Prerequisite graph and RC bookends",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo cycles; every referenced task ID resolves to an existing task folder. The\nlifecycle bookends are linked correctly: `CM-20260917-022-open-rc-2-23-12`\n(DONE) is a prerequisite of all five CODER tasks;\n`CODER-20260917-021-provenance-sweep` correctly depends on the three CODER\ntasks whose output it sweeps; this TESTER task depends on all five; and\n`CM-20260917-025-release-2-23-12` sits at `[W]` (WAITING) in `cm_backlog.md`,\nwaiting on this verification. Queue markers match task states in every case\n(`[x]` for the four DONE plus the one WONT-DO, `[A]` for this task).\nSequence numbers do not collide; `024` is unused, which is a gap in the\nsequence, not a collision.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Both gated suites exited 0",
+      "heading": "Finding 14: Both gated suites exited 0",
+      "level": 3,
+      "body": "**Category:** pass\n\nRun from the RC worktree root with `--coverage`, output teed under\n`$PGAI_AGENT_KANBAN_TEMP_DIR/tester/`:\n\n| Runner | Exit | Result |\n|---|---|---|\n| `bash team/scripts/run-unit-tests.sh --coverage` | `UNIT_EXIT=0` | 4697 passed, 31 skipped in 864.10s |\n| `bash team/scripts/run-integration-tests.sh --coverage` | `INTEGRATION_EXIT=0` | 515 passed, 1 skipped in 564.09s |\n\nThe PASS evidence here is the two runner exit codes, not a pytest summary line;\nboth runners ran their full lint pre-flight (breakage class and quality class)\nahead of pytest and neither aborted.\n\nTwo further checks ride on these runs:\n\n- **Step 6.8, synthetic release simulation.** The diff touches\n  `team/pgai_agent_kanban/cm/changelog_writer.py`, which `cm-release.sh` calls,\n  so the simulation was not skipped:\n  `tests/integration/test_cm_release_synthetic.py` — 17 tests, all passed,\n  inside the green integration run.\n- **`BUG-0314`'s own acceptance, behaviorally.** `git status --porcelain` in\n  the worktree is empty immediately after each full run. The intermittent\n  failure BUG-0314 described was a stray `v99.0.0` release-notes file visible\n  to other tests mid-run; neither suite produced a changelog-freshness failure\n  and neither left residue behind.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Coverage (informational only)",
+      "heading": "Finding 15: Coverage (informational only)",
+      "level": 3,
+      "body": "**Category:** pass\n\nRead from the `totals` object of each runner's JSON, with the field names\nchecked against the generated file rather than recalled:\n\n| Suite | Line (statement) | Branch | Blended (`Cover` column) |\n|---|---|---|---|\n| unit | 77 % (12652/16519) | 63 % (3137/4968) | 73 % |\n| integration | 10 % (1629/16510) | 8 % (396/4968) | 9 % |\n\nCoverage is recorded, not judged: it enters neither the recommendation nor the\nsystemic-risk rating.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

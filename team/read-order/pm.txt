@@ -1,0 +1,26 @@
+# team/read-order/pm.txt
+# Read-order manifest for the PM role.
+#
+# One path per line, relative to the kanban root as the RUNTIME layout
+# resolves it -- install.sh flattens team/ onto the kanban root, so a
+# line here reads "roles/PM.md", never "team/roles/PM.md". Blank lines
+# and lines starting with # are ignored. team/scripts/lib/read_order.sh
+# resolves this file into an ordered list of absolute paths that the
+# wake composer (_wd_build_governance_line in
+# team/scripts/lib/wake_governance_composer.sh) assembles into this role's
+# governance reading list.
+#
+# The shared law this role reads is SOP-core.md: the discovery
+# pipeline and its operating modes, workflow types, the bug queue and
+# bug-reporting flow, the decision tree, priority-queue mechanics, the
+# wake order, RC immutability, the model-override mechanism and the
+# autonomous lifecycle live in the role file below, and core carries
+# only what every role must read. The per-project README is
+# conditional at runtime (present only in multi-project mode) and
+# stays the composer's job to append, not a static manifest line.
+
+DIRECTIVES.md
+OVERVIEW.md
+SOP-core.md
+README.md
+roles/PM.md

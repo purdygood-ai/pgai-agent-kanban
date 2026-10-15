@@ -1,0 +1,158 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `rc/v0.7.0` of pgai-chomp-man against its requirements\ndoc (`requirements/v0.7.0-chompman-warp-tunnels.md`). The RC adds left<->right warp\ntunnels: an opening in the left and right maze walls on one row so a character\nmoving off one side reappears on the opposite side at the same row. The change is\ntightly scoped to three source files (`maze.py`, `player.py`, `dragons.py`) plus a\nnew test file (`tests/test_warp_tunnel.py`); no AI, speed, scoring, fruit, lives,\nsound, or unrelated-wall code was touched. The full project test suite passes\n(237 tests, exit 0), the game launches headless without error, and every\nchain-verifiable acceptance criterion (1-6) was independently confirmed against the\nshipped `DEFAULT_LAYOUT`, including the critical board-clear-integrity regression\ncheck (140 pellets, 0 orphaned). Criterion 7 is an operator play-test that the\nrequirements doc itself marks NOT chain-verifiable -- flagged for the operator, not a\ndefect. Zero bugs, gaps, or stale assertions found.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Criterion 1 -- game launches and runs without error",
+      "heading": "Finding 1: Criterion 1 -- game launches and runs without error",
+      "level": 3,
+      "body": "Category: pass\nTimed headless launch (`timeout 3 python3 pgai-chomp-man.py`, dummy SDL drivers) ran\nthe event loop for 3s and was killed by timeout (exit 124) with no traceback,\nexception, or error in output. Existing tests pass.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Criterion 2 -- maze opening at left AND right on the tunnel row",
+      "heading": "Finding 2: Criterion 2 -- maze opening at left AND right on the tunnel row",
+      "level": 3,
+      "body": "Category: pass\n`DEFAULT_LAYOUT` row 7 (of 15, the vertical middle) changed from `#.#.......#.....#.#`\nto `..#.......#.....#..`: col 0 and col 18 opened from WALL to OPEN. Independently\nconfirmed exactly one tunnel row (row 7), it is interior (0 < 7 < 14), and BOTH\nboundary columns are passable. Every other interior row still walls both boundary\ncolumns -- no other wall became passable.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Criterion 3 -- position wrap on the tunnel row",
+      "heading": "Finding 3: Criterion 3 -- position wrap on the tunnel row",
+      "level": 3,
+      "body": "Category: pass\n`Maze.wrap_target()` returns `(7, 18)` for an off-left step `(7, -1)` and `(7, 0)`\nfor an off-right step `(7, 19)` -- same row, on-grid. Returns `None` on every\nnon-tunnel row's off-edge step and when the column is already in range or the row is\nout of bounds. The tunnel row is derived from the grid itself (both boundary columns\nopen), not a separately tracked index -- consistent with the maze's single-source-of-\ntruth convention.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Criterion 4 -- wrap applies to BOTH player and enemies",
+      "heading": "Finding 4: Criterion 4 -- wrap applies to BOTH player and enemies",
+      "level": 3,
+      "body": "Category: pass\n`player.ChompMan.move()` and `dragons.open_directions()`/`Dragon.step()` all call the\nsame `maze.wrap_target()` boundary-wrap code path. Independently confirmed: a player\nand a dragon both wrap from `(7, 0)` off the left edge to `(7, 18)`. `open_directions`\ncorrectly treats a tunnel-mouth off-edge step as open and a non-tunnel-row off-edge\nstep as blocked; `Dragon.step` resolves the wrapped target so a dragon never lands\noff-grid (200-tick fuzz test + shipped-layout test both green).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Criterion 5 -- board-clear still achievable (CRITICAL regression)",
+      "heading": "Finding 5: Criterion 5 -- board-clear still achievable (CRITICAL regression)",
+      "level": 3,
+      "body": "Category: pass\nBFS reachability over the shipped `DEFAULT_LAYOUT` from the player start cell (walls\nblock, tunnel wraps connect): 140 pellets placed, 0 unreachable. The two\ntunnel-mouth edge cells hold ordinary collectible pellets after `place_pellets()`.\nThe tunnel change adds connectivity only -- it cannot orphan a pellet or soft-lock the\nwin condition. A dedicated regression test asserts this in the suite.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Criterion 6 -- py_compile and game test suite",
+      "heading": "Finding 6: Criterion 6 -- py_compile and game test suite",
+      "level": 3,
+      "body": "Category: pass\n`py_compile` on all changed files succeeds; full suite 237/237 pass.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Scope discipline -- no forbidden changes",
+      "heading": "Finding 7: Scope discipline -- no forbidden changes",
+      "level": 3,
+      "body": "Category: pass\nDiff touches only `maze.py` (wrap_target + one layout row), `player.py` (move() wrap\nbranch), `dragons.py` (open_directions/step wrap branches), and the new test file.\n`choose_dragon_direction` (AI weighting), speed, scoring, fruit, lives, sound, and the\nentrypoint are unchanged. No unrelated wall opened. Matches the requirements doc's\nscope guard exactly.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

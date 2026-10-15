@@ -1,10 +1,10 @@
 """
 test_bundle_family.py
 ======================
-Unit tests for pgai_agent_kanban.cm.bundle_family — the v2.0.0 Goal 3
-("the retry counter") family-identity and attempt-number computation.
+Unit tests for pgai_agent_kanban.cm.bundle_family — the retry-counter
+family-identity and attempt-number computation.
 
-Coverage (mirrors the task's Acceptance Criteria):
+Coverage:
   - Same sorted cargo set rebundled under a new version increments the
     attempt count (N -> N+1) via a matching CANCELLED history record.
   - A different cargo set produces a different family_key and starts fresh
@@ -16,7 +16,7 @@ Coverage (mirrors the task's Acceptance Criteria):
   - family_key is order- and duplicate-independent (same SET -> same key).
 
 All tests use tmp_path; no live filesystem paths. Function names describe
-behaviour under test, never bug/task IDs (SOP.md "Test Authoring
+behaviour under test, never bug/task IDs (roles/TESTER.md "Test Authoring
 Guidelines", Anti-pattern 6).
 """
 

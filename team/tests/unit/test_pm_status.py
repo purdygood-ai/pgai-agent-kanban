@@ -13,7 +13,7 @@ Covers:
 All filesystem interactions use tmp_path.  No subprocess calls, no live
 kanban tree access, no bare /tmp paths.
 
-Test function names describe the behavior under test (SOP.md anti-pattern 6).
+Test function names describe the behavior under test (roles/TESTER.md anti-pattern 6).
 """
 
 from __future__ import annotations

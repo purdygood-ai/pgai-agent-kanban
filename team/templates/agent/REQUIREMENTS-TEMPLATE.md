@@ -200,7 +200,7 @@ auto
 
 <!--
 Optional. Use this section to request that specific tasks use a particular
-model instead of the subagent default.
+model instead of the provider CLI's built-in default.
 
 Recognized model values:
   opus              (alias for claude-opus-4-7)
@@ -219,7 +219,7 @@ Examples:
   - All documentation tasks should use sonnet
   - The integration test task should use claude-opus-4-7
 
-If this section is omitted or blank, all tasks use their subagent defaults.
+If this section is omitted or blank, all tasks use the provider CLI's built-in default.
 -->
 
 ## Deliverables
@@ -268,10 +268,10 @@ Tips:
 - **Default max is 15 tasks.** Override with `--max-tasks N` on the pm-agent command. Smaller projects (3-8 tasks) often produce better results than the maximum.
 - **Task IDs use agent-prefixed kebab-case.** Generated task IDs follow the pattern
   `<AGENT>-<YYYYMMDD>-<NNN>-<short-slug>`, for example:
-  - `CODER-20260501-001-add-login-endpoint`
-  - `WRITER-20260501-002-update-api-docs`
-  - `CM-20260501-003-open-rc`
-  - `TESTER-20260501-004-verify-rc`
+  - CODER example: `CODER-20260501-001-add-login-endpoint`
+  - WRITER example: `WRITER-20260501-002-update-api-docs`
+  - CM example: `CM-20260501-003-open-rc`
+  - TESTER example: `TESTER-20260501-004-verify-rc`
   The slug must be lowercase, hyphen-separated, and under 30 characters.
   Which LLM provider ran a task is recorded in the task's tokens.json and
   status.md, not in the ID.

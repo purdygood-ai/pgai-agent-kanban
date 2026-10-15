@@ -9,6 +9,12 @@
 # --include-secrets) secrets, but NEVER modifies, renames, or recreates any of
 # them. The only output is the archive written to --file (default path below).
 #
+# The archive is always created mode 0600 (owner read/write only), whatever
+# the caller's umask: with --include-secrets it carries the credentials the
+# 0600 secrets file holds, and the configuration it always carries is the
+# operator's alone too. An existing file at --file is replaced, not
+# rewritten in place, so it cannot keep a wider mode.
+#
 # Always-bundled files (when present):
 #   kanban.cfg
 #   projects.cfg
@@ -22,7 +28,7 @@
 #   when --include-secrets is used. The warning uses the words "credential"
 #   and "secret" and instructs secure transfer / no-commit.
 #
-# MANIFEST schema (forward-contract for v0.52.0 import-kanban-config):
+# MANIFEST schema (the contract import-kanban-config.sh reads):
 #   kanban_version: <string from VERSION file or "unknown">
 #   export_timestamp: <UTC ISO-8601>
 #   include_secrets: <true|false>
@@ -35,7 +41,7 @@
 #   export-kanban-config.sh [--file <path>] [--include-secrets] [--help]
 #
 # Options:
-#   --file <path>      Path for the output archive.
+#   --file <path>      Path for the output archive (created mode 0600).
 #                      Default: ./kanban-config-export-<UTCstamp>.tar.gz
 #                      where UTCstamp = YYYYMMDDTHHMMSSZ (script start time)
 #   --include-secrets  Include the secrets file in the archive (see warning above)
@@ -83,7 +89,7 @@ OPERATOR_VALID_FLAGS=(file help include-secrets h)
 # ---------------------------------------------------------------------------
 # Value-taking: script-specific (file)
 # Boolean: help, include-secrets.
-argparse_parse \
+operator_args_argparse \
     --value-flags "file" \
     -- "$@"
 
@@ -98,7 +104,7 @@ if argparse_has "help" || argparse_has "h"; then
     operator_args_render_help_for_flags "export-kanban-config.sh" \
         "Bundle the kanban root configuration into a portable .tar.gz archive." \
         OPERATOR_VALID_FLAGS \
-        "  (--file default: ./kanban-config-export-<UTCstamp>.tar.gz)" \
+        "  (--file default: ./kanban-config-export-<UTCstamp>.tar.gz; the archive is created mode 0600)" \
         "  --include-secrets  Include the secrets file in the archive (emits loud warning)"
     exit 0
 fi
@@ -242,7 +248,17 @@ for fname in "${INCLUDED_FILES[@]}"; do
     fi
 done
 
-tar czf "$OUT_FILE" -C "$STAGE_DIR" "${STAGED_NAMES[@]}"
+# Owner-only from the first byte: the archive is created under umask 077 in
+# a subshell (the caller's umask is untouched), after any existing file at
+# the path is removed so tar creates a new inode rather than truncating one
+# that may already be group- or world-readable. The chmod is a final
+# guarantee should the filesystem have applied a default ACL.
+(
+    umask 077
+    rm -f -- "$OUT_FILE"
+    tar czf "$OUT_FILE" -C "$STAGE_DIR" "${STAGED_NAMES[@]}"
+)
+chmod 600 -- "$OUT_FILE"
 
 # ---------------------------------------------------------------------------
 # Verify the archive was written

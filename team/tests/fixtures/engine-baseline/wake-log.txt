@@ -1,0 +1,19 @@
+config_loader: load_config: [release] deferred_bugs absent; applying documented default 'false'.
+config_loader: load_config: [release] deferred_bug_level absent; applying documented default 'low'.
+config_loader: load_config: [release] defer_piggyback absent; applying documented default 'true'.
+config_loader: load_config: [release] deep_verify absent; applying documented default 'weekly'.
+[<TIMESTAMP>] wake(tester): background-wait ceiling: derived BASH_MAX_TIMEOUT_MS=5430000 from MAX_TASK_SECONDS=5400s + KILL_GRACE_SECONDS=30s
+[<TIMESTAMP>] wake(tester): starting multi-project iteration (agent=tester)
+[<TIMESTAMP>] wake(tester): project harness-fixture: beginning chain (project 1)
+[harness] create_detached_worktree stub: using temp path <TMPPATH> for task TESTER-20260101-001-sample-verification-task (ref=main)
+[<TIMESTAMP>] wake(tester): harness: starting task TESTER-20260101-001-sample-verification-task (subagent=tester role=TESTER)
+[harness] provider_invoke_agent: simulating DONE for task TESTER-20260101-001-sample-verification-task (subagent=tester)
+[harness] provider_invoke_agent: wrote State=DONE to <TMPPATH>/wake-root/projects/harness-fixture/tasks/TESTER-20260101-001-sample-verification-task/status.md
+[harness] provider_invoke_agent: planted report artifact at <TMPPATH>/wake-root/projects/harness-fixture/tasks/TESTER-20260101-001-sample-verification-task/artifacts/report.md
+[<TIMESTAMP>] wake(tester): harness: task TESTER-20260101-001-sample-verification-task final_state=DONE
+[harness] teardown_task_worktree stub: removed <TMPPATH>
+[<TIMESTAMP>] wake(tester): re-checking WAITING tasks for satisfied prerequisites...
+[<TIMESTAMP>] wake(tester): no WAITING tasks to re-check
+[<TIMESTAMP>] wake(tester): project harness-fixture: harness run complete (1 task(s) processed)
+[<TIMESTAMP>] wake(tester): done: iterated 1 project(s), total elapsed=<DURATION>
+[<TIMESTAMP>] wake(tester): timing: work_begin=<EPOCH> work_end=<EPOCH> work_delta=<DURATION>

@@ -1,10 +1,13 @@
 # subagents/MANIFEST.txt
 #
-# The list of subagent role files that pgai-agent-kanban installs into
-# ~/.claude/agents/ (or $CLAUDE_CONFIG_DIR/agents/).
+# The list of subagent role files that pgai-agent-kanban installs into each
+# provider's agents directory: $CLAUDE_CONFIG_DIR/agents/ for Claude Code
+# (~/.claude/agents/ when CLAUDE_CONFIG_DIR is unset) and ~/.codex/agents/ for
+# Codex.
 #
-# install.sh reads this file at install time and copies each named agent from
-# subagents/<name>.md to the agents directory.
+# install.sh and upgrade.sh read this file and, when run with
+# --add-claude-agents or --add-codex-agents, copy each named agent from
+# subagents/<name>.md to that provider's agents directory.
 #
 # install.sh also tracks which agents it has previously installed via a state
 # file at $KANBAN_ROOT/.installed-subagents. On subsequent installs, any agent
@@ -17,6 +20,10 @@
 #
 # To remove a subagent: delete the line below. The next install will detect
 # the removal and clean up the file from the agents directory.
+#
+# Model selection belongs to kanban.cfg [models.<provider>] and task-level
+# overrides, never to a wrapper: no file listed here may carry a frontmatter
+# model key.
 
 po
 pm
@@ -24,3 +31,4 @@ coder
 writer
 tester
 cm
+overwatch

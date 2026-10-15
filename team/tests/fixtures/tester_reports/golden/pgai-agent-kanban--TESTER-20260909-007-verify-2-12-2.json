@@ -1,0 +1,212 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `ai_rc/v2.12.2` (commit `ea86cc9`) against\n`requirements/v2.12.2-bugfix-bundle-20260909.md` — a nine-item BUG bundle\n(BUG-0202 through BUG-0210) implemented by four tickets: CODER-002\n(dual-channel probe skip), WRITER-003 (PM ride-along rule), CODER-004\n(HALT-scope lint narrowing + branch-prefix routing), CODER-005 (shipped-text\nhygiene). Verification ran in the isolated detached-HEAD worktree at\n/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260909-007-verify-2-12-2,\nwhose HEAD matches `ai_rc/v2.12.2` exactly; the worktree was clean before and\nafter every check and no stashes were present.\n\nBoth gated runners exit 0. Every fix was verified behaviorally, not\nstructurally: the dual-channel probe skip was exercised with all four probe\nspellings plus a mixed file carrying a genuinely malformed emitter call; the\nHALT-scope narrowing was exercised with three project-scoped negative shapes\nand seven fleet-scoped positives spanning all five declaration keywords; the\nbranch-prefix routing was exercised through the `_is_rc_branch` matrix and the\nnew synthetic `foo_rc/*` stale-worktree fixture; the hygiene work was verified\nby running its acceptance greps and `intake.sh --help` directly. All nine\nbundled items are accounted for — six by a landed fix, three (BUG-0207,\nBUG-0209, BUG-0210) by verified absence of their subject from this release\nbase, which is what PM scoped them to.\n\nTwo defects were found outside the bundle's own acceptance criteria and are\nfiled via Path C-A (filed as BUG — code defect / regression / test failure).\nNeither prevents the release from working: one is a fallback-path divergence\nvisible only on an install with no readable `project.cfg`, the other a\npre-existing comment-hygiene class that this RC neither introduced nor was\nasked to clear.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0206 — dual-channel lint no longer reads an availability probe as an emitter call",
+      "heading": "Finding 1: BUG-0206 — dual-channel lint no longer reads an availability probe as an emitter call",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/scripts/lint_dual_channel_pair.py` gained `_PROBE_TAIL_PATTERNS` and\n`_is_availability_probe_operand()`, applied in `_scan_bash_file` against the\nline text preceding the identifier match. Verified behaviorally:\n\n- Probe-only fixture containing all four supported spellings (`command -v X`,\n  `type -t X`, `type X`, `declare -F X`) produced `OK — 1 file(s) checked,\n  0 offenders`, exit 0.\n- The pre-change scanner (`git show ai_main:...`) flags all four of those lines,\n  proving the fixture exercises the defect rather than passing vacuously.\n- Mixed fixture (probe + a real call missing `remedy` + a well-formed call)\n  produced exactly one finding, at the malformed call's line 6, not at the\n  probe's line 2. The check was narrowed correctly, not disabled.\n- Whole tree: `OK — 209 file(s) checked, 0 offenders`.\n- The originally failing test,\n  `tests/unit/test_lint_dual_channel_pair.py::test_real_tree_produces_zero_findings`,\n  passes; the file gained 106 lines of regression coverage.\n\nNote on context: the site that originally tripped the lint\n(`config_loader.sh:153`) belonged to the cancelled v2.13.0 RC and does not exist\non this base. The fix is therefore forward-looking rather than symptom-clearing,\nwhich is the right shape — the guarded self-source idiom will recur.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0204 — HALT-scope lint stops flagging correct project-scoped writes",
+      "heading": "Finding 2: BUG-0204 — HALT-scope lint stops flagging correct project-scoped writes",
+      "level": 3,
+      "body": "**Category:** pass\n\n`_KANBAN_ROOT_HALT_GAP = r'[^A-Za-z0-9/]*'` replaces the unrestricted `.*` in\nall three bash patterns. Verified behaviorally against synthetic trees driven\nwith `--team-dir`:\n\n- Negative fixture with all three write shapes of\n  `${KANBAN_ROOT}/projects/${name}/HALT` (assignment+touch, literal touch,\n  literal redirect) inside non-`global`-named functions produced\n  `OK (no unnamed fleet-scope HALT writers found)`, exit 0. This is the exact\n  fixture BUG-0204 reported as a false positive.\n- Positive fixture with seven fleet-scope writes covering all five declaration\n  keywords (local, declare, readonly, export, typeset) and the quoting variants\n  the `.*` was originally written to tolerate (`\"${KANBAN_ROOT}\"/HALT`,\n  `${KANBAN_ROOT:?}/HALT`) produced `FAIL — 7 violation(s)`; all seven are still\n  reported.\n- Shipped tree: exit 0.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0203 — RC-branch detection routed through the configured branch_prefix",
+      "heading": "Finding 3: BUG-0203 — RC-branch detection routed through the configured branch_prefix",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nFour sites changed. Verified:\n\n- `lint_changelog_freshness._is_rc_branch` matrix: ('foo_rc/v1.0.0','foo_')\n  True, ('rc/v1.0.0','foo_') True, ('feature/x','foo_') False,\n  ('ai_rc/v2.12.2','ai_') True, ('rc/v1.0.0','') True. The bare `rc/`\n  alternative is kept everywhere, as the constraint required.\n- `_resolve_branch_prefix()` against the live install returns 'ai_', matching\n  `project.cfg`.\n- `check-stale-worktrees.sh` threads a resolved prefix into\n  `_csw_worktree_has_extra_commits`; the new TEST 9 in\n  `team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh`\n  configures `branch_prefix = foo_`, merges the feature branch into\n  `foo_rc/v1.0.0`, and asserts the worktree is pruned rather than bug-filed.\n  Full script: PASS 20, FAIL 0.\n- Both gated runners set `PGAI_LINT_CHANGELOG_MODE=rc` correctly on this\n  configured install (`changelog_freshness: OK` in both pre-flights).\n\nCaveat: the shell half of this fix diverges from the Python half on the\nunconfigured-install fallback. Filed separately as Finding 6 / BUG-0211 — the\nhappy path verified here is correct.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0205 + BUG-0202 — placeholder phrase and unfollowable pointers cleared from shipped text",
+      "heading": "Finding 4: BUG-0205 + BUG-0202 — placeholder phrase and unfollowable pointers cleared from shipped text",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `grep -rn 'an earlier defect' team/scripts/ team/pgai_agent_kanban/` returns\n  no matches (exit 1). 23 occurrences across 9 files were rewritten; every value\n  position now carries a value a reader could type (`BUG-NNNN-some-slug.md`,\n  `BUG-0042`, `PRIORITY-0007`, `malformed-intake-foo.md`) and every prose\n  position states the reasoning inline.\n- `bash team/scripts/intake.sh --help` Examples block reads\n  `intake.sh --project myproject $PGAI_AGENT_KANBAN_TEMP_DIR/BUG-NNNN-some-slug.md`\n  — no embedded spaces, no bare `/tmp` literal.\n- `grep -nEi 'this ticket|the task this|this task.s status|a separate ticket|the ticket that' team/scripts/*.py team/scripts/lib/*.sh install.sh`\n  returns no matches (exit 1).\n- `wake_lifecycle.sh:477`'s contentless four-item `Reference:` line is deleted;\n  `wake_task_transition.sh`'s \"as this ticket's function\" clause is gone.\n- `lint_comment_provenance` reports `OK — 0 findings across 547 file(s)` in the\n  gated pre-flight.\n- The declined lint half (BUG-0202's durable half) is explicitly permitted by\n  CODER-005's `## Notes` fallback (\"if you decline it, say so in your status\n  Summary with the hit count that decided it, and the fourth acceptance\n  criterion is then satisfied by recording that evidence instead\"), and the\n  CODER's status Summary carries the hit counts. Compliant.\n\n140 occurrences of the placeholder phrase remain under `team/tests/`, which is\noutside both the ticket's and BUG-0205's acceptance scope (both name\n`team/scripts/` and `team/pgai_agent_kanban/` only). Recorded as an observation,\nnot a shortfall.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0208 — PM.md ride-along consolidation rule",
+      "heading": "Finding 5: BUG-0208 — PM.md ride-along consolidation rule",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/roles/PM.md` gains \"Ride-alongs consolidate into at most two hygiene\ntickets\" inside PHASE 3. Read in full against WRITER-003's acceptance criteria:\n\n- The annotation contract is stated with its fixed wording, including the em\n  dash and the `hygiene ride-along (piggyback on <TRIGGER-ID>)` form, plus the\n  three disambiguations (a line ending at its closing parenthesis is headline\n  work; every ride-along in one bundle names the same trigger; PM never writes,\n  edits or removes the annotation).\n- K = 2 is stated as a ceiling on tickets, never on bugs, with the\n  twelve-ride-alongs-are-still-two-tickets example that forecloses the exact\n  misreading the constraint named, and PM is told not to raise it on its own\n  judgment.\n- Group-by-area, the fixed decomposition-note sentence, placement as the last\n  work tickets ahead of the closing bookends, the rationale (release cost scales\n  with agent wakes), and all three boundaries (anti-role split wins; hygiene\n  tickets count against the plan-wide cap; the cap governs ride-alongs alone)\n  are all present.\n- `bash team/scripts/lint_governance_byte_budgets.sh --kanban-cfg kanban.cfg_example`\n  prints `under` for all seven roles; pm assembles to 71704 against 73728. No\n  budget key was raised.\n- `git diff --name-only` for the WRITER commit names `team/roles/PM.md` alone.\n- BUG-0208's third acceptance criterion (\"no shipped document claims PM behavior\n  that PM's role file does not define\") holds: grep for `ride-along` and\n  `piggyback` across `team/` and `docs/` returns hits in PM.md only. The\n  over-claiming sentences BUG-0208 quoted (`discovery_state.sh:629`,\n  `SOP-core.md:285`) belonged to the cancelled v2.13.0 tree and are absent here.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Runner-side branch_prefix fallback drops RC mode where the Python side keeps it",
+      "heading": "Finding 6: Runner-side branch_prefix fallback drops RC mode where the Python side keeps it",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (a quality-class lint runs in the wrong mode on an unconfigured install; no runtime failure, no fatal exit)\n**Regression:** yes (before this RC the runners matched `^(rc/|ai_rc/)` unconditionally; they now match `^(rc/)` when the prefix cannot be read)\n**Integrity Damage:** no\n**Filed As:** BUG-0211 (Path C-A — filed as BUG: code defect / regression / test failure)\n\nThe two halves of the same fix disagree about what to assume when\n`projects/<name>/project.cfg` is unreadable or carries no `branch_prefix`:\n`lint_changelog_freshness._resolve_branch_prefix()` falls back to `\"ai_\"`;\n`run-unit-tests.sh` and `run-integration-tests.sh` fall back to `\"\"`, which\nassembles the pattern `^(rc/)` and no longer matches `ai_rc/v2.12.2`.\n\nVerified by running the runner's own block against a throwaway root with no\nproject.cfg: NO-MATCH for `ai_rc/v2.12.2`, while the Python half under the same\nroot returns 'ai_'. The consequence is that the CHANGELOG freshness gate runs\nstrict where it used to run RC-tolerant, producing a false quality-class\nstaleness finding. The lint is quality-class, so nothing becomes fatal.\n\nSame site, secondary point: the runner reads\n`${TEAM_ROOT}/projects/pgai-agent-kanban/project.cfg` — a hardcoded project name\nreplacing a hardcoded branch prefix, so the site is still not general.\n\nThis is invisible on the operator's own install, which carries\n`branch_prefix = ai_`; both runners entered RC mode correctly during this\nverification.",
+      "filed_as": "BUG-0211",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (a quality-class lint runs in the wrong mode on an unconfigured install; no runtime failure, no fatal exit)",
+        "regression": "yes (before this RC the runners matched `^(rc/|ai_rc/)` unconditionally; they now match `^(rc/)` when the prefix cannot be read)",
+        "filed_as": "BUG-0211 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Twenty-two shipped source files point the reader at a requirements/ directory that does not ship",
+      "heading": "Finding 7: Twenty-two shipped source files point the reader at a requirements/ directory that does not ship",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** medium (3-5 CODER tasks — 22 sites plus the lint half and its unit cases)\n**Systemic Risk:** low (comment hygiene; no behavior is affected)\n**Regression:** no (identical count on ai_main; `git diff ai_main..ai_rc/v2.12.2 | grep '^+' | grep -c 'requirements/v[0-9]'` returns 0 — this RC added none)\n**Integrity Damage:** no\n**Filed As:** BUG-0212 (Path C-A)\n\n`docs/coding-standards.md` directive 8 forbids citing requirement versions or\ninternal framework versions in shipped code. `ls requirements` fails in the\nshipped tree, yet 22 files under `team/scripts/` and `team/pgai_agent_kanban/`\ncarry header comments reading `see requirements/v2.9.20-engine-decomposition.md`\nor similar. This is precisely BUG-0202's stated class — \"a shipped shell library\nstill explains one of its design choices by telling the reader to go look at the\ninternal work ticket behind it, a document nobody holding the release can open\"\n— surviving the fix pass, because the pass was scoped to a narrower grep.\n\nThe sharpest instance is `team/scripts/lib/wake_task_transition.sh:6`: this RC\nrewrote the very sentence it sits in and left `v2.9.20-engine-decomposition`\nstanding in the clause immediately above the words it cleared.\n\n`lint_comment_provenance.py` reports 0 findings on this tree because it matches\nidentifier shapes, not paths, so nothing mechanical will catch the class or stop\nit recurring in the next file that copies the header.\n\n`docs/audits/vX.Y.Z-*.md` citations are explicitly excluded from this finding —\n`docs/audits/` does ship, so those pointers are followable.",
+      "filed_as": "BUG-0212",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "medium (3-5 CODER tasks — 22 sites plus the lint half and its unit cases)",
+        "systemic_risk": "low (comment hygiene; no behavior is affected)",
+        "regression": "no (identical count on ai_main; `git diff ai_main..ai_rc/v2.12.2 | grep '^+' | grep -c 'requirements/v[0-9]'` returns 0 — this RC added none)",
+        "filed_as": "BUG-0212 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "BUG-0207, BUG-0209 and BUG-0210 close on verified absence, not on a fix",
+      "heading": "Finding 8: BUG-0207, BUG-0209 and BUG-0210 close on verified absence, not on a fix",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nAll three describe defects in code that belonged to the cancelled v2.13.0 RC and\ndoes not exist on this release base. PM scoped them to verification rather than\nchange, and the evidence is recorded:\n\n- BUG-0207 — `grep -n 'CODER-20260908-04' team/tests/integration/test_operator_commands.py`\n  returns nothing (exit 1); `lint_comment_provenance` reports 0 findings across\n  547 files in the gated pre-flight. Confirmed absent.\n- BUG-0209 — `grep -n 'nothing reads them for behavior yet' kanban.cfg_example\n  project.cfg_example team/scripts/lib/config_loader.sh` returns nothing\n  (exit 1). Confirmed absent.\n- BUG-0210 — `team/scripts/lib/defer_low_bugs.sh` does not exist in this tree.\n  Confirmed absent.\n\nCaveat for CM: `cm-release.sh` Step 16b will promote all nine bundled items,\nincluding these three, to `## Status: done` on ship. For BUG-0207 and BUG-0209\nthat is honest — the defect provably does not exist in what ships. BUG-0210 is\nthe one worth noting: its subject (`defer_low_bugs.sh`) is not merely fixed but\nabsent, and the v2.13.0 requirements document PM pointed at as the place that\nwork will return has been renamed to\n`v2.13.0-posture-config-deferral-and-piggyback.SUPERSEDED-on-cancel-2026-09-09T00:37:04+00:00.md`,\na shape discovery's strict regex does not match. If the deferral-posture feature\nis ever rebuilt, BUG-0210's defect can return with no open ticket tracking it.\nNothing in the shipped tree is wrong; this is a tracking observation, not a\ndefect in the RC, and it is recorded here rather than filed so it is not\ndouble-counted against the recommendation.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Structural, syntax and constraint checks",
+      "heading": "Finding 9: Structural, syntax and constraint checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `python3 -m compileall -q team/` exits 0. Requirements AC \"All Python files\n  compile cleanly\": met.\n- `bash -n` over every tracked `*.sh` (232 files): 0 failures. Requirements AC\n  \"All bash files pass syntax check\": met.\n- All 13 changed Python files individually py_compile clean; all 9 changed shell\n  files individually `bash -n` clean.\n- Skip-cites-real-bug gate (Step 6.13): no placeholder skip IDs in `team/tests/`\n  outside archived coverage logs; every cited BUG-NNNN resolves to a real file.\n  The gated pre-flight agrees: `lint_skip_bug_gate: OK`.\n- Release-state drift (Step 6.1): `pp_last_released_version` returns `v2.12.1`;\n  `semver_gt v2.12.2 v2.12.1` is true; `## Last Released` in `release-state.md`\n  is the well-formed `v2.12.1`; `## Active RC` is `v2.12.2` and the branch\n  `ai_rc/v2.12.2` exists.\n- Pre-flight merge verification: passed. Every DONE task's feature branch is\n  either merged into the RC or already deleted post-merge (normal lifecycle);\n  no live `ai_feature/*` branches remain and no zero-commits-ahead anomaly.\n- Prereq dependency graph (Step 6.10): acyclic, every referenced task ID exists,\n  bookends correct (CM-006 open-rc is a prerequisite of all four work tickets;\n  TESTER-007 depends on all four; CM-009 release depends on all five). The\n  numeric gap at 008 and the bookend numbered above its dependents match the\n  established convention in every prior cycle (v2.12.0, v2.12.1) — not drift.\n- ICD: `lint_icd_freshness` ok, `lint_icd_compat` ok against all four supported\n  baselines. The RC's edit to `docs/api/baselines/icd-v1.3.0.json` is required\n  by the shipped byte-identity tests at\n  `team/tests/unit/test_lint_icd_compat.py:188` and\n  `team/tests/unit/test_review_cmds.py:603`; compat also passes against the\n  pre-RC baselines, so nothing was weakened.\n- Worktree clean and stash-free before and after all checks; the operator's live\n  install and the dev tree were left untouched (`git status --short` empty in\n  both).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

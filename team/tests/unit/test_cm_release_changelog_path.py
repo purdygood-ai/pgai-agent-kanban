@@ -1,14 +1,15 @@
 """
 test_cm_release_changelog_path.py
 ==================================
-Regression gate: cm-release.sh CHANGELOG-update path uses the canonical
-pp_run_ops helper to invoke pgai_agent_kanban.cm.changelog_writer, and
-the output of that invocation is byte-identical to a direct changelog_writer
-call on the same fixture.
+Regression gate: cm-release.sh's CHANGELOG-update path (Step 11b, extracted
+into team/scripts/lib/cm/release_notes.sh by the v2.9.20-engine-decomposition)
+uses the canonical pp_run_ops helper to invoke
+pgai_agent_kanban.cm.changelog_writer, and the output of that invocation is
+byte-identical to a direct changelog_writer call on the same fixture.
 
 Acceptance criteria addressed:
-  1. Structural: cm-release.sh Step 11b invokes the writer via the pp_run_ops
-     shared helper — fails immediately if the script is reverted to the legacy
+  1. Structural: Step 11b invokes the writer via the pp_run_ops shared
+     helper — fails immediately if the script is reverted to the legacy
      heredoc approach or a bare python3 -m form.
   2. Behavioral: two independent subprocess invocations of the module on the same
      hermetic fixture produce byte-identical output.
@@ -48,7 +49,9 @@ _THIS_FILE = pathlib.Path(__file__).resolve()
 # three levels up: unit/ → tests/ → team/
 _TEAM_DIR = _THIS_FILE.parent.parent.parent       # team/
 _DEV_TREE_ROOT = _TEAM_DIR.parent                  # project root
-_CM_RELEASE_SCRIPT = _TEAM_DIR / "scripts" / "cm" / "release.sh"
+# Step 11b was extracted from cm/release.sh into this lib stage file by the
+# v2.9.20-engine-decomposition; this constant follows the move.
+_CM_RELEASE_SCRIPT = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_notes.sh"
 
 # The Python package lives under team/, so PYTHONPATH must point there.
 _PYTHONPATH_ROOT = str(_TEAM_DIR)

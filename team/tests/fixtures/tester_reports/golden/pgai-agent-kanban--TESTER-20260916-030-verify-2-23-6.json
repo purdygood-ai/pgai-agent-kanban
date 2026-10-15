@@ -1,0 +1,350 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified release candidate `ai_rc/v2.23.6` of `pgai-agent-kanban` at commit\n`92f5dfa` against `requirements/v2.23.6-bugfix-bundle-20260916.md`, a four-item\nBUG bundle (BUG-0299 recaptured golden, BUG-0300 wake-flag scrub in the CM-script\ntest env helper, BUG-0301 stale-literal advisory blind to recorded-output\nfixtures, BUG-0302 provenance citation in an assertion message plus the lint\nnarrowing behind it). Work was done in the detached read-only worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260916-030-verify-2-23-6`.\nBoth gated runners exited 0. All four bundled items are implemented and were\nverified behaviourally, not structurally: each fix was exercised against the\nfailure mode it was filed for, and three of the four were additionally confirmed\nto be regression-guarded by reverting the production change and watching the\nsuite go red. The fourth — the BUG-0300 scrub — is present and correct but has\nno guard: removing it leaves the estate fully green on the default invocation\npath. That single gap is the only finding, filed as BUG-0303.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "the agent-wake scrub ships without a regression guard",
+      "heading": "Finding 1: the agent-wake scrub ships without a regression guard",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the inherit-then-delete environment pattern recurs in any fixture that drives a real subprocess, so the same blind spot can be reintroduced elsewhere)\n**Filed As:** BUG-0303-wake-flag-scrub-has-no-guard (Path C-A — filed as BUG: code defect / regression / test failure)\n\nThe BUG-0300 fix is one line —\n`scrub_agent_scoped_env(base_env)` at\n`team/tests/integration/test_cm_release_synthetic.py:277` — and nothing in the\nsuite asserts it happens. I proved the exposure rather than inferring it: in a\nthrowaway clone I deleted that line and re-ran the affected modules.\n\n```\n# fix reverted, no wake flag (ordinary developer / cron / CI path)\nenv -u PGAI_AGENT_WAKE_ACTIVE python3 -m pytest \\\n  \"tests/integration/test_ship_policy_acceptance.py::TestOperatorForceShipsOverriddenTrigger\" \\\n  tests/integration/test_cm_release_synthetic.py -q\n16 passed in 41.67s\n\n# fix reverted, wake flag present\nPGAI_AGENT_WAKE_ACTIVE=1 python3 -m pytest \\\n  \"tests/integration/test_ship_policy_acceptance.py::TestOperatorForceShipsOverriddenTrigger\" -q\n1 failed   (tests/integration/test_ship_policy_acceptance.py:866)\n```\n\nThe two runs differ only in an inherited environment variable, so whether the\nestate notices the fix disappearing is a property of the host, not of the tree —\nthe same coupling class the fix exists to remove, and the reason BUG-0300 stayed\ninvisible until an agent wake ran the suite. `AGENT_SCOPED_ENV_NAMES` carries the\nsame exposure: no test asserts its contents or that every name in it is removed.\n\nThis is a spot-check finding under Step 6.11 (\"untested new mechanisms\"), not an\nunmet acceptance criterion — BUG-0300 itself *is* addressed (Finding 3). Nothing\nis broken today; the risk is a silent regression resurfacing as an unexplained\nred line in a future RC verification.",
+      "filed_as": "BUG-0303",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the inherit-then-delete environment pattern recurs in any fixture that drives a real subprocess, so the same blind spot can be reintroduced elsewhere)",
+        "filed_as": "BUG-0303-wake-flag-scrub-has-no-guard (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0299 — engine-baseline board-render golden recaptured",
+      "heading": "Finding 2: BUG-0299 — engine-baseline board-render golden recaptured",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `team/tests/fixtures/engine-baseline/board-render.txt:2` now reads\n  `no fresh snapshot (missing or unreadable) -- rendering directly`, matching the\n  shipped narration at `team/scripts/dashboard/lib/snapshot.sh:285` byte for byte.\n- The diff against `ai_main` touches exactly one line of one golden; `wake-log.txt`\n  and `ship-summary.txt` come back byte-identical, as the bug required.\n- The recaptured line is the normal-volume missing/unreadable sentence, not the\n  `-debug` routine-expiry line — the bug's warm-cache failure mode did not occur.\n- `python3 -m pytest tests/integration/test_engine_behavior_baseline_harness.py -q`\n  → `4 passed`, including the two assertions named in the bug.\n- Guard confirmed: restoring the pre-release golden turns\n  `test_compare_against_goldens_is_clean_on_unmodified_tree` and\n  `test_compare_is_stable_across_invoking_shell_budget_values` red (`2 failed, 2 passed`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0300 — CM-script test env helper no longer inherits the wake signal",
+      "heading": "Finding 3: BUG-0300 — CM-script test env helper no longer inherits the wake signal",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe fix routes through the tree's existing shared scrubbed-environment helper\nrather than adding a one-off `pop`, as the bug asked:\n`team/tests/fixtures/scrubbed_subprocess_env.py` gains `scrub_agent_scoped_env`\nand `AGENT_SCOPED_ENV_NAMES` beside the pre-existing `build_scrubbed_env`, and\n`_run_cm_script` calls it on its inherited base *before* layering `extra_env`, so\na caller that wants the wake context still gets it explicitly.\n\nBehavioural verification, both directions (Step 6.5 — original failure mode and\nnew normal case, plus proof the guard was not merely disabled):\n\n| Case | Command | Result |\n|---|---|---|\n| Original failure mode | `PGAI_AGENT_WAKE_ACTIVE=1 pytest ...::TestOperatorForceShipsOverriddenTrigger` | 1 passed |\n| New normal case | `env -u PGAI_AGENT_WAKE_ACTIVE pytest ...::TestOperatorForceShipsOverriddenTrigger` | 1 passed |\n| Guard still enforced | `PGAI_AGENT_WAKE_ACTIVE=1 pytest ... -k force_from_agent_wake_context` | 1 passed (still refuses the ship) |\n\nThe whole gated integration suite also ran from inside this agent wake with\n`PGAI_AGENT_WAKE_ACTIVE=1` present and exited 0 — the invocation path that was\nred on the previous RC.\n\nThe absence of a regression guard for this fix is Finding 1.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0301 — stale-literal advisory now sees recorded-output fixtures",
+      "heading": "Finding 4: BUG-0301 — stale-literal advisory now sees recorded-output fixtures",
+      "level": 3,
+      "body": "**Category:** pass\n\n`literal_grep_recorded_output` is added to\n`team/scripts/lib/literal-extraction.sh` as a second, independent search surface\n(bare `grep -rn -F`, `--binary-files=without-match`), and\n`coder-stale-literal-check.sh` drives it over `fixtures/engine-baseline` and\n`fixtures/golden` under each test directory — selected by location, explicitly,\nnot by guessing at content. The assertion-context search is left untouched, as\nthe bug required.\n\nVerified against this release's own historical case, which is the strongest\navailable evidence. In a throwaway clone checked out at `origin/ai_main` — where\nthe production narration is already the new sentence and the golden still holds\nthe old one — I ran the advisory over the commit that changed the narration\n(`4398161^..4398161`), first with the pre-release scripts, then with only the two\nv2.23.6 scripts overlaid and nothing else changed:\n\n| Scripts | board-render hits |\n|---|---|\n| pre-release | 0 |\n| v2.23.6 | `team/tests/fixtures/engine-baseline/board-render.txt:2` naming the stale line |\n\nOther required properties confirmed: the check still exits 0 in both runs (it\nstays advisory, not a gate); a range touching no test-visible literal still\nprints the `(none …)` form; `--help` documents both search surfaces. Guard\nconfirmed: reverting the two scripts to their pre-release state turns the new\n`test_literal_extraction_bash.py` and\n`test_coder_stale_literal_check_recorded_output.py` red (`7 failed, 3 passed`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0302 — provenance citation removed and the lint narrowed",
+      "heading": "Finding 5: BUG-0302 — provenance citation removed and the lint narrowed",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/unit/test_dashboard_activation_hook_lifecycle.py:382` no longer\ncarries the internal identifier; the assertion's logic is untouched and the file\nnow holds no `BUG-NNNN` token at all. `python3 team/scripts/lint_hygiene.py\n--classes provenance` reports `OK — 0 findings` across all 8 scan directories.\n\nThe optional narrowing was taken, and the required sweep-first ordering was\nhonoured — `c335323` reworks assertion messages across 20 test modules in the\nsame commit as the lint change, touching no assertion's logic (spot-read the\nhunks in `test_discovery_pipeline.py`, `test_changelog_writer.py`,\n`test_ledger_filename_contract.py`: message prose only).\n\nBehavioural verification of the narrowing (Step 6.5), against a synthetic probe\nmodule covering each position the exemption must and must not still cover:\n\n| Probe | Position | Expected | Observed |\n|---|---|---|---|\n| `assert bug_id == \"BUG-0001\"` | assert condition (test data) | exempt | not flagged |\n| `fixture_name = \"BUG-0001-some-slug.md\"` | ordinary literal (test data) | exempt | not flagged |\n| `assert value == 1, \"... (BUG-0298 ADDENDUM) ...\"` | assert message | flagged | flagged (line 17) |\n| `pytest.fail(\"... (BUG-0298) ...\")` | fail argument | flagged | flagged (line 23) |\n| `assert sorted(items) == [\"a\",\"b\"], \"...\"` | comma nested in condition | no false positive | not flagged |\n\nThe lint still exits 0 with findings present, so it remains quality-class and\nnon-blocking. The skip-annotation exception is intact:\n`team/scripts/lint_skip_bug_gate.sh` reports `OK — all skip annotations are\ncompliant`, 0 missing files. Guard confirmed: reverting `lint_hygiene.py` turns\n`test_test_tree_surface_flags_bug_shaped_token_in_assert_message` and\n`..._in_pytest_fail` red (`2 failed, 55 passed`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "requirements acceptance criteria",
+      "heading": "Finding 6: requirements acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"Each bundled item is addressed in the implementation\" — met; Findings 2-5.\n- \"All Python files compile cleanly\" — `python3 -m py_compile` over all 487\n  tracked `.py` files: 0 failures.\n- \"All bash files pass syntax check\" — `bash -n` over all 280 tracked `.sh`\n  files: 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Step 2 pre-flight — the RC is intact",
+      "heading": "Finding 7: Step 2 pre-flight — the RC is intact",
+      "level": 3,
+      "body": "**Category:** pass\n\nEvery task folder under `projects/pgai-agent-kanban/tasks/` was scanned. Every\n`DONE` task naming a `## Feature Branch` other than `none` has had that branch\ndeleted locally — the normal post-merge shape — so Checks 1 and 2 pass trivially\nfor all of them, with no anomaly. The four prerequisite CODER tasks are all\n`## State: DONE` and all four merges are on the RC:\n\n```\n92f5dfa Merge ai_feature/CODER-20260916-028-provenance-sweep-test-tree\ne4694fc Merge ai_feature/CODER-20260916-027-literal-check-sees-goldens\n88e8ae1 Merge ai_feature/CODER-20260916-026-scrub-wake-flag-in-fixture\n7aea059 Merge ai_feature/CODER-20260916-025-recapture-baseline-golden\n```",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Step 3 working tree",
+      "heading": "Finding 8: Step 3 working tree",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` and `git rev-parse ai_rc/v2.23.6` are both\n`92f5dfa6bc4124663a48c6358a37a0022c534325`. `git status --porcelain` empty.\n`git stash list` empty.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Step 5a gated suites",
+      "heading": "Finding 9: Step 5a gated suites",
+      "level": 3,
+      "body": "**Category:** pass\n\nRun from the dev-tree root, output teed under `/tmp/pgai_kanban_tmp/tester/`.\n\n| Runner | Exit | Result |\n|---|---|---|\n| `bash team/scripts/run-unit-tests.sh --coverage` | `UNIT_EXIT=0` | 4640 passed, 31 skipped (842.44s) |\n| `bash team/scripts/run-integration-tests.sh --coverage` | `INTEGRATION_EXIT=0` | 513 passed, 1 skipped (621.70s) |\n\nLint pre-flight green on both; post-run `bare_tmp_cleanliness` and\n`listener_cleanliness` OK on both. These two exit codes are the PASS-precondition\nevidence; no pytest \"N passed\" line is cited as a suite verdict anywhere in this\nreport — the direct pytest runs above are targeted behavioural probes.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Step 5b coverage (informational only)",
+      "heading": "Finding 10: Step 5b coverage (informational only)",
+      "level": 3,
+      "body": "**Category:** pass\n\nSource: the `totals` object of `/tmp/pgai_kanban_tmp/coverage/unit.json` and\n`.../integration.json`; field names were read off the generated files rather than\nrecalled (`percent_statements_covered`, `percent_branches_covered`,\n`percent_covered`).\n\n| Suite | line (statement) % | branch % | blended % |\n|---|---|---|---|\n| unit | 76.55 | 62.99 | 73.42 |\n| integration | 9.88 | 8.00 | 9.45 |\n\nCoverage did not enter the verdict.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Step 6.1 release-state.md",
+      "heading": "Finding 11: Step 6.1 release-state.md",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll four fields present and well-formed — `## Active RC` `v2.23.6`,\n`## RC Opened At` `2026-09-16T13:55:12+00:00`, `## RC Opened By Task`\n`CM-20260916-029-open-rc-2-23-6`, `## Last Released` `v2.23.5`.\n`pp_last_released_version \"pgai-agent-kanban\"` returns `v2.23.5`, and\n`semver_gt \"v2.23.6\" \"v2.23.5\"` (the shared helper in\n`team/scripts/lib/semver.sh`, never an inline compare) returns true.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Step 6.8 synthetic release simulation",
+      "heading": "Finding 12: Step 6.8 synthetic release simulation",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe diff touches `team/tests/integration/test_cm_release_synthetic.py` — the\nshared driver for every CM script — so the simulation was run rather than\nskipped: `python3 -m pytest tests/integration/test_cm_release_synthetic.py -q`\n→ `15 passed in 36.80s`, against fresh isolated temp repos. No production\nrelease-lifecycle script (`cm/release.sh`, `cm/open-rc.sh`, `cm/cancel-rc.sh`,\n`lib/project_paths.sh`) changed in this RC. No real branch was touched.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Step 6.9 constraint negative checks",
+      "heading": "Finding 13: Step 6.9 constraint negative checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n`set -euo pipefail` still present in both modified shell files. No hardcoded\ncredential shape in any added line. The only bug-shaped tokens in added lines are\nusage examples and constructed test data inside the new lint and\nliteral-extraction tests — the first sanctioned exception in `SOP-core.md`\n(\"Naming: describe behavior, not scaffolding or provenance\").",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Step 6.10 prerequisite dependency graph",
+      "heading": "Finding 14: Step 6.10 prerequisite dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CM-20260916-029-open-rc-2-23-6` (no prerequisites) → `CODER-…-025`, `-026`,\n`-027` (each on the CM-open) → `CODER-…-028` (on the CM-open plus the other\nthree) → `TESTER-20260916-030` (on all four CODERs) →\n`CM-20260916-032-release-2-23-6` (on all four CODERs plus this TESTER task). No\ncycles, every referenced task ID resolves to a real folder, sequence numbers are\nnon-colliding, and both lifecycle bookends are linked correctly. Queue markers\nmatch task state in every case (`[x]` for the five DONE tasks, `[A]` for this\none, `[W]` for the pending release).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Step 6.13 skip-cites-a-real-bug",
+      "heading": "Finding 15: Step 6.13 skip-cites-a-real-bug",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo `BUG-SKIP` placeholder anywhere under `team/tests/`. No skip annotation cites\na letter-suffixed `BUG-` shape. `bash team/scripts/lint_skip_bug_gate.sh` →\n`OK — all skip annotations are compliant`, `BUG-NNNN file-existence check: 0\nmissing files`. The residual grep hits are the gate's own fixture strings in\n`test_skip_bug_citation_scan.py` and historical run logs under\n`team/tests/artifacts/`, neither of which is a live skip annotation.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "Step 6.14 coding-standards spot-check",
+      "heading": "Finding 16: Step 6.14 coding-standards spot-check",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`coder-stale-literal-check.sh --help` and `lint_hygiene.py --help` both run and\nname every argument, and both had their help text updated in the same commit as\nthe behaviour change, satisfying the Documentation Discipline Rule. The\nrecorded-output directory list is a named array at the top of the caller rather\nthan a buried literal. The new `scrub_agent_scoped_env` extends the tree's\nexisting shared fixture module instead of duplicating a scrub list, which is what\nBUG-0300 asked for.\n\nThe caveat: `coder-stale-literal-check.sh` still prints its empty-result sentence\nas `(none — no test assertions match literals changed in this task's production\ndiff)` at three sites (lines 30, 259, 271, 314). After this RC the check also\nsearches recorded-output fixtures, which carry no assertions, so that sentence\nnow understates what ran — a CODER reading it could conclude goldens were not\ncovered, which is the exact false confidence BUG-0301 was filed about. No test\nasserts the string, and the behaviour itself is correct, so this is a wording\nshortfall rather than a defect: recorded here, not filed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

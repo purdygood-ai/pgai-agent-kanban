@@ -1,0 +1,86 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified RC v2.26.5 (`ai_rc/v2.26.5` at `6a005fca`) against `requirements/v2.26.5-bugfix-bundle-20260930.md`, which bundles 16 bugs (BUG-0454..0469) delivered by 7 tasks (CODER-014..018, WRITER-019, CODER-020). Every bundled item was checked against its own `## Acceptance`. For each guard or fix I reproduced the original failure on `ai_main` (or from the bug's own reproduction) and then the fixed behavior on the RC, all in sandboxes. Both gated runners exited 0 with zero lint findings. The code changes for all 16 items meet their acceptance. Two bundle acceptance bullets about back-filling historical ledger/changelog data (from BUG-0456/BUG-0465) cannot be met by what shipped. Both are filed, along with one pre-existing status-writer data-loss bug that a CODER ticket in this cycle surfaced for TESTER. None is severe, and none is a regression introduced by this RC.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Fixed-In back-fill for v2.26.1-v2.26.3 bugs cannot land",
+      "heading": "Finding 1: Fixed-In back-fill for v2.26.1-v2.26.3 bugs cannot land",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to 22 ledger records; the forward path is fixed)\n**Filed As:** BUG-0470 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — twenty-two bugs fixed in v2.26.1-v2.26.3 are recorded as fixed in v2.26.4, and the new back-fill script cannot correct them because it never overwrites a set value.\n\nBUG-0456's and BUG-0465's acceptance require the bugs closed by v2.26.1/2/3 to carry their `## Fixed In`. The v2.26.4 release (before this RC) ran the old, unscoped writeback successfully and stamped `v2.26.4` onto 29 done bugs. 22 of those belong to the v2.26.1-v2.26.3 bundles. The RC's `restamp-fixed-in.sh` refuses to overwrite a set value by design, so the three per-release back-fill commands CODER-015 recorded will skip every bug. CODER-015 recorded this conflict and asked TESTER to file it. Severity medium: incorrect metadata, with a hand-edit workaround under the bug template's cm-release-error clause. Regression: no (the data predates the RC).",
+      "filed_as": "BUG-0470",
+      "filed_by": "TESTER (autonomous Path C) — twenty-two bugs fixed in v2.26.1-v2.26.3 are recorded as fixed in v2.26.4, and the new back-fill script cannot correct them because it never overwrites a set value.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to 22 ledger records; the forward path is fixed)",
+        "filed_as": "BUG-0470 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — twenty-two bugs fixed in v2.26.1-v2.26.3 are recorded as fixed in v2.26.4, and the new back-fill script cannot correct them because it never overwrites a set value."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "CHANGELOG `### Fixed` is empty for every bug-bundle release",
+      "heading": "Finding 2: CHANGELOG `### Fixed` is empty for every bug-bundle release",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (recurs on every release, including v2.26.5)\n**Filed As:** BUG-0471 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the changelog's Fixed list has been empty since v2.24.18 because the release-notes generator only puts bugs with category bugfix under Bug Fixes, and no bundled bug uses that category.\n\nBUG-0465's last acceptance bullet says \"the next CHANGELOG regeneration lists them under `### Fixed`\". `changelog_writer` builds `### Fixed` from BUG ids under the release notes' `## Bug Fixes`. `release_notes.sh` `CATEGORY_SECTION` routes only `## Category: bugfix` there, and bundled bugs use subsystem categories (`release`, `api`, `wake`, `docs`, ...). Every version from v2.24.18 through v2.26.4 therefore reads `### Fixed: None`, and a `## Fixed In` back-fill cannot change that. Pre-existing (Regression: no). Severity medium: the published changelog is incomplete, with no runtime effect.",
+      "filed_as": "BUG-0471",
+      "filed_by": "TESTER (autonomous Path C) — the changelog's Fixed list has been empty since v2.24.18 because the release-notes generator only puts bugs with category bugfix under Bug Fixes, and no bundled bug uses that category.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (recurs on every release, including v2.26.5)",
+        "filed_as": "BUG-0471 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the changelog's Fixed list has been empty since v2.24.18 because the release-notes generator only puts bugs with category bugfix under Bug Fixes, and no bundled bug uses that category."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "set_state / set_block delete the next section when the target section is empty",
+      "heading": "Finding 3: set_state / set_block delete the next section when the target section is empty",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (state-file corruption class in the wake's own writer)\n**Filed As:** BUG-0472 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the bash status writers silently delete the next section of a task's status.md when the section they rewrite is empty.\n\nThis is a spot-check (6.11) next to BUG-0458's fix, and CODER-020 raised it for TESTER. Sandbox reproduction on both the RC and `ai_main`: `set_block f Summary 'new summary'` on a file with an empty `## Summary` removed `## Blockers`, and `set_state f WORKING` on an empty `## State` removed `## Summary`. Pre-existing (Regression: no). It violates SOP-core's \"preserves every section it was not asked to change\". Rated medium, not high: the path is latent because status.md sections are normally populated, so nothing is failing today.",
+      "filed_as": "BUG-0472",
+      "filed_by": "TESTER (autonomous Path C) — the bash status writers silently delete the next section of a task's status.md when the section they rewrite is empty.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (state-file corruption class in the wake's own writer)",
+        "filed_as": "BUG-0472 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the bash status writers silently delete the next section of a task's status.md when the section they rewrite is empty."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

@@ -2,7 +2,8 @@
 # team/scripts/lib/overwatch-checks/check-stale-worktrees.sh
 #
 # OVERWATCH Tier-1 detection module: find git worktrees whose backing task
-# is in a terminal state AND older than an age threshold.
+# has finished AND that are older than an age threshold, and remove the ones
+# that hold nothing a removal would lose.
 #
 # Detection:
 #   - Run `git worktree list --porcelain` in the dev tree to enumerate all
@@ -11,20 +12,37 @@
 #     (or is under the framework's worktree temp directory), look up the
 #     corresponding task status.md.
 #   - A worktree is "stale" when BOTH conditions are true:
-#     1. The task is in a terminal state: DONE, WONT-DO, or BLOCKED.
+#     1. The task has finished: DONE or WONT-DO. Every other state keeps its
+#        worktree — a BLOCKED task's worktree holds the work a human was
+#        asked to look at, and a task requeued to BACKLOG will be resumed.
 #     2. The worktree directory's mtime is older than OVERWATCH_STALE_WORKTREE_THRESHOLD_DAYS
 #        (default: 7 days).
 #
-# Auto-fix path (no extra commits, prune-class only):
-#   - Call `git worktree remove --force <path>` (or `git worktree prune` after
-#     removing the directory) to clean up the worktree metadata.
-#   - Log the action via overwatch_log_action.
-#   - This is the ONLY auto-fix; no branch deletion.
-#
 # Bug-file path (branch-carrying worktree):
-#   - If the worktree branch has commits not reachable from any other ref
-#     (it "carries commits"), write a bug report and log it.
+#   - If the worktree branch has commits no integration branch holds — main
+#     and <branch_prefix>main, rc/* and <branch_prefix>rc/*, with
+#     branch_prefix read from the project's project.cfg — write a bug report
+#     and log it.
 #   - Never auto-remove a branch-carrying worktree.
+#
+# Report path (worktree holding changes):
+#   - The finished-worktree assessment block triage's residue rules use
+#     (pgai_agent_kanban.overwatch.worktree_residue assess-finished) keeps any
+#     worktree holding uncommitted or untracked changes, a locked one, or one
+#     reaching commits no other ref holds. It is reported — dual-channel on
+#     stderr and a "worktree-kept:<why>" action-log row — never removed.
+#
+# Auto-fix path (removal), only for a worktree the assessment calls removable:
+#   - Runs inside overwatch_halt_first_fix, so it holds the project's repo
+#     lock and is deferred (sentinel 5, nothing changed) while a HALT is
+#     present.
+#   - Under the lock it re-reads the task's state; a task that is no longer
+#     DONE or WONT-DO (requeued since the scan) keeps its worktree.
+#   - worktree_residue remove-finished re-checks the worktree, then runs
+#     `git worktree remove <path>` (never --force) and `git worktree prune`.
+#     No branch or commit is deleted.
+#   - Logs "auto-fix:worktree-pruned" naming the removed entry (its HEAD and
+#     branch).
 #
 # Module contract:
 #   - Sourceable without side effects.
@@ -43,6 +61,9 @@
 #
 # Usage (standalone):
 #   bash check-stale-worktrees.sh [--dry-run]
+#
+#   --dry-run  scan, report and narrate what would be removed or bug-filed;
+#              nothing is removed, filed or locked.
 #
 # Exit codes:
 #   0 — completed (anomalies found and handled, or none found)
@@ -103,6 +124,18 @@ _csw_resolve_env() {
         _CSW_DEV_TREE="${PGAI_DEV_TREE_PATH}"
     fi
 
+    # Resolve this project's configured branch_prefix from the same config
+    # file (the same [project] branch_prefix source pp_prefix_branch
+    # resolves), so integration-branch detection recognizes <prefix>rc/*
+    # for a project configured with any prefix, not just the literal "ai_"
+    # this repo happens to ship with. Empty when unconfigured (no prefix).
+    _CSW_BRANCH_PREFIX=""
+    if [[ -n "${_cfg_file}" ]]; then
+        _CSW_BRANCH_PREFIX="$(grep -E '^[[:space:]]*branch_prefix[[:space:]]*=' "${_cfg_file}" \
+            | head -n1 \
+            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+    fi
+
     # Tasks root for this project.
     _CSW_TASKS_ROOT="${_proj_root}/tasks"
 
@@ -115,25 +148,40 @@ _csw_resolve_env() {
 
 # ---------------------------------------------------------------------------
 # _csw_load_protocol
-# Ensure overwatch_log_action and overwatch_backup_file are available.
-# Returns 0 on success, 1 on failure.
+# Ensure the libraries this check calls are defined: overwatch_log_action and
+# overwatch_halt_first_fix (overwatch_protocol.sh), pgai_emit_error_contract
+# (error_contract.sh) and pp_run_ops (pp_run_ops.sh). A library is sourced
+# only when the caller has not already defined what it provides (a caller's
+# own copy, or a test stub, wins). Every path resolves from this file's own
+# directory. Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _csw_load_protocol() {
-    if declare -f overwatch_log_action >/dev/null 2>&1; then
-        return 0
-    fi
     local lib_dir
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)" || {
         echo "check-stale-worktrees: cannot resolve lib dir" >&2
         return 1
     }
-    local protocol_sh="${lib_dir}/../overwatch_protocol.sh"
-    if [[ ! -f "${protocol_sh}" ]]; then
-        echo "check-stale-worktrees: overwatch_protocol.sh not found at ${protocol_sh}" >&2
-        return 1
-    fi
-    # shellcheck source=/dev/null
-    source "${protocol_sh}"
+    local -a wanted=(
+        "overwatch_halt_first_fix:overwatch_protocol.sh"
+        "pgai_emit_error_contract:error_contract.sh"
+        "pp_run_ops:pp_run_ops.sh"
+    )
+    local entry fn file
+    for entry in "${wanted[@]}"; do
+        fn="${entry%%:*}"
+        file="${entry#*:}"
+        declare -F "${fn}" >/dev/null 2>&1 && continue
+        if [[ ! -f "${lib_dir}/${file}" ]]; then
+            echo "check-stale-worktrees: ${file} not found at ${lib_dir}/${file}" >&2
+            return 1
+        fi
+        # shellcheck source=/dev/null
+        source "${lib_dir}/${file}" || {
+            echo "check-stale-worktrees: cannot load ${lib_dir}/${file}" >&2
+            return 1
+        }
+    done
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -168,31 +216,29 @@ _csw_extract_task_id_from_path() {
 }
 
 # ---------------------------------------------------------------------------
-# _csw_task_is_terminal <tasks_root> <task_id>
-# Returns 0 (true) if the task's state is DONE, WONT-DO, or BLOCKED.
-# Returns 1 (false) otherwise (WORKING, BACKLOG, WAITING, or no status file).
+# _csw_task_state <tasks_root> <task_id>
+# Echo the task's ## State value, upper-cased with whitespace removed;
+# empty when there is no status.md or no State section. The heading may carry
+# trailing spaces and blank lines may sit between it and its value.
 # ---------------------------------------------------------------------------
-_csw_task_is_terminal() {
-    local tasks_root="$1"
-    local task_id="$2"
+_csw_task_state() {
+    local status_file="${1}/${2}/status.md"
+    [[ -f "${status_file}" ]] || return 0
+    awk '/^##[ \t]+State[ \t]*$/{found=1;next} found && /^##[ \t]/{exit} found && NF{print;exit}' \
+        "${status_file}" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]'
+}
 
-    local status_file="${tasks_root}/${task_id}/status.md"
-    if [[ ! -f "${status_file}" ]]; then
-        return 1
-    fi
-
-    # Extract the ## State field.
-    local state
-    state="$(awk '/^## State$/{found=1;next} found && /^## /{exit} found{print;exit}' \
-        "${status_file}" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
-
-    case "${state}" in
-        DONE|WONT-DO|BLOCKED)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
+# ---------------------------------------------------------------------------
+# _csw_task_is_finished <tasks_root> <task_id>
+# Returns 0 (true) if the task's state is DONE or WONT-DO, the two states in
+# which no one will come back to the task's worktree.
+# Returns 1 (false) otherwise — BLOCKED (a human was asked to look at the
+# work), WORKING, BACKLOG, WAITING, or no status file.
+# ---------------------------------------------------------------------------
+_csw_task_is_finished() {
+    case "$(_csw_task_state "$1" "$2")" in
+        DONE|WONT-DO) return 0 ;;
+        *) return 1 ;;
     esac
 }
 
@@ -226,7 +272,7 @@ _csw_worktree_age_seconds() {
 }
 
 # ---------------------------------------------------------------------------
-# _csw_worktree_has_extra_commits <dev_tree> <wt_path> <branch_ref>
+# _csw_worktree_has_extra_commits <dev_tree> <wt_path> <branch_ref> <branch_prefix>
 # Returns 0 (true) if the worktree branch has commits not reachable from
 # any branch other than itself (i.e., it "carries commits").
 # Returns 1 (false) if the worktree is safe to prune.
@@ -235,6 +281,7 @@ _csw_worktree_has_extra_commits() {
     local dev_tree="$1"
     local wt_path="$2"
     local branch_ref="$3"
+    local branch_prefix="${4:-}"
 
     if [[ -z "${dev_tree}" || ! -d "${dev_tree}" ]]; then
         # No dev tree — cannot determine; treat as safe to prune.
@@ -261,19 +308,23 @@ _csw_worktree_has_extra_commits() {
     local branch_name="${branch_ref#refs/heads/}"
 
     # Find commits on this branch not yet merged into any integration branch.
-    # Integration branches: main, ai_main, rc/*, ai_rc/*.
-    # If any integration branch contains all commits from this branch, return 1 (safe to prune).
+    # Integration branches are derived from this project's branch_prefix:
+    # <branch_prefix>main and <branch_prefix>rc/*, with the bare main and
+    # rc/* always tested alongside them, never in place of them, so an
+    # unprefixed project and a pre-prefix leftover branch both still match.
+    # If any integration branch contains all commits from this branch,
+    # return 1 (safe to prune).
     local integration_branches=()
     local _b
     while IFS= read -r _b; do
         _b="${_b#  }"    # strip leading spaces
-        _b="${_b#\* }"   # strip "* " current-branch marker
+        _b="${_b#[*+] }" # strip the "* " current-branch / "+ " other-worktree marker
         _b="${_b//[[:space:]]/}"
         [[ -z "${_b}" ]] && continue
-        case "${_b}" in
-            main|ai_main) integration_branches+=("${_b}") ;;
-            rc/*|ai_rc/*) integration_branches+=("${_b}") ;;
-        esac
+        if [[ "${_b}" == "main" || "${_b}" == "${branch_prefix}main" \
+            || "${_b}" == rc/* || "${_b}" == "${branch_prefix}rc/"* ]]; then
+            integration_branches+=("${_b}")
+        fi
     done < <(git -C "${dev_tree}" branch 2>/dev/null)
 
     if (( ${#integration_branches[@]} == 0 )); then
@@ -342,13 +393,64 @@ ${wt_path}
 ${reason}
 
 ## Description
-OVERWATCH detected a stale worktree whose backing task is in a terminal state
-but which carries local commits not reachable from any other branch. The worktree
+OVERWATCH detected a stale worktree whose backing task has finished (DONE or
+WONT-DO) but which carries local commits not reachable from any other branch. The worktree
 cannot be auto-pruned. Manual inspection is required to determine whether the
 commits should be merged, abandoned, or preserved.
 EOF
 
     echo "${bug_file}"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _csw_do_remove
+# The wrapped removal, run by overwatch_halt_first_fix (repo lock held, no
+# HALT present) for one worktree. Reads _CSW_FIX_TASK_ID, _CSW_FIX_WT_PATH,
+# _CSW_FIX_DEV_TREE, _CSW_FIX_TASKS_ROOT and _CSW_FIX_AGE from the
+# environment and sets _CSW_FIX_OUTCOME to "removed" or "kept".
+#
+# Re-reads the task's state first: a task that is no longer DONE or WONT-DO
+# (requeued between the scan and now) keeps its worktree. Then
+# worktree_residue remove-finished re-checks the worktree and removes it
+# with `git worktree remove` (never --force) and `git worktree prune`; when
+# that re-check finds work, it refuses dual-channel itself and the worktree
+# is kept.
+# Returns 0 when the worktree was removed or deliberately kept, 1 when the
+# removal failed partway (narrated on stderr).
+# ---------------------------------------------------------------------------
+_csw_do_remove() {
+    local task_id="${_CSW_FIX_TASK_ID}" wt_path="${_CSW_FIX_WT_PATH}"
+    local state
+    state="$(_csw_task_state "${_CSW_FIX_TASKS_ROOT}" "${task_id}")"
+    if ! _csw_task_is_finished "${_CSW_FIX_TASKS_ROOT}" "${task_id}"; then
+        _CSW_FIX_OUTCOME="kept"
+        # CONVERT: a report, not a stop -- the task was requeued since the
+        # scan, so its worktree is kept exactly as found.
+        # CENSUS-ANCHOR: stale-worktrees-state-changed-01
+        pgai_emit_error_contract "overwatch.stale_worktree_kept" \
+            "the old worktree of task ${task_id} at ${wt_path} was kept: the task is ${state:-in no readable state} now, no longer DONE or WONT-DO." \
+            "git -C ${wt_path} status --short" "${OVERWATCH_PROJECT:-}" || true
+        overwatch_log_action "check-stale-worktrees" "${wt_path}" "worktree-kept:task-not-finished" "none" \
+            "Task ${task_id} is ${state:-unreadable} under the repo lock, no longer finished; worktree kept" || true
+        return 0
+    fi
+
+    local out rc=0
+    out="$(pp_run_ops pgai_agent_kanban.overwatch.worktree_residue remove-finished \
+        --repo "${_CSW_FIX_DEV_TREE}" --path "${wt_path}" --project "${OVERWATCH_PROJECT:-}")" || rc=$?
+    if (( rc == 3 )); then
+        _CSW_FIX_OUTCOME="kept"
+        overwatch_log_action "check-stale-worktrees" "${wt_path}" "worktree-kept:holds-work" "none" \
+            "Stale worktree for finished task ${task_id} kept: the re-check under the repo lock refused the removal (see the sweep log)" || true
+        return 0
+    elif (( rc != 0 )); then
+        echo "check-stale-worktrees: ${task_id}: worktree removal of ${wt_path} failed (exit ${rc})" >&2
+        return 1
+    fi
+    _CSW_FIX_OUTCOME="removed"
+    overwatch_log_action "check-stale-worktrees" "${wt_path}" "auto-fix:worktree-pruned" "none" \
+        "Stale worktree for finished task ${task_id} (${state}) removed under the repo lock without --force, age=${_CSW_FIX_AGE}s; no branch or commit deleted; was ${out#*$'\t'}" || true
     return 0
 }
 
@@ -374,6 +476,7 @@ overwatch_check_stale_worktrees() {
     local bugs_dir="${project_root}/bugs"
     local tasks_root="${_CSW_TASKS_ROOT}"
     local dev_tree="${_CSW_DEV_TREE:-}"
+    local branch_prefix="${_CSW_BRANCH_PREFIX:-}"
     local threshold_secs="${_CSW_THRESHOLD_SECONDS}"
 
     if [[ ! -d "${project_root}" ]]; then
@@ -442,6 +545,7 @@ overwatch_check_stale_worktrees() {
     echo "check-stale-worktrees: found ${#wt_paths[@]} worktree(s)" >&2
 
     local pruned_count=0
+    local kept_count=0
     local bug_count=0
     local i
 
@@ -463,9 +567,9 @@ overwatch_check_stale_worktrees() {
             continue
         fi
 
-        # Check if the task is in a terminal state.
-        if ! _csw_task_is_terminal "${tasks_root}" "${task_id}"; then
-            echo "check-stale-worktrees: worktree ${wt_path}: task ${task_id} is not terminal; skipping" >&2
+        # Only a finished task's worktree is ever a candidate.
+        if ! _csw_task_is_finished "${tasks_root}" "${task_id}"; then
+            echo "check-stale-worktrees: worktree ${wt_path}: task ${task_id} is not finished (state $(_csw_task_state "${tasks_root}" "${task_id}" | sed 's/^$/unknown/')); skipping" >&2
             continue
         fi
 
@@ -478,16 +582,16 @@ overwatch_check_stale_worktrees() {
             continue
         fi
 
-        echo "check-stale-worktrees: worktree ${wt_path}: task=${task_id} is terminal and age=${age_secs}s >= threshold; inspecting" >&2
+        echo "check-stale-worktrees: worktree ${wt_path}: task=${task_id} is finished and age=${age_secs}s >= threshold; inspecting" >&2
 
         # Check for extra commits before deciding on auto-fix vs bug-file.
-        if _csw_worktree_has_extra_commits "${dev_tree}" "${wt_path}" "${wt_branch}"; then
+        if _csw_worktree_has_extra_commits "${dev_tree}" "${wt_path}" "${wt_branch}" "${branch_prefix}"; then
             # Carries commits — bug-file, never auto-prune.
             echo "check-stale-worktrees: worktree ${wt_path}: carries commits; bug-filing" >&2
             if (( dry_run == 0 )); then
                 local bug_path
                 bug_path="$(_csw_bug_file "${task_id}" "${wt_path}" \
-                    "Stale worktree for terminal task ${task_id} carries local commits; manual inspection required" \
+                    "Stale worktree for finished task ${task_id} carries local commits; manual inspection required" \
                     "${bugs_dir}")" || {
                     echo "check-stale-worktrees: bug-file write failed for ${wt_path}" >&2
                     continue
@@ -497,7 +601,7 @@ overwatch_check_stale_worktrees() {
                     "${wt_path}" \
                     "bug-filed:branch-carrying-worktree" \
                     "none" \
-                    "Stale worktree for terminal task ${task_id} carries commits; bug filed at ${bug_path}" \
+                    "Stale worktree for finished task ${task_id} carries commits; bug filed at ${bug_path}" \
                 || true
                 bug_count=$(( bug_count + 1 ))
                 echo "check-stale-worktrees: bug filed at ${bug_path}" >&2
@@ -508,42 +612,83 @@ overwatch_check_stale_worktrees() {
                     "${wt_path}" \
                     "dry-run-would-bug-file-branch-carrying-worktree" \
                     "none" \
-                    "Stale worktree for terminal task ${task_id} carries commits; dry-run, no action" \
+                    "Stale worktree for finished task ${task_id} carries commits; dry-run, no action" \
                 2>/dev/null || true
             fi
         else
-            # No extra commits — prune-class auto-fix.
-            echo "check-stale-worktrees: worktree ${wt_path}: no extra commits; prune candidate" >&2
-            if (( dry_run == 0 )); then
-                # Remove the worktree directory if it still exists, then prune metadata.
-                if [[ -d "${wt_path}" ]]; then
-                    git -C "${dev_tree}" worktree remove --force "${wt_path}" 2>/dev/null || true
+            # No extra commits: removable only if the shared finished-worktree
+            # assessment finds nothing a removal would lose.
+            local verdict verdict_detail
+            verdict="$(pp_run_ops pgai_agent_kanban.overwatch.worktree_residue assess-finished \
+                --repo "${dev_tree}" --path "${wt_path}" 2>/dev/null)" || verdict=""
+            verdict_detail="${verdict#*$'\t'}"
+            verdict="${verdict%%$'\t'*}"
+            if [[ "${verdict}" != "removable" ]]; then
+                [[ -n "${verdict}" ]] || verdict_detail="the worktree could not be assessed"
+                kept_count=$(( kept_count + 1 ))
+                if (( dry_run == 1 )); then
+                    echo "check-stale-worktrees: [dry-run] would keep and report worktree ${wt_path}: ${verdict_detail}" >&2
+                    continue
                 fi
-                git -C "${dev_tree}" worktree prune 2>/dev/null || true
-
+                # CONVERT: a report, not a stop -- the worktree is kept exactly
+                # as found and the sweep carries on.
+                # CENSUS-ANCHOR: stale-worktrees-kept-01
+                pgai_emit_error_contract "overwatch.stale_worktree_kept" \
+                    "the old worktree of finished task ${task_id} at ${wt_path} was kept, not removed: ${verdict_detail}" \
+                    "git -C ${wt_path} status --short" "${project_name}" || true
                 overwatch_log_action \
                     "check-stale-worktrees" \
                     "${wt_path}" \
-                    "auto-fix:worktree-pruned" \
+                    "worktree-kept:holds-work" \
                     "none" \
-                    "Stale worktree for terminal task ${task_id} had no extra commits; pruned (age=${age_secs}s)" \
+                    "Stale worktree for finished task ${task_id} kept: ${verdict_detail}" \
                 || true
-                pruned_count=$(( pruned_count + 1 ))
-                echo "check-stale-worktrees: pruned worktree ${wt_path}" >&2
-            else
-                echo "check-stale-worktrees: [dry-run] would prune worktree ${wt_path} (no extra commits)" >&2
+                continue
+            fi
+
+            echo "check-stale-worktrees: worktree ${wt_path}: no extra commits, nothing uncommitted; removal candidate" >&2
+            if (( dry_run == 1 )); then
+                echo "check-stale-worktrees: [dry-run] would remove worktree ${wt_path} (no extra commits, clean)" >&2
                 overwatch_log_action \
                     "check-stale-worktrees" \
                     "${wt_path}" \
                     "dry-run-would-prune-worktree" \
                     "none" \
-                    "Stale worktree for terminal task ${task_id} at ${wt_path}; dry-run, would prune" \
+                    "Stale worktree for finished task ${task_id} at ${wt_path}; dry-run, would remove" \
                 2>/dev/null || true
+                continue
+            fi
+
+            export _CSW_FIX_TASK_ID="${task_id}" _CSW_FIX_WT_PATH="${wt_path}" _CSW_FIX_DEV_TREE="${dev_tree}"
+            export _CSW_FIX_TASKS_ROOT="${tasks_root}" _CSW_FIX_AGE="${age_secs}"
+            _CSW_FIX_OUTCOME=""
+            local fix_exit=0
+            overwatch_halt_first_fix _csw_do_remove || fix_exit=$?
+            unset _CSW_FIX_TASK_ID _CSW_FIX_WT_PATH _CSW_FIX_DEV_TREE _CSW_FIX_TASKS_ROOT _CSW_FIX_AGE
+
+            if (( fix_exit == 3 )); then
+                echo "check-stale-worktrees: HALT_OVERWATCH guard tripped; aborting" >&2
+                break
+            elif (( fix_exit == 4 )); then
+                echo "check-stale-worktrees: per-repo flock contended; aborting" >&2
+                break
+            elif (( fix_exit == 5 )); then
+                echo "check-stale-worktrees: fix deferred: HALT present; aborting" >&2
+                break
+            elif (( fix_exit != 0 )); then
+                echo "check-stale-worktrees: removal of ${wt_path} failed (exit ${fix_exit}); worktree left in place" >&2
+                continue
+            fi
+            if [[ "${_CSW_FIX_OUTCOME}" == "removed" ]]; then
+                pruned_count=$(( pruned_count + 1 ))
+                echo "check-stale-worktrees: removed and pruned worktree ${wt_path}" >&2
+            else
+                kept_count=$(( kept_count + 1 ))
             fi
         fi
     done
 
-    echo "check-stale-worktrees: complete; pruned=${pruned_count}, bug-filed=${bug_count}" >&2
+    echo "check-stale-worktrees: complete; removed=${pruned_count}, kept=${kept_count}, bug-filed=${bug_count}" >&2
     return 0
 }
 

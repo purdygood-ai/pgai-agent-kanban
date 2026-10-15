@@ -102,6 +102,28 @@ def _normalize_reset_log(raw: bytes) -> bytes:
     return normalized.encode("utf-8")
 
 
+# logs/sentinel-writes.log is the sentinel writers' provenance log
+# (pgai_agent_kanban.lib.sentinel_provenance). Besides the wall-clock time it
+# names the writing process -- epoch second, command line, pid, parent pid,
+# parent command line -- and the sentinel's absolute path inside each
+# sandbox, all of which legitimately differ between the API server and the
+# script run. Those are normalised; op, the root-relative path, sha256, user
+# and test are still compared verbatim.
+_SENTINEL_WRITE_LOG_RELPATH = "logs/sentinel-writes.log"
+_SENTINEL_WRITE_PROCESS_FIELD_RE = re.compile(
+    r"(^|\t)(time|epoch|entry|pid|ppid|parent)=[^\t\n]*", re.MULTILINE
+)
+
+
+def _normalize_sentinel_write_log(raw: bytes, root: pathlib.Path) -> bytes:
+    """Return *raw* with the per-process fields and the sandbox root replaced
+    by stable tokens, so two sandboxes recording the same write hash equal."""
+    text = raw.decode("utf-8", errors="replace")
+    for root_form in {str(root.resolve()), str(root)}:
+        text = text.replace(root_form, "<root>")
+    return _SENTINEL_WRITE_PROCESS_FIELD_RE.sub(r"\1\2=<process>", text).encode("utf-8")
+
+
 # ---------------------------------------------------------------------------
 # Sandbox structure constants
 # ---------------------------------------------------------------------------
@@ -126,7 +148,8 @@ def _compute_dir_checksum(root: pathlib.Path) -> dict[str, str]:
 
     Normalization: files whose relative path matches ``_RESET_LOG_RELPATH``
     (``logs/reset.log``) are hashed after stripping ISO 8601 timestamps via
-    ``_normalize_reset_log``.  This prevents the wall-clock timestamp written
+    ``_normalize_reset_log``; ``logs/sentinel-writes.log`` is hashed after
+    ``_normalize_sentinel_write_log``.  This prevents the wall-clock timestamp written
     by the reset operation from causing spurious fidelity mismatches between
     the API and script sandbox runs.
 
@@ -149,6 +172,8 @@ def _compute_dir_checksum(root: pathlib.Path) -> dict[str, str]:
             # even when they land in different clock seconds.
             if rel == _RESET_LOG_RELPATH or rel.endswith("/" + _RESET_LOG_RELPATH):
                 raw = _normalize_reset_log(raw)
+            elif rel == _SENTINEL_WRITE_LOG_RELPATH:
+                raw = _normalize_sentinel_write_log(raw, root)
             digest = hashlib.sha256(raw).hexdigest()
             result[rel] = digest
     return result
@@ -209,13 +234,13 @@ def _materialise_sandbox(root: pathlib.Path) -> None:
                             tester_backlog.md
                             cm_backlog.md
                             bug_backlog.md
-                        CODER-20260101-001-alpha/
+                        <_SANDBOX_TASK_KEY>/
                             README.md
                             status.md
                             artifacts/
                             logs/
                     bugs/
-                        BUG-0001.md
+                        <_SANDBOX_BUG_KEY>.md
                     requirements/
                     priority/
                     release-state.md
@@ -444,6 +469,31 @@ def api_client(
         yield client
 
 
+@pytest.fixture
+def ops_api_client(
+    sandbox_root: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
+    """A TestClient whose API kanban_root IS the sandbox.
+
+    For mutation routes that call their ``pgai_agent_kanban.ops`` function
+    in process against ``ApiConfig.kanban_root`` (reset among them): unlike
+    ``api_client``, no script needs resolving, so the config names the
+    sandbox the operation must act on.
+
+    Yields:
+        A configured TestClient instance for the duration of the test.
+    """
+    from pgai_agent_kanban.api.app import create_app
+    from pgai_agent_kanban.api.config import ApiConfig
+
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(sandbox_root))
+    monkeypatch.setenv("KANBAN_ROOT", str(sandbox_root))
+    cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=sandbox_root)
+    with TestClient(create_app(cfg=cfg), raise_server_exceptions=True) as client:
+        yield client
+
+
 def _make_fidelity_client(
     kanban_root: pathlib.Path,
     dev_tree_team_dir: pathlib.Path,
@@ -452,11 +502,16 @@ def _make_fidelity_client(
     """Create a TestClient for fidelity tests with a specific kanban root.
 
     Like api_client but accepts the kanban root as a parameter (needed for
-    twin-sandbox tests where each sandbox has its own root).
+    twin-sandbox tests where each sandbox has its own root). Every mutation
+    route these tests drive calls its ``pgai_agent_kanban.ops`` function in
+    process against ``ApiConfig.kanban_root``, so the config names the
+    sandbox itself; the environment names it too, matching the server's own
+    start-up where both come from ``PGAI_AGENT_KANBAN_ROOT_PATH``.
 
     Args:
-        kanban_root:       Sandbox kanban root the scripts should operate on.
-        dev_tree_team_dir: Path to team/ for script resolution.
+        kanban_root:       Sandbox kanban root the operations act on.
+        dev_tree_team_dir: Path to team/ (kept for the fixture signature the
+                           tests share with ``api_client``).
         monkeypatch:       pytest monkeypatch fixture for env var overrides.
 
     Returns:
@@ -471,7 +526,7 @@ def _make_fidelity_client(
     cfg = ApiConfig(
         host="127.0.0.1",
         port=0,
-        kanban_root=dev_tree_team_dir,
+        kanban_root=kanban_root,
     )
     return TestClient(create_app(cfg=cfg), raise_server_exceptions=True)
 
@@ -682,6 +737,7 @@ class TestVerbDiscipline:
             sandbox_root,
             "GET",
             "/dashboard/input",
+            params={"column_type": "bugs"},
         )
 
     def test_dashboard_queue_no_mutation(
@@ -695,6 +751,7 @@ class TestVerbDiscipline:
             sandbox_root,
             "GET",
             "/dashboard/queue",
+            params={"column_type": "coder"},
         )
 
     def test_approvals_no_mutation(
@@ -1116,7 +1173,7 @@ def _add_priority_fixture(sandbox_root: pathlib.Path) -> None:
     """Add a priority intake file and its backlog marker to a sandbox.
 
     Creates:
-        projects/sandbox-proj/priority/PRIORITY-0001.md  — status: open
+        projects/sandbox-proj/priority/<_SANDBOX_PRIORITY_KEY>.md  — status: open
         projects/sandbox-proj/tasks/queues/priority_backlog.md  — with marker
 
     Args:
@@ -1145,7 +1202,7 @@ def _add_requirement_fixture(sandbox_root: pathlib.Path) -> None:
     """Add a requirement intake file to a sandbox.
 
     Creates:
-        projects/sandbox-proj/requirements/v0.0.1-test.md  — status: open, PM Task: none
+        projects/sandbox-proj/requirements/<_SANDBOX_REQUIREMENT_KEY>  — status: open, PM Task: none
 
     The PM Task is 'none' so reset.sh skips the pm_backlog marker flip; the
     requirement status reset is the meaningful operation.
@@ -1196,14 +1253,14 @@ class TestResetKindForms:
         self,
         sandbox_root: pathlib.Path,
         dev_tree_team_dir: pathlib.Path,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """POST /operations/reset with 'key' selector resets the task and returns exit_code 0."""
         # Pre-condition: task must not be WORKING for reset to succeed.
         self._close_task(sandbox_root, dev_tree_team_dir, monkeypatch)
 
-        resp = api_client.post(
+        resp = ops_api_client.post(
             "/operations/reset",
             json={"project": _SANDBOX_PROJECT_NAME, "key": _SANDBOX_TASK_KEY},
         )
@@ -1216,13 +1273,13 @@ class TestResetKindForms:
         self,
         sandbox_root: pathlib.Path,
         dev_tree_team_dir: pathlib.Path,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """POST /operations/reset with 'agent' selector resets the task and returns exit_code 0."""
         self._close_task(sandbox_root, dev_tree_team_dir, monkeypatch)
 
-        resp = api_client.post(
+        resp = ops_api_client.post(
             "/operations/reset",
             json={"project": _SANDBOX_PROJECT_NAME, "agent": _SANDBOX_TASK_KEY},
         )
@@ -1234,10 +1291,10 @@ class TestResetKindForms:
     def test_reset_via_bug_selector_returns_exit_code_0(
         self,
         sandbox_root: pathlib.Path,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
     ) -> None:
         """POST /operations/reset with 'bug' selector resets the bug intake and returns exit_code 0."""
-        resp = api_client.post(
+        resp = ops_api_client.post(
             "/operations/reset",
             json={"project": _SANDBOX_PROJECT_NAME, "bug": _SANDBOX_BUG_KEY},
         )
@@ -1249,12 +1306,12 @@ class TestResetKindForms:
     def test_reset_via_priority_selector_returns_exit_code_0(
         self,
         sandbox_root: pathlib.Path,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
     ) -> None:
         """POST /operations/reset with 'priority' selector resets the priority intake and returns exit_code 0."""
         _add_priority_fixture(sandbox_root)
 
-        resp = api_client.post(
+        resp = ops_api_client.post(
             "/operations/reset",
             json={"project": _SANDBOX_PROJECT_NAME, "priority": _SANDBOX_PRIORITY_KEY},
         )
@@ -1266,12 +1323,12 @@ class TestResetKindForms:
     def test_reset_via_requirement_selector_returns_exit_code_0(
         self,
         sandbox_root: pathlib.Path,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
     ) -> None:
         """POST /operations/reset with 'requirement' selector resets the requirement intake and returns exit_code 0."""
         _add_requirement_fixture(sandbox_root)
 
-        resp = api_client.post(
+        resp = ops_api_client.post(
             "/operations/reset",
             json={
                 "project": _SANDBOX_PROJECT_NAME,
@@ -1285,7 +1342,7 @@ class TestResetKindForms:
 
     def test_reset_two_selectors_returns_422_naming_both_fields(
         self,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
     ) -> None:
         """POST /operations/reset with two selectors returns 422 naming both conflicting fields.
 
@@ -1294,7 +1351,7 @@ class TestResetKindForms:
         from unittest.mock import patch
 
         with patch("subprocess.run") as mock_run:
-            resp = api_client.post(
+            resp = ops_api_client.post(
                 "/operations/reset",
                 json={
                     "project": _SANDBOX_PROJECT_NAME,
@@ -1306,14 +1363,17 @@ class TestResetKindForms:
             mock_run.assert_not_called()
 
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}"
-        detail = resp.json().get("detail", "")
-        # Both conflicting field names must appear in the error detail.
-        assert "key" in detail, f"'key' not named in 422 detail: {detail!r}"
-        assert "bug" in detail, f"'bug' not named in 422 detail: {detail!r}"
+        body = resp.json()
+        assert "detail" not in body, f"framework validation list leaked into the refusal: {body}"
+        assert body["error"] == "reset.selector_conflict", body
+        message = body["message"]
+        # Both conflicting field names must appear in the refusal message.
+        assert "key" in message, f"'key' not named in 422 message: {message!r}"
+        assert "bug" in message, f"'bug' not named in 422 message: {message!r}"
 
     def test_reset_no_selector_returns_422_naming_missing_choice(
         self,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
     ) -> None:
         """POST /operations/reset with no kind selector returns 422 naming the missing choice.
 
@@ -1322,7 +1382,7 @@ class TestResetKindForms:
         from unittest.mock import patch
 
         with patch("subprocess.run") as mock_run:
-            resp = api_client.post(
+            resp = ops_api_client.post(
                 "/operations/reset",
                 json={"project": _SANDBOX_PROJECT_NAME},
             )
@@ -1330,18 +1390,21 @@ class TestResetKindForms:
             mock_run.assert_not_called()
 
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}"
-        detail = resp.json().get("detail", "")
+        body = resp.json()
+        assert "detail" not in body, f"framework validation list leaked into the refusal: {body}"
+        assert body["error"] == "reset.selector_required", body
+        message = body["message"]
         # The missing choice should reference the selector fields.
         assert any(
-            field in detail
+            field in message
             for field in ("key", "agent", "bug", "priority", "requirement")
-        ), f"No selector field names in 422 detail: {detail!r}"
+        ), f"No selector field names in 422 message: {message!r}"
 
     def test_reset_key_only_regression_passes(
         self,
         sandbox_root: pathlib.Path,
         dev_tree_team_dir: pathlib.Path,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Existing key-only reset behavior is preserved (regression fixture).
@@ -1352,7 +1415,7 @@ class TestResetKindForms:
         """
         self._close_task(sandbox_root, dev_tree_team_dir, monkeypatch)
 
-        resp = api_client.post(
+        resp = ops_api_client.post(
             "/operations/reset",
             json={"project": _SANDBOX_PROJECT_NAME, "key": _SANDBOX_TASK_KEY},
         )
@@ -1367,29 +1430,30 @@ class TestResetKindForms:
 
 
 class TestSetVersionCeilingEndpoint:
-    """Positive-path and script-guard-negative tests for POST /operations/set-version-ceiling.
+    """Positive-path and guard-negative tests for POST /operations/set-version-ceiling.
 
     Covers:
         - Positive path: dry-run request against the sandbox project returns exit_code 0.
-        - Script-guard-negative: omitting all action flags causes the script to refuse
-          with a non-zero exit_code; the refusal message appears in stderr.
+        - Guard-negative: omitting all action flags is refused with a non-zero
+          exit_code; the refusal message appears in stderr.
 
-    The sandbox project (sandbox-proj) has a project.cfg so set-version-ceiling.sh
-    can locate the project.  Using ``--dry-run`` on the positive path means no
-    project.cfg fields are modified.
+    The route calls ``ops.write.set_version_ceiling`` in process against
+    ``ApiConfig.kanban_root``, so these tests use ``ops_api_client``, whose
+    config names the sandbox (sandbox-proj has a project.cfg). Using
+    ``dry_run`` on the positive path means no project.cfg fields are modified.
     """
 
     def test_set_version_ceiling_dry_run_returns_exit_code_0(
         self,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
     ) -> None:
         """POST /operations/set-version-ceiling with dry_run and minor returns exit_code 0.
 
-        The script is invoked with --project sandbox-proj --minor 5 --dry-run.
-        In dry-run mode set-version-ceiling.sh prints the intended change and exits 0
-        without writing project.cfg.  The envelope exit_code must be 0.
+        The dry-run short-circuit describes the equivalent
+        set-version-ceiling.sh call and writes nothing. The envelope
+        exit_code must be 0.
         """
-        resp = api_client.post(
+        resp = ops_api_client.post(
             "/operations/set-version-ceiling",
             json={
                 "project": _SANDBOX_PROJECT_NAME,
@@ -1404,43 +1468,40 @@ class TestSetVersionCeilingEndpoint:
         )
         body = resp.json()
         assert body["exit_code"] == 0, (
-            f"set-version-ceiling.sh must exit 0 in dry-run mode; "
+            f"set-version-ceiling must exit 0 in dry-run mode; "
             f"got exit_code={body['exit_code']}.\n"
             f"stdout: {body['stdout']}\nstderr: {body['stderr']}"
         )
 
-    def test_set_version_ceiling_no_action_returns_nonzero_exit_code_with_script_refusal(
+    def test_set_version_ceiling_no_action_returns_nonzero_exit_code_with_refusal(
         self,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
     ) -> None:
         """POST /operations/set-version-ceiling with no action flag returns non-zero exit_code.
 
-        The script guards that at least one action (--show, --minor, --major,
-        --no-minor, --no-major) must be supplied.  Passing only ``project``
-        causes the script to exit 1 with its own refusal message in stderr.
-        The envelope propagates this unchanged: non-zero exit_code, HTTP 500,
-        refusal text in stderr.
-
-        This verifies that script guards are propagated rather than re-implemented:
-        the endpoint does not add its own "action required" check.
+        At least one action (show, minor, major, no_minor, no_major) must be
+        supplied. Passing only ``project`` is refused by the shared function
+        with exit code 1 and its refusal line in stderr -- the same line
+        set-version-ceiling.sh prints. The envelope carries it: non-zero
+        exit_code, HTTP 409 (a guard refused the call), refusal text in stderr.
         """
-        resp = api_client.post(
+        resp = ops_api_client.post(
             "/operations/set-version-ceiling",
             json={"project": _SANDBOX_PROJECT_NAME},
         )
 
-        assert resp.status_code == 500, (
-            f"Expected HTTP 500 on script refusal; got {resp.status_code}.\n"
+        assert resp.status_code == 409, (
+            f"Expected HTTP 409 on refusal; got {resp.status_code}.\n"
             f"body: {resp.text}"
         )
         body = resp.json()
         assert body["exit_code"] != 0, (
-            f"set-version-ceiling.sh must exit non-zero when no action is supplied; "
+            f"set-version-ceiling must exit non-zero when no action is supplied; "
             f"got exit_code={body['exit_code']}."
         )
-        assert body["stderr"], (
-            "Script refusal must appear in stderr; stderr was empty.\n"
-            f"stdout: {body['stdout']}"
+        assert "at least one action is required" in body["stderr"], (
+            "The refusal must appear in stderr.\n"
+            f"stdout: {body['stdout']}\nstderr: {body['stderr']}"
         )
 
 
@@ -1450,91 +1511,77 @@ class TestSetVersionCeilingEndpoint:
 
 
 class TestSwitchProviderEndpoint:
-    """Positive-path and script-guard-negative tests for POST /operations/switch-provider.
+    """Positive-path and guard-negative tests for POST /operations/switch-provider.
 
     Covers:
-        - Positive path: the endpoint routes the request to switch-provider.sh and
-          returns the envelope.  Because provider CLIs (claude/codex/gemini) are
-          unlikely to be installed in CI, subprocess.run is mocked to return
-          exit code 0 for the positive-path fixture.
-        - Script-guard-negative: an unknown provider name causes the script to refuse
-          with exit code 1; the refusal appears in stderr.  No mock is used here —
-          the real script validates the provider name before any CLI check.
+        - Positive path: the route calls ``ops.write.switch_provider`` in
+          process (no subprocess) and rewrites the sandbox kanban.cfg
+          ``[providers] active``. A stub ``claude`` executable on PATH stands
+          in for the provider CLI, which CI need not have installed.
+        - Guard-negative: an unknown provider name is refused with exit code
+          1 and the dual-channel ``switch_provider.unknown_provider`` block in
+          stderr, before any CLI check.
     """
 
     def test_switch_provider_positive_path_returns_exit_code_0(
         self,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
+        sandbox_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """POST /operations/switch-provider routes to switch-provider.sh and returns exit_code 0.
+        """POST /operations/switch-provider rewrites [providers] active and returns exit_code 0."""
+        from unittest.mock import patch
 
-        The script is mocked to return exit code 0 because the real switch-provider.sh
-        requires the target provider CLI binary to be present in PATH, which is not
-        guaranteed in CI.  The mock verifies that the endpoint correctly routes the
-        ``provider`` body field as ``--provider <value>`` to the script.
-        """
-        from unittest.mock import MagicMock, patch
+        stub_bin = tmp_path / "stub-bin"
+        stub_bin.mkdir()
+        stub = stub_bin / "claude"
+        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{stub_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+        cfg = sandbox_root / "kanban.cfg"
+        cfg.write_text("[providers]\n# active = gemini\nactive = codex\n", encoding="utf-8")
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "Active provider switched: (none) → claude\n"
-        mock_result.stderr = ""
-
-        with patch("subprocess.run", return_value=mock_result) as mock_run:
-            resp = api_client.post(
+        with patch("subprocess.run") as mock_run:
+            resp = ops_api_client.post(
                 "/operations/switch-provider",
                 json={"provider": "claude"},
             )
+            mock_run.assert_not_called()
 
         assert resp.status_code == 200, (
             f"Expected HTTP 200 on success; got {resp.status_code}.\n"
             f"body: {resp.text}"
         )
         body = resp.json()
-        assert body["exit_code"] == 0, (
-            f"Mocked exit_code must be 0; got {body['exit_code']}."
-        )
-        # Verify the endpoint passed --provider to the script.
-        mock_run.assert_called_once()
-        call_argv = mock_run.call_args[0][0]
-        assert "--provider" in call_argv, (
-            f"--provider flag must be present in argv passed to switch-provider.sh; "
-            f"got: {call_argv}"
-        )
-        assert "claude" in call_argv, (
-            f"provider value 'claude' must be forwarded to the script; "
-            f"got argv: {call_argv}"
-        )
+        assert body["exit_code"] == 0, body
+        assert body["stdout"].startswith("Active provider switched: codex → claude\n"), body["stdout"]
+        assert cfg.read_text(encoding="utf-8") == "[providers]\n# active = gemini\nactive = claude\n"
 
-    def test_switch_provider_unknown_provider_returns_nonzero_exit_code_with_script_refusal(
+    def test_switch_provider_unknown_provider_returns_nonzero_exit_code_with_refusal(
         self,
-        api_client: "TestClient",
+        ops_api_client: "TestClient",
     ) -> None:
         """POST /operations/switch-provider with an unknown provider returns non-zero exit_code.
 
-        switch-provider.sh validates the provider name before any CLI check.
-        Passing an unrecognized provider (e.g. ``"unknown-provider"``) causes the
-        script to exit 1 with its own refusal message in stderr.  The envelope
-        propagates this unchanged: non-zero exit_code, HTTP 500, refusal text in stderr.
-
-        This verifies that provider validation is the script's responsibility and is
-        not re-implemented by the endpoint.
+        The shared function validates the provider name before any CLI check.
+        An unrecognized provider (e.g. ``"unknown-provider"``) is refused at
+        exit code 1 with the dual-channel block in stderr, lifted to the
+        envelope's top-level keys: HTTP 409 (a guard refused the call).
         """
-        resp = api_client.post(
+        resp = ops_api_client.post(
             "/operations/switch-provider",
             json={"provider": "unknown-provider"},
         )
 
-        assert resp.status_code == 500, (
-            f"Expected HTTP 500 on script refusal; got {resp.status_code}.\n"
+        assert resp.status_code == 409, (
+            f"Expected HTTP 409 on refusal; got {resp.status_code}.\n"
             f"body: {resp.text}"
         )
         body = resp.json()
-        assert body["exit_code"] != 0, (
-            f"switch-provider.sh must exit non-zero for an unknown provider; "
-            f"got exit_code={body['exit_code']}."
-        )
+        assert body["exit_code"] == 1, body
+        assert body["error"] == "switch_provider.unknown_provider", body
         assert body["stderr"], (
-            "Script refusal must appear in stderr; stderr was empty.\n"
+            "The refusal must appear in stderr; stderr was empty.\n"
             f"stdout: {body['stdout']}"
         )

@@ -23,9 +23,10 @@
 # designed to uphold this property.
 #
 # Usage:
-#   migrate-projects-cfg.sh              # migrate $KANBAN_ROOT/projects.cfg
-#   migrate-projects-cfg.sh --force      # overwrite existing backup and proceed
-#   migrate-projects-cfg.sh --dry-run    # preview, no writes
+#   migrate/projects-cfg.sh              # migrate $KANBAN_ROOT/projects.cfg
+#   migrate/projects-cfg.sh --force      # overwrite existing backup and proceed
+#   migrate/projects-cfg.sh --dry-run    # preview, no writes
+#   migrate/projects-cfg.sh --help       # print this usage and exit 0
 #
 # Exit codes:
 #   0 — success (migrated, or already INI — nothing to do)
@@ -46,6 +47,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/projects.sh
 source "${SCRIPT_DIR}/../lib/projects.sh"
+# shellcheck source=../lib/header_help.sh
+source "${SCRIPT_DIR}/../lib/header_help.sh"
 
 FORCE="false"
 DRY_RUN="false"
@@ -57,7 +60,7 @@ while [[ $# -gt 0 ]]; do
         --dry-run)
             DRY_RUN="true"; shift ;;
         --help|-h)
-            sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+            header_help_print "${BASH_SOURCE[0]}"
             exit 0 ;;
         -*)
             echo "ERROR: unknown option: $1" >&2
@@ -71,7 +74,7 @@ done
 CFG_FILE="$(projects_cfg_path)"
 BACKUP_FILE="${CFG_FILE}.colon-format-backup"
 
-echo "=== migrate-projects-cfg.sh ==="
+echo "=== scripts/migrate/projects-cfg.sh ==="
 echo "Kanban root: $KANBAN_ROOT"
 echo "projects.cfg: $CFG_FILE"
 echo ""

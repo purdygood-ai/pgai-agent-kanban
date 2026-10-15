@@ -26,6 +26,10 @@ source "${_UNHALT_GLOBAL_LIB_DIR}/operator_args.sh"
 # shellcheck source=lib/pp_run_ops.sh
 source "${_UNHALT_GLOBAL_LIB_DIR}/pp_run_ops.sh"
 
+# --- Source the dual-channel error-contract emitter ---
+# shellcheck source=lib/error_contract.sh
+source "${_UNHALT_GLOBAL_LIB_DIR}/error_contract.sh"
+
 # --- Declare accepted flags for this script ---
 # unhalt-global takes no project/key arguments; only --help is accepted.
 OPERATOR_VALID_FLAGS=(help)
@@ -53,8 +57,16 @@ operator_args_validate_known "unhalt-global.sh" OPERATOR_VALID_FLAGS || exit 1
 
 # --- Validate KANBAN_ROOT exists ---
 if [[ ! -d "${KANBAN_ROOT}" ]]; then
-    printf 'unhalt-global.sh: KANBAN_ROOT does not exist or is not a directory: %s\n' \
-        "${KANBAN_ROOT}" >&2
+    # BLOCK-WORTHY (docs/blocking-site-census.md): the global HALT sentinel
+    # this verb removes lives at KANBAN_ROOT/HALT -- with no such directory
+    # there is nothing to check or remove, so this refuses rather than
+    # letting the removal attempt below fail one line later with a less
+    # specific message.
+    pgai_emit_error_contract \
+        "unhalt_global.kanban_root_missing" \
+        "unhalt-global.sh: KANBAN_ROOT does not exist or is not a directory: ${KANBAN_ROOT}." \
+        "Set PGAI_AGENT_KANBAN_ROOT_PATH to an existing kanban root, or create ${KANBAN_ROOT} first."
+    # CENSUS-ANCHOR: unhalt-global-kanban-root-missing-01
     exit 1
 fi
 
@@ -71,6 +83,14 @@ if pp_run_ops pgai_agent_kanban.ops unhalt_global "${KANBAN_ROOT}"; then
     printf 'global HALT cleared: %s removed — all projects will resume at next wake\n' "${_halt_path}"
     exit 0
 else
-    printf 'unhalt-global.sh: failed to remove global HALT at %s\n' "${_halt_path}" >&2
+    # BLOCK-WORTHY (docs/blocking-site-census.md): the sentinel removal
+    # itself failed (permissions, or another OS-level cause) -- the
+    # operator cannot rely on the HALT being cleared, so this refuses loud
+    # rather than reporting success on an unverified removal.
+    pgai_emit_error_contract \
+        "unhalt_global.sentinel_remove_failed" \
+        "unhalt-global.sh: failed to remove global HALT sentinel at ${_halt_path}." \
+        "Check that ${KANBAN_ROOT} is writable by the current user, then re-run team/scripts/unhalt-global.sh."
+    # CENSUS-ANCHOR: unhalt-global-sentinel-remove-failed-01
     exit 1
 fi

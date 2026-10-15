@@ -1,0 +1,482 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "v2.24.12 closes the structural hole that let the bug and priority discovery\nsteps write a requirements bundle whose `## Bundled Items` were pipeline\nnarration rather than item files — the wedge whose evidence is this RC's own\nrequirements document. Three new refusal sites were added and all three were\nexercised directly: the shared `_disc_bundle_item_shape_ok` predicate in\n`discovery_steps.sh` (eleven synthetic shapes, all classified correctly), its\napplication as a post-filter guard in `discovery_step_bugs` and\n`discovery_step_priority` (placement confirmed to sit after\n`_disc_bug_deferral_filter` and after the priority cap slice respectively),\nand `_disc_write_bundle`'s zero-valid-items backstop (five cases: three\nrefusals with no file written and a full dual-channel trio, two happy paths\nincluding correct `RIDE_ALONG` suffix rendering). The new operator script\n`retire-empty-bundles.sh` was exercised end to end in a throwaway sandbox\nacross all five of its acceptance criteria — dry-run leaves every checksum\nunchanged, apply retires exactly the one retirable bundle and leaves the kept,\nskipped and mixed bundles byte-identical, and a second apply is idempotent.\nThe operator documentation is substantive and its claims check out against the\nsource.\n\nTwo things keep this off `PASS`. The gated integration runner exited 1 on a\nsingle non-deterministic dashboard test that this RC's diff cannot reach, and\nthe RC adds a cross-reference from an installed document to one the installer\ndoes not deliver. Neither threatens the release's usability. Both, plus a\nquality-class lint finding and a pre-existing blind spot in the check that\nshould have caught the second, are filed via Path C-A (filed as BUG — code\ndefect / regression / test failure).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Post-filter item-shape guard in `discovery_step_bugs`",
+      "heading": "Finding 1: Post-filter item-shape guard in `discovery_step_bugs`",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-025 AC1. `team/scripts/lib/discovery_steps.sh` line 287 applies\n`_disc_bundle_item_shape_ok` to `unhandled_files` *after* the\n`_disc_bug_deferral_filter` assignment at line 269 and before the Active-RC\nguard — that is, to the list `_disc_write_bundle` actually renders, which is\nwhat the criterion asks for. The pre-existing `grep -q '^/'` pre-filter check\nabove it is untouched.\n\nBehavioural verification of the predicate, sourcing the library directly in a\nthrowaway sandbox under `$PGAI_AGENT_KANBAN_TEMP_DIR` (11/11 as expected):\n\n| Input | Expected | Result |\n|---|---|---|\n| `/a/b/BUG-0001-x.md` | accept | accept |\n| two absolute paths | accept | accept |\n| `/a/b.md` + TAB + `RIDE_ALONG:BUG-0002` | accept | accept |\n| `/a/b.md` + TAB + SPACE + `RIDE_ALONG:...` | refuse | refuse |\n| `[2026-01-01T00:00:00+00:00] wake(pm): ...` | refuse | refuse |\n| one real path plus one narration line | refuse | refuse |\n| `bugs/BUG-0001.md` (relative) | refuse | refuse |\n| `/a/b.md` + TAB + `GARBAGE` | refuse | refuse |\n| `/a/b.md` + TAB + empty annotation | refuse | refuse |\n| blank lines only | accept (vacuous) | accept |\n| empty string | accept (vacuous) | accept |\n\nThe two vacuous-accept cases are correct: emptiness is handled by the\nseparate `[[ -z \"$unhandled_files\" ]]` check above and, at the render layer,\nby `_disc_write_bundle`'s own zero-valid-items guard (Finding 3).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Same guard in `discovery_step_priority`",
+      "heading": "Finding 2: Same guard in `discovery_step_priority`",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-025 AC2. `discovery_steps.sh` line 433 applies the same predicate to\n`bundle_files` immediately after the `head -n \"$_cap\"` slice that finalises\nit, before the Active-RC guard. Same predicate, so Finding 1's behavioural\ntable covers it.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "`_disc_write_bundle` refuses when no entry resolves to a real file",
+      "heading": "Finding 3: `_disc_write_bundle` refuses when no entry resolves to a real file",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-025 AC3 and AC4, and CODER-026 AC2. Invoked directly with stubbed\n`wf_load_plugin` / `wf_bundle_source_branch`:\n\n| Files argument | Return | File created | Dual-channel output |\n|---|---|---|---|\n| one narration line | 1 | no | `error: discovery.bundle-write-no-valid-items` + message + remedy |\n| one non-existent absolute path | 1 | no | same trio |\n| empty | 1 | no | same trio |\n| one real file | 0 | yes | n/a |\n| one real file + one real file with `RIDE_ALONG` | 0 | yes | n/a |\n\nThe narration case is AC4 stated directly: injecting a line beginning\n`[2026-01-01T00:00:00+00:00] wake(pm): discovery_step_bugs: ...` produced no\nfile in the requirements directory.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Happy path and `RIDE_ALONG` rendering preserved",
+      "heading": "Finding 4: Happy path and `RIDE_ALONG` rendering preserved",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-025 AC5, CODER-026 AC3. The two successful writes above rendered:\n\n```\n- BUG-0001-real.md (`/.../BUG-0001-real.md`)\n- BUG-0002-rider.md (`/.../BUG-0002-rider.md`) — hygiene ride-along (piggyback on BUG-0001-real)\n```\n\nBoth lines present, the ride-along suffix verbatim in the wording\n`team/roles/PM.md` specifies, on its own item line.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Census declarations and Locator Index entries",
+      "heading": "Finding 5: Census declarations and Locator Index entries",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-025 AC6. Three `CENSUS-ANCHOR` markers exist in code —\n`discovery-steps-bug-item-shape-01` (line 294),\n`discovery-steps-priority-item-shape-01` (line 440),\n`discovery-state-write-bundle-no-valid-items-01` (line 708) — each directly\nunder an inline `CONVERT (docs/blocking-site-census.md)` class comment, and\neach has a matching Locator Index line in `docs/blocking-site-census.md`\nclassified `CONVERT`. The narrative block above the index explains all three.\n\nThe declared class matches the behaviour: each site logs, emits the trio, and\nreturns non-zero to its in-process caller. None creates a HALT flag; none\nalters task state. Verified by reading each site and by the refusals observed\nin Findings 1 and 3, which ended the call and nothing else.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Syntax checks across the tree",
+      "heading": "Finding 6: Syntax checks across the tree",
+      "level": 3,
+      "body": "**Category:** pass\n\nRequirements-doc AC2 and AC3, and CODER-025 AC6 / CODER-027 AC5.\n`bash -n` over all 292 tracked `*.sh`: 0 failures, including both edited\nlibraries and the new operator script. `ast.parse` over all 531 tracked\n`*.py`: 0 syntax errors.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Regression tests genuinely exercise the new behaviour",
+      "heading": "Finding 7: Regression tests genuinely exercise the new behaviour",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-026 AC1/AC2/AC3/AC5. `team/tests/unit/test_bundle_write_refuses_without_valid_items.py`\nis new and was read end to end: four test classes covering all-narration,\nall-nonexistent, empty-argument, and a positive control that the guard does\nnot fire when one entry is real. The refusal assertions check the `error`,\n`message` and `remedy` keys, not just the exit code.\n`team/tests/integration/test_discovery_narration_channel.py` was rewritten\nfrom `TestSeededNarrationLineIsSkippedLoudly` (asserting the old\nskip-and-still-bundle behaviour) to\n`TestContaminatedPostFilterListRefusesTheWholeBundle`, asserting no bundle is\nwritten and that neither trigger nor riders are marked `running` — the\ncorrect fixture sweep for a guard that changed the behaviour the old test\npinned. Both files ran green inside the gated suites.\n\nTest fidelity: the unit file stubs `wf_load_plugin` / `wf_bundle_source_branch`\nrather than resolving a real plugin manifest. That is the right scope for a\nunit test of one guard, and the real resolution path is exercised by the\nintegration tests that drive the whole discovery pipeline — the condition the\nguard protects against (a non-path line in the item list) is present\nunmocked in both layers. No sanitised-proxy concern.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "`retire-empty-bundles.sh` report mode modifies nothing",
+      "heading": "Finding 8: `retire-empty-bundles.sh` report mode modifies nothing",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-027 AC1, AC3, AC4. Against a sandbox project holding five bundles — one\nall-narration at `open`, one with a resolvable item, one already `done`, one\nalready `running`, and one mixing a narration item with a resolvable one — the\nno-flag run printed a per-file stanza with a verdict and classified correctly:\n\n```\nv1.0.1 ... items: 1 item line(s) ..., none resolve to an existing file   verdict: retirable\nv1.0.2 ... items: item resolves to an existing file: .../BUG-0001-real.md verdict: kept\nv1.0.3 ... status: done                                                  verdict: skipped (already done)\nv1.0.4 ... status: running                                               verdict: skipped (already running)\nv1.0.5 ... items: item resolves to an existing file: .../BUG-0001-real.md verdict: kept\nsummary: 5 bundle(s) considered, 1 retirable, 2 kept, 2 skipped (dry run -- re-run with --apply to retire)\n```\n\n`md5sum` over every file before and after was identical — AC1's stated\nverification method, run as stated. The mixed bundle (one narration item, one\nreal item) was classified `kept`, which is AC3.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "`retire-empty-bundles.sh` apply mode retires exactly the eligible bundle",
+      "heading": "Finding 9: `retire-empty-bundles.sh` apply mode retires exactly the eligible bundle",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-027 AC2. The apply run set `## Status` to `done` on the one retirable\nbundle and reported `1 retirable, 1 retired, 2 kept, 2 skipped`. A per-file\n`diff` against a pre-run snapshot showed the kept, both skipped, and the mixed\nbundle byte-identical, and the retired bundle differing only in the status\nvalue. A second apply run was idempotent: `0 retirable, 0 retired, 2 kept,\n3 skipped`. No file was deleted.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "`--help` states usage, both modes, and the eligibility rule",
+      "heading": "Finding 10: `--help` states usage, both modes, and the eligibility rule",
+      "level": 3,
+      "body": "**Category:** pass\n\nCODER-027 AC5. `--help` exits 0 and prints the usage line, the flag\nvocabulary, the parenthetical distinguishing `--apply` from the report-only\ndefault, and the eligibility rule in full (not already `done`/`running`, AND\nevery `## Bundled Items` line failing to resolve, including zero item lines).\nThis is the authoritative statement the operator documentation points at\ninstead of restating, per WRITER-028's constraint.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Operator documentation is accurate and complete",
+      "heading": "Finding 11: Operator documentation is accurate and complete",
+      "level": 3,
+      "body": "**Category:** pass\n\nWRITER-028 AC1, AC2, AC4, AC5. `docs/operator-troubleshooting.md` gains \"The\nrequirements queue is full of near-identical bundles\", which names the\nthree-part symptom (consecutive patch versions, one dateline, no resolvable\nitems), explains the version-slot cost ending in `max_patch` exhaustion, and\nnotes that `list-stale-requirements.sh` excludes bundle files so it will not\nsurface the run. The dry-run invocation is shown first and `--apply` second,\nand the section states plainly that retiring sets `## Status` to `done` and\ndeletes nothing. The document's own intro enumeration was updated so it is not\nstale. No file was added under `docs/` (`git diff --diff-filter=A --name-only`\nover `docs/` is empty) and `team/config/docs-manifest.txt` is unchanged, which\nis AC4; every manifest entry still resolves to a real file. No markdown links\nwere introduced in the new section, so there are no broken internal links\nwithin it.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Gated integration runner exited 1 on a dashboard pane-death race",
+      "heading": "Finding 12: Gated integration runner exited 1 on a dashboard pane-death race",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** medium (3-5 CODER tasks — a tmux activation-hook race, and a\nflaky gated test that will keep costing future RCs their `PASS` until it is\neither fixed or quarantined behind a cited bug)\n**Systemic Risk:** medium (nothing about this RC, but an intermittently red\ngated suite recurs across every subsequent RC and degrades the one\nauthoritative pass/fail signal TESTER has)\n**Filed As:** BUG-0379-dashboard-switch-storm-pane-death (Path C-A — filed as\nBUG — code defect / regression / test failure)\n\n`tests/integration/test_dashboard_activation_hook_lifecycle.py::test_thirty_immediate_window_switches_leave_every_pane_alive`\nfailed: after thirty immediate `select-window` calls, pane `%37` of forty was\ngone. `Missing: ['%37']`, `New/unexpected: []`, at line 194.\n\nAttribution was investigated rather than assumed, because the previous release\n(v2.24.11) recorded `INTEGRATION_EXIT=0` with 542 passed — so on the face of\nit a green command went red.\n\n- Diff analysis: `git diff --name-only ai_main..ai_rc/v2.24.12` lists eight\n  files. None is a dashboard, tmux, or `create.sh` path. The failing test file\n  is itself unchanged by this RC. There is no code path by which the RC can\n  reach this test.\n- Repetition on an isolated clone of the RC: 1 failure in 17 runs.\n- Repetition on an isolated clone of `ai_main`: 0 failures in 15 runs.\n\nFifteen clean runs is not proof that `ai_main` never fails — the sample is\nsmall for a race, and a 1-in-17 rate would plausibly produce zero failures in\nfifteen attempts. What the two samples together do establish is that the\nfailure is non-deterministic rather than a deterministic break, and the diff\nestablishes that the RC cannot have introduced it. Rated `medium` on that\nevidence, with **Regression: no**, and stated here in prose rather than\nburied: a reader who weighs \"green last release, red this one\" more heavily\nthan the diff evidence should read this finding as the argument for that view\nand is free to reach a different rating.\n\nThe underlying defect is real and user-visible: a dashboard pane can vanish\nwhen an operator flips between windows faster than the activation hook\nsettles. The dashboard is recoverable by recreating the session, which is why\nthis is `medium` and not `high`.",
+      "filed_as": "BUG-0379",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "medium (3-5 CODER tasks — a tmux activation-hook race, and a",
+        "systemic_risk": "medium (nothing about this RC, but an intermittently red",
+        "filed_as": "BUG-0379-dashboard-switch-storm-pane-death (Path C-A — filed as"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Installed `OPERATIONS.md` cites a document the installer does not deliver",
+      "heading": "Finding 13: Installed `OPERATIONS.md` cites a document the installer does not deliver",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks — one manifest line, or a reword of two\ncitations)\n**Systemic Risk:** low (isolated to documentation delivery; no runtime path\ndepends on it)\n**Filed As:** BUG-0381-installed-operations-cites-uninstalled-doc (Path C-A)\n\n`team/config/docs-manifest.txt` states the rule in its own header: *\"A\ndocument listed here must never cite a docs/ path this file omits — that would\njust move the dangling pointer one hop deeper.\"* It then records\n`operator-troubleshooting.md` as a deliberate exclusion, checkout-only.\n\n`docs/OPERATIONS.md` is on the manifest and is installed. This RC adds a\nparagraph to it (line 3141) pointing the reader at\n`operator-troubleshooting.md`. Confirmed empirically against the live\ninstalled root: `docs/OPERATIONS.md` is present at 225203 bytes;\n`docs/operator-troubleshooting.md` does not exist there.\n\nTwo things keep this at `gap`/medium rather than higher. First, the condition\npredates the RC — `docs/operator-commands.md`, also manifest-listed and also\ninstalled, already carried a markdown link to the same target on `ai_main`\n(line 1980). This RC widens an existing defect rather than creating one.\nSecond, the new paragraph repeats both runnable invocations inline and names\nthe script's `--help` as authoritative, so an installed-root reader can still\ndo the work; only the longer walkthrough is unreachable.\n\nWRITER-028's own `status.md` flagged this concern before merge, which is the\nprocess working — it was recorded rather than hidden. It is filed here because\na concern noted in a task status is not a tracked item.\n\nSeparately noted in the filing: `docs/README.md` line 22 still describes\n`operator-troubleshooting.md` as \"Five common symptoms\". This RC made it six.",
+      "filed_as": "BUG-0381",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks — one manifest line, or a reword of two",
+        "systemic_risk": "low (isolated to documentation delivery; no runtime path",
+        "filed_as": "BUG-0381-installed-operations-cites-uninstalled-doc (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "The docs-citation closure check cannot see the citation form that broke",
+      "heading": "Finding 14: The docs-citation closure check cannot see the citation form that broke",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks — widen the pattern for files already\ninside `docs/`, resolve relative to the citing file, add two fixtures)\n**Systemic Risk:** low (a guard with a blind spot, not a runtime defect)\n**Filed As:** BUG-0382-docs-citation-check-misses-bare-filenames (Path C-A)\n\n`python3 team/scripts/check_docs_citations.py` exits 0 on this RC and reports\n\"24 governance file(s) scanned, 13 docs/ citation(s) checked, all named in\ndocs-manifest.txt\" — while the two citations in Finding 13 stand.\n\nThe transitive walk (`walk_docs_citation_closure` in\n`team/pgai_agent_kanban/lib/docs_citation_scan.py`) is correct and does follow\nmanifest-listed documents one hop deeper. The defect is upstream of it, at\nline 56:\n\n```python\nDOCS_CITATION_RE: re.Pattern[str] = re.compile(r\"docs/[A-Za-z0-9._/-]+\\.md\")\n```\n\nA citation counts only when the author wrote the literal `docs/` prefix.\nInside `docs/` the natural forms are a bare sibling filename and a relative\nmarkdown link, and neither carries it, so the walk is handed nothing to\nfollow and terminates with a clean verdict it has not earned. This is why\nFinding 13's pre-existing instance has gone unreported and why the new one\npassed pre-merge checks.\n\nThe pattern predates this RC. Filed separately from Finding 13 because the\nfixes are different files and different work: one is a manifest or wording\ndecision, the other is a scanner change with its own regression fixtures.",
+      "filed_as": "BUG-0382",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks — widen the pattern for files already",
+        "systemic_risk": "low (a guard with a blind spot, not a runtime defect)",
+        "filed_as": "BUG-0382-docs-citation-check-misses-bare-filenames (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Stray blank line splits the `discovery_state.sh` header comment block",
+      "heading": "Finding 15: Stray blank line splits the `discovery_state.sh` header comment block",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nStep 6.14 coding-standards spot-check. The RC's addition to the file header\nends with a `#` line followed by a bare empty line, splitting what was one\ncontiguous comment block into two:\n\n```\n#       section -- see the guard's own comment for the full rationale.\n#\n                                    <- bare blank line, no '#'\n#       A line in <files> may carry a trailing \"\\t<annotation>\".\n```\n\nCosmetic. Nothing parses this block, no lint flagged it, and both suites\nreached pytest. Recorded rather than filed: it is a one-character fix that\nbelongs to whoever next edits the file, and a bug report would cost more to\ntriage than the defect is worth.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "Operator verb manifest registration not taken",
+      "heading": "Finding 16: Operator verb manifest registration not taken",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nCODER-027's Required Output made manifest registration conditional — *\"if that\nmanifest governs operator scripts\"*. It does not govern all of them.\n`team/config/operator_verbs.manifest` catalogues the operator *verb* set with\nREST twins; thirteen scripts under `team/scripts/` declare\n`OPERATOR_VALID_FLAGS` and are absent from it, twelve of them predating this\nRC (`list-stale-requirements.sh`, `show-test-report.sh`,\n`export-project.sh`, `verdict-report.sh` and others).\n`team/scripts/lint_operator_verb_manifest.py` checks manifest-to-tree\ndirection plus `operations.py` route coverage; it does not require every\noperator script to have a row, and it reported no drift.\n\nThe script is nonetheless delivered to installed roots: `install.sh` and\n`team/scripts/upgrade.sh` both copy the whole `team/scripts` directory to\n`<kanban-root>/scripts`, so the documentation's\n`$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/retire-empty-bundles.sh` invocation\nresolves. Verified by reading both install loops.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 17,
+      "label": "17",
+      "title": "Requirements-doc acceptance criterion 1",
+      "heading": "Finding 17: Requirements-doc acceptance criterion 1",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe requirements doc's first criterion is *\"Each bundled item is addressed in\nthe implementation\"*. Its two `## Bundled Items` are not item files — they are\nthe verbatim narration lines that are the evidence of the wedge, which is what\nmakes this bundle its own exhibit. PM read them as that evidence and\ndecomposed them into four tickets that fix the mechanism which produced them.\nFindings 1 through 11 confirm every one of those tickets' criteria is met.\n\nRecorded as `pass-with-caveat` rather than `pass` because the criterion as\nliterally written cannot be satisfied by a bundle whose items are not items;\nthe substance behind it is fully addressed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 18,
+      "label": "18",
+      "title": "Release-state schema and version ordering",
+      "heading": "Finding 18: Release-state schema and version ordering",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.1. `projects/pgai-agent-kanban/release-state.md` holds all four fields.\n`## Active RC` is `v2.24.12`, matching the branch under test;\n`## RC Opened At` is a well-formed ISO-8601 value; `## RC Opened By Task` names\n`CM-20260923-029-open-rc-2-24-12`, which exists and reports `DONE`;\n`## Last Released` is `v2.24.11`, well-formed. `pp_last_released_version\n\"pgai-agent-kanban\"` returns `v2.24.11`, and `semver_gt \"v2.24.12\" \"v2.24.11\"`\nvia `team/scripts/lib/semver.sh` returns true. No inline comparison was made.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 19,
+      "label": "19",
+      "title": "Pre-flight — every DONE task landed on the RC",
+      "heading": "Finding 19: Pre-flight — every DONE task landed on the RC",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 2. All task folders under `projects/pgai-agent-kanban/tasks/` were scanned\nfor `## State: DONE` with a `## Feature Branch` other than `none`. No such\nbranch still exists locally, which passes both checks trivially — CODER and\nWRITER delete branches after merging, and each of the four prerequisite tasks'\nmerges is present in the RC history as a `--no-ff` merge commit (`e6c935d`,\n`227b4af`, `84818c6`, `9816229`). Step 3: `git rev-parse HEAD` equals\n`git rev-parse ai_rc/v2.24.12`; `git status --porcelain` empty;\n`git stash list` empty.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 20,
+      "label": "20",
+      "title": "Skip-cites-a-real-bug gate",
+      "heading": "Finding 20: Skip-cites-a-real-bug gate",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.13. `team/scripts/lint_skip_bug_gate.sh` reports\n\"OK — all skip annotations are compliant\" with \"BUG-NNNN file-existence check:\n0 missing files\". No `BUG-SKIP` placeholder or `skip`-near-`BUG-<letters>`\nshape exists outside archived runner logs under `team/tests/artifacts/` and one\ntest that deliberately contains the literal string `reason=BUG-NNNN` as its\nown fixture data.\n\nA naive grep for every `BUG-NNNN` token anywhere under `team/tests/` returns\n132 ids, most of which have no file — those are synthetic fixture values inside\ntest bodies, not skip citations, and the project's own gate correctly scopes to\nskip annotations.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 21,
+      "label": "21",
+      "title": "Constraint negative checks",
+      "heading": "Finding 21: Constraint negative checks",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.9. No credential-shaped token in any changed file. `set -euo pipefail`\npresent in `retire-empty-bundles.sh` (line 138, after argument parsing and\nbootstrap, as its header explains). No provenance leakage: every `BUG-NNNN`\ntoken among the RC's added lines is a synthetic fixture value inside the new\nunit test, which is SOP-core's sanctioned \"usage EXAMPLES where a bug-shaped\nVALUE illustrates an interface\" exception. `python3 team/scripts/lint_hygiene.py\n--classes provenance` reports \"OK — 0 findings across 8 scan director(y/ies)\".",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 22,
+      "label": "22",
+      "title": "Synthetic release simulation not applicable",
+      "heading": "Finding 22: Synthetic release simulation not applicable",
+      "level": 3,
+      "body": "**Category:** pass\n\nStep 6.8. The diff touches no release-lifecycle file — not `cm-release.sh`,\n`cm-open-rc.sh`, `cm-cancel-rc.sh`, `team/scripts/lib/project_paths.sh`, nor\nanything in the open/close cycle. `retire-empty-bundles.sh` is a new operator\nread/report tool outside that cycle. The step is skipped on its own terms; for\ninformation, `test_cm_release_synthetic.py` ran green (17 passed) inside the\ngated integration suite.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

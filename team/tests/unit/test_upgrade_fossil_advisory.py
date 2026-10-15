@@ -5,10 +5,10 @@ Behavioral unit tests for the fossil-retirement section of upgrade.sh.
 
 WHAT IS TESTED
 --------------
-After v1.3.0 moved top-level pipeline yamls inside each workflow plugin
-directory (``workflows/<type>/pipeline.yaml``), live installs that are
-upgraded may still carry the old ``workflows/release.yaml`` and
-``workflows/document.yaml`` files.  Since v1.6.2 upgrade.sh MOVES those
+Pipeline yamls live inside each workflow plugin directory
+(``workflows/<type>/pipeline.yaml``), but a live install being upgraded may
+still carry the top-level ``workflows/release.yaml`` and
+``workflows/document.yaml`` files.  upgrade.sh MOVES those
 fossil files to ``$KANBAN_ROOT/retired/<UTC-ts>/<relative-path>`` using the
 retirement manifest at ``$KANBAN_ROOT/templates/retired-files.txt``, rather
 than emitting a passive advisory.
@@ -61,10 +61,12 @@ _REAL_ARGPARSE_SH = _TEAM_SCRIPTS_DIR / "lib" / "argparse.sh"
 _REAL_ENV_BOOTSTRAP_SH = _TEAM_SCRIPTS_DIR / "lib" / "env_bootstrap.sh"
 _REAL_INI_PARSER_SH = _TEAM_SCRIPTS_DIR / "lib" / "ini_parser.sh"
 _REAL_PROJECT_PATHS_SH = _TEAM_SCRIPTS_DIR / "lib" / "project_paths.sh"
+_REAL_ERROR_CONTRACT_SH = _TEAM_SCRIPTS_DIR / "lib" / "error_contract.sh"
 _REAL_TEMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "temp.sh"
 _REAL_RETIRED_LINT_SH = _TEAM_SCRIPTS_DIR / "lib" / "retired_files_lint.sh"
 _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
+_REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 
 _TEAM_TEMPLATES_DIR = pathlib.Path(__file__).parent.parent.parent / "templates"
 _REAL_RETIRED_FILES_TXT = _TEAM_TEMPLATES_DIR / "retired-files.txt"
@@ -138,10 +140,11 @@ def _build_fossil_sandbox(
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
         _REAL_PROJECT_PATHS_SH,
+        _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
         _REAL_RETIRED_LINT_SH,
         _REAL_VERSION_STAMP_SH,
-        _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, installed_lib / lib_src.name)
@@ -235,10 +238,11 @@ def _build_fossil_sandbox(
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
         _REAL_PROJECT_PATHS_SH,
+        _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
         _REAL_RETIRED_LINT_SH,
         _REAL_VERSION_STAMP_SH,
-        _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_team_lib / lib_src.name)
@@ -251,7 +255,7 @@ def _build_fossil_sandbox(
     )
 
     # --- Dev tree: team content stubs for the deposit loop ---
-    for item_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP.md"]:
+    for item_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
         (dev_tree / "team" / item_name).write_text(
             f"# {item_name} stub\n", encoding="utf-8"
         )
@@ -493,6 +497,60 @@ def test_retirement_moves_document_fossil_only(
     graveyard = _find_graveyard_dir(kanban_root)
     assert graveyard is not None
     assert (graveyard / "workflows" / "document.yaml").exists()
+
+
+@pytest.mark.skipif(
+    not _REAL_UPGRADE_SH.exists(),
+    reason=f"Real upgrade.sh not found at {_REAL_UPGRADE_SH}; skipping.",
+)
+def test_retirement_removes_stale_top_level_sop_md(
+    tmp_path: pathlib.Path,
+) -> None:
+    """upgrade.sh retires a stale top-level SOP.md left by a pre-split install.
+
+    v2.10.0 split SOP.md into SOP-core.md plus per-role procedure and
+    registered the old pointer stub in the retirement manifest. A live
+    install upgraded from before the split still carries the old
+    ``SOP.md`` at the kanban root; the retirement step must move it to
+    the graveyard so the install does not end up holding both files.
+    """
+    sandbox = _build_fossil_sandbox(tmp_path, fossils=[])
+    kanban_root = sandbox["kanban_root"]
+    (kanban_root / "SOP.md").write_text(
+        "# Shared Operating Procedure — split, see SOP-core.md\n",
+        encoding="utf-8",
+    )
+
+    result = _run_upgrade(sandbox, tmp_path)
+
+    assert result.returncode == 0, (
+        f"upgrade.sh failed (exit {result.returncode}).\n"
+        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+    )
+
+    combined_output = result.stdout + result.stderr
+    retire_lines = [
+        line for line in combined_output.splitlines()
+        if _RETIRE_FRAGMENT in line and _GRAVEYARD_FRAGMENT in line and _RETIRE_PER_FILE_MARKER in line and "[upgrade]" in line
+    ]
+    assert len(retire_lines) == 1, (
+        f"Expected 1 retirement line for the stale SOP.md, found {len(retire_lines)}.\n"
+        + ("\n".join(retire_lines) or "  (none)")
+        + f"\n\nFull stdout:\n{result.stdout}"
+    )
+    assert "SOP.md" in retire_lines[0]
+
+    assert not (kanban_root / "SOP.md").exists(), (
+        "SOP.md still exists at the live root after upgrade; a kanban root "
+        "holding both SOP.md and SOP-core.md is the failure this retirement "
+        "entry exists to prevent."
+    )
+
+    graveyard = _find_graveyard_dir(kanban_root)
+    assert graveyard is not None, "No retired/<ts>/ directory was created."
+    assert (graveyard / "SOP.md").exists(), (
+        f"SOP.md not found in graveyard {graveyard}."
+    )
 
 
 @pytest.mark.skipif(

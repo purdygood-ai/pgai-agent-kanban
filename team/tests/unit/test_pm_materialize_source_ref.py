@@ -4,8 +4,8 @@ test_pm_materialize_source_ref.py
 Tests for plan-level source_branch propagation and the fail-closed
 source-ref guard in pm_materialize.py.
 
-Covers three acceptance criteria from task
-CODER-20260713-027-propagate-source-ref-fail-closed:
+Covers three acceptance criteria for source_branch propagation and the
+fail-closed guard:
 
   AC-1  Per-ticket override retained (regression): a ticket with its own
         explicit source_branch keeps it; propagation does not overwrite.

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# dashboard-git-recent-tags.sh
+# git-recent-tags.sh
 # Prints a Recent Tags listing for all registered release/feature projects.
 #
-# Designed to run under `watch -n 10 dashboard-git-recent-tags.sh` in the
-# right pane of the tmux `git` window created by dashboard-create.sh.
+# Designed to run under `watch -n 10 git-recent-tags.sh` in the
+# right pane of the tmux `git` window created by dashboard/create.sh.
 #
 # For each registered project whose workflow_type is "release" (or "feature"),
 # a labeled section is rendered showing the 10 most recent semver tags
@@ -20,7 +20,7 @@
 # ls-remote is ever invoked here.
 #
 # Usage:
-#   dashboard-git-recent-tags.sh [--kanban-root <path>] [--project <name>]
+#   git-recent-tags.sh [--kanban-root <path>] [--project <name>]
 #
 # Options:
 #   --kanban-root <path>  Override the kanban root (default: $PGAI_AGENT_KANBAN_ROOT_PATH)
@@ -57,7 +57,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//'
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:36}"
       exit 0
       ;;
     *)
@@ -83,6 +88,10 @@ source "${LIB_DIR}/project_paths.sh"
 # Source projects lib for projects_cfg_list.
 # shellcheck source=../lib/projects.sh
 source "${LIB_DIR}/projects.sh"
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh).
+# shellcheck source=../lib/script_common.sh
+source "${LIB_DIR}/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # ANSI color support (honor NO_COLOR and TERM=dumb)
@@ -92,30 +101,12 @@ if [[ -n "${NO_COLOR:-}" ]] || [[ "${TERM:-}" == "dumb" ]]; then
   USE_COLOR=false
 fi
 
-c() {
-  # c <color-name> — emit ANSI code or empty string
-  if [[ "$USE_COLOR" != "true" ]]; then echo ""; return; fi
-  case "$1" in
-    bold)    printf '\033[1m' ;;
-    dim)     printf '\033[2m' ;;
-    reset)   printf '\033[0m' ;;
-    cyan)    printf '\033[0;36m' ;;
-    green)   printf '\033[0;32m' ;;
-    yellow)  printf '\033[0;33m' ;;
-    red)     printf '\033[0;31m' ;;
-    blue)    printf '\033[0;34m' ;;
-    white)   printf '\033[0;37m' ;;
-    magenta) printf '\033[0;35m' ;;
-    *)       printf '' ;;
-  esac
-}
-
-RESET="$(c reset)"
-BOLD="$(c bold)"
-DIM="$(c dim)"
-CYAN="$(c cyan)"
-GREEN="$(c green)"
-YELLOW="$(c yellow)"
+RESET="$(ansi_code reset)"
+BOLD="$(ansi_code bold)"
+DIM="$(ansi_code dim)"
+CYAN="$(ansi_code cyan)"
+GREEN="$(ansi_code green)"
+YELLOW="$(ansi_code yellow)"
 
 # ---------------------------------------------------------------------------
 # render_project_recent_tags <project_name> <dev_tree> <branch_prefix>

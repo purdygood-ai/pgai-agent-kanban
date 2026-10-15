@@ -284,9 +284,13 @@ def api_server_fixture(
                       for providing a valid path (e.g. pytest's tmp_path).
         port:         TCP port to bind.  Pass 0 (default) to let the OS assign
                       an ephemeral port.  Never pass 8300.
-        kanban_root:  Value of PGAI_AGENT_KANBAN_ROOT_PATH for the subprocess.
-                      When None, a minimal temp directory is created so the
-                      server starts without a real kanban installation.
+        kanban_root:  The kanban root the subprocess is pinned to: it is
+                      exported as PGAI_AGENT_KANBAN_ROOT_PATH and KANBAN_ROOT,
+                      and the pre-resolved PGAI_TASKS_DIR / PGAI_PROJECT_ROOT /
+                      PGAI_PROJECT_NAME inherited from the calling shell are
+                      cleared so nothing the server runs can resolve any other
+                      root.  When None, a minimal temp directory is created so
+                      the server starts without a real kanban installation.
 
     Yields:
         ServerHandle(port=<bound_port>, pid=<uvicorn_pid>)
@@ -341,20 +345,32 @@ def api_server_fixture(
         "1",
     ]
 
-    # Build the subprocess environment: propagate current env, then set the
-    # kanban root so the app finds its config.  Explicitly clear PGAI_AGENT_KANBAN_ROOT_PATH
-    # from the parent and replace it with the fixture root so that the subprocess
-    # does not inherit the live-install path from the test harness.
+    # Build the subprocess environment: propagate the current env, then pin
+    # every name that resolves to a kanban root at *kanban_root*.  A root is
+    # only sandboxed when all of these agree (docs/test-authoring-guidelines.md
+    # "Live-install safety"): PGAI_AGENT_KANBAN_ROOT_PATH is what the app and
+    # every entry-point script read; KANBAN_ROOT is the alias project_paths.sh
+    # and OpsContext.from_env read ahead of it; PGAI_TASKS_DIR and
+    # PGAI_PROJECT_ROOT arrive pre-resolved from a wake-invoked shell and
+    # outrank anything a root derives, so they are cleared rather than
+    # repointed -- a script that needs them derives them from the pinned
+    # root; PGAI_PROJECT_NAME is cleared so no script assumes the invoking
+    # lane's project.  The framework temp dir is left as the caller set it.
     env = dict(os.environ)
     env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
+    env["KANBAN_ROOT"] = str(kanban_root)
+    for inherited_name in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "PGAI_PROJECT_NAME"):
+        env.pop(inherited_name, None)
 
-    # Ensure the dev-tree package is importable inside the subprocess.
-    # The parent conftest ensures PGAI_DEV_TREE_PATH and PYTHONPATH are set for
-    # the test session; we propagate them as-is.
-    dev_tree = env.get("PGAI_DEV_TREE_PATH", "")
-    if dev_tree and (pathlib.Path(dev_tree) / "team").is_dir():
+    # Ensure the package of the tree under test is importable inside the
+    # subprocess. The team/ directory is located from this file's own path
+    # (team/tests/fixtures/api_server.py), never from PGAI_DEV_TREE_PATH: the
+    # suite-wide isolation fixture removes that variable, and an inherited
+    # value names the operator's checkout rather than the tree being tested.
+    team_dir = pathlib.Path(__file__).resolve().parents[2]
+    if (team_dir / "pgai_agent_kanban").is_dir():
         current_pythonpath = env.get("PYTHONPATH", "")
-        team_path = str(pathlib.Path(dev_tree) / "team")
+        team_path = str(team_dir)
         if team_path not in current_pythonpath.split(os.pathsep):
             env["PYTHONPATH"] = (
                 team_path + os.pathsep + current_pythonpath

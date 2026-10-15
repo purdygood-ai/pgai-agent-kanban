@@ -43,7 +43,7 @@ Tests cover the core acceptance criteria:
      against the real team/scripts/cm/ (via --scripts-dir) finds exactly the
      five expected offender scripts still awaiting remediation.
 
- 12. **Remedy block (PRIORITY-0001-gates-prescribe-remedies)**: forcing a
+ 12. **Remedy block (the gates-prescribe-remedies pattern)**: forcing a
      missing-``--help`` failure prints the full three-part remedy block
      required by docs/coding-standards.md ("Gates prescribe, not just
      diagnose") — cause(s) naming the offending script, a numbered fix block
@@ -53,7 +53,7 @@ Tests cover the core acceptance criteria:
  13. **Remedy commands clear the gate**: the exact numbered commands printed
      in the remedy block are parsed out of the captured output and executed,
      verbatim, through a real shell — the appended handler actually responds
-     to ``--help`` (proving the fix is a genuine implementation, not a
+     to ``--help`` (proving the remedy is a genuine implementation, not a
      pattern-match exploit), and the lint re-run against the fixture exits 0.
 
 All tests use pytest's ``tmp_path`` and importlib for isolation — no bare /tmp
@@ -65,6 +65,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -114,6 +115,11 @@ def _write_shell_script(directory: Path, name: str, content: str) -> Path:
     script = directory / name
     script.write_text(content, encoding="utf-8")
     return script
+
+
+# _write_shell_script is suffix-agnostic (it just writes text to a path); the
+# alias below documents intent at .py call sites without duplicating logic.
+_write_python_script = _write_shell_script
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +297,146 @@ exec "$(dirname "${BASH_SOURCE[0]}")/real-script.sh" --max-tasks=1 "$@"
 
 
 # ---------------------------------------------------------------------------
+# Test 5b: .py entry points are in scope — argparse-based script passes
+# ---------------------------------------------------------------------------
+
+
+def test_python_argparse_script_passes(tmp_path: Path) -> None:
+    """A .py entry point built on argparse.ArgumentParser() is recognized as
+    help-aware — argparse adds a working -h/--help flag by default.
+
+    This is the positive proof that widening the scan set to .py files does
+    not turn every Python entry point into a false-positive offender: the
+    common case (argparse with default add_help=True) must pass.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+
+    script_content = """\
+#!/usr/bin/env python3
+\"\"\"Synthetic Python entry point using argparse's default --help.\"\"\"
+import argparse
+
+
+def main():
+    parser = argparse.ArgumentParser(description="synthetic test tool")
+    parser.parse_args()
+    print("running")
+
+
+if __name__ == "__main__":
+    main()
+"""
+    _write_python_script(scripts_dir, "test_argparse_entry_point.py", script_content)
+    exempt_path = _write_exempt_list(tmp_path, [])
+
+    result = _lint.main([
+        "--scripts-dir", str(scripts_dir),
+        "--exempt-list", str(exempt_path),
+    ])
+
+    assert result == 0, (
+        "A .py entry point built on argparse.ArgumentParser() (default "
+        "add_help=True) must be recognized as help-aware.  The pattern-6 "
+        "argparse-constructor detection is broken."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 5c: .py entry points are in scope — no-help script is flagged
+# ---------------------------------------------------------------------------
+
+
+def test_python_script_without_help_triggers_violation(tmp_path: Path) -> None:
+    """A .py entry point with no argparse and no --help handling is flagged.
+
+    This is the negative proof for the widened scan set: a Python script
+    that never checks --help/-h — the exact shape pseudocron.py had before
+    its argument parser was added — must fail the gate, not be silently
+    skipped for having the wrong extension.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+
+    script_content = """\
+#!/usr/bin/env python3
+\"\"\"Synthetic Python entry point with no argument parsing at all.\"\"\"
+import sys
+
+
+def main():
+    print("doing real work", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
+"""
+    _write_python_script(scripts_dir, "test_no_help_entry_point.py", script_content)
+    exempt_path = _write_exempt_list(tmp_path, [])
+
+    result = _lint.main([
+        "--scripts-dir", str(scripts_dir),
+        "--exempt-list", str(exempt_path),
+    ])
+
+    assert result == 1, (
+        "A .py entry point with no argparse and no --help handling must be "
+        "flagged as an offender now that the scan set covers .py files.  "
+        "If this returns 0, the widened scan is not actually checking "
+        "Python entry points."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 5d: .py entry point with add_help=False and no manual handler fails
+# ---------------------------------------------------------------------------
+
+
+def test_python_argparse_add_help_false_without_manual_handler_fails(
+    tmp_path: Path,
+) -> None:
+    """A .py script that disables argparse's automatic help (add_help=False)
+    and adds no manual --help/-h handling is flagged.
+
+    argparse.ArgumentParser(add_help=False) opts out of the free -h/--help
+    flag; a script that does this without adding its own handler has no
+    working help path, so pattern 6 must not give it credit just for
+    calling the constructor.
+    """
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+
+    script_content = """\
+#!/usr/bin/env python3
+\"\"\"Synthetic Python entry point with help explicitly disabled.\"\"\"
+import argparse
+
+
+def main():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--project")
+    parser.parse_args()
+
+
+if __name__ == "__main__":
+    main()
+"""
+    _write_python_script(scripts_dir, "test_no_manual_help_entry_point.py", script_content)
+    exempt_path = _write_exempt_list(tmp_path, [])
+
+    result = _lint.main([
+        "--scripts-dir", str(scripts_dir),
+        "--exempt-list", str(exempt_path),
+    ])
+
+    assert result == 1, (
+        "A .py entry point that sets add_help=False and adds no manual "
+        "--help/-h handler must be flagged.  Pattern 6 must not credit a "
+        "parser constructed this way."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Test 6: missing scripts directory returns 2
 # ---------------------------------------------------------------------------
 
@@ -350,6 +496,9 @@ def test_real_tree_produces_zero_offenders() -> None:
     """
     real_exempt_list = _SCRIPTS_DIR / "help_presence_exempt.txt"
 
+    # Deliberately exercises the real team/scripts/ tree (not a fixture):
+    # this is the proof that the current codebase satisfies the lint, not
+    # an isolated behavior a fixture could stand in for.
     result = _lint.main([
         "--scripts-dir", str(_SCRIPTS_DIR),
         "--exempt-list", str(real_exempt_list),
@@ -360,6 +509,45 @@ def test_real_tree_produces_zero_offenders() -> None:
         "directory.  A script is missing --help and is not on the exempt list.  "
         "Run 'python3 team/scripts/lint_help_presence.py --verbose' to see "
         "which script(s) are flagged."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 8b: real-tree .py inclusion — pseudocron.py is actually scanned
+# ---------------------------------------------------------------------------
+
+
+def test_real_tree_scan_includes_pseudocron_py() -> None:
+    """pseudocron.py is a checked (non-exempt) script in the real-tree scan.
+
+    Regression guard for the gap this lint used to have: before the scan
+    set widened to .py files, pseudocron.py was invisible to this lint no
+    matter what its --help behavior was. This proves the widened scan
+    actually walks it — a script naming any list of .py files without
+    including this one would silently keep the gap open. Uses --verbose so
+    the scanned-file names are on stdout to check against.
+    """
+    import contextlib
+    import io
+
+    real_exempt_list = _SCRIPTS_DIR / "help_presence_exempt.txt"
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        result = _lint.main([
+            "--scripts-dir", str(_SCRIPTS_DIR),
+            "--exempt-list", str(real_exempt_list),
+            "--verbose",
+        ])
+
+    assert result == 0, (
+        "Real-tree scan (including pseudocron.py) must produce zero "
+        "offenders; pseudocron.py must implement --help/-h."
+    )
+    assert "scanning: pseudocron.py" in buf.getvalue(), (
+        "pseudocron.py did not appear in the --verbose scan log — the "
+        "widened scan set is not actually including .py entry points.\n"
+        f"stdout: {buf.getvalue()!r}"
     )
 
 
@@ -478,6 +666,9 @@ def test_real_tree_cm_offenders_match_expected() -> None:
     import contextlib
 
     # Capture stdout to parse offender names from the lint output.
+    # Deliberately exercises the real team/scripts/cm/ tree (not a
+    # fixture): this is a live regression guard, not an isolated behavior a
+    # fixture could stand in for.
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         result = _lint.main([
@@ -512,7 +703,7 @@ def test_real_tree_cm_offenders_match_expected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Remedy-block tests (PRIORITY-0001-gates-prescribe-remedies)
+# Remedy-block tests (the gates-prescribe-remedies pattern)
 # ---------------------------------------------------------------------------
 
 # A numbered fix-command line, e.g. "  1. echo '...' >> \"...\"".
@@ -528,7 +719,7 @@ _ANGLE_BRACKET_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][\w -]*>")
 class TestHelpPresenceRemedyBlock:
     """The remedy block: cause(s), numbered verbatim commands, re-lint, rule.
 
-    Exercises PRIORITY-0001-gates-prescribe-remedies' second lint target end
+    Exercises the gates-prescribe-remedies pattern's second lint target end
     to end: force a missing-``--help`` failure, assert the remedy block
     contains every required part, assert the printed commands carry no
     angle-bracket placeholders, and then actually execute the printed
@@ -615,8 +806,7 @@ class TestHelpPresenceRemedyBlock:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Executing the remedy block's printed commands verbatim clears the
-        gate — the motivating end-to-end proof (acceptance criterion 4 of
-        CODER-20260727-017-retrofit-provenance-help): a stranger reading only
+        gate — the motivating end-to-end proof: a stranger reading only
         the gate's failure output, with no other guidance, can clear it.
 
         The test parses the exact numbered command strings out of the
@@ -677,3 +867,303 @@ class TestHelpPresenceRemedyBlock:
             f"Patched script did not print a usage line on --help.\n"
             f"stdout: {help_proc.stdout!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Python-offender remedy — same end-to-end proof, for a .py target
+# ---------------------------------------------------------------------------
+
+
+class TestHelpPresenceRemedyBlockPython:
+    """The remedy block for a .py offender: same three-part contract, but the
+    fix command must be `_build_py_fix_command`'s rewrite, not the shell
+    case-branch append (which would be invalid syntax dropped into a .py
+    file, and would never even run past a `sys.exit()`-calling __main__
+    guard placed ahead of it).
+    """
+
+    def _write_no_help_python_fixture(self, tmp_path: Path) -> tuple[Path, Path, Path]:
+        """Return (scripts_dir, exempt_list_path, script_path) for a synthetic
+        scripts directory containing exactly one no-help Python entry point
+        whose __main__ guard calls sys.exit() — the shape that proves an
+        end-of-file append would never run."""
+        scripts_dir = tmp_path / "remedy_fixture_py"
+        scripts_dir.mkdir()
+        script = _write_python_script(
+            scripts_dir,
+            "no_help_target.py",
+            "#!/usr/bin/env python3\n"
+            '"""Synthetic offender for the Python remedy path."""\n'
+            "import sys\n"
+            "\n"
+            "\n"
+            "def main():\n"
+            '    print("doing real work")\n'
+            "    return 0\n"
+            "\n"
+            "\n"
+            'if __name__ == "__main__":\n'
+            "    sys.exit(main())\n",
+        )
+        exempt_path = _write_exempt_list(tmp_path, [])
+        return scripts_dir, exempt_path, script
+
+    def test_python_remedy_command_is_single_line_and_clears_the_gate(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The printed fix command for a .py offender is exactly one line
+        (a multi-line command would break the numbered-command parsing every
+        other remedy-block consumer relies on), carries no angle-bracket
+        placeholder, and — when executed verbatim — produces a genuine,
+        working --help responder without disturbing the script's normal
+        (no-argument) behavior.
+        """
+        scripts_dir, exempt_path, script = self._write_no_help_python_fixture(tmp_path)
+
+        result = _lint.main([
+            "--scripts-dir", str(scripts_dir),
+            "--exempt-list", str(exempt_path),
+        ])
+        assert result == 1, "Forced no-help Python fixture did not fail the gate."
+
+        out = capsys.readouterr().out
+        commands = _NUMBERED_COMMAND_RE.findall(out)
+        assert len(commands) >= 2, (
+            f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
+        )
+
+        placeholder_hits = _ANGLE_BRACKET_PLACEHOLDER_RE.findall(out)
+        assert placeholder_hits == [], (
+            "Python remedy command contains unresolved angle-bracket "
+            f"placeholder(s).\nPlaceholders found: {placeholder_hits!r}\nstdout: {out!r}"
+        )
+
+        fix_command_text = commands[0][1]
+        assert fix_command_text.count("\n") == 0, (
+            "The .py offender's fix command must be a single line (a "
+            "multi-line command breaks the '<n>. <command>' numbered-list "
+            f"parsing every remedy-block consumer relies on).\nGot: {fix_command_text!r}"
+        )
+
+        for _, command_text in commands:
+            proc = subprocess.run(
+                command_text,
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, (
+                f"Printed Python remedy command exited non-zero: {command_text!r}\n"
+                f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
+            )
+
+        recheck = _lint.main([
+            "--scripts-dir", str(scripts_dir),
+            "--exempt-list", str(exempt_path),
+        ])
+        assert recheck == 0, (
+            "lint_help_presence still fails against the Python fixture "
+            "directory after running every printed remedy command verbatim."
+        )
+
+        # The patched script must genuinely respond to --help ...
+        help_proc = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert help_proc.returncode == 0, (
+            f"Patched .py script exited non-zero on --help: {help_proc.stderr!r}"
+        )
+        assert "Usage:" in help_proc.stdout, (
+            f"Patched .py script did not print a usage line on --help.\n"
+            f"stdout: {help_proc.stdout!r}"
+        )
+
+        # ... while its original no-argument behavior is undisturbed.
+        plain_proc = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True,
+            text=True,
+        )
+        assert plain_proc.returncode == 0, (
+            f"Patched .py script exited non-zero with no arguments: "
+            f"{plain_proc.stderr!r}"
+        )
+        assert "doing real work" in plain_proc.stdout, (
+            "Patched .py script's original no-argument behavior changed.\n"
+            f"stdout: {plain_proc.stdout!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Help-quality checks: undocumented flags and fixed sed help ranges.
+# Quality class — each finding is narrated; neither changes the exit status.
+# ---------------------------------------------------------------------------
+
+_SECRET_FLAG_SCRIPT = """\
+#!/usr/bin/env bash
+# fixture_secret_flag.sh
+# Usage:
+#   fixture_secret_flag.sh [--verbose] [--help]
+#
+# Options:
+#   --verbose  Print more.
+#   --help     Print this usage and exit 0.
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h) echo usage; exit 0 ;;
+    --verbose) shift ;;
+    --secret) shift ;;
+    *) exit 1 ;;
+  esac
+done
+"""
+
+_FIXED_RANGE_SCRIPT_TEMPLATE = """\
+#!/usr/bin/env bash
+# fixture_fixed_range.sh
+# Usage: fixture_fixed_range.sh [--help]
+case "${{1:-}}" in
+  --help|-h) sed -n '2,3p' {operand} | sed 's/^# \\{{0,1\\}}//'; exit 0 ;;
+esac
+"""
+
+
+def _quality_findings(scripts_dir: Path) -> list:
+    """Return the help-quality findings for every script under *scripts_dir*."""
+    findings, _checked = _lint._scan_help_quality(scripts_dir, verbose=False)
+    return findings
+
+
+def test_quality_scan_reports_an_undocumented_case_arm_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A script whose case arm parses --secret, never named in its help, is
+    reported by name; the documented --verbose is not; the lint still
+    exits 0 because the check is quality class."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    _write_shell_script(scripts_dir, "fixture_secret_flag.sh", _SECRET_FLAG_SCRIPT)
+    exempt_path = _write_exempt_list(tmp_path, [])
+
+    result = _lint.main(["--scripts-dir", str(scripts_dir), "--exempt-list", str(exempt_path)])
+    output = capsys.readouterr().out
+
+    assert result == 0, f"quality findings must not change the exit status; got {result}\n{output}"
+    finding_lines = [line for line in output.splitlines() if "[undocumented-flag]" in line]
+    assert len(finding_lines) == 1, f"expected one undocumented-flag finding:\n{output}"
+    assert "fixture_secret_flag.sh" in finding_lines[0]
+    assert "--secret" in finding_lines[0]
+    assert "--verbose" not in finding_lines[0], finding_lines[0]
+
+
+@pytest.mark.parametrize("operand", ['"$0"', '"${BASH_SOURCE[0]}"', "$0"])
+def test_quality_scan_reports_a_fixed_sed_help_range(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], operand: str
+) -> None:
+    """A script printing its help through a fixed sed -n 'A,Bp' range on its
+    own file is reported with the line number; the lint still exits 0."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    _write_shell_script(
+        scripts_dir,
+        "fixture_fixed_range.sh",
+        _FIXED_RANGE_SCRIPT_TEMPLATE.format(operand=operand),
+    )
+    exempt_path = _write_exempt_list(tmp_path, [])
+
+    result = _lint.main(["--scripts-dir", str(scripts_dir), "--exempt-list", str(exempt_path)])
+    output = capsys.readouterr().out
+
+    assert result == 0, f"quality findings must not change the exit status; got {result}\n{output}"
+    finding_lines = [line for line in output.splitlines() if "[fixed-sed-help-range]" in line]
+    assert len(finding_lines) == 1, f"expected one fixed-sed-help-range finding:\n{output}"
+    assert "fixture_fixed_range.sh:5" in finding_lines[0], finding_lines[0]
+    assert "header_help_print" in finding_lines[0], "the finding must name the replacement helper"
+
+
+def test_quality_scan_reads_every_parsed_flag_form(tmp_path: Path) -> None:
+    """argparse_has, --value-flags lists and OPERATOR_VALID_FLAGS arrays all
+    count as parsed flags; each undocumented one is reported, and a script
+    rendering help from OPERATOR_VALID_FLAGS documents those by construction."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    _write_shell_script(
+        scripts_dir,
+        "fixture_forms.sh",
+        "#!/usr/bin/env bash\n"
+        "# fixture_forms.sh [--help]\n"
+        "\n"
+        'argparse_parse --value-flags "kanban-root backup" -- "$@"\n'
+        "if argparse_has help; then echo usage; exit 0; fi\n"
+        "if argparse_has dry-run; then :; fi\n"
+        "OPERATOR_VALID_FLAGS=(project limit)\n",
+    )
+    _write_shell_script(
+        scripts_dir,
+        "fixture_rendered.sh",
+        "#!/usr/bin/env bash\n"
+        "# fixture_rendered.sh\n"
+        "\n"
+        "OPERATOR_VALID_FLAGS=(project limit help)\n"
+        "if argparse_has help; then operator_args_render_help_for_flags; exit 0; fi\n",
+    )
+
+    findings = {f.label: f.detail for f in _quality_findings(scripts_dir)}
+
+    assert "fixture_rendered.sh" not in findings, findings
+    detail = findings.get("fixture_forms.sh", "")
+    for flag in ("--kanban-root", "--backup", "--dry-run", "--project", "--limit"):
+        assert flag in detail, f"{flag} not reported: {detail!r}"
+    assert "--help" not in detail.split(" but ")[0], detail
+
+
+def test_quality_scan_passes_documented_flags_and_skips_lib_and_comments(
+    tmp_path: Path,
+) -> None:
+    """Flags named in the header, a usage function or a heredoc pass; a case
+    arm inside a comment is not a parsed flag; scripts under lib/ are not
+    entry points and are never scanned."""
+    scripts_dir = tmp_path / "scripts"
+    (scripts_dir / "lib").mkdir(parents=True)
+    _write_shell_script(
+        scripts_dir,
+        "fixture_documented.sh",
+        "#!/usr/bin/env bash\n"
+        "# fixture_documented.sh [--alpha] [--help]\n"
+        "\n"
+        "_usage() {\n"
+        '  echo "  --beta   the beta flag"\n'
+        "}\n"
+        "cat <<EOF\n"
+        "  --gamma  the gamma flag\n"
+        "EOF\n"
+        'case "$1" in\n'
+        "  --help|-h) _usage; exit 0 ;;\n"
+        "  --alpha|--beta) ;;\n"
+        "  --gamma=*) ;;\n"
+        "  # --commented-out) ;;\n"
+        "esac\n",
+    )
+    _write_shell_script(
+        scripts_dir / "lib",
+        "helper.sh",
+        "#!/usr/bin/env bash\n"
+        "# helper.sh\n"
+        "x() { case \"$1\" in --help) sed -n '2,3p' \"$0\" ;; --hidden) ;; esac; }\n",
+    )
+
+    assert _quality_findings(scripts_dir) == []
+
+
+def test_quality_scan_is_clean_on_the_real_scripts_tree() -> None:
+    """Every bash entry point under team/scripts/ names each flag it parses
+    and none prints help through a fixed sed range."""
+    # Deliberately the real tree, not a fixture: this proves the shipped
+    # scripts satisfy both checks.
+    findings = _quality_findings(_SCRIPTS_DIR)
+    assert findings == [], "help-quality findings on the real tree:\n" + "\n".join(
+        f"  [{f.check}] {f.label}: {f.detail}" for f in findings
+    )

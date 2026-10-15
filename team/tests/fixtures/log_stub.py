@@ -150,7 +150,7 @@ def make_log_stub_fragment(log_file: pathlib.Path) -> str:
     """
     log_file_str = str(log_file.resolve())
     return textwrap.dedent(f"""\
-        # --- faithful log() stub (BUG-0161 test fidelity) ---
+        # --- faithful log() stub (test fidelity) ---
         # Mirrors production log() from team/scripts/lib/wake_common.sh:
         #   log() {{ echo "[...] wake($AGENT): $*" | tee -a "$LOG_FILE"; }}
         # Key: tee writes to BOTH stdout and the log file.  An stderr-only stub

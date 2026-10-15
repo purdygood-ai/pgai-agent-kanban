@@ -1,7 +1,7 @@
 """
-test_bug0041_acceptance.py — Acceptance tests proving BUG-0041 is fixed.
+test_bug0041_acceptance.py — Acceptance tests for the API's two universal
+contracts, honored by every operation:
 
-BUG-0041 established two universal API contracts:
   1. dry_run on every operation (all 17), uniform semantics — dispatch-layer
      short-circuit, no subprocess spawned, zero filesystem/git side effects.
   2. warnings: list[str] on every response, always present — unknown query
@@ -40,7 +40,7 @@ Design notes
   remain hermetic and do not depend on script availability.
 - Cleanup: non-dry-run probes that mutate state (the 'forse' test creates a HALT
   file) clean up their side effects so the suite is idempotent.
-- Test names describe observable behavior per SOP.md naming convention.
+- Test names describe observable behavior per SOP-core.md's naming convention.
 """
 
 from __future__ import annotations
@@ -159,7 +159,9 @@ def _make_client(
     Args:
         kanban_root:  Sandbox root for script invocation (e.g. tmp_path/"sb").
         monkeypatch:  pytest monkeypatch fixture for env var isolation.
-        dev_tree:     team/ directory containing scripts/; defaults to _TEAM_DIR.
+        dev_tree:     The API config's kanban_root: team/ (containing scripts/)
+                      by default, for routes that shell to a script; the
+                      sandbox itself for a route that acts in process.
 
     Returns:
         TestClient instance (use as a context manager).
@@ -175,13 +177,39 @@ def _make_client(
     return TestClient(create_app(cfg=cfg), raise_server_exceptions=True)
 
 
+def _in_process_operation_routes() -> frozenset[str]:
+    """POST routes whose census row declares ``impl`` = ``module:<function>``.
+
+    Such a route calls its ops function in process against the API's own
+    ``kanban_root`` instead of shelling to a script, so a test that wants it
+    to act on (or provably leave alone) a sandbox roots the API there.
+    """
+    from pgai_agent_kanban.lib.operator_verb_manifest import load_manifest
+
+    return frozenset(
+        verb.rest_route
+        for verb in load_manifest().values()
+        if verb.rest_method == "POST" and verb.impl.startswith("module:")
+    )
+
+
+def _make_operation_client(
+    route: str, kanban_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> TestClient:
+    """A TestClient for *route*: rooted at the sandbox for an in-process
+    route, at team/ (so scripts resolve) for a route that shells out."""
+    if route in _in_process_operation_routes():
+        return _make_client(kanban_root, monkeypatch, dev_tree=kanban_root)
+    return _make_client(kanban_root, monkeypatch)
+
+
 # ---------------------------------------------------------------------------
 # (a) Four literal reference-shape tests
 # ---------------------------------------------------------------------------
 
 
 class TestReferenceShapes:
-    """Four literal reference shapes from BUG-0041 — exact target behavior."""
+    """Four literal reference shapes covering the module's target behavior."""
 
     def test_health_baseline_warnings_empty(
         self,
@@ -267,7 +295,10 @@ class TestReferenceShapes:
             "Pre-condition violated: HALT file must not exist before dry-run call."
         )
 
-        with _make_client(kanban_root, monkeypatch) as client:
+        # POST /operations/halt calls ops.write.halt in process against the
+        # API's own kanban root, so the API is rooted at the sandbox: a dry
+        # run that wrongly executed would create the HALT checked below.
+        with _make_client(kanban_root, monkeypatch, dev_tree=kanban_root) as client:
             resp = client.post(
                 "/operations/halt",
                 json={"project": _SANDBOX_PROJECT, "dry_run": True},
@@ -324,7 +355,9 @@ class TestReferenceShapes:
         project_root = _make_minimal_sandbox(kanban_root)
         halt_file = project_root / "HALT"
 
-        with _make_client(kanban_root, monkeypatch) as client:
+        # POST /operations/halt calls ops.write.halt in process against the
+        # API's own kanban root, so the API is rooted at the sandbox.
+        with _make_client(kanban_root, monkeypatch, dev_tree=kanban_root) as client:
             resp = client.post(
                 "/operations/halt",
                 json={"project": _SANDBOX_PROJECT, "forse": True},
@@ -493,7 +526,7 @@ _ALL_17_OPERATIONS: list[_OpSpec] = [
         route="/operations/remove-project",
         minimal_body={"project": _SANDBOX_PROJECT},
         primary_artifact=None,
-        special_kwargs={"force": True},  # force required when not dry_run, included here for clarity
+        special_kwargs={"force": True},  # the destructive escalation; a dry_run preview needs no confirm
     ),
     _OpSpec(
         route="/operations/ship-rc",
@@ -541,7 +574,7 @@ class TestSeventeenOperationProbe:
             "dry_run": True,  # short-circuit so no real mutation occurs
         }
 
-        with _make_client(kanban_root, monkeypatch) as client:
+        with _make_operation_client(spec.route, kanban_root, monkeypatch) as client:
             resp = client.post(spec.route, json=body)
 
         assert resp.status_code == 200, (
@@ -597,7 +630,7 @@ class TestSeventeenOperationProbe:
             "dry_run": True,
         }
 
-        with _make_client(kanban_root, monkeypatch) as client:
+        with _make_operation_client(spec.route, kanban_root, monkeypatch) as client:
             resp = client.post(spec.route, json=body)
 
         assert resp.status_code == 200, (
@@ -678,6 +711,46 @@ class _ReadRouteSpec(NamedTuple):
     response_has_warnings: bool
 
 
+# The task GET /show reads in the probe: seeded into the sandbox, because the
+# route reads the API's own kanban_root in process rather than through a script.
+_SHOW_PROBE_TASK = "CODER-20260101-001-alpha"
+
+# The TESTER task GET /test-report reads for the probe's RC version key.
+_TEST_REPORT_PROBE_VERSION = "v1.0.0"
+_TEST_REPORT_PROBE_TASK = "TESTER-20260101-002-verify-1-0-0"
+
+# Read routes that act in process on the API's kanban_root, so the probe roots
+# the API at the sandbox for them (scripts are not needed) and seeds what
+# each reads.
+_IN_PROCESS_READ_ROUTES = frozenset({"/show", "/status", "/test-report", "/rejected", "/verify-rc-state", "/costs"})
+
+
+def _seed_read_route_state(spec: "_ReadRouteSpec", kanban_root: pathlib.Path) -> None:
+    """Add the sandbox state an in-process read route needs to answer 200.
+
+    /status and /rejected answer 200 from the minimal sandbox itself (a
+    registered project with its tasks/ directory); /show needs its task's
+    status.md, /test-report a TESTER task for the probe's version with its
+    report, and /verify-rc-state a release-state.md carrying every required
+    field so its check finds no error.
+    """
+    tasks_dir = kanban_root / "projects" / _SANDBOX_PROJECT / "tasks"
+    if spec.path == "/show":
+        task_dir = tasks_dir / _SHOW_PROBE_TASK
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "status.md").write_text("## State\nBACKLOG\n", encoding="utf-8")
+    elif spec.path == "/test-report":
+        artifacts = tasks_dir / _TEST_REPORT_PROBE_TASK / "artifacts"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        (artifacts.parent / "status.md").write_text("## State\nDONE\n", encoding="utf-8")
+        (artifacts / "report.md").write_text("# Verification report\n\nAll criteria met.\n", encoding="utf-8")
+    elif spec.path == "/verify-rc-state":
+        (tasks_dir.parent / "release-state.md").write_text(
+            "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
+            encoding="utf-8",
+        )
+
+
 # All read (GET) routes that inject warn_unknown_query_params.
 # /board, /logs/{kind}, /traces, /traces/{trace_id}, /projects/{name},
 # /dashboard/{pane} all shell out; we mock subprocess.run for those.
@@ -691,19 +764,25 @@ _ALL_READ_ROUTES: list[_ReadRouteSpec] = [
     _ReadRouteSpec(
         path="/status",
         required_params={"project": _SANDBOX_PROJECT},
-        uses_subprocess=True,
+        uses_subprocess=False,  # calls ops.read.render_status in process, against the sandbox
         response_has_warnings=True,
     ),
     _ReadRouteSpec(
         path="/show",
-        required_params={"project": _SANDBOX_PROJECT, "key": "CODER-20260101-001-alpha"},
-        uses_subprocess=True,
+        required_params={"project": _SANDBOX_PROJECT, "key": _SHOW_PROBE_TASK},
+        uses_subprocess=False,  # calls ops.read.get_task_status in process, against the sandbox
         response_has_warnings=True,
     ),
     _ReadRouteSpec(
         path="/test-report",
-        required_params={"project": _SANDBOX_PROJECT, "key": "v1.0.0"},
-        uses_subprocess=True,
+        required_params={"project": _SANDBOX_PROJECT, "key": _TEST_REPORT_PROBE_VERSION},
+        uses_subprocess=False,  # calls ops.read.render_test_report in process, against the sandbox
+        response_has_warnings=True,
+    ),
+    _ReadRouteSpec(
+        path="/verify-rc-state",
+        required_params={"project": _SANDBOX_PROJECT},
+        uses_subprocess=False,  # calls ops.rc_state.verify_rc_state in process, against the sandbox
         response_has_warnings=True,
     ),
     _ReadRouteSpec(
@@ -721,7 +800,7 @@ _ALL_READ_ROUTES: list[_ReadRouteSpec] = [
     _ReadRouteSpec(
         path="/rejected",
         required_params={},
-        uses_subprocess=True,
+        uses_subprocess=False,  # calls ops.read.render_rejected in process, against the sandbox
         response_has_warnings=True,
     ),
     _ReadRouteSpec(
@@ -783,7 +862,9 @@ def _make_client_for_route(
     finds the test project).  Script-based routes need kanban_root to point at team/
     so scripts resolve correctly.
 
-    For /projects/{name}: use the sandbox root as kanban_root (no script invocation).
+    For /projects/{name} and the in-process read routes (_IN_PROCESS_READ_ROUTES):
+    use the sandbox root as kanban_root (no script invocation; each route's
+    state is seeded first).
     For all other routes: use _TEAM_DIR as kanban_root (scripts are resolved there).
 
     Args:
@@ -798,6 +879,10 @@ def _make_client_for_route(
     # kanban_root — point the API at the sandbox so the test project is found.
     # This route does not shell out, so scripts are not needed.
     if spec.path.startswith("/projects/") and spec.path != "/projects":
+        return _make_client(kanban_root, monkeypatch, dev_tree=kanban_root)
+    # In-process read routes read the API's own kanban_root.
+    if spec.path in _IN_PROCESS_READ_ROUTES:
+        _seed_read_route_state(spec, kanban_root)
         return _make_client(kanban_root, monkeypatch, dev_tree=kanban_root)
     return _make_client(kanban_root, monkeypatch)
 
@@ -1011,7 +1096,7 @@ class TestNativeDryRunRegression:
             "dry_run": True,
         }
 
-        with _make_client(kanban_root, monkeypatch) as client:
+        with _make_operation_client(route, kanban_root, monkeypatch) as client:
             resp = client.post(route, json=body)
 
         assert resp.status_code == 200, (

@@ -17,10 +17,16 @@
 #   # <context> — source description for the error message (e.g. "$KANBAN_ROOT/kanban.cfg")
 #   require_dev_tree "${PGAI_DEV_TREE_PATH}" "${KANBAN_ROOT}/kanban.cfg"
 #
+#   # The repository a runner under scripts/ operates on (layout-aware).
+#   REPO_ROOT="$(resolve_runner_repo_root "$SCRIPT_DIR" "${KANBAN_ROOT}/kanban.cfg")"
+#
 # Functions
 # ---------
 #   resolve_global_dev_tree        — env > kanban.cfg, no validation, prints value (possibly empty)
 #   require_dev_tree <path> <ctx>  — non-empty + is-directory check; exit 1 on failure
+#   resolve_runner_repo_root <script_dir> [<ctx>]
+#                                  — checkout layout: the runner's own checkout;
+#                                    install layout: PGAI_DEV_TREE_PATH
 #
 # Safety invariants
 # -----------------
@@ -89,8 +95,7 @@ require_dev_tree() {
     local _ctx="${2:-kanban.cfg}"
 
     # Partial remedy (docs/coding-standards.md "Gates prescribe, not just
-    # diagnose", classified in docs/audits/v1.27.2-gate-remedy-census.md):
-    # both branches name the exact config source deterministically, but the
+    # diagnose"): both branches name the exact config source deterministically, but the
     # dev-tree path value itself is site-specific (only the operator knows
     # where their checkout lives) — the fix commands below print a concrete,
     # filled-in example the reader adapts rather than a bare placeholder.
@@ -101,12 +106,15 @@ require_dev_tree() {
         echo "${_ctx} resolved to a value, and no self-located fallback applied." >&2
         echo "" >&2
         echo "To fix (pick one):" >&2
-        echo "  1. export PGAI_DEV_TREE_PATH=/home/rocky/develop/pgai-agent-kanban   # example — use your actual checkout path" >&2
-        echo "  2. printf '[paths]\\ndev_tree_path = /home/rocky/develop/pgai-agent-kanban\\n' >> \"${_ctx}\"   # example — use your actual checkout path" >&2
+        echo "  1. export PGAI_DEV_TREE_PATH=\"\$HOME/develop/pgai-agent-kanban\"   # example — use your actual checkout path" >&2
+        echo "  2. printf '[paths]\\ndev_tree_path = %s\\n' \"\$HOME/develop/pgai-agent-kanban\" >> \"${_ctx}\"   # example — use your actual checkout path" >&2
         echo "  3. Re-run the command that invoked this gate." >&2
         echo "" >&2
         echo "Rule: every gated runner requires a resolvable dev-tree path before it can" >&2
         echo "locate the test suite it runs." >&2
+        # BLOCK-WORTHY: a gated runner cannot locate the test suite it runs
+        # without a resolvable dev-tree path.
+        # CENSUS-ANCHOR: dev-tree-path-unconfigured-01
         exit 1
     fi
 
@@ -118,14 +126,53 @@ require_dev_tree() {
         echo "" >&2
         echo "To fix:" >&2
         echo "  1. ls -la \"${_path}\"                          # confirm it is really absent" >&2
-        echo "  2. export PGAI_DEV_TREE_PATH=/home/rocky/develop/pgai-agent-kanban   # example — point at the real checkout" >&2
+        echo "  2. export PGAI_DEV_TREE_PATH=\"\$HOME/develop/pgai-agent-kanban\"   # example — point at the real checkout" >&2
         echo "     # or edit [paths] dev_tree_path in ${_ctx} to the real checkout path" >&2
         echo "  3. Re-run the command that invoked this gate." >&2
         echo "" >&2
         echo "Rule: the configured dev-tree path must be a real, existing directory —" >&2
         echo "a stale path fails loud here instead of silently operating on the wrong tree." >&2
+        # BLOCK-WORTHY: operating on a stale, no-longer-existing dev-tree
+        # path risks silently running against the wrong checkout.
+        # CENSUS-ANCHOR: dev-tree-path-missing-01
         exit 1
     fi
 
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# resolve_runner_repo_root <script_dir> [<context>]
+#
+# The repository root a runner in <script_dir> operates on. The rule shared
+# by every runner that resolves the dev tree and then works inside
+# <repo>/team:
+#
+#   Checkout layout — <repo>/team/scripts/<runner>, recognised by the parent
+#     of <script_dir> being named "team": the runner's own checkout,
+#     <script_dir>/../.., whatever PGAI_DEV_TREE_PATH names. A run from a
+#     worktree tests that worktree, not the configured dev tree.
+#   Install layout — <root>/scripts/<runner> (install.sh flattens team/ onto
+#     the kanban root, so no repository sits above the script): the resolved
+#     dev tree, PGAI_DEV_TREE_PATH.
+#
+# Prints the absolute root. In the install layout PGAI_DEV_TREE_PATH must
+# name an existing directory; otherwise require_dev_tree's refusal fires
+# (naming <context>, default kanban.cfg) and the call exits 1. Callers run
+# resolve_global_dev_tree and require_dev_tree first, so that refusal is a
+# backstop rather than the normal path.
+# ---------------------------------------------------------------------------
+resolve_runner_repo_root() {
+    local _script_dir="${1:?resolve_runner_repo_root: script directory required}"
+    local _ctx="${2:-kanban.cfg}"
+    local _parent
+    _parent="$(cd "${_script_dir}/.." && pwd)" || return 1
+
+    if [[ "$(basename "${_parent}")" == "team" ]]; then
+        (cd "${_parent}/.." && pwd)
+        return
+    fi
+
+    require_dev_tree "${PGAI_DEV_TREE_PATH:-}" "${_ctx}"
+    (cd "${PGAI_DEV_TREE_PATH}" && pwd)
 }

@@ -524,7 +524,8 @@ def test_inject_simple_tester_task_task_id_has_correct_format(
     tester = tasks[-1]
     tid = tester.get("task_id", "")
     assert tid.startswith("TESTER-20260101-100-"), (
-        f"Expected task_id to start with 'TESTER-20260101-100-'; got {tid!r}"
+        f"Expected task_id to start with the requested owner/date/sequence "
+        f"prefix; got {tid!r}"
     )
 
 

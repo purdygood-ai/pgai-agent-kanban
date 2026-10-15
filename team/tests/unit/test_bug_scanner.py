@@ -402,6 +402,101 @@ def test_claim_next_bug_id_raises_for_nonexistent_bugs_dir(
 
 
 # ---------------------------------------------------------------------------
+# claim_next_bug_id() — durable claim provenance ledger
+#
+# A mis-attributed bugs/ filing's own Source Task header cannot be trusted
+# on its own -- nothing durable records who actually created the file, so a
+# mismatch can only be inferred after the fact from file mtimes and wake-log
+# timing. These tests assert claim_next_bug_id itself leaves a durable,
+# independently-checkable record of the claiming session at the moment of
+# creation.
+# ---------------------------------------------------------------------------
+
+
+def test_claim_next_bug_id_records_explicit_claimed_by_in_ledger(
+    tmp_path: pathlib.Path,
+) -> None:
+    """An explicit claimed_by argument is written verbatim to the durable
+    .bug-claims.log ledger, alongside the claimed bug ID."""
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    bug_id, _, lock_path = claim_next_bug_id(
+        str(bugs_dir), "explicit-claimant", claimed_by="verifier-session-alpha"
+    )
+    try:
+        ledger = bugs_dir / ".bug-claims.log"
+        assert ledger.exists(), "claim_next_bug_id did not create the durable claims ledger."
+        ledger_text = ledger.read_text(encoding="utf-8")
+        assert bug_id in ledger_text
+        assert "verifier-session-alpha" in ledger_text
+        # One tab-separated line: timestamp, bug_id, claimant.
+        line = next(l for l in ledger_text.splitlines() if bug_id in l)
+        fields = line.split("\t")
+        assert len(fields) == 3, f"expected 3 tab-separated fields, got: {fields!r}"
+        assert fields[1] == bug_id
+        assert fields[2] == "verifier-session-alpha"
+    finally:
+        release_bug_id_claim(lock_path)
+
+
+def test_claim_next_bug_id_falls_back_to_task_id_env_var(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When claimed_by is omitted, the claim is attributed to the PGAI_TASK_ID
+    environment variable an agent's own wake dispatch exports for its
+    session -- the mechanism that makes an ordinary two-argument call site
+    (every existing caller) still produce an attributable record."""
+    monkeypatch.setenv("PGAI_TASK_ID", "implementer-session-fallback-check")
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    bug_id, _, lock_path = claim_next_bug_id(str(bugs_dir), "env-fallback-claimant")
+    try:
+        ledger_text = (bugs_dir / ".bug-claims.log").read_text(encoding="utf-8")
+        assert "implementer-session-fallback-check" in ledger_text
+        assert bug_id in ledger_text
+    finally:
+        release_bug_id_claim(lock_path)
+
+
+def test_claim_next_bug_id_records_unknown_when_no_identity_available(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With neither an explicit claimed_by nor PGAI_TASK_ID set, the ledger
+    still gets a record -- naming the claimant "unknown" rather than
+    silently skipping the entry, so an unattributed claim is itself visible
+    in the ledger instead of invisible."""
+    monkeypatch.delenv("PGAI_TASK_ID", raising=False)
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    bug_id, _, lock_path = claim_next_bug_id(str(bugs_dir), "no-identity-claimant")
+    try:
+        ledger_text = (bugs_dir / ".bug-claims.log").read_text(encoding="utf-8")
+        line = next(l for l in ledger_text.splitlines() if bug_id in l)
+        assert line.split("\t")[2] == "unknown"
+    finally:
+        release_bug_id_claim(lock_path)
+
+
+def test_claim_next_bug_id_appends_one_line_per_claim(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Two successive claims append two separate ledger lines rather than
+    overwriting -- the ledger is a durable append-only history, not a
+    last-write-wins pointer."""
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    bug_id_1, _, lock_1 = claim_next_bug_id(str(bugs_dir), "first", claimed_by="session-a")
+    release_bug_id_claim(lock_1)
+    bug_id_2, _, lock_2 = claim_next_bug_id(str(bugs_dir), "second", claimed_by="session-b")
+    release_bug_id_claim(lock_2)
+
+    ledger_lines = (bugs_dir / ".bug-claims.log").read_text(encoding="utf-8").splitlines()
+    assert len(ledger_lines) == 2
+    assert bug_id_1 in ledger_lines[0] and "session-a" in ledger_lines[0]
+    assert bug_id_2 in ledger_lines[1] and "session-b" in ledger_lines[1]
+
+
+# ---------------------------------------------------------------------------
 # release_bug_id_claim()
 # ---------------------------------------------------------------------------
 
@@ -560,7 +655,8 @@ def test_scan_highest_bug_num_parses_numerically_not_lexically(
 def test_claim_next_bug_id_recovers_correct_next_id_with_malformed_file_present(
     tmp_path: pathlib.Path,
 ) -> None:
-    """claim_next_bug_id allocates BUG-0037 even with a date-first file present.
+    """claim_next_bug_id allocates the correct next-highest ID even with a
+    date-first file present.
 
     End-to-end regression check: the malformed file must not leak its
     8-digit date into the allocated ID.

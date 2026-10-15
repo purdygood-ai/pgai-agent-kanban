@@ -1,0 +1,115 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verifying `ai_rc/v2.25.2` at commit `8de43366fec342618a1ffcf5c907b6cfe648cd9c` (branched from `ai_main` at `4cddf24`) against `requirements/v2.25.2-bugfix-bundle-20260928.md`: a nine-bug bundle (BUG-0416, 0419, 0420, 0422, 0423, 0424 primary; BUG-0417, 0418, 0421 hygiene ride-alongs), implemented by CODER-002..007, 009 and WRITER-008, 010. Worktree: `/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260928-012-verify-2-25-2` (detached HEAD == RC commit; `git status --porcelain` empty; no stash).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "published `KI-1.23.0.1` line was rewritten at v2.25.1; one-time restore needed",
+      "heading": "Finding 1: published `KI-1.23.0.1` line was rewritten at v2.25.1; one-time restore needed",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks — one edit of the published artifact plus one regeneration)\n**Systemic Risk:** low (isolated to one published identifier)\n**Filed As:** BUG-0425 (Path C-A — filed as BUG — code defect / regression / test failure)\n**Regression:** no\n**Integrity:** none\n\nBUG-0420 acceptance bullet 1 is not met on this tree and cannot be met by the writer alone: commit `06171cf` (tagged `ai_v2.25.1`) already published `KI-1.23.0.1` with BUG-0417's text. The RC's writer is correct (seeded reproduction: `KI-1.0.0.2` issued, published line kept; `ai_main` writer reissues `.1`) and treats the current artifact as spent truth. Restoring the original line (`git show 06171cf^:CHANGELOG.md` line 1428) once will make the RC's own writer reissue BUG-0417 `KI-1.23.0.2` and keep the restored line verbatim.",
+      "filed_as": "BUG-0425",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks — one edit of the published artifact plus one regeneration)",
+        "systemic_risk": "low (isolated to one published identifier)",
+        "filed_as": "BUG-0425 (Path C-A — filed as BUG — code defect / regression / test failure)",
+        "regression": "no",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "both gated runners skip the `sentinel_leak` check when pytest fails",
+      "heading": "Finding 2: both gated runners skip the `sentinel_leak` check when pytest fails",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low\n**Filed As:** BUG-0426 (Path C-A)\n**Regression:** no\n**Integrity:** none\n\n`run-unit-tests.sh` line 1001 / `run-integration-tests.sh` line 799 exit before the sentinel check at lines 1081 / 879 (unchanged from `ai_main`). Observed live in this task's HALT-armed run and, last cycle, as the unattributed 02:05:16Z HALT arming. Traces to BUG-0423 \"Expected\". CONVERT class must be preserved by the fix.",
+      "filed_as": "BUG-0426",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low",
+        "filed_as": "BUG-0426 (Path C-A)",
+        "regression": "no",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "`run-gated-tests.sh` and `run-cold-build-tests.sh` still pin a fixed shared basetemp",
+      "heading": "Finding 3: `run-gated-tests.sh` and `run-cold-build-tests.sh` still pin a fixed shared basetemp",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low\n**Filed As:** BUG-0427 (Path C-A)\n**Regression:** no\n**Integrity:** none\n\nThe two sibling runners keep `pytest/gated` and `pytest/cold` (lines 163-168 / 199-204), the collision shape BUG-0419 describes; the per-invocation helper now exists and can be reused. Named by CODER-003 as outside its scope.",
+      "filed_as": "BUG-0427",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low",
+        "filed_as": "BUG-0427 (Path C-A)",
+        "regression": "no",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "non-deterministic failure in `test_defer_behaviour_matrix.py` (one full run of two)",
+      "heading": "Finding 4: non-deterministic failure in `test_defer_behaviour_matrix.py` (one full run of two)",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low\n**Filed As:** BUG-0429 (Path C-A)\n**Regression:** no\n**Integrity:** none\n\nFailed once in the secondary throwaway-root run with discovery's `no valid item paths after filtering` skip; passed in the authoritative run and in six isolated reruns including the failed run's exact environment. Pre-existing test (v2.13.0) and lib (v2.24.13), untouched by the RC; cause not determined within the time box — filed with the evidence and the diagnostic path, per \"ambiguity defaults to bug\".",
+      "filed_as": "BUG-0429",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low",
+        "filed_as": "BUG-0429 (Path C-A)",
+        "regression": "no",
+        "integrity": "none"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

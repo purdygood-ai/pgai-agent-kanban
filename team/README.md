@@ -15,10 +15,10 @@ This tree provides:
 
 - Top-level rules (`DIRECTIVES.md`)
 - Autonomy principle and orientation (`OVERVIEW.md`)
-- Shared operating procedure (`SOP.md`)
-- Participant identity files (`participants/`)
+- Shared operating procedure (`SOP-core.md`)
 - Role files (`roles/`)
-- Workspace conventions (`workspaces/`)
+- Per-project rules (`projects/<name>/README.md`, one per registered project)
+- Per-role governance manifests (`read-order/`)
 - Task folders (`tasks/`)
 - Wake scripts and PM agent (`scripts/`, `pm-agent/`)
 
@@ -31,11 +31,15 @@ Each participant should normally do this:
 1. Receive tasking
 2. Read the required documents in the expected read order
 3. Determine identity, role, scope, constraints, and output location
-4. Read the `status.md` at the start of a new agent session — if work was already started, pick up where it left off
+4. Read the task's `status.md` — every session starts in `WORKING`; `SOP-core.md` ("Session start") says how to tell a fresh start from a resume
 5. Execute the task
 6. Write status into the assigned task folder `status.md`
 
-This system runs autonomously. Read `OVERVIEW.md` first for the autonomy principle and the binary terminal-state contract (DONE / BLOCKED / WONT-DO). Read `SOP.md` for procedural detail. The reading order is defined in `SOP.md` under "Required Read Order For Assigned Work."
+This system runs autonomously. Read `OVERVIEW.md` first for the autonomy principle and the binary terminal-state contract (DONE / BLOCKED / WONT-DO). Read `SOP-core.md` for the shared law. The reading order is defined in `SOP-core.md` under "Required Read Order For Assigned Work."
+
+## Read-Order Manifests
+
+What each role reads at wake time is declared in `read-order/<role>.txt`, one path per line in reading order. **A document not named in a role's manifest is not read by that role.** Per-role byte budgets live in `kanban.cfg [governance]`; the lint narrates, never blocks. See `docs/read-order-manifests.md`.
 
 ## Important Write Rule
 
@@ -67,10 +71,10 @@ $PGAI_PROJECT_ROOT/tasks/<TASK-ID>/
 
 In multi-project mode, `$PGAI_PROJECT_ROOT` resolves to `${PGAI_AGENT_KANBAN_ROOT_PATH}/projects/<project-name>/`. In single-project mode (backward compat), it defaults to `${PGAI_AGENT_KANBAN_ROOT_PATH}`.
 
-Recommended task naming format:
+Task naming format (the materializer assigns it):
 
 ```
-<OWNER>-<YYYYMMDD>-<sequence>-<short-slug>
+<ROLE>-<YYYYMMDD>-<sequence>-<short-slug>
 ```
 
 Examples:
@@ -96,18 +100,18 @@ These queue files define dispatch priority. Queue files are control files for ta
 
 ## Standard Task States
 
-The approved task states are defined in `SOP.md` and should be used consistently in each task folder's `status.md`.
+The approved task states are defined in `SOP-core.md` and should be used consistently in each task folder's `status.md`.
 
 Approved states:
 
 - `BACKLOG` — ready to be pulled
 - `WAITING` — pulled but prerequisites are not yet satisfied (auto-resolved)
 - `WORKING` — actively being worked
-- `BLOCKED` — needs human attention (manual resolution)
+- `BLOCKED` — a named obstacle stops the task; OVERWATCH's block triage may requeue a recoverable block, every other block waits for HUMAN
 - `DONE` — accepted and finished
 - `WONT-DO` — intentionally not done
 
-See `SOP.md` for the full state transition rules and the WAITING vs BLOCKED distinction.
+See `SOP-core.md` for the full state transition rules and the WAITING vs BLOCKED distinction.
 
 ## Role Model
 
@@ -120,64 +124,11 @@ Claude may perform any role when the task assigns it.
 
 ## New Agent Session
 
-If a task is not completed for any reason, the participant must record that in `status.md`. The next session reads the status before starting, so it knows where to pick up (e.g., "task was previously blocked" or "model ran out of tokens"). Once it knows the status, it begins the task from that point.
+If a task is not completed for any reason, the participant records that in `status.md` and `logs/progress.log`. The next session uses that evidence, not the `WORKING` state alone, to decide whether it is resuming — `SOP-core.md`, "Session start".
 
-## Wake Scripts and Cron Scheduling
+## Wake Scripts, Scheduling and Configuration
 
-The primary wake entry point is `scripts/wake-batch.sh`. It reads the active
-provider from `kanban.cfg [providers] active` and dispatches to the matching
-`scripts/wake/<provider>.sh` (currently `claude.sh` or `codex.sh`).
-`scripts/wake.sh` is a convenience wrapper that adds `--max-tasks=1` for
-one-shot single-task invocations.
-
-```
-wake-batch.sh --agent=AGENT [--sleep=N] [--max-tasks=N]
-wake-batch.sh AGENT          # deprecated positional form; emits a warning
-wake.sh AGENT                # single-task wrapper
-```
-
-Operator benefit: switching providers (claude → codex → gemini) no longer
-requires editing the crontab. Update `kanban.cfg [providers] active` (or run
-`scripts/switch-provider.sh PROVIDER`) and the next cron firing dispatches to
-the new provider automatically.
-
-The recommended cron schedule fires each agent every 2 minutes with a sub-minute
-stagger so agents in the same 2-minute window do not collide.  PM, CM, and TESTER
-fire on even minutes; CODER and WRITER fire on odd minutes.  Operators can swap
-the even/odd assignment if preferred.
-
-```cron
-# Even-minute agents
-*/2 * * * *    $KANBAN_ROOT/scripts/wake-batch.sh --agent=pm     --sleep=0
-*/2 * * * *    $KANBAN_ROOT/scripts/wake-batch.sh --agent=cm     --sleep=21
-*/2 * * * *    $KANBAN_ROOT/scripts/wake-batch.sh --agent=tester --sleep=42
-
-# Odd-minute agents
-1-59/2 * * * * $KANBAN_ROOT/scripts/wake-batch.sh --agent=coder  --sleep=0
-1-59/2 * * * * $KANBAN_ROOT/scripts/wake-batch.sh --agent=writer --sleep=21
-```
-
-Run `scripts/install-crontab.sh` to install the full annotated crontab automatically.
-See `templates/install/crontab.example` for the complete annotated crontab template.
-
-## Configuration
-
-The framework uses five configuration files across two formats. `env` and `bashrc` are bash-sourced for wake scripts and personal shell setup respectively. `kanban.cfg`, `projects.cfg`, and `project.cfg` (per project) use INI format (`[section] key = value`) — data files that are never executed, preventing command-injection errors.
-
-| File | Format | Role |
-|------|--------|------|
-| `env` | Bash | Wake script tunables (per-agent models, PM mode, verbose) |
-| `bashrc` | Bash | Personal shell config (PATH, OAuth tokens, KANBAN_ROOT) |
-| `kanban.cfg` | INI | Framework operational settings (dashboard, chain, paths) |
-| `projects.cfg` | INI | Project registry |
-| `project.cfg` (per project) | INI | Per-project settings (git repo, dev tree, workflow type, version ceilings) |
-
-Templates with inline documentation for every key:
-
-- `team/templates/kanban.cfg.example` — schema for `kanban.cfg`
-- `team/templates/project.cfg.example` — schema for `project.cfg`
-
-`install.sh` creates `kanban.cfg` from the template on a fresh install and migrates `config.cfg` → `kanban.cfg` (and `PROJECT.cfg` → `project.cfg`) on upgrade. See `docs/OPERATIONS.md` "Configuration File System" for full operator guidance.
+Operator material — how wakes are scheduled, which configuration file holds which setting, and how to install or upgrade — is in `docs/OPERATIONS.md` and `HOW_TO.md`, not here. Agents do not need it to do assigned work: the wake prompt that invoked you names everything a dispatch needs.
 
 ## Helpful Information
 

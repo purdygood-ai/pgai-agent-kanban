@@ -112,4 +112,7 @@ fi
 # ---------------------------------------------------------------------------
 # Delegate to Python
 # ---------------------------------------------------------------------------
-exec python3 "$MODULE_PATH" "${PASS_THROUGH_ARGS[@]+"${PASS_THROUGH_ARGS[@]}"}"
+# PYTHONPATH must point at the parent of pgai_agent_kanban/ so the module's
+# package imports (task_status) resolve.
+PYTHONPATH="$(dirname "$(dirname "$(dirname "$MODULE_PATH")")")${PYTHONPATH:+:${PYTHONPATH}}" \
+    exec python3 "$MODULE_PATH" "${PASS_THROUGH_ARGS[@]+"${PASS_THROUGH_ARGS[@]}"}"

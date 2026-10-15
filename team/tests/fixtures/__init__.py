@@ -18,6 +18,6 @@ log_stub        — Faithful stub of the production log() bash function that
                   (stderr-only stub masked command-substitution contamination
                   bug).
 
-See PRIORITY-0074 for the full rationale and the failure modes these helpers
-close.
+Each module's own entry above states the failure mode it closes and the
+rationale for the fixture that closes it.
 """

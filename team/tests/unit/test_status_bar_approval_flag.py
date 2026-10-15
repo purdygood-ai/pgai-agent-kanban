@@ -5,7 +5,7 @@ Behavioral tests for the APPROVAL(n) flag in the tmux status-line scripts:
   - team/scripts/dashboard/status-right.sh
   - team/scripts/dashboard/status-bottom.sh
 
-Covers all acceptance criteria from CODER-20260708-024:
+Covers all acceptance criteria for the APPROVAL(n) flag:
 
   1. One pending HUMAN-APPROVE task (WAITING) → status line contains
      '✋ APPROVAL(1)' (USE_COLOR) or '[APPROVAL(1)]' (NO_COLOR / TERM=dumb).

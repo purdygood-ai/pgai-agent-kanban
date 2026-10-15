@@ -1,21 +1,20 @@
 """
 test_dashboard_network_stub_fixture.py
 ========================================
-BUG-0112 acceptance #2: "Network-stub fixture: full dashboard refresh across
+Network-stub fixture: full dashboard refresh across
 ALL windows performs ZERO remote git operations (stub records attempts;
-assert empty) — no exceptions."
+assert empty) — no exceptions.
 
 WHY THIS EXISTS
 ---------------
-CODER-20260726-002/003/004 converted every render-path git call site and
-verified the result behaviorally, but only as throwaway scratch runs inside
-each ticket's own session — none of that verification survived as permanent
-pytest coverage.  This file is the "teeth" acceptance criterion #2 promoted
+Every render-path git call site was converted to route through the
+local-only surface, verified behaviorally, but only as throwaway scratch
+runs during development — none of that verification survived as permanent
+pytest coverage.  This file promotes that verification permanently
 into the test suite: a real, git-shadowing stub drives the SAME entry point
 the shipped smoke test (test_dashboard_smoke_container.py) uses for a full
 refresh (``create.sh --no-tmux``), plus every render-path / 4:git-window
-script the census in DASHBOARD-GIT-CENSUS.md identifies that ``--no-tmux``
-mode does not itself invoke (show-header.sh, metadata.sh,
+script that touches git and that ``--no-tmux`` mode does not itself invoke (show-header.sh, metadata.sh,
 git-recent-tags.sh, status-bottom.sh — see the SCOPE note below), and
 asserts the stub's network-call log is empty across every one of them.
 
@@ -41,7 +40,7 @@ Every other dashboard script the census classifies as NO-GIT
 queue-pane.sh, project-toggle.sh, show-document-drill.sh,
 verify-window0-geometry.sh, status-right.sh, and the control scripts
 attach.sh/detach.sh/kill.sh) contains no git invocation of any kind (per
-the census's exhaustive grep passes and this ticket's lint gate, which
+the census's exhaustive grep passes and the network-git lint gate, which
 scans literally every file in the directory) — those files structurally
 cannot emit a network git call, so they are not separately re-invoked here;
 their git-free status is enforced by the lint gate
@@ -64,6 +63,7 @@ import pytest
 from tests.fixtures.dashboard_render_fixture import (
     build_dashboard_project_root,
     clean_subprocess_env,
+    run_dashboard_script,
 )
 from tests.fixtures.git_network_stub import install_git_network_stub
 
@@ -99,13 +99,9 @@ def _run(
     env = clean_subprocess_env(kanban_root=kanban_root)
     env.update(env_overrides)
 
-    return subprocess.run(
-        argv,
-        capture_output=True,
-        text=True,
-        timeout=_TIMEOUT_SECONDS,
-        env=env,
-    )
+    # Uses run_dashboard_script (not a bare subprocess.run) so a timeout can
+    # never orphan a grandchild -- see that helper's own docstring.
+    return run_dashboard_script(argv, env=env, timeout=_TIMEOUT_SECONDS)
 
 
 def _assert_no_network_calls(log_file: pathlib.Path, *, label: str) -> None:

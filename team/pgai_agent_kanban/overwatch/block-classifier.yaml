@@ -1,0 +1,204 @@
+# block-classifier.yaml — OVERWATCH's block-triage decision table.
+#
+# Loaded by pgai_agent_kanban.overwatch.block_classifier.load_table(). For a
+# BLOCKED task carrying a ## Block Record, the row keyed by the record's
+# reason_code says what OVERWATCH's block triage may do about it. The
+# classifier only decides; it reads nothing but the record, the caller's
+# facts and this file, and changes nothing.
+#
+# Fail closed: a reason_code with no row, a record that cannot be read, an
+# unmet precondition, or a table that does not validate always decides
+# `escalate` — never a default action.
+#
+# Row shape. Every row declares these six keys:
+#
+#   action          one of: requeue_owner, prune_worktree_then_requeue,
+#                   recompute_gate, defer_to_resolution_stage,
+#                   run_allowlisted_verb, escalate.
+#   max_attempts    triage attempts allowed on one block (a whole number), or
+#                   `stage` for a row whose ceiling is the resolution
+#                   stage's own ([release] max_rc_retries) — only with
+#                   defer_to_resolution_stage. Once the record's `attempts`
+#                   reaches it, the decision is escalate.
+#   cooldown_s      seconds the record's cooldown_until is set ahead after an
+#                   action; 0 for none. Inside a cooldown_until window the
+#                   decision is "not yet" (no action), not escalate.
+#   backoff         none, or {factor: F, cap_s: C}: the window before attempt
+#                   k+1 is min(cooldown_s * F^k, C) seconds.
+#   verification    none, or the check the next terminal outcome must pass:
+#                   next_outcome_not_timeout, zero_progress_not_readvanced,
+#                   gate_passes, next_create_succeeds, stage_decision_event,
+#                   rerun_reports_no_changes.
+#   preconditions   facts that must all hold before the action is taken (a
+#                   list, may be empty); any one unmet decides escalate.
+#                   Closed set: branch_ancestor_of_source, merge_tree_clean,
+#                   owner_is_coder_or_writer, worktree_residue_in_base,
+#                   residue_holds_no_unique_commits, source_branch_exists,
+#                   action_args_valid, action_targets_verified.
+#
+# and may declare:
+#
+#   params                 the action's arguments. requeue_owner,
+#                          prune_worktree_then_requeue and
+#                          run_allowlisted_verb require `note` (the Triage
+#                          Note text; {key} is filled from the caller's facts,
+#                          then the record's evidence, else `unknown`; the
+#                          triage executor supplies {killed_at} for a
+#                          per-task timeout) and
+#                          accept `resume` (branch|fresh). requeue_owner also
+#                          accepts `snapshot` (evidence to save under
+#                          artifacts/block-evidence/ first: commits_ahead,
+#                          dirty_patch) and `reset_zero_progress` (true|false).
+#                          The other actions take no params.
+#   cooldown_before_first  true: the first sighting (attempts 0, no
+#                          cooldown_until yet) waits one window before the
+#                          first action.
+#   otherwise              {action, params, preconditions}: tried, in turn,
+#                          when this row's own preconditions are unmet; may
+#                          itself carry an `otherwise`.
+#
+# Any other key, an unknown name, a duplicate key, or a row for a
+# reason_code outside the Block Record vocabulary makes the whole table
+# invalid. Each row's comment says when the block stays with a human.
+
+reason_codes:
+  # Stays human on a second timeout.
+  per_task_timeout:
+    action: requeue_owner
+    params:
+      note: "previous attempt was killed at {killed_at}; continue on the existing branch, whose commits are kept, and finish the remaining work in smaller steps"
+      resume: branch
+      snapshot: [commits_ahead]
+    max_attempts: 1
+    cooldown_s: 1800
+    backoff: none
+    verification: next_outcome_not_timeout
+    preconditions: []
+
+  # Stays human when still refusing after 3 (a fleet-level cause).
+  provider_refusal:
+    action: requeue_owner
+    params:
+      note: "previous attempt was refused by the provider (signature={signature}); retried after a cool-down"
+      reset_zero_progress: true
+    max_attempts: 3
+    cooldown_s: 900
+    backoff: {factor: 2, cap_s: 3600}
+    cooldown_before_first: true
+    verification: zero_progress_not_readvanced
+    preconditions: []
+
+  # Stays human when it repeats.
+  zero_progress:
+    action: requeue_owner
+    params:
+      note: "previous attempt exited cleanly without forward progress; re-read the task README and status before continuing"
+    max_attempts: 1
+    cooldown_s: 1800
+    backoff: none
+    verification: zero_progress_not_readvanced
+    preconditions: []
+
+  # The existing transient-error handler's requeue, with a backoff. Stays
+  # human when the cap is reached.
+  transient_api_error:
+    action: requeue_owner
+    params:
+      note: "previous attempt hit a transient provider error; retried after a backoff"
+    max_attempts: 3
+    cooldown_s: 300
+    backoff: {factor: 2, cap_s: 1200}
+    cooldown_before_first: true
+    verification: none
+    preconditions: []
+
+  # (a) branch already an ancestor of the source: recompute the gate
+  # read-only. (b) otherwise a clean merge-tree: requeue the CODER/WRITER
+  # owner onto its branch to merge. Stays human on a merge-tree conflict or
+  # a second refusal.
+  gate_merge_not_found:
+    action: recompute_gate
+    preconditions: [branch_ancestor_of_source]
+    otherwise:
+      action: requeue_owner
+      params:
+        note: "merge only, then re-complete"
+        resume: branch
+      preconditions: [merge_tree_clean, owner_is_coder_or_writer]
+    max_attempts: 1
+    cooldown_s: 0
+    backoff: none
+    verification: gate_passes
+
+  # Stays human on a second refusal.
+  gate_dirty_worktree:
+    action: requeue_owner
+    params:
+      note: "uncommitted changes from the previous attempt were saved, never committed, to artifacts/block-evidence/dirty.patch and untracked.txt; re-apply what belongs to the task, commit, then re-complete"
+      resume: branch
+      snapshot: [dirty_patch]
+    max_attempts: 1
+    cooldown_s: 0
+    backoff: none
+    verification: gate_passes
+    preconditions: []
+
+  # Stays human on a second refusal.
+  gate_empty_commit:
+    action: requeue_owner
+    params:
+      note: "the completion gate found no change in the branch commits ({shas}); commit the task's real work on the existing branch, then re-complete"
+      resume: branch
+    max_attempts: 1
+    cooldown_s: 0
+    backoff: none
+    verification: gate_passes
+    preconditions: []
+
+  # Only "already exists" residue inside the worktree base whose commits all
+  # exist elsewhere. Stays human when the source branch is missing or the
+  # residue holds unique commits.
+  worktree_create_failed:
+    action: prune_worktree_then_requeue
+    params:
+      note: "a stale worktree left by an earlier attempt was removed and pruned; the worktree is created afresh"
+    max_attempts: 1
+    cooldown_s: 300
+    backoff: none
+    verification: next_create_succeeds
+    preconditions: [worktree_residue_in_base, residue_holds_no_unique_commits, source_branch_exists]
+
+  # No new authority: the resolution stage decides, under its own ceiling.
+  # Stays human when the stage declines.
+  ship_policy_halt:
+    action: defer_to_resolution_stage
+    max_attempts: stage
+    cooldown_s: 0
+    backoff: none
+    verification: stage_decision_event
+    preconditions: []
+
+  # Only an allowlisted verb with valid typed arguments whose targets exist
+  # (and, for bugs, are done). Stays human on any invalid argument, a verb
+  # not allowlisted, or a prose-only remedy.
+  agent_operator_data_action:
+    action: run_allowlisted_verb
+    params:
+      note: "the operator data action {verb} ran with validated arguments; continue the task"
+    max_attempts: 1
+    cooldown_s: 0
+    backoff: none
+    verification: rerun_reports_no_changes
+    preconditions: [action_args_valid, action_targets_verified]
+
+  # Always human.
+  missing_readme: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  invalid_assignment: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  invalid_effort_config: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  invalid_state: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  branch_prefix_failed: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  workflow_type_unparseable: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  plugin_load_failed: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  source_branch_missing: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  gate_merge_evidence_not_found: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  agent_unclassified: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}

@@ -1,0 +1,227 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified RC `ai_rc/v2.23.3` (HEAD `6620145`, clean worktree, no stashes)\nagainst `projects/pgai-agent-kanban/requirements/v2.23.3-bugfix-bundle-20260916.md`,\na discovery-bundled BUG bundle of seven items: BUG-0290 (Lane A doc-truth),\nBUG-0291 and BUG-0292 (seven provenance hygiene instances), BUG-0293\n(provenance-class non-convergence), BUG-0294 (citation-walk docstring\nuntrue), BUG-0295 (bug-filing provenance and bare-`/tmp` litter), BUG-0296\n(CODER and WRITER governance byte budgets over). The RC is six merges over\n`ai_main`: 23 files, +508/-46.\n\nBoth gated runners exited 0 (`run-unit-tests.sh`: 4624 passed, 31 skipped;\n`run-integration-tests.sh`: 510 passed, 1 skipped), and both quality-class\nfindings files are empty — every lint in both pre-flights reported OK,\nincluding `hygiene` (provenance), `governance_byte_budget`, `doc_command_truth`,\n`docs_citation_manifest`, `skip_cites_real_bug`, and `runnable_remedy`. That\nis an unusually clean result for this project: the provenance class, red on\nnine consecutive releases, reports zero tree-wide here, and the byte-budget\nclass reports every role under.\n\nSix of the seven bundled items are fully met and were verified behaviourally\nrather than structurally where behaviour was claimed — the litter-check remedy\nwas exercised by planting a bare-`/tmp` file and driving the teardown path, the\nbug-claim provenance ledger was exercised across all three claimant-resolution\npaths, the Lane A decline described by the rewritten role file was read back\nagainst `_run_lane_a()` in the shipped code, and the new citation-walk contract\ntest was read for both branches. One acceptance criterion inside BUG-0295 is\nhalf-delivered and is filed as BUG-0297.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0290 — Lane A doc-truth and the undocumented verb",
+      "heading": "Finding 1: BUG-0290 — Lane A doc-truth and the undocumented verb",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/roles/OVERWATCH.md` line 45 no longer claims the drill \"assumes (a)\nalready ran\"; `grep -n \"assumes (a) already ran\" team/roles/OVERWATCH.md`\nreturns nothing. The rewritten paragraph and its new sibling paragraph state\nthat (a) is the drill's precondition, that an absent attributed\n`## Fix (OVERWATCH rewrite)` block makes it decline (b)–(e) with\n`overwatch.lane-a-rewrite-missing`, that the decline writes an\n`## OVERWATCH Decision` event but no ledger entry (so the single attempt is not\nconsumed), and that `overwatch-attach-fix-rewrite.sh` clears it.\n\nEvery one of those claims was checked against the shipped code rather than\ntaken on the role file's word. `_run_lane_a()` in\n`team/pgai_agent_kanban/overwatch/resolution_stage.py` performs the\n`has_attributed_rewrite` check ahead of the drill, calls `write_decision_event`\nwith `lane=LANE_A`, returns `DECLINED`, writes no ledger entry, and carries the\ncensus anchor `lane-a-rewrite-precondition-01` with a BLOCK-WORTHY class\ncomment. `_format_lane_a_rewrite_missing` emits the machine key, a\nplain-language cause, and a remedy with `--project`, `--kanban-root` and\n`--bug-id` pre-substituted. The role file matches the code exactly.\n\n`docs/operator-commands.md` gains a hand-authored\n`overwatch-attach-fix-rewrite` section (57 lines) naming all seven flags plus\n`--help`, each against the script's own `--help` output: `--project`,\n`--kanban-root`, `--bug-id`, `--forbidden-approach`, `--correct-direction`,\n`--ground-truth-ref` (repeatable, at least one required), `--timestamp`. The\nexit-0/exit-1 contract and the non-idempotence note are stated. Placement is\nimmediately above the generated `Verb Reference` block, which the RC correctly\ndid not hand-edit.\n\n`python3 team/scripts/lint_doc_command_truth.py` → 0 findings across all three\nof its checks (651 citations, key-parity, pane-parity). Both gated runners\nexit 0.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0291 / BUG-0292 — the seven provenance instances",
+      "heading": "Finding 2: BUG-0291 / BUG-0292 — the seven provenance instances",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_hygiene.py --classes provenance` reports\n`OK — 0 findings across 8 scan director(y/ies)`, run standalone from the\nworktree and again inside both gated runners. All seven named sites are clean:\n`overwatch-attach-fix-rewrite.sh:26` (now `--bug-id BUG-NNNN`),\n`test_overwatch_scaffolding_gates_resolution.py:244`,\n`test_cleanup_root_override.py` (4 sites), and\n`test_overwatch_lane_classification.py:222`.\n\n`team/scripts/hygiene-lint-allowlist.json` is byte-unchanged from `ai_main`, so\nzero was reached by rewording, not by suppression — the sweep's own claim,\nconfirmed independently. `findings-unit.json` and `findings-integration.json`\neach carry `\"findings\": []`.\n\nThe sweep also caught one site the two bugs never named\n(`release-notes/v2.23.2.md:31`, a TESTER task-ID citation added after the bugs\nwere filed), which is the sweep-not-a-punch-list behaviour BUG-0293 asked for,\ndemonstrated on its first run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0293 — provenance-class convergence",
+      "heading": "Finding 3: BUG-0293 — provenance-class convergence",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nFour of five acceptance criteria are met and verifiable now.\n\n- **Sweep-ticket acceptance is the lint's own zero.** `team/roles/PM.md:141`\n  gains \"A provenance sweep ticket's acceptance is the lint's own zero\",\n  stating the acceptance as the one-line lint invocation and forbidding a\n  transcribed site list.\n- **Sweep sequenced last.** The same section requires `depends_on` on every\n  other CODER and WRITER ticket, and reconciles itself against the ride-along\n  rule that otherwise puts hygiene tickets last. This RC's own plan already\n  obeys it: `CODER-20260916-007-provenance-sweep-tree-wide` depends on tickets\n  002, 003, 004, 005 and 006, and merged last (`6620145`).\n- **Authoring-time self-check documented.** `team/roles/CODER.md` and\n  `team/roles/WRITER.md` both replace the old general paragraph with a\n  diff-scoped check (`git diff --name-only <source-branch>...HEAD`), explicitly\n  informational — \"never a BLOCK, never `Needs Human`, and never a gate\n  refusal\" — with findings outside the agent's own diff routed to the sweep\n  ticket. WRITER additionally documents `--prose-dirs`.\n- **Dedup-against-running decision recorded.** A 40-line decision block sits\n  above `find_existing_bug_for_class` in\n  `team/pgai_agent_kanban/lint/bug_filer.py`, choosing \"leave as-is\" and giving\n  two reasons (a coverage-diff narrowing would reintroduce the per-finding\n  flood the module exists to prevent; nothing is lost permanently, only delayed\n  by at most one RC).\n\n**Caveats.** (a) The fifth criterion — two consecutive RCs provenance-clean\nwith no sweep ticket in the second — is not evaluable against one RC; v2.23.3\nsupplies the first data point only, and the next verification run should check\nthe second. This is recorded in `gaps.md` as a carry-forward, not as a shortfall\nof this RC. (b) The decision text lands in the filer module, which is what\n`CODER-20260916-003`'s own acceptance criterion specified; BUG-0293's wording\nwas \"where the next TESTER will read it\", and nothing in `team/roles/TESTER.md`\nStep 5c points a reader at that module. The decision is recorded and reasoned;\nits discoverability from the TESTER side is the caveat. (c) \"A ticket generated\nfrom that pattern cannot be completed while the lint is red\" is delivered as\nticket-acceptance wording rather than an enforcement mechanism — correctly, since\nBUG-0293's own Scope puts making the class blocking out of bounds.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0294 — `resolved_target` call contract",
+      "heading": "Finding 4: BUG-0294 — `resolved_target` call contract",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe docstring paragraph in `walk_docs_citation_closure`\n(`team/pgai_agent_kanban/lib/docs_citation_scan.py`) now reads \"Consulted only\nfor a citation `is_resolved` has already accepted — an unresolved citation is\nrecorded as a finding directly, and `resolved_target` is never called for it\",\nwhich matches the branch the call actually sits in. The false advice about\nreturning `None` to stop the walk is gone. The walk loop is untouched, so there\nis no behaviour change — the bug's preferred fix.\n\n`team/tests/unit/test_docs_citation_scan_walk_contract.py` is new and pins both\nbranches with a spy: with `is_resolved` always False, `resolved_target` records\nzero calls while the report carries one finding per citation; with `is_resolved`\nalways True, it records exactly one call per citation and zero findings. It\ndrives the shared module directly rather than through either caller's adapter,\nwhich is what makes it catch the drift that both callers' own suites could not\nsee.\n\nBoth callers' now-redundant re-checks were simplified with an explanatory\ncomment rather than deleted silently.\n`python3 team/scripts/check_docs_citations.py` still exits 0 (24 governance\nfiles, 13 citations, all in the manifest).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0295 items 1 and 2 — litter remedy and claim provenance",
+      "heading": "Finding 5: BUG-0295 items 1 and 2 — litter remedy and claim provenance",
+      "level": 3,
+      "body": "**Category:** pass\n\n**Litter remedy, exercised rather than read.** I planted a bare-`/tmp` file,\ntook a pre-dispatch snapshot, and drove `wake_tmp_litter_check_and_report`\ndirectly. The log line came back as\n`litter check: TESTER-VERIFY left 1 bare /tmp entry(ies): <path> — remedy: rm -f <path>`\nand `status.md` gained a `## Temp Litter` section carrying the same\n`remedy:` line with the identical command. The file survived the check, which\nis the deliberate report-only behaviour the existing load-bearing negative\nfixture protects. The new fixture\n`test_litter_report_carries_a_runnable_removal_remedy` asserts the remedy\nappears in both surfaces and then actually runs it and asserts the file is\ngone — a genuinely behavioural test, not a string-shape assertion.\n\n**Claim provenance ledger, exercised in production shape.**\n`claim_next_bug_id` now appends `<UTC timestamp>\\t<bug id>\\t<claimant>` to\n`<bugs_dir>/.bug-claims.log`, with claimant resolving explicit `claimed_by` >\n`PGAI_TASK_ID` > `\"unknown\"`. I drove all three paths in a sandbox and got the\nthree expected lines. The best evidence is from this verification run itself:\nfiling BUG-0297 below through the RC's own helper wrote\n`2026-09-16T06:50:00+00:00\tBUG-0297\tTESTER-20260916-009-verify-2-23-3`\ninto the live `bugs/.bug-claims.log` — the first real filing the mechanism has\nrecorded, attributed correctly, against a bug file whose `Source Task` header\nsays the same thing. That is exactly the cross-check BUG-0295 asked for.\n\n`team/scripts/lib/wake_driver_invoke.sh:636` exports `PGAI_TASK_ID` alongside\nthe three pre-existing per-project exports; `task_id` is in scope well before\nthat line. The two automated aggregate filers\n(`lint/bug_filer.py`, `deep_verify/bug_filer.py`) pass their own fixed\nidentities rather than relying on the env fallback, which is right since\nneither is task-scoped.\n\n**Integration hazard checked and cleared.** The new `.bug-claims.log` dotfile\nlands inside a directory that several scanners walk. I confirmed it is inert:\n`get_unbundled_bugs`, `update_bug_backlog_cache`, `detect_duplicate_bug_ids`\nand `next_free_number` all ignore it in a sandbox containing it, and\ndiscovery's item scan (`_disc_find_unhandled_items`) skips non-`.md` files\nsilently before the filename gate sees them — so it can never be rejected or\nquarantined.\n\n`/tmp/BUG-0293-provenance-sweep-convergence.md` no longer exists.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0295 item 3 — the swim-lane boundary ships untested",
+      "heading": "Finding 6: BUG-0295 item 3 — the swim-lane boundary ships untested",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (the safeguard is present and effective today; what is\nmissing is protection against its silent removal later)\n**Regression:** no — the defect predates this RC. Before v2.23.3 there was no\nboundary sentence at all and therefore nothing to test; this RC improved the\nposition and stopped one step short of the criterion. No test for this boundary\nexists anywhere in the RC's diff or before it.\n**Integrity Damage:** no\n**Filed As:** BUG-0297-coder-bugs-write-boundary-untested (Path C-A — filed as\nBUG — code defect / regression / test failure)\n\nBUG-0295's fourth acceptance bullet offers two branches: \"either the writing\npath is fixed **and a test forbids a CODER-lane write into `bugs/`**, or the\nentry is recorded as an operator action.\"\n\nThe RC took the first branch and delivered it three-quarters of the way. The\ncause was named — `CODER-20260916-003`'s `status.md` carries a full attribution\nsection concluding a lane violation by the code-writing session over an\noperator hand-filing, citing the wake log's litter line, a 70-minute idle gap in\nthat session's own progress log spanning all three affected mtimes, every other\nagent's `lock.contended` exits in the same window, the operator's shell history\nshowing no trace of the files, and the byte-identical `/tmp` duplicate being a\nwrite-then-place shape rather than a `mv`. The writing path was closed at the\nprompt level: `team/roles/CODER.md:138` now reads \"**Never write into a\nproject's `bugs/` directory.**\"\n\nNo test pins it. `grep -rn \"Never write into a project\" team/tests/` returns\nnothing, and no test references the boundary in any other wording. Both gated\nrunners exit 0 with the sentence present and would exit 0 with it removed. The\nrisk is concrete rather than theoretical: the same release had to raise the\nCODER governance byte budget because that assembly keeps growing, so a future\ntrim of that file is a realistic way for the safeguard to vanish unnoticed.",
+      "filed_as": "BUG-0297",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (the safeguard is present and effective today; what is",
+        "regression": "no — the defect predates this RC. Before v2.23.3 there was no",
+        "filed_as": "BUG-0297-coder-bugs-write-boundary-untested (Path C-A — filed as"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0296 — governance byte budgets",
+      "heading": "Finding 7: BUG-0296 — governance byte budgets",
+      "level": 3,
+      "body": "**Category:** pass\n\n`budget_bytes_coder` and `budget_bytes_writer` in `kanban.cfg_example` move\nfrom 69632 to 77824. Measured against the shipped tree:\n\n```\nROLE             ASSEMBLED         BUDGET   VERDICT\npo                   63167          65536   under\npm                   78200          81920   under\ncoder                71143          77824   under\nwriter               70453          77824   under\ntester              102384         102400   under\ncm                   85578          86016   under\noverwatch            78453          81920   under\n```\n\nCoder headroom 6681 bytes, writer 7371 bytes — both far above the 1 KB floor\nthe bug asked for. Every role reads `under`, the gated runners' own\n`governance_byte_budget` check reports OK, and both findings files carry zero\n`governance_byte_budget` instances. The docs-manifest self-check bullet added\nin v2.23.2 is still present in both `team/roles/CODER.md` and\n`team/roles/WRITER.md` (one occurrence each), as the bug required, and neither\nrole file was touched by the rebalance ticket.\n\nThe ticket also re-baselined the matching documented defaults in\n`team/scripts/lib/config_loader.sh`'s key registry in the same session, which\nthe doc-truth lint's key-parity check would otherwise have flagged as a config\ndefault mismatch — caught and fixed rather than left as a new finding.\n\n**Observation, not a finding.** The rebalance covered only the two roles the\nbug named. `tester` now sits 16 bytes under its budget and `cm` 438 bytes\nunder — the exact \"a budget nobody can author against\" condition BUG-0296's\n`## Expected` complains about, now relocated to two other roles. Both predate\nthis RC (identical assembled sizes at v2.23.2) and neither is in the bug's\nacceptance, so this is not a shortfall of the RC. The next edit to\n`team/roles/TESTER.md` will re-trip the class.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Requirements-document acceptance criteria",
+      "heading": "Finding 8: Requirements-document acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- *Each bundled item is addressed in the implementation* — all seven; see\n  Findings 1–7. One sub-criterion inside BUG-0295 is partially delivered\n  (Finding 6).\n- *All Python files compile cleanly* — `python3 -m compileall -q team/` exits 0;\n  every `.py` in the diff compiles individually.\n- *All bash files pass syntax check* — `bash -n` clean on every `.sh` in the\n  diff and across `team/scripts/` tree-wide.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Pre-flight, state, and structural checks",
+      "heading": "Finding 9: Pre-flight, state, and structural checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Worktree HEAD `66201454207adbcf54dda5d924b9f415b7805b38` equals\n  `ai_rc/v2.23.3`; `git status --short` empty; `git stash list` empty.\n- Pre-flight merge verification: every DONE task's feature branch is already\n  deleted (normal post-merge cleanup; no `feature/*` or `ai_feature/*` branches\n  remain), so Check 1 and Check 2 are skipped per the lifecycle note. No\n  UNMERGED or BUG-92 anomalies.\n- `release-state.md`: `Active RC: v2.23.3` with branch `ai_rc/v2.23.3` present;\n  `Last Released: v2.23.2`, well-formed, matching the highest tag on the dev\n  tree (`ai_v2.23.2`); `semver_gt v2.23.3 v2.23.2` true. No drift. The file's\n  mtime (01:50:22) is the RC-open moment and it has not been touched since.\n- Prereq graph: all referenced task IDs exist, no cycles, bookends correct\n  (`CM-20260916-008-open-rc-2-23-3` at the head,\n  `CM-20260916-011-release-2-23-3` WAITING at the tail with all six work\n  tickets plus this verification as prerequisites). Queue markers agree with\n  every task's state (`[x]` for the six DONE, `[A]` for this task, `[W]` for\n  the release bookend).\n- Skip-cites-real-bug (Step 6.13): `lint_skip_bug_gate.sh` exits 0. The four\n  `BUG-123x` IDs a naive grep surfaces are synthetic fixture strings inside\n  `test_skip_bug_citation_scan.py`'s own corpus, verified by reading them.\n- Coding-standards spot-check (Step 6.14): no new scripts, so no `--help`\n  obligation; no new operational value hardcoded; the provenance lint (which is\n  directive 8's enforcement) reports zero over the whole scanned tree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Autonomous operation criterion",
+      "heading": "Finding 10: Autonomous operation criterion",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll four checks answer NO — see the dedicated section below.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

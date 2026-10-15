@@ -75,6 +75,9 @@ if [[ ! -x "$WAKE_SCRIPT" ]]; then
     echo "wake-batch.sh: ERROR: provider wake script not found or not executable: $WAKE_SCRIPT" >&2
     echo "  Active provider: ${PROVIDER}" >&2
     echo "  Check: ls -la $SCRIPT_DIR/wake/" >&2
+    # BLOCK-WORTHY: a wake firing cannot dispatch to a provider wake script
+    # that does not exist or is not executable.
+    # CENSUS-ANCHOR: wake-batch-provider-script-missing-01
     exit 1
 fi
 

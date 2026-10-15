@@ -11,6 +11,13 @@
 # Thin adapter: delegates the on-disk change to the Python halt_global function
 # in pgai_agent_kanban.ops.write.  Idempotent and fully reversible via
 # unhalt-global.sh.
+#
+# Provenance: a write that changes the sentinel also appends one record --
+# time, op, path, entry, pid, parent (this script's command line), user --
+# to ${KANBAN_ROOT}/logs/sentinel-writes.log, so the gated runners' sentinel
+# check can tell this arm from a test leak. The sentinel's bytes, this
+# script's output and its exit codes are unchanged; a record that cannot
+# be written is one stderr warning, never a failure.
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
@@ -27,6 +34,10 @@ source "${_HALT_GLOBAL_LIB_DIR}/operator_args.sh"
 # --- Source the shared Python invocation helper ---
 # shellcheck source=lib/pp_run_ops.sh
 source "${_HALT_GLOBAL_LIB_DIR}/pp_run_ops.sh"
+
+# --- Source the dual-channel error-contract emitter ---
+# shellcheck source=lib/error_contract.sh
+source "${_HALT_GLOBAL_LIB_DIR}/error_contract.sh"
 
 # --- Declare accepted flags for this script ---
 # halt-global takes no project/key arguments; only --help is accepted.
@@ -55,8 +66,15 @@ operator_args_validate_known "halt-global.sh" OPERATOR_VALID_FLAGS || exit 1
 
 # --- Validate KANBAN_ROOT exists ---
 if [[ ! -d "${KANBAN_ROOT}" ]]; then
-    printf 'halt-global.sh: KANBAN_ROOT does not exist or is not a directory: %s\n' \
-        "${KANBAN_ROOT}" >&2
+    # BLOCK-WORTHY (docs/blocking-site-census.md): the global HALT sentinel
+    # lives at KANBAN_ROOT/HALT -- with no such directory there is nowhere
+    # to write it, so this refuses rather than letting the write attempt
+    # below fail one line later with a less specific message.
+    pgai_emit_error_contract \
+        "halt_global.kanban_root_missing" \
+        "halt-global.sh: KANBAN_ROOT does not exist or is not a directory: ${KANBAN_ROOT}." \
+        "Set PGAI_AGENT_KANBAN_ROOT_PATH to an existing kanban root, or create ${KANBAN_ROOT} first."
+    # CENSUS-ANCHOR: halt-global-kanban-root-missing-01
     exit 1
 fi
 
@@ -73,6 +91,14 @@ if pp_run_ops pgai_agent_kanban.ops halt_global "${KANBAN_ROOT}"; then
     printf 'global HALT set: %s — all projects will stop at next wake\n' "${_halt_path}"
     exit 0
 else
-    printf 'halt-global.sh: failed to create global HALT at %s\n' "${_halt_path}" >&2
+    # BLOCK-WORTHY (docs/blocking-site-census.md): the sentinel write itself
+    # failed (permissions, disk, or another OS-level cause) -- the operator
+    # cannot rely on the HALT being in effect, so this refuses loud rather
+    # than reporting success on an unverified write.
+    pgai_emit_error_contract \
+        "halt_global.sentinel_create_failed" \
+        "halt-global.sh: failed to create global HALT sentinel at ${_halt_path}." \
+        "Check that ${KANBAN_ROOT} is writable by the current user, then re-run team/scripts/halt-global.sh."
+    # CENSUS-ANCHOR: halt-global-sentinel-create-failed-01
     exit 1
 fi

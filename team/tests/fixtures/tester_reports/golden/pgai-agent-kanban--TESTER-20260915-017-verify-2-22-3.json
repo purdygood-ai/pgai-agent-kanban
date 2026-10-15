@@ -1,0 +1,10 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "This verification covers release candidate v2.22.3 — a six-item bug bundle whose\nfront-of-bundle item (BUG-0279) is a live-install-safety defect in\n`team/scripts/cleanup/cleanup.sh`, with five hygiene ride-alongs. All six bundled\nitems were verified behaviorally, not structurally: each destructive or preventive\nchange was exercised against the failure mode it exists to stop, inside a throwaway\ntemp root, with the pre-RC `ai_main` code run under the identical environment as a\nnegative control. Both gated runners exited 0 — unit 4528 passed / 31 skipped in\n12m02s, integration 465 passed / 1 skipped in 8m02s. All six bundled items pass.\nOne gap was found outside the bundled items but squarely inside the class the bundle\nset out to close: the sandbox seam `cleanup.sh` now reconciles covers two root\nvariables, and a third pre-resolved export (`PGAI_TASKS_DIR`) still silently outranks\nboth, so the destructive task-folder prune can still be aimed at the operator's live\ninstall by an invocation that looks sandboxed. That defect predates this RC and is\nnarrowed — not widened — by it. Two quality-class lint findings (the CODER and TESTER\ngovernance byte budgets, both crossed by this RC's documentation growth) are recorded\nnon-blocking. Both findings are filed via Path C-A.",
+  "findings": [],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

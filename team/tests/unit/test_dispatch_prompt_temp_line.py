@@ -46,8 +46,18 @@ from tests.unit.shell_harness import run_bash
 # ---------------------------------------------------------------------------
 # Paths relative to team/ (pytest cwd when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
-_CLAUDE_SH = pathlib.Path("scripts/wake/claude.sh")
-_CODEX_SH = pathlib.Path("scripts/wake/codex.sh")
+# This prompt block now lives once in the shared wake driver's invoke
+# stage, sourced by both wake/claude.sh and wake/codex.sh (v2.9.20-engine-
+# decomposition: process_one_task's inline body was lifted
+# out of wake/claude.sh; wake/codex.sh now sources the
+# same shared driver instead of carrying its own inline copy). Both
+# constants below point at the one shared file the block now lives in.
+_CLAUDE_SH = pathlib.Path("scripts/lib/wake_driver_invoke.sh")
+_CODEX_SH = pathlib.Path("scripts/lib/wake_driver_invoke.sh")
+# The post-session litter check (checked further below) lives one stage
+# later than the scratch line and the pre-dispatch snapshot: the finalize
+# stage, not the invoke stage — shared by both siblings the same way.
+_CLAUDE_FINALIZE_SH = pathlib.Path("scripts/lib/wake_driver_finalize.sh")
 _TEMP_SH = pathlib.Path("scripts/lib/temp.sh")
 _WAKE_BRACKET_SH = pathlib.Path("scripts/lib/wake_bracket.sh")
 
@@ -352,11 +362,17 @@ def test_pre_dispatch_litter_marker_still_present(sibling: pathlib.Path) -> None
     )
 
 
-@pytest.mark.parametrize("sibling", _PROVIDER_SIBLINGS, ids=_PROVIDER_IDS)
+@pytest.mark.parametrize(
+    "sibling",
+    [_CLAUDE_FINALIZE_SH, _CLAUDE_FINALIZE_SH],
+    ids=_PROVIDER_IDS,
+)
 def test_post_session_litter_marker_still_present(sibling: pathlib.Path) -> None:
     """
     The post-session /tmp litter check marker must still be present
-    in each sibling (regression guard).
+    (regression guard). This now lives once in the shared wake driver's
+    finalize stage, one stage later than the scratch line and the
+    pre-dispatch snapshot checked above, shared by both wake siblings.
     """
     content = sibling.read_text(encoding="utf-8")
     assert _POST_SESSION_MARKER in content, (

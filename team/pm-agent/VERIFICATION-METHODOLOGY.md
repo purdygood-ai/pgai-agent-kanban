@@ -54,14 +54,15 @@ The checklist is your scope. Everything you check should trace back to one of th
 
 Independent of the requirements doc. Cheap drift check.
 
-The schema for `release-state.md` holds only three fields: `Active RC`, `RC Opened At`, `RC Opened By Task`. Last Released is derived from git tags via `pp_last_released_version` — there is no `Last Released` field stored in any file, so the "release-state vs. git tag drift" failure mode is gone by construction.
+The schema for `release-state.md` holds exactly four fields: `## Active RC`, `## RC Opened At`, `## RC Opened By Task`, `## Last Released`. The first three are ephemeral RC-tracking state; `## Last Released` is written by `cm/release.sh` after every successful tag and read by the halt-after drain. Its presence is by design — do not report it as drift. The canonical Last Released answer is still derived from git tags via `pp_last_released_version`, never by parsing this file, so the "release-state vs. git tag drift" failure mode is gone by construction.
 
 What's still worth checking:
 
 - Resolve canonical Last Released via `pp_last_released_version "<project-name>"`. By definition this matches a git tag on `origin/main`, or returns `v0.0.0` for fresh systems — no extra verification step is needed.
 - Inspect the project's `release-state.md` at `$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<project-name>/release-state.md`. Confirm:
-  - It contains `Active RC`, `RC Opened At`, `RC Opened By Task` and only those fields.
-  - Stale `Last Released*` fields from an older install were migrated cleanly. If they remain, the install.sh migration did not fire — flag as drift.
+  - It contains `Active RC`, `RC Opened At`, `RC Opened By Task`, and `Last Released` — those four fields.
+  - `## Last Released` holds a well-formed `vX.Y.Z`, or is absent or empty on a project that has never shipped. Only a malformed value is drift; the field's presence is not.
+  - The retired `Last Released At` and `Last Released By Task` fields are gone. If either remains, the install.sh migration did not fire — flag as drift.
   - If `Active RC` is set, the RC branch actually exists. Mismatch is drift (e.g., `Active RC: vX.Y.Z` set but no `rc/vX.Y.Z` branch).
 
 **Output:** drift status (clean / drift detected with notes).

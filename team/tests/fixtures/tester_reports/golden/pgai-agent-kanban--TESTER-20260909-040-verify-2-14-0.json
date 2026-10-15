@@ -1,0 +1,239 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified RC v2.14.0 (\"provider runtime hardening\") against its requirements\ndocument. The RC delivers four things: an operator-owned `claude-env` file\nseeded at install and upgrade and sourced after `shell-env` on every entry path;\na background-wait ceiling (`BASH_MAX_TIMEOUT_MS`) derived on the wake path from\nthe kanban's own per-task budget; a per-firing provider CLI version and model\nidentity log in both wake entry points; and a safeguard-retry wrapper that stops\nan optional prompt-instrumentation block from killing a wake, with that block\nreworded to documentation-feedback vocabulary. A fifth deliverable documents the\nfour-concerns law across `HOW_TO.md`, `docs/OPERATIONS.md`, and\n`docs/public-contract.md`.\n\nBoth gated runners exited 0 (unit: 3595 passed, 3 skipped; integration: 424\npassed, 1 skipped). Every deliverable and all three acceptance criteria were\nverified behaviourally, not structurally -- I exercised each guard against the\nfailure mode it exists to prevent, including a full sandboxed `install.sh` +\n`upgrade.sh` cycle, a syntactically broken `claude-env`, a simulated provider\nsafeguard refusal, a missing provider CLI, and a hanging provider CLI.\n\nOne gap was found: `team/README.md` still ships the pre-v2.14.0 \"five\nconfiguration files\" text naming `env` and `bashrc` as current, which\ncontradicts the four-concerns law this same RC makes canonical -- and because\n`install.sh` and `upgrade.sh` deposit that file over `$KANBAN_ROOT/README.md`\n(it is not in `PROTECTED_FILES`), upgrading replaces the operator's currently\ncorrect README with the wrong text. Reproduced in a sandbox, not inferred. Two\nquality-class lint findings were also ingested and filed. Recommendation:\nSHIP-WITH-CONCERNS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "`team/README.md` config section contradicts the four-concerns law this RC ships, and an upgrade deposits it over a correct README",
+      "heading": "Finding 1: `team/README.md` config section contradicts the four-concerns law this RC ships, and an upgrade deposits it over a correct README",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER/WRITER tasks -- a single documentation section)\n**Systemic Risk:** low (documentation only; no runtime path, no data, no chain state)\n**Regression:** yes\n**Integrity Damage:** no\n**Filed As:** BUG-0217 (Path C-A -- filed as BUG -- code defect / regression / test failure)\n\nTraces to Deliverable 4 of the requirements doc: \"Four-concerns law documented:\nkanban.cfg / shell-env / claude-env / secrets.\"\n\nThe law itself is documented well. `HOW_TO.md` section 1.2 is the canonical\nstatement (ownership sentence per file, a decidability test, and a consequence\nclause per misplacement), section 1.6 covers `claude-env` in operator depth,\n`docs/OPERATIONS.md` and `docs/public-contract.md` reference it without a second\nfull copy, and the 1.2-1.6 renumbering to 1.3-1.8 left every internal and\nexternal cross-reference consistent (checked: all anchors in `HOW_TO.md`, both\ncitations in `docs/OPERATIONS.md`, one in `docs/public-contract.md`).\n\nWhat was not updated is `team/README.md`. On the RC it still reads:\n\n- line 170 -- \"The framework uses five configuration files across two formats.\n  `env` and `bashrc` are bash-sourced for wake scripts and personal shell setup\n  respectively.\"\n- lines 174-175 -- table rows presenting `env` and `bashrc` as the current bash\n  config files. No `shell-env`, no `secrets`, no `claude-env` row exists.\n- the template list points at `team/templates/kanban.cfg.example` and\n  `team/templates/project.cfg.example`; neither path exists in the tree.\n\nThree documents shipped by this same RC say `env`/`bashrc` are\nlegacy-compatibility-only and that the four current root files are\n`kanban.cfg`, `shell-env`, `claude-env`, `secrets`. The shipped doc set is\ninternally contradictory.\n\nThe operator consequence is the reason this is a `gap` and not an observation.\n`install.sh:734` and `team/scripts/upgrade.sh:1084` both deposit `README.md`\n(from `team/README.md`) into `$KANBAN_ROOT/README.md`, and `README.md` is not in\n`upgrade.sh`'s `PROTECTED_FILES` (verified at `upgrade.sh:253-261`). The live\ninstall's `$PGAI_AGENT_KANBAN_ROOT_PATH/README.md` currently carries the correct\nsix-file / `claude-env` text. I reproduced the regression in a fully sandboxed\nroot: after `install.sh` followed by `upgrade.sh --force --no-backup\n--wake-tier none`, `grep -n \"five configuration files\" \"$SB/root/README.md\"`\nmatched at line 170. An upgrade to v2.14.0 installs the wrong text over the\nright one.\n\nOn `Regression: yes` -- stated precisely so CM can weigh it. The stale text in\n`team/README.md` predates this RC and the file is untouched by this RC's diff.\nWhat is new in this RC is the contradiction: v2.13.1 shipped no four-concerns\nlaw for the README to disagree with, and v2.13.1's deposit of the same README\ndid not overwrite correct text with incorrect text in the way v2.14.0's does.\nThe defect being reported is the inconsistency, and the inconsistency is\nproduced by this RC, so the honest value is `yes`. It is `Systemic Risk: low`\nand `Fix Effort: small`, and the next loop heals it.",
+      "filed_as": "BUG-0217",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER/WRITER tasks -- a single documentation section)",
+        "systemic_risk": "low (documentation only; no runtime path, no data, no chain state)",
+        "regression": "yes",
+        "filed_as": "BUG-0217 (Path C-A -- filed as BUG -- code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "new wake-bootstrap comment cites the release-bundle slug",
+      "heading": "Finding 2: new wake-bootstrap comment cites the release-bundle slug",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task -- delete one parenthetical)\n**Systemic Risk:** low (a comment; no runtime effect, no operator-visible output)\n**Regression:** yes (the line was added by this RC's CODER-034 work; the file's other provenance was clean on `ai_main`)\n**Integrity Damage:** no\n**Filed As:** BUG-0218 (Path C-A)\n\n`team/scripts/lib/wake_bootstrap.sh:359` contains\n`(see v2.14.0-provider-runtime-hardening)` inside the comment block above the\nbackground-wait-ceiling derivation. This is the `comment_provenance` lint's\n`bare-release-slug` pattern in production code. Recorded here as a Step-7\nfinding as well as in the Lint Findings section below, because unlike the\nempty-commit finding it is a defect introduced by this RC's own new code rather\nthan a process artifact around it.\n\nVerified in scope: the same slug appears in the docstrings of this RC's six new\nfiles under `team/tests/`, but `team/scripts/lint_comment_provenance.py`\nException 7 explicitly exempts `bare-release-slug` under `team/tests/`. Those\nare sanctioned, not violations, and BUG-0218 says so explicitly so a CODER does\nnot \"fix\" them.",
+      "filed_as": "BUG-0218",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task -- delete one parenthetical)",
+        "systemic_risk": "low (a comment; no runtime effect, no operator-visible output)",
+        "regression": "yes (the line was added by this RC's CODER-034 work; the file's other provenance was clean on `ai_main`)",
+        "filed_as": "BUG-0218 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "stray empty commit is the RC branch tip",
+      "heading": "Finding 3: stray empty commit is the RC branch tip",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (guard the two demo README snippets)\n**Systemic Risk:** low (the commit changes no file; the shipped tree is byte-identical either way)\n**Regression:** no -- the defect predates this RC. The same pattern was filed as BUG-0183 and BUG-0192 against earlier RCs (both now `done`), and nothing in this RC's diff touches commit creation. This is a recurrence of a known class, not something v2.14.0's changes introduced.\n**Integrity Damage:** no\n**Filed As:** BUG-0219 (Path C-A)\n\n`4de7551` (\"initial empty commit\") is the tip of `ai_rc/v2.14.0` and changes no\nfile against its parent. Reflog places it 19 seconds after the WRITER-038 merge.\nAuthor is the normal agent identity (`purdygood`), not the harness identity\n(`PGAI Harness <harness@pgai.local>`) -- `harness_init_scratch_repo`'s\nalready-inside-a-repo refusal\n(`team/scripts/harness/lib/throwaway-root.sh:80-86`) held. The message is the\nverbatim boilerplate published in `team/demos/*/README.md`, which is the\nlikeliest copy-path. `WRITER-20260909-038`'s `status.md` independently records\nthe same observation. Per the lint's own remedy the finding is recorded, not\nrepaired -- rewriting a branch other agents have merged into is not proposed.",
+      "filed_as": "BUG-0219",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (guard the two demo README snippets)",
+        "systemic_risk": "low (the commit changes no file; the shipped tree is byte-identical either way)",
+        "regression": "no -- the defect predates this RC. The same pattern was filed as BUG-0183 and BUG-0192 against earlier RCs (both now `done`), and nothing in this RC's diff touches commit creation. This is a recurrence of a known class, not something v2.14.0's changes introduced.",
+        "filed_as": "BUG-0219 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Deliverable 1 -- claude-env template, sourcing order, and install/upgrade seeding",
+      "heading": "Finding 4: Deliverable 1 -- claude-env template, sourcing order, and install/upgrade seeding",
+      "level": 3,
+      "body": "**Category:** pass\n\nExercised, not inspected:\n\n- **Sourcing order.** In a sandboxed root under `env -i` (no inherited\n  environment -- a genuinely cron-shaped context), `shell-env` set\n  `ORDER_PROOF=shell-env` and `claude-env` set `ORDER_PROOF=claude-env`. The\n  probe printed `ORDER_PROOF=claude-env`, proving `claude-env` sources second\n  and wins.\n- **Absent file is a clean no-op.** With `claude-env` removed, the same probe\n  exited 0, printed no error or warning, and `ORDER_PROOF` fell back to\n  `shell-env`.\n- **Syntax error refuses, nothing half-sourced.** A `claude-env` whose first\n  line set `EARLY_VAR` and whose second line was a broken `if` produced exit 1\n  and a complete dual-channel refusal --\n  `error: env_bootstrap.claude_env_syntax_error`, a message naming the file's\n  path, and a runnable `bash -n` remedy. `EARLY_VAR` was never set: the\n  `bash -n`-before-`source` ordering does what its comment claims. The refusal\n  names the path and no value, honouring the template's no-disclosure rule.\n- **Fresh install seeds it.** A fully sandboxed `install.sh`\n  (`HOME`, `CLAUDE_CONFIG_DIR`, and `PGAI_AGENT_KANBAN_ROOT_PATH` all repointed\n  at a temp root per the Live-Install Safety rule) exited 0 and logged\n  `Initialized: claude-env (from claude-env_example)`. Both `claude-env` and\n  `claude-env_example` were present at 4901 bytes.\n- **Upgrade never clobbers.** I appended an operator marker to the seeded\n  `claude-env` and ran `upgrade.sh --force --no-backup --dev-tree <RC>`. The\n  md5 was byte-identical before and after and the marker survived.\n  `claude-env` is in `PROTECTED_FILES` (`upgrade.sh:258`).\n- **Upgrade from a pre-`claude-env` install creates it.** With `claude-env` and\n  `claude-env_example` deleted, the same upgrade logged\n  `Initialized: claude-env (from claude-env_example)` and the created file\n  matched the template exactly. This is the gap the new upgrade block was\n  written to close, and it closes it.\n- **Template header records calibration.** `claude-env_example` states \"Claude\n  CLI version this file's tuning was calibrated against: 2.1.251\", as the\n  deliverable requires, and every line ships commented out.\n\nThe sandboxed `upgrade.sh` run also confirmed its own temp-target guard fired\n(\"Crontab: skipped -- target is under a temp/test directory\"); the live crontab\nwas checked afterwards and is unmodified, still pointing at the live root.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Deliverable 1 -- derived background-wait ceiling",
+      "heading": "Finding 5: Deliverable 1 -- derived background-wait ceiling",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe derivation block (`team/scripts/lib/wake_bootstrap.sh`, between the\n`BG-WAIT-CEILING-DERIVATION-BEGIN/END` sentinels) was extracted and driven under\n`env -i` across all four states:\n\n| Inputs | Result | Log line |\n|---|---|---|\n| `MAX_TASK_SECONDS=5400`, `KILL_GRACE_SECONDS=30` | `BASH_MAX_TIMEOUT_MS=5430000` | derived, naming both inputs |\n| `MAX_TASK_SECONDS=10800`, `KILL_GRACE_SECONDS=60` | `BASH_MAX_TIMEOUT_MS=10860000` | derived -- tracks a raised budget with no second edit |\n| `MAX_TASK_SECONDS=0` | unset | \"per-task watchdog disabled; BASH_MAX_TIMEOUT_MS left unset\" |\n| `BASH_MAX_TIMEOUT_MS=777000` pre-set | `777000` preserved | \"operator override in force\" |\n\nThe derived default (5430000 ms) is 9x the CLI's own 600000 ms ceiling the\nrequirements doc names as the hazard, so the truncation this exists to prevent\nis prevented. The operator-wins ordering was independently confirmed end-to-end\nin the sourcing test above (`claude-env` setting `BASH_MAX_TIMEOUT_MS=777000`\nreached the probe's environment).\n\nThe RC's own integration lane covers the same claim at the assembled-pipeline\nlevel (`test_cron_wake_exports_derived_ceiling_to_the_agent_process` and\n`test_cron_wake_honours_claude_env_ceiling_override_in_the_agent_process`,\nboth passing), driving a real `bash scripts/wake/claude.sh` subprocess under a\ncron-shaped environment. That is the \"cron-context fixture\" the acceptance\nsection asks for.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Deliverable 2 -- per-firing provider CLI version and model log",
+      "heading": "Finding 6: Deliverable 2 -- per-firing provider CLI version and model log",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe `PROVIDER-IDENTITY-LOG` block was extracted from\n`team/scripts/wake/claude.sh` and driven with stub binaries:\n\n- Working CLI -> `provider CLI version: 2.1.251 (Claude Code)`.\n- `PGAI_CODER_MODEL=claude-opus-5` -> `model: claude-opus-5 (configured default\n  for coder; a task-level Model Override may replace this per task)`.\n- No model configured -> `model: <provider CLI default> (no PGAI_CODER_MODEL\n  configured; ...)`.\n- CLI absent from PATH -> the explicit unknown marker, exit 0. Never a gate.\n- CLI that hangs -> bounded at exactly 10s by `timeout 10`, then the same\n  unknown marker, exit 0.\n\nPlacement checked: the block sits at `claude.sh:294-329`, after the HALT check\n(which exits 0 at lines 272-274) and before `wake_common_preflight` at line 332,\nso it fires on every firing that begins work, including one that finds no work.\n`team/scripts/wake/codex.sh` carries a byte-identical block with the same field\nnames, so one grep correlates both providers, as the deliverable requires.\n\nI checked one thing the block could plausibly have broken: it contains a\n`set +e` / `set -e` pair and `claude.sh` has no `set -euo pipefail` of its own.\nTracing the sourcing chain, `wake_bootstrap.sh:283` runs `set -euo pipefail`\ninside `wake_bootstrap_init`, which `wake_bootstrap.sh:506` invokes at file\ntop-level, which `wake_common.sh:84` sources, which `claude.sh:223` sources. So\nerrexit is already active when line 305 runs and the block restores the\npre-existing state rather than newly enabling it. Not a defect.\n\nThe RC's integration lane covers the \"with work and without work\" halves\n(`test_identity_header_present_for_firing_with_and_without_work`, passing).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Deliverable 3 -- telemetry-block safeguard retry and rewording",
+      "heading": "Finding 7: Deliverable 3 -- telemetry-block safeguard retry and rewording",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth halves exercised.\n\n*Classifier* -- `_wd_is_safeguard_refusal` was extracted and driven with twelve\ninputs. All twelve behaved correctly: safety-system, content-policy,\nprompt-injection-guard and moderation wording classify as refusals; timeout,\nconnection-refused, 401/auth, 429/rate-limit and \"overloaded\" do not; empty\ninput does not; unrecognised failure text does not (an unrecognised failure is\nnever assumed to be the block's fault); and a string containing BOTH a safeguard\nsignature and a timeout signature classifies as NOT a refusal, confirming the\ndocumented exclusion-first ordering.\n\n*Retry wrapper* -- `_wd_run_provider_with_telemetry_safeguard_retry` was driven\nwith a stubbed provider across four scenarios:\n\n| Scenario | Attempts | Block present on retry | Final exit | Narration |\n|---|---|---|---|---|\n| Safeguard refusal then success | 2 | no | 0 | verbatim provider output + `skipping trace injection: provider safeguard` |\n| Timeout on first attempt | 1 | -- | 1 (real failure preserved) | none |\n| First attempt succeeds | 1 | -- | 0 | none |\n| Safeguard refusal on both attempts | 2 | no | 1 (real failure returned) | narrated exactly once; never loops |\n\nThis is the deliverable's core claim -- \"optional telemetry blocks NEVER kill a\nwake\" -- demonstrated by triggering the failure mode, and the exclusion cases\ndemonstrate the fix does not mask real provider failures. The narration phrase\nis the literal string the requirements doc specifies. The refusal site carries\n`# CENSUS-ANCHOR: wake-driver-invoke-01`, an inline `CENSUS CLASS: CONVERT`\ncomment, a full dual-channel error contract, and a matching Locator Index entry\nin `docs/blocking-site-census.md` (rollup updated to 56 sites / 26 CONVERT).\n`python3 team/scripts/lint_gate_census_compliance.py` exits 0 with 0 offenders.\n\n*Rewording* -- the injected block was extracted (41 lines) and grepped for the\nforbidden vocabulary. Zero hits for `trace`, `introspect`, `confidence`, or\n`confidence calibration`. Section 5 is now \"Documentation sufficiency\", section\n7 \"Documentation feedback\", and the artifact is `task-notes.md`. The\ncounterpart copy gate in `wake_driver_finalize.sh` was renamed in lockstep\n(`notes_source=\"${task_artifact_dir}/task-notes.md\"`), and a tree-wide grep\nfinds no residual `reasoning-trace.md` reference outside `team/tests/`, so the\ninjection and copy halves cannot silently disagree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "acceptance criteria",
+      "heading": "Finding 8: acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll three named criteria verified. Criterion 1 (cron-context fixture shows the\nderived ceiling in the agent env) -- Finding 5. Criterion 2 (simulated safeguard\nrefusal -> wake completes with narrated skip) -- Finding 7. Criterion 3\n(CLI/model version present in every wake log header block) -- Finding 6.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "test fidelity of the new suites",
+      "heading": "Finding 9: test fidelity of the new suites",
+      "level": 3,
+      "body": "**Category:** pass\n\nChecked against the Test Fidelity checklist because the RC's claims are\nshell-environment claims, the class most often faked by a sanitized proxy.\n`team/tests/integration/test_provider_runtime_integration.py` drives a real\n`bash scripts/wake/claude.sh --agent=writer` subprocess against a real throwaway\nkanban root under `env -i`, with the `claude` binary replaced by a\nPATH-shadowing stub (`team/tests/fixtures/claude_provider_stub.py`) rather than\nmocking the wake internals. Real strict-mode bash is exercised (item 1); an\ninstalled-tree copy is built rather than running from the dev tree (item 2);\nevery root is a throwaway under the framework temp root (item 6). The golden\nfixture `team/tests/fixtures/engine-baseline/wake-log.txt` was refreshed with\nthe new ceiling line rather than left to drift -- the BUG-0213 failure mode did\nnot recur.\n\nTwo production defects the integration task found and fixed in the same session\nare documented at their fix sites and were independently confirmed here: the\n`claude-env` wake-path dead-code path (`env_bootstrap.sh`'s idempotency guard\nshort-circuits before its own `claude-env` block, so `wake_bootstrap.sh`\nre-sources directly -- this is why the second census anchor\n`wake-bootstrap-claude-env-01` exists), and `provider_dispatch`'s\nprocess-global `set -e` reactivation that would have prevented the safeguard\nretry from ever firing.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "structural, constraint and standards checks",
+      "heading": "Finding 10: structural, constraint and standards checks",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n- Pre-flight merge verification passed: every DONE task's feature branch is\n  already deleted post-merge (normal lifecycle), so no unmerged-branch or BUG-92\n  zero-commit anomaly exists.\n- Worktree HEAD matches `ai_rc/v2.14.0` exactly; `git status --short` clean;\n  `git stash list` empty.\n- `bash -n` clean on all eight changed shell files and on `claude-env_example`.\n- Strict mode preserved where it was present (`env_bootstrap.sh`,\n  `wake_bootstrap.sh`, `install.sh`, `upgrade.sh`); see Finding 6 for why the\n  wake entry points legitimately have none of their own.\n- No hardcoded secrets in the new code. `claude-env_example` carries an explicit\n  no-disclosure rule and both refusal sites honour it (path named, value never).\n- `.gitignore` correctly adds `claude-env` so an operator's tuning is never\n  committed.\n- Skip-cites-real-bug gate (Step 6.13): no placeholder `BUG-SKIP-*` IDs, and\n  every cited `BUG-NNNN` in `team/tests/` resolves to a real file in `bugs/`.\n  The RC's five new test files contain no skips at all.\n- Synthetic release simulation (Step 6.8): the RC touches no open/close\n  lifecycle script, but `team/scripts/upgrade.sh` is under `team/scripts/`, so\n  the lane was run anyway -- `tests/integration/test_cm_release_synthetic.py`,\n  15 passed.\n- Prereq graph (Step 6.10): acyclic, every referenced task ID exists, sequence\n  032-042 non-colliding, bookends correct (CM-039 open-RC at the head,\n  TESTER-040 then CM-042 release at the tail, currently `[W]`).\n- Step 6.1 drift check: `pp_last_released_version` returns `v2.13.1`;\n  `semver_gt v2.14.0 v2.13.1` is true; `release-state.md` `## Active RC` is\n  `v2.14.0` with the `ai_rc/v2.14.0` branch actually present; `## Last Released`\n  is a well-formed `v2.13.1`. No drift. No HALT flag at either scope.\n\nThe **caveat** is a coding-standards spot-check hit (Step 6.14) that I judged\nborderline rather than a defect, so it is recorded here and not filed: the\n~25-line provider-identity block is duplicated verbatim in\n`team/scripts/wake/claude.sh` and `team/scripts/wake/codex.sh` rather than\nfactored into `team/scripts/lib/`, which is the shape directive 3 (\"put shared\ncode in a `lib/` package and import it; never copy\") exists to discourage. Both\ncopies carry a comment stating the duplication is deliberate so one grep pattern\nmatches both providers, and the two wake entry points are already parallel files\nby design. It is a real duplication with a stated rationale -- an arguable call\nrather than a violation -- so per Step 6.11 it is an observation, not a finding.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

@@ -5,7 +5,7 @@ lint_test_anti_patterns.py
 CI lint for the pgai-agent-kanban test suite AND runtime scripts.
 
 Scans team/tests/ for the two highest-impact anti-patterns documented in
-SOP.md "Test Authoring Guidelines":
+roles/TESTER.md "Test Authoring Guidelines":
 
   Anti-pattern 1 — Pattern-scan universal invariants
       A test loops over all items returned by a scan function (glob, find,
@@ -37,6 +37,42 @@ prevents regressions of the bare-/tmp and hardcoded-temp-path anti-pattern class
       return value (e.g. ``test_returns_bug_report``) are not flagged because
       "bug" is not immediately followed by digits in those cases.
 
+  Anti-pattern 7 — Golden comparison with an inherited subprocess environment
+      A narrower sub-class of Anti-pattern 2, scoped down deliberately
+      because inherited-environment subprocess construction is otherwise far
+      too common (over a hundred call sites in team/tests/, most correct) to
+      flag on its own.  This check fires only on the pairing that actually
+      produces a host-dependent verdict: a test file that both (a) compares
+      a captured surface against a committed golden -- recognised by a
+      "golden"-named identifier, or a literal "golden" path segment, assigned
+      as part of a pathlib join or os.path.join() -- AND (b) builds a
+      subprocess environment by inheriting the ambient one (``dict(os.environ)``
+      or ``os.environ.copy()``) anywhere in the same file.  Neither half alone
+      is a finding: a golden comparison with an explicit, rebuilt environment
+      is correct and silent; an inherited environment with no golden
+      comparison is one of the many ordinary, correct call sites and is also
+      silent. See tests.fixtures.scrubbed_subprocess_env.build_scrubbed_env
+      for the remedy.
+
+  Anti-pattern 8 — Uncontrolled absolute-path substring assertion
+      A narrower sub-class of Anti-pattern 2: an assertion searches an
+      absolute path for a hardcoded path-segment literal (one that both
+      starts and ends with "/", e.g. "/projects/") using Python's ``in`` /
+      ``not in`` containment operator, rather than comparing against a
+      value the test itself computed. The absolute path's own prefix is
+      the ambient scratch root the whole suite happens to run under
+      (``PGAI_AGENT_KANBAN_TEMP_DIR`` / pytest's ``tmp_path``), which the
+      test does not control — a caller whose own scratch root happens to
+      contain the same substring (the multi-project layout puts scratch
+      space at ``.../projects/<name>/...``) makes the assertion fail with
+      no defect in the code under test. Fix: assert against the path
+      RELATIVE to a root value the test built (``path.relative_to(root)``),
+      or compare the full expected value the test computed instead of a
+      free-floating substring. This fires only on the narrow literal shape
+      above — every ordinary ``"needle" in haystack`` containment check in
+      the tree (hundreds of them, checking captured stdout/stderr text
+      against expected substrings) is untouched.
+
 Scope: Anti-patterns 3, 4, 5 (order-dependent state, production-coupling, and
 side-effect-leaking tests) require semantic judgment that static analysis cannot
 reliably provide and are explicitly out of scope for this linter.
@@ -54,6 +90,7 @@ following marker comments within 5 lines BEFORE the flagged line:
 
   # anti-pattern-allowlist: 1 (justification: ...)
   # anti-pattern-allowlist: 2 (justification: ...)
+  # anti-pattern-allowlist: 8 (justification: ...)
   # Intentional pattern-scan: <reason>
   # allowlist: <description>
   # scoped-scan: <description>
@@ -63,14 +100,15 @@ The justification text is required but its content is not validated.
 
 Reference
 ---------
-  SOP.md "Test Authoring Guidelines" — canonical anti-pattern definitions and
-  recommended alternatives.
+  roles/TESTER.md "Test Authoring Guidelines" — canonical anti-pattern
+  definitions and recommended alternatives.
 
 Usage
 -----
   python3 scripts/lint_test_anti_patterns.py [--tests-dir PATH]
                                               [--scripts-dirs PATH [PATH ...]]
                                               [--verbose]
+  python3 scripts/lint_test_anti_patterns.py --files PATH [PATH ...] [--verbose]
 
   --tests-dir    PATH       Directory to scan for test anti-patterns (default:
                             team/tests/ relative to repo root inferred from
@@ -80,6 +118,16 @@ Usage
                             team/scripts/lib/overwatch-checks/ relative to repo
                             root).  Pass an empty string to disable runtime
                             scanning.
+  --files PATH ...          Named-file mode: scan exactly these test files
+                            with every test-file check (AP1, AP2, AP3, AP6,
+                            AP7, AP8) and nothing else -- no tests-directory
+                            walk and no runtime-script scan.  A named file is
+                            scanned even if it sits under a fixtures/
+                            directory, because naming it is explicit.  Each
+                            path must be an existing file; a missing path is a
+                            usage error (exit 2).  Cannot be combined with
+                            --tests-dir or --scripts-dirs.  Without --files
+                            the whole-tree default above is unchanged.
   --verbose                 Emit each scanned file name before processing.
 
 Examples
@@ -92,6 +140,10 @@ Examples
 
   # Disable runtime script scanning:
   python3 team/scripts/lint_test_anti_patterns.py --scripts-dirs
+
+  # Scan only the named test files (e.g. for a targeted test run):
+  python3 team/scripts/lint_test_anti_patterns.py \\
+      --files team/tests/unit/test_semver.py team/tests/unit/test_skip_bug_citation_scan.py
 """
 
 from __future__ import annotations
@@ -99,6 +151,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -125,7 +178,7 @@ _TEMP_ROOT_BASENAME: str = (
 # ---------------------------------------------------------------------------
 
 _OPT_OUT_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"#\s*anti-pattern-allowlist\s*:\s*[126]", re.IGNORECASE),
+    re.compile(r"#\s*anti-pattern-allowlist\s*:\s*[12678]", re.IGNORECASE),
     re.compile(r"#\s*Intentional pattern-scan\s*:", re.IGNORECASE),
     re.compile(r"#\s*allowlist\s*:", re.IGNORECASE),
     re.compile(r"#\s*scoped-scan\s*:", re.IGNORECASE),
@@ -174,14 +227,22 @@ _AP1_BODY_WINDOW = 10  # lines after the for-line to search for assert
 # are all flagged exactly the same.  Paths must route through
 # PGAI_AGENT_KANBAN_TEMP_DIR.  Use the per-instance opt-out marker if a
 # specific occurrence is legitimately data-only and creates no real path.
+#
+# The optional `[a-zA-Z]{0,2}` before the quote covers Python string prefixes
+# (f, r, b, u, rb, br, fr, rf and their case variants) so that
+# Path(f"/tmp/{name}") is caught exactly like Path("/tmp/name") — an
+# f-string previously slipped past this check entirely because the prefix
+# letter sat between the opening paren and the quote the old pattern
+# required immediately after "\(\s*".
 _AP2_PY_PATH_CONSTRUCTOR: re.Pattern[str] = re.compile(
-    r"""Path\s*\(\s*["']/tmp/"""
+    r"""Path\s*\(\s*[a-zA-Z]{0,2}["']/tmp/"""
 )
 
 # os.makedirs("/tmp/...) or os.mkdir("/tmp/...)
 # Same zero-exemption policy: any /tmp path is flagged regardless of name.
+# Same f-string-prefix coverage as _AP2_PY_PATH_CONSTRUCTOR above.
 _AP2_PY_MAKEDIRS: re.Pattern[str] = re.compile(
-    r"""os\s*\.\s*make?dirs?\s*\(\s*["']/tmp/"""
+    r"""os\s*\.\s*make?dirs?\s*\(\s*[a-zA-Z]{0,2}["']/tmp/"""
 )
 
 # Direct assignment of a /tmp path to a variable (Python or embedded shell):
@@ -193,11 +254,16 @@ _AP2_PY_MAKEDIRS: re.Pattern[str] = re.compile(
 # the linter does not flag the temp-root constant definition itself (e.g. in
 # temp.sh or the conftest resolver).  All other bare-/tmp names — including
 # "fake*", "stub*", "test*", "mock*", "placeholder*", "example*", and "dummy*"
-# — are flagged without exception.
+# — are flagged without exception.  The optional `[a-zA-Z]{0,2}` prefix (see
+# _AP2_PY_PATH_CONSTRUCTOR above) catches f-string/raw-string assignments too.
+# The trailing character class includes `{` so an f-string whose interpolation
+# starts immediately after the literal segment (e.g. f"/tmp/{name}") is still
+# matched — without it, the very first character after "/tmp/" is "{", which
+# neither the negative lookahead nor a bare word-class character would reach.
 _AP2_PY_VAR_ASSIGN: re.Pattern[str] = re.compile(
-    r"""^\s*\w+\s*=\s*["']/tmp/(?!"""
+    r"""^\s*\w+\s*=\s*[a-zA-Z]{0,2}["']/tmp/(?!"""
     + re.escape(_TEMP_ROOT_BASENAME)
-    + r"""["'])[\w/._-]"""
+    + r"""["'])[\w/.{_-]"""
 )
 
 # Shell redirect to a bare /tmp path: > /tmp/..., 2> /tmp/..., >> /tmp/...,
@@ -240,10 +306,16 @@ _AP2_SH_REDIRECT: re.Pattern[str] = re.compile(
 # NOT flagged:
 #   open(os.environ["PGAI_AGENT_KANBAN_TEMP_DIR"] + "/err", "w")  — routed
 #   open("/dev/null", "w")            — null device
+#
+# The optional `[a-zA-Z]{0,2}` prefix (see _AP2_PY_PATH_CONSTRUCTOR above)
+# catches open(f"/tmp/...", "w") the same way plain-string calls are caught.
+# The trailing character class includes `{` for the same reason documented on
+# _AP2_PY_VAR_ASSIGN — an f-string interpolation that starts immediately after
+# the literal segment (open(f"/tmp/{name}", "w")) must still be reachable.
 _AP2_PY_OPEN_TMP: re.Pattern[str] = re.compile(
-    r"""open\s*\(\s*["']/tmp/(?!"""
+    r"""open\s*\(\s*[a-zA-Z]{0,2}["']/tmp/(?!"""
     + re.escape(_TEMP_ROOT_BASENAME)
-    + r"""["'])[\w/._-]"""
+    + r"""["'])[\w/.{_-]"""
 )
 
 # Bare $(mktemp) inside an embedded shell string in a Python test file.
@@ -351,6 +423,36 @@ _AP2_PY_TMPDIR_NO_DIR: re.Pattern[str] = re.compile(
 _AP2_CONFTEST_WHITELIST: frozenset[str] = frozenset({"conftest.py"})
 
 # ---------------------------------------------------------------------------
+# Bare-/tmp subject-matter whitelist — files that behaviorally test a real
+# bare-/tmp scan and cannot route the path they plant through either
+# sanctioned mechanism without testing nothing
+# ---------------------------------------------------------------------------
+#
+# team/tests/unit/test_wake_bracket_litter_check.py exercises
+# wake_tmp_litter_check_and_report (scripts/lib/temp.sh), which scans REAL
+# top-level bare /tmp entries and deliberately EXCLUDES both the framework
+# temp root (PGAI_AGENT_KANBAN_TEMP_DIR) and pytest's own tmp_path (which
+# nests under /tmp/pytest-of-*, itself on the check's own allowlist) from
+# that scan.  A fixture proving the check detects real litter therefore
+# cannot route through either sanctioned mechanism — landing directly under
+# bare /tmp is this module's subject matter, not a caller bypassing the
+# temp-path contract.  Every such fixture generates a fresh, uuid4-suffixed
+# name (see the file's own bare-tmp-probe helper) so concurrent runs, and
+# repeat runs against an already-dirty host, never collide on the same path.
+#
+# This is DELIBERATELY narrower than _AP2_CONFTEST_WHITELIST: it exempts
+# ONLY the Path()/open() bare-/tmp constructor checks (_AP2_PY_PATH_CONSTRUCTOR
+# and _AP2_PY_OPEN_TMP) for the listed filename.  Every other AP2 pattern —
+# variable assignment, os.makedirs, bare mktemp, TemporaryDirectory without
+# dir= — still applies normally to these files.  A new bare-/tmp construct
+# added to a whitelisted file outside its bare-tmp-probe helper is a genuine
+# finding; keep this set to the fewest files possible and re-justify here
+# before adding another.
+_AP2_BARE_TMP_SUBJECT_MATTER_WHITELIST: frozenset[str] = frozenset({
+    "test_wake_bracket_litter_check.py",
+})
+
+# ---------------------------------------------------------------------------
 # Anti-pattern 2 detection patterns — Bash (.sh files)
 # ---------------------------------------------------------------------------
 
@@ -408,9 +510,9 @@ _AP2_SH_BARE_MKTEMP_D: re.Pattern[str] = re.compile(
 #
 # AP3 flags any occurrence of the literal "/tmp/pgai_kanban_tmp" in source
 # files, indicating a caller that bypasses the temp.sh resolver rather than
-# routing through PGAI_AGENT_KANBAN_TEMP_DIR.  This is a regression guard for
-# the v0.55.0 consolidation: once all 68 call sites were migrated to the
-# resolver, no new literal should appear in scripts or tests.
+# routing through PGAI_AGENT_KANBAN_TEMP_DIR.  It keeps every caller on the
+# resolver: no literal may appear in scripts or tests outside the permitted
+# locations below.
 #
 # The ONLY permitted locations are:
 #   1. team/scripts/lib/temp.sh          — the resolver's own hard fallback
@@ -485,12 +587,99 @@ _AP6_PROV_NAME: re.Pattern[str] = re.compile(
 )
 
 # ---------------------------------------------------------------------------
+# Anti-pattern 7 detection — golden comparison + inherited subprocess env
+# ---------------------------------------------------------------------------
+#
+# The pairing this check targets is narrower than either half alone:
+#
+#   (a) golden-comparison marker -- a "golden"-named identifier, or a literal
+#       "golden" path segment, assigned as part of a pathlib `/` join or an
+#       os.path.join() call.  This is the naming convention the tree's own
+#       golden-comparison harnesses already use (`_GOLDEN_DIR = ... /
+#       "fixtures" / "engine-baseline"`, `_FIXTURE_DIR = ... / "fixtures" /
+#       "golden"`), not a bare occurrence of the word "golden" anywhere in
+#       the file -- the word alone is also idiomatic test-naming shorthand
+#       for "the happy path" (`test_golden_path_...`), which is unrelated to
+#       a committed-fixture comparison and must not trip this check.
+#
+#   (b) inherited-environment marker -- ``dict(os.environ)`` or
+#       ``os.environ.copy()``, the same two forms a tree-wide survey of
+#       team/tests/ found at well over a hundred call sites.  Most of those
+#       sites are correct as written; this check only turns that signal into
+#       a finding when marker (a) is ALSO present somewhere in the same file.
+#
+# Both markers are evaluated at file scope, not per-function: the check does
+# not attempt to prove the two constructs sit in the same test or the same
+# call chain.  That is a deliberate width choice, not an oversight -- a file
+# that carries a golden-fixture comparison anywhere already has a verdict
+# that depends on a committed artifact, so an inherited-environment
+# subprocess anywhere else in that same file is worth a second look even
+# when today's read of the code shows the two are unrelated.  Because this
+# is a quality-class finding (warn, record, never block), the cost of that
+# width is a nudge to re-check, not a build failure.  A file with the
+# marker-(a) shape and no marker-(b) construct, or vice versa, is silent --
+# proven by the two negative-control fixtures accompanying this check.
+_AP7_GOLDEN_NAME_ASSIGN: re.Pattern[str] = re.compile(
+    r"""[A-Za-z_]*golden[A-Za-z_]*\s*=\s*.*(?:/\s*["']|os\.path\.join\()""",
+    re.IGNORECASE,
+)
+
+_AP7_GOLDEN_PATH_LITERAL: re.Pattern[str] = re.compile(
+    r"""(?:/\s*["']golden["']|os\.path\.join\([^)]*["']golden["'])""",
+    re.IGNORECASE,
+)
+
+_AP7_ENV_INHERIT: re.Pattern[str] = re.compile(
+    r"""dict\(\s*os\.environ\s*\)|os\.environ\.copy\(\)"""
+)
+
+# ---------------------------------------------------------------------------
+# Anti-pattern 8 detection — uncontrolled absolute-path substring assertion
+# ---------------------------------------------------------------------------
+#
+# AP8 flags ``assert "<literal>" (not )?in <subject>`` where <literal> both
+# starts AND ends with "/" -- a path-segment shape ("/projects/", "/tmp/",
+# "/home/") searched as a free-floating substring of an absolute path the
+# test does not fully control.  The literal's containing prefix is whatever
+# the ambient scratch root happens to be (PGAI_AGENT_KANBAN_TEMP_DIR /
+# pytest's tmp_path), which the multi-project layout can itself route
+# through a "projects" segment -- so the assertion's verdict becomes a
+# property of the invoking environment, not of what the routing code under
+# test computed.
+#
+# The "starts and ends with a slash" requirement is the deliberate narrowing
+# that keeps this check from firing on the hundreds of ordinary, correct
+# containment assertions in the tree that check captured stdout/stderr text
+# against an expected substring (`assert "1/3" in captured.out`, `assert
+# "rc/v8.8.8" in result.stderr`) -- none of those literals both open and
+# close with "/", so none of them match.
+#
+# Flagged:
+#   assert "/projects/" not in resolved_path
+#   assert "/tmp/" in some_absolute_path
+#
+# NOT flagged (no leading/trailing slash on the literal, or not a
+# containment assertion against a bare-name subject):
+#   assert "1/3" in captured.out
+#   assert "/approvals" in scratch["paths"]
+#   assert resolved_path.startswith(expected_prefix)
+#
+# Stable error code: AP8
+#
+# This check applies only to Python test files, not to runtime scripts.
+
+_AP8_ABS_PATH_SUBSTRING: re.Pattern[str] = re.compile(
+    r"""assert\s+[a-zA-Z]{0,2}(?P<quote>["'])(?P<literal>/[^"']*/)(?P=quote)"""
+    r"""\s+(?P<neg>not\s+)?in\s+(?P<subject>\w[\w.\[\]]*)"""
+)
+
+# ---------------------------------------------------------------------------
 # Shared utility
 # ---------------------------------------------------------------------------
 
 SOP_CITATION = (
-    "See SOP.md 'Test Authoring Guidelines' for the preferred pattern "
-    "and opt-out instructions."
+    "See roles/TESTER.md 'Test Authoring Guidelines' for the preferred "
+    "pattern and opt-out instructions."
 )
 
 
@@ -627,6 +816,12 @@ def _check_ap2_py(filepath: Path, lines: list[str]) -> list[str]:
     framework wrappers that define the correct calling convention.  Their
     internal bare mkdtemp calls (which always pass dir=) must not be
     flagged; only the callers under team/tests/ are targeted by this lint.
+
+    Files listed in _AP2_BARE_TMP_SUBJECT_MATTER_WHITELIST lose only the
+    Path()/open() bare-/tmp constructor checks — they behaviorally test a
+    real bare-/tmp scan that cannot be exercised through the sanctioned
+    routing mechanisms without testing nothing. See that set's own comment
+    for the full reasoning.
     """
     findings: list[str] = []
 
@@ -723,6 +918,18 @@ def _check_ap2_py(filepath: Path, lines: list[str]) -> list[str]:
         ),
     ]
 
+    # Narrow allowance: a file on _AP2_BARE_TMP_SUBJECT_MATTER_WHITELIST loses
+    # ONLY the Path()/open() bare-/tmp constructor checks — see that set's own
+    # docstring-comment for the full reasoning. Every other AP2 pattern in
+    # patterns_and_messages (var assignment, makedirs, bare mktemp,
+    # TemporaryDirectory-without-dir=) still applies to the file unchanged.
+    if filepath.name in _AP2_BARE_TMP_SUBJECT_MATTER_WHITELIST:
+        patterns_and_messages = [
+            (pat, message)
+            for pat, message in patterns_and_messages
+            if pat not in (_AP2_PY_PATH_CONSTRUCTOR, _AP2_PY_OPEN_TMP)
+        ]
+
     for idx, line in enumerate(lines):
         lineno = idx + 1
         stripped = line.lstrip()
@@ -812,9 +1019,8 @@ def _check_ap3(filepath: Path, lines: list[str]) -> list[str]:
 
     Flags any line that contains the literal string ``/tmp/pgai_kanban_tmp``
     in files that are not the resolver (temp.sh) or the lint script itself
-    (lint_test_anti_patterns.py).  This is a regression guard for the v0.55.0
-    consolidation: once all inline literals were migrated to the temp.sh
-    resolver, no new literal should appear anywhere outside those two files.
+    (lint_test_anti_patterns.py).  It keeps every caller on the temp.sh
+    resolver: no literal may appear anywhere outside those two files.
 
     Applies to both Python (.py) and shell (.sh) files.  Also flags comments
     and string data — any occurrence of the literal is a potential regression.
@@ -895,6 +1101,109 @@ def _check_ap6(filepath: Path, lines: list[str]) -> list[str]:
     return findings
 
 
+def _has_golden_comparison_marker(lines: list[str]) -> bool:
+    """Return True if *lines* contains a golden-comparison marker anywhere.
+
+    See the AP7 pattern comments above for exactly what counts: a
+    "golden"-named identifier or a literal "golden" path segment, in each
+    case assigned as part of a pathlib `/` join or an os.path.join() call.
+    A bare occurrence of the word "golden" with no path-join context (e.g.
+    the common `test_golden_path_...` happy-path naming idiom) does not
+    count.
+    """
+    for line in lines:
+        if _AP7_GOLDEN_NAME_ASSIGN.search(line) or _AP7_GOLDEN_PATH_LITERAL.search(
+            line
+        ):
+            return True
+    return False
+
+
+def _check_ap7(filepath: Path, lines: list[str]) -> list[str]:
+    """Detect anti-pattern 7: golden comparison + inherited subprocess env.
+
+    Applies only to Python test files (golden-comparison harnesses in this
+    tree are Python).  Scans the whole file once for the golden-comparison
+    marker; if absent, the file cannot carry this pairing and the inherited-
+    environment scan is skipped entirely so an ordinary, correct inherited-
+    environment site never pays for this check.  If the marker is present,
+    every inherited-environment construct in the file is a finding at its
+    own line, subject to the normal per-instance opt-out.
+    """
+    if not _has_golden_comparison_marker(lines):
+        return []
+
+    findings: list[str] = []
+    for idx, line in enumerate(lines):
+        lineno = idx + 1
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        if not _AP7_ENV_INHERIT.search(line):
+            continue
+        if _has_opt_out(lines, lineno):
+            continue
+        detail = (
+            "This file compares a captured surface against a committed golden "
+            "AND builds its subprocess environment by inheriting the ambient "
+            "one here, which makes the comparison's verdict a property of the "
+            "invoking shell rather than of the tree. "
+            "Fix: build the subprocess environment from an explicit, minimal "
+            "set of names instead -- see "
+            "tests.fixtures.scrubbed_subprocess_env.build_scrubbed_env. "
+            "Opt out with: '# anti-pattern-allowlist: 7 (justification: ...)'"
+        )
+        findings.append(_finding(filepath, lineno, "AP7", detail))
+
+    return findings
+
+
+def _check_ap8(filepath: Path, lines: list[str]) -> list[str]:
+    """Detect anti-pattern 8: uncontrolled absolute-path substring assertion.
+
+    Flags ``assert "<literal>" (not )?in <subject>`` where the literal both
+    starts and ends with "/" -- a path-segment shape ("/projects/", "/tmp/")
+    searched as a free-floating substring of an absolute path.  The literal's
+    surrounding prefix is whatever the ambient scratch root happens to be,
+    which the test does not control, so the assertion's verdict can flip
+    based on the invoking environment rather than on what the code under
+    test computed.
+
+    Deliberately narrow: only a literal that both opens and closes with "/"
+    matches, so the hundreds of ordinary containment assertions against
+    captured stdout/stderr text elsewhere in the tree are untouched.
+    """
+    findings: list[str] = []
+
+    for idx, line in enumerate(lines):
+        lineno = idx + 1
+
+        m = _AP8_ABS_PATH_SUBSTRING.search(line)
+        if not m:
+            continue
+
+        if _has_opt_out(lines, lineno):
+            continue
+
+        literal = m.group("literal")
+        subject = m.group("subject")
+        detail = (
+            f"Assertion searches an absolute path for the hardcoded literal "
+            f"'{literal}' inside '{subject}'. The prefix surrounding that "
+            "literal is the ambient scratch root the suite happens to run "
+            "under, which this test does not control -- a caller whose own "
+            "scratch root contains the same substring makes this assertion "
+            "fail with no defect in the code under test. "
+            "Fix: assert against a value the test computed instead, e.g. "
+            "pathlib.Path(subject).relative_to(root).parts, or the full "
+            "expected path. "
+            "Opt out with: '# anti-pattern-allowlist: 8 (justification: ...)'"
+        )
+        findings.append(_finding(filepath, lineno, "AP8", detail))
+
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # File scanner
 # ---------------------------------------------------------------------------
@@ -950,6 +1259,16 @@ def _scan_file(
     if not runtime_only and filepath.suffix == ".py":
         findings.extend(_check_ap6(filepath, lines))
 
+    # AP7 — golden comparison + inherited subprocess env — only applies to
+    # Python test files; runtime scripts do not author golden comparisons.
+    if not runtime_only and filepath.suffix == ".py":
+        findings.extend(_check_ap7(filepath, lines))
+
+    # AP8 — uncontrolled absolute-path substring assertion — only applies to
+    # Python test files; runtime scripts do not author pytest assertions.
+    if not runtime_only and filepath.suffix == ".py":
+        findings.extend(_check_ap8(filepath, lines))
+
     return findings
 
 
@@ -964,9 +1283,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description=(
             "Lint team/tests/ for anti-pattern 1 (pattern-scan assertion loops), "
             "anti-pattern 2 (hardcoded /tmp or $HOME paths / bare mktemp calls), "
-            "and anti-pattern 6 (bug-provenance test names). "
+            "anti-pattern 6 (bug-provenance test names), anti-pattern 7 "
+            "(golden comparison + inherited subprocess environment), and "
+            "anti-pattern 8 (uncontrolled absolute-path substring assertion). "
             "Also scans runtime script directories for AP2 violations. "
-            "See SOP.md 'Test Authoring Guidelines' for full definitions."
+            "With --files, scans only the named test files instead. "
+            "See roles/TESTER.md 'Test Authoring Guidelines' for full definitions."
         ),
     )
     parser.add_argument(
@@ -991,6 +1313,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--files",
+        metavar="PATH",
+        nargs="+",
+        default=None,
+        help=(
+            "Named-file mode: scan exactly these test files with every "
+            "test-file check (AP1, AP2, AP3, AP6, AP7, AP8) and nothing else "
+            "-- no tests-directory walk and no runtime-script scan. A named "
+            "file is scanned even under a fixtures/ directory. Each path must "
+            "be an existing file (a missing one exits 2). Cannot be combined "
+            "with --tests-dir or --scripts-dirs."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -999,8 +1335,110 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _resolve_named_files(raw_paths: list[str]) -> tuple[list[Path], list[str]]:
+    """Resolve the --files arguments to the exact list of files to scan.
+
+    Returns ``(files, missing)``: *files* holds each existing regular file
+    once, in the order first named (a path named twice is scanned once, so
+    its findings are not double-counted); *missing* holds every argument
+    that does not name an existing regular file, verbatim, so the caller
+    can report all of them in one message rather than one per run.
+    """
+    files: list[Path] = []
+    missing: list[str] = []
+    seen: set[Path] = set()
+    for raw in raw_paths:
+        path = Path(raw).resolve()
+        if not path.is_file():
+            missing.append(raw)
+            continue
+        if path in seen:
+            continue
+        seen.add(path)
+        files.append(path)
+    return files, missing
+
+
+def _report(all_findings: list[str], test_count: int, runtime_count: int) -> int:
+    """Print the findings block or the OK line; return the process exit code."""
+    if all_findings:
+        print(
+            f"\nlint_test_anti_patterns: {len(all_findings)} finding(s):\n",
+            flush=True,
+        )
+        for finding in all_findings:
+            print(finding, flush=True)
+            print()  # blank line between findings
+        print(
+            f"lint_test_anti_patterns: FAIL — {len(all_findings)} finding(s). "
+            "Fix the issues above or add per-instance opt-out marker comments.\n"
+            f"{SOP_CITATION}",
+            flush=True,
+        )
+        return 1
+
+    print(
+        f"lint_test_anti_patterns: OK — 0 findings across "
+        f"{test_count + runtime_count} file(s) "
+        f"({test_count} test, {runtime_count} runtime).",
+        flush=True,
+    )
+    return 0
+
+
+def _main_named_files(args: argparse.Namespace) -> int:
+    """Named-file mode: scan exactly the --files paths as test files.
+
+    No directory is walked and no runtime script is scanned, so the cost of
+    a run is proportional to the files named, not to the size of the tree.
+    The fixtures/ exclusion the whole-tree walk applies does not apply here:
+    a caller that names a file wants that file checked.
+    """
+    script = str(Path(__file__).resolve())
+    if args.tests_dir or args.scripts_dirs is not None:
+        print(
+            "ERROR: --files cannot be combined with --tests-dir or "
+            "--scripts-dirs: named-file mode scans exactly the named files "
+            "and never walks a directory.\n"
+            f"Run with --files alone: python3 {shlex.quote(script)} --files "
+            + shlex.join(args.files),
+            file=sys.stderr,
+        )
+        return 2
+
+    named_files, missing = _resolve_named_files(args.files)
+    if missing:
+        print(
+            "ERROR: --files path(s) not found or not a regular file: "
+            + ", ".join(missing)
+            + "\nPass existing test file paths, e.g.: python3 "
+            f"{shlex.quote(script)} --files "
+            + shlex.quote(str(Path(script).parent.parent / "tests" / "unit" / "test_semver.py")),
+            file=sys.stderr,
+        )
+        return 2
+
+    print(
+        f"lint_test_anti_patterns: scanning {len(named_files)} named file(s)",
+        flush=True,
+    )
+    all_findings: list[str] = []
+    for filepath in named_files:
+        all_findings.extend(_scan_file(filepath, verbose=args.verbose))
+
+    return _report(all_findings, len(named_files), 0)
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Run the test anti-pattern lint over the test tree, or exactly ``--files``.
+
+    Exit codes: 0 no findings; 1 one or more findings (printed per finding);
+    2 usage error or internal failure, such as a missing ``--files`` path.
+    """
     args = _parse_args(argv)
+
+    if args.files is not None:
+        return _main_named_files(args)
 
     # Infer the repo root as the grandparent of this script
     # (team/scripts/lint_test_anti_patterns.py → repo root = parent of team/).
@@ -1100,30 +1538,7 @@ def main(argv: list[str] | None = None) -> int:
             _scan_file(filepath, verbose=args.verbose, runtime_only=True)
         )
 
-    total_files = len(test_files) + len(runtime_files)
-
-    if all_findings:
-        print(
-            f"\nlint_test_anti_patterns: {len(all_findings)} finding(s):\n",
-            flush=True,
-        )
-        for finding in all_findings:
-            print(finding, flush=True)
-            print()  # blank line between findings
-        print(
-            f"lint_test_anti_patterns: FAIL — {len(all_findings)} finding(s). "
-            "Fix the issues above or add per-instance opt-out marker comments.\n"
-            f"{SOP_CITATION}",
-            flush=True,
-        )
-        return 1
-
-    print(
-        f"lint_test_anti_patterns: OK — 0 findings across {total_files} file(s) "
-        f"({len(test_files)} test, {len(runtime_files)} runtime).",
-        flush=True,
-    )
-    return 0
+    return _report(all_findings, len(test_files), len(runtime_files))
 
 
 if __name__ == "__main__":

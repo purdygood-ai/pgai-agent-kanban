@@ -1,28 +1,42 @@
 """
 test_describe_tag_filter.py
 ============================
-Behavioral tests for BUG-0074 and BUG-0078: git describe --tags must always
-carry a prefix-aware --match pattern at every call site in team/scripts/.
+Behavioral tests: git describe --tags must always carry a prefix-aware
+--match pattern at every call site in team/scripts/, so a newer 'latest'
+alias tag (or a bare v-ancestor sitting alongside a prefixed release tag)
+never outranks the real release tag.
 
 WHAT IS TESTED
 --------------
-1. **Bare-prefix alias-tag fixture** (BUG-0074 regression) — a repo with an
-   annotated vX.Y.Z tag and a NEWER annotated 'latest' tag on the same commit:
-   the version_stamp path must resolve to vX.Y.Z, not 'latest'.  The divergence
-   check must also report clean when compared against a VERSION file containing
-   vX.Y.Z.
+1. **Bare-prefix alias-tag fixture** (the empty-prefix regression) — a repo
+   with an annotated vX.Y.Z tag and a NEWER annotated 'latest' tag on the
+   same commit: the version_stamp path must resolve to vX.Y.Z, not 'latest'.
+   The divergence check must also report clean when compared against a
+   VERSION file containing vX.Y.Z.
 
-2. **Prefixed fixture** (BUG-0078) — a repo whose release tag carries a branch
-   prefix (e.g. ai_v1.23.0), with a BARE v-ancestor (v1.0.0) and a NEWER
-   'latest' alias on HEAD: the version_stamp path must resolve to the ai_v tag,
-   not the bare v-ancestor or the 'latest' alias.  The divergence check must
-   also report clean when VERSION matches the prefixed tag.
+2. **Prefixed fixture** (the branch-prefix scenario) — a repo whose release
+   tag carries a branch prefix (e.g. ai_v1.23.0), with a BARE v-ancestor
+   (v1.0.0) and a NEWER 'latest' alias on HEAD: the version_stamp path must
+   resolve to the ai_v tag, not the bare v-ancestor or the 'latest' alias.
+   The divergence check must also report clean when VERSION matches the
+   prefixed tag.
+
+2b. **Production-shape fixture** (committed VERSION identity path) — a repo
+   that commits an unprefixed VERSION file (e.g. v1.23.0) and carries the
+   prefixed release tag (e.g. ai_v1.23.0) at HEAD.  install copies the
+   committed VERSION verbatim, so the installed VERSION is unprefixed while
+   git describe returns the prefixed tag.  The divergence check must
+   normalize the branch prefix before comparing: equal versions report
+   clean, and a real version difference is still reported naming both raw
+   values.  The prefixed fixture above seeds VERSION with the prefixed tag,
+   which is the shape only the describe-fallback path (no committed VERSION)
+   produces; this fixture covers the committed-VERSION path beside it.
 
 3. **Call-site matrix** — both prefix shapes (empty and "ai_") are exercised for
    all four describe call sites (version_stamp.sh, check-version-divergence.sh,
    cm/finalize-release.sh both-describes path, and upgrade.sh advisory path via
    git_describe_tag_pattern).  This encodes the "omitted-dimension" lesson from
-   BUG-0074's fixture gap.
+   the bare-prefix fixture's original coverage gap.
 
 4. **Grep-zero gate** — zero unfiltered 'git describe --tags' calls exist in
    team/scripts/ shell files.  An unfiltered call is 'describe --tags' NOT
@@ -43,6 +57,18 @@ import subprocess
 import pytest
 
 from tests.unit.shell_harness import run_bash
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="describe-tag-filter")
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +125,7 @@ def _build_alias_tag_repo(
     """Build a repo with an annotated release tag and a NEWER annotated 'latest' tag
     on the same commit.
 
-    Bare-prefix fixture (BUG-0074 regression scenario): release tags have the form
+    Bare-prefix fixture (the empty-prefix regression scenario): release tags have the form
     vX.Y.Z with no branch prefix.  A fresh clone where 'latest' was created after
     the release tag causes unfiltered 'git describe --tags' to pick 'latest'
     instead of the release tag.
@@ -132,7 +158,7 @@ def _build_prefixed_alias_tag_repo(
     """Build a repo with a bare v-ancestor, a newer prefixed release tag, and a
     NEWER annotated 'latest' tag on HEAD.
 
-    Prefixed fixture (BUG-0078 scenario): installs that use branch_prefix=ai_ tag
+    Prefixed fixture (the branch-prefix scenario): installs that use branch_prefix=ai_ tag
     releases as ai_vX.Y.Z.  Without a prefix-aware --match pattern, git describe
     walks past the ai_v tag to the older bare v-ancestor (or to 'latest').
 
@@ -177,7 +203,7 @@ def _build_prefixed_alias_tag_repo(
 def test_version_stamp_resolves_release_tag_not_alias(tmp_path: pathlib.Path) -> None:
     """version_stamp writes the numeric release tag when a newer 'latest' alias exists.
 
-    Reproduces the BUG-0074 failure scenario:
+    Reproduces the bare-prefix alias-tag failure scenario:
     - Repo has annotated v1.23.0 and a NEWER annotated 'latest' on the same commit.
     - Unfiltered 'git describe --tags' would resolve to 'latest'.
     - With --match 'v[0-9]*', it must resolve to 'v1.23.0'.
@@ -289,7 +315,7 @@ def test_divergence_check_clean_when_version_matches_release_tag(
 def test_version_stamp_resolves_prefixed_tag_not_bare_ancestor(tmp_path: pathlib.Path) -> None:
     """version_stamp resolves the prefixed release tag, not a bare v-ancestor or 'latest'.
 
-    Prefixed fixture (BUG-0078 scenario):
+    Prefixed fixture (the branch-prefix scenario):
     - Repo has a bare v1.0.0 ancestor, a newer annotated ai_v1.23.0 on a later
       commit, and a NEWER annotated 'latest' on the same commit as ai_v1.23.0.
     - Without a prefix-aware --match pattern, describe walks back to v1.0.0
@@ -355,7 +381,7 @@ def test_divergence_check_clean_when_version_matches_prefixed_tag(
 ) -> None:
     """Divergence check reports clean when VERSION matches the prefixed release tag.
 
-    Prefixed fixture (BUG-0078 scenario):
+    Prefixed fixture (the branch-prefix scenario):
     - Repo has v1.0.0 bare ancestor, ai_v1.23.0 prefixed tag, and newer 'latest'.
     - The installed VERSION file contains 'ai_v1.23.0'.
     - Without a prefix-aware --match, the check resolves to v1.0.0 or 'latest',
@@ -433,7 +459,7 @@ def test_git_describe_tag_pattern_constructs_correct_pattern(
 ) -> None:
     """git_describe_tag_pattern returns the correct --match pattern for each prefix.
 
-    Empty prefix collapses to 'v[0-9]*' (BUG-0074 latest-exclusion preserved).
+    Empty prefix collapses to 'v[0-9]*' (the latest-exclusion behavior is preserved).
     Non-empty prefix produces '<prefix>v[0-9]*'.
     """
     result = run_bash(
@@ -462,9 +488,9 @@ def test_git_describe_tag_pattern_constructs_correct_pattern(
     reason=f"version_stamp.sh not found at {_VERSION_STAMP_SH}",
 )
 @pytest.mark.parametrize("prefix,tag,bare_ancestor,expected", [
-    # Bare-prefix shape: existing BUG-0074 scenario
+    # Bare-prefix shape: the empty-prefix regression scenario
     ("", "v1.23.0", None, "v1.23.0"),
-    # Prefixed shape: BUG-0078 scenario
+    # Prefixed shape: the branch-prefix scenario
     ("ai_", "ai_v1.23.0", "v1.0.0", "ai_v1.23.0"),
 ])
 def test_version_stamp_prefix_shape_matrix(
@@ -477,8 +503,8 @@ def test_version_stamp_prefix_shape_matrix(
     """version_stamp resolves the correct tag for both bare and prefixed shapes.
 
     Matrix:
-    - prefix=""    → bare v-tag repo (BUG-0074 regression)
-    - prefix="ai_" → prefixed ai_v-tag repo with bare v-ancestor (BUG-0078)
+    - prefix=""    → bare v-tag repo (the empty-prefix regression)
+    - prefix="ai_" → prefixed ai_v-tag repo with bare v-ancestor (the branch-prefix scenario)
 
     Both cases also include a newer 'latest' alias tag on HEAD.
     """
@@ -522,9 +548,9 @@ def test_version_stamp_prefix_shape_matrix(
     reason=f"check-version-divergence.sh not found at {_CVD_SH}",
 )
 @pytest.mark.parametrize("prefix,installed_version,tag,bare_ancestor", [
-    # Bare-prefix shape: BUG-0074 regression
+    # Bare-prefix shape: the empty-prefix regression
     ("", "v1.23.0", "v1.23.0", None),
-    # Prefixed shape: BUG-0078 scenario
+    # Prefixed shape: the branch-prefix scenario
     ("ai_", "ai_v1.23.0", "ai_v1.23.0", "v1.0.0"),
 ])
 def test_divergence_check_prefix_shape_matrix(
@@ -586,6 +612,179 @@ def test_divergence_check_prefix_shape_matrix(
 
 
 # ---------------------------------------------------------------------------
+# Production shape: committed unprefixed VERSION plus prefixed tag
+# ---------------------------------------------------------------------------
+
+
+def _build_committed_version_repo(
+    tmp_path: pathlib.Path,
+    committed_version: str,
+    tag: str,
+) -> pathlib.Path:
+    """Build a repo that commits a VERSION file and tags HEAD with *tag*.
+
+    Production-shape fixture: the dev tree commits an unprefixed VERSION
+    (identity source 1 in version_stamp.sh, copied verbatim on install),
+    while the release tag at HEAD carries the branch prefix.  A NEWER
+    'latest' alias tag on the same commit keeps the --match filter honest.
+
+    Returns the repo path.
+    """
+    repo = _make_git_repo(tmp_path, "committed_version_repo")
+
+    (repo / "VERSION").write_text(f"{committed_version}\n", encoding="utf-8")
+    _git_cmd(repo, "add", "VERSION")
+    _git_cmd(repo, "commit", "-m", "Release commit with committed VERSION")
+    _git_cmd(repo, "tag", "-a", tag, "-m", f"Release {tag}")
+    _git_cmd(repo, "tag", "-a", "latest", "-m", "Alias tag pointing to latest release")
+
+    return repo
+
+
+def _run_divergence_check_on_stamped_install(
+    tmp_path: pathlib.Path,
+    repo: pathlib.Path,
+    prefix: str,
+) -> tuple[str, str, str]:
+    """Stamp an install from *repo* the way install.sh does, then run the check.
+
+    The installed VERSION is produced by stamp_version_files (not written by
+    hand), so the test exercises the real committed-VERSION identity path.
+    overwatch_log_action is stubbed to print its detail argument with an
+    'ACTION:' marker so the action-log wording can be asserted on.
+
+    Returns (installed_version, combined_output, action_lines).
+    """
+    kanban_root = tmp_path / "kanban_root_committed"
+    kanban_root.mkdir(parents=True, exist_ok=True)
+
+    (kanban_root / "projects.cfg").write_text(
+        "[project:test-proj]\nname = test-proj\n",
+        encoding="utf-8",
+    )
+    proj_root = kanban_root / "projects" / "test-proj"
+    proj_root.mkdir(parents=True, exist_ok=True)
+    (proj_root / "project.cfg").write_text(
+        f"[project]\nbranch_prefix = {prefix}\ndev_tree_path = {repo!s}\n",
+        encoding="utf-8",
+    )
+
+    result = run_bash(
+        tmp_path,
+        "\n".join([
+            f"export KANBAN_ROOT='{kanban_root!s}'",
+            "export OVERWATCH_PROJECT='test-proj'",
+            "unset PGAI_DEV_TREE_PATH",
+            f"source '{_VERSION_STAMP_SH!s}'",
+            f"stamp_version_files '{repo!s}' '{kanban_root!s}' '' '{prefix}'",
+            'overwatch_log_action() { echo "ACTION: $3 $5"; return 0; }',
+            f"source '{_CVD_SH!s}'",
+            "overwatch_check_version_divergence",
+        ]),
+    )
+    assert result.returncode == 0, (
+        f"stamp + divergence check exited non-zero: {result.stderr}"
+    )
+
+    installed = (kanban_root / "VERSION").read_text(encoding="utf-8").strip()
+    combined = result.stdout + result.stderr
+    actions = "\n".join(
+        line for line in result.stdout.splitlines() if line.startswith("ACTION:")
+    )
+    return installed, combined, actions
+
+
+@pytest.mark.skipif(
+    not (_CVD_SH.exists() and _VERSION_STAMP_SH.exists()),
+    reason="check-version-divergence.sh or version_stamp.sh not found",
+)
+@pytest.mark.parametrize("prefix,committed_version,tag", [
+    # Prefixed lane: unprefixed committed VERSION, prefixed release tag.
+    ("ai_", "v1.23.0", "ai_v1.23.0"),
+    # Empty-prefix lane: committed VERSION and tag are the same string.
+    ("", "v1.23.0", "v1.23.0"),
+])
+def test_divergence_check_clean_when_committed_version_matches_tag(
+    tmp_path: pathlib.Path,
+    prefix: str,
+    committed_version: str,
+    tag: str,
+) -> None:
+    """Committed unprefixed VERSION plus the matching tag at HEAD reads as clean.
+
+    On a prefixed lane the installed VERSION is 'v1.23.0' while describe
+    returns 'ai_v1.23.0'; the check must remove the branch prefix before
+    comparing and log 'no divergence'.  The empty-prefix lane compares the
+    raw strings and must stay clean too.
+    """
+    repo = _build_committed_version_repo(tmp_path, committed_version, tag)
+    installed, combined, actions = _run_divergence_check_on_stamped_install(
+        tmp_path, repo, prefix,
+    )
+
+    assert installed == committed_version, (
+        f"stamp_version_files must copy the committed VERSION verbatim; "
+        f"expected {committed_version!r}, got {installed!r}"
+    )
+    assert "DIVERGENCE DETECTED" not in combined, (
+        f"Divergence check must NOT report divergence for prefix={prefix!r} "
+        f"when committed VERSION={committed_version!r} matches tag {tag!r}.\n"
+        f"output:\n{combined}"
+    )
+    assert "version-match" in actions and "no divergence" in actions, (
+        f"Divergence check must log a version-match 'no divergence' entry.\n"
+        f"action lines:\n{actions}\noutput:\n{combined}"
+    )
+
+
+@pytest.mark.skipif(
+    not (_CVD_SH.exists() and _VERSION_STAMP_SH.exists()),
+    reason="check-version-divergence.sh or version_stamp.sh not found",
+)
+def test_divergence_check_reports_real_difference_with_committed_version(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A real version difference is still reported after prefix normalization.
+
+    Committed VERSION 'v1.22.0' with tag 'ai_v1.23.0' at HEAD and
+    branch_prefix 'ai_': the normalized values differ (v1.22.0 vs v1.23.0),
+    so the check must report a divergence, and the report must name both
+    raw values exactly as read.
+    """
+    committed_version = "v1.22.0"
+    tag = "ai_v1.23.0"
+    repo = _build_committed_version_repo(tmp_path, committed_version, tag)
+    installed, combined, actions = _run_divergence_check_on_stamped_install(
+        tmp_path, repo, "ai_",
+    )
+
+    assert installed == committed_version, (
+        f"stamp_version_files must copy the committed VERSION verbatim; "
+        f"expected {committed_version!r}, got {installed!r}"
+    )
+    assert "DIVERGENCE DETECTED" in combined, (
+        f"Divergence check must report divergence when VERSION={committed_version!r} "
+        f"and the tag at HEAD is {tag!r}.\noutput:\n{combined}"
+    )
+    report_lines = [
+        line for line in actions.splitlines()
+        if "report:version-divergence" in line
+    ]
+    assert report_lines, (
+        f"Divergence check must log a report:version-divergence entry.\n"
+        f"action lines:\n{actions}\noutput:\n{combined}"
+    )
+    assert f"installed={committed_version}" in report_lines[0], (
+        f"Divergence report must name the raw installed VERSION "
+        f"{committed_version!r}; got: {report_lines[0]!r}"
+    )
+    assert f"={tag}" in report_lines[0], (
+        f"Divergence report must name the raw describe value {tag!r}; "
+        f"got: {report_lines[0]!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Test 1h: call-site matrix — git_describe_tag_pattern for upgrade.sh advisory path
 # ---------------------------------------------------------------------------
 
@@ -595,9 +794,9 @@ def test_divergence_check_prefix_shape_matrix(
     reason=f"version_stamp.sh not found at {_VERSION_STAMP_SH}",
 )
 @pytest.mark.parametrize("prefix,tag,bare_ancestor", [
-    # Bare-prefix shape: BUG-0074 regression
+    # Bare-prefix shape: the empty-prefix regression
     ("", "v1.23.0", None),
-    # Prefixed shape: BUG-0078 scenario
+    # Prefixed shape: the branch-prefix scenario
     ("ai_", "ai_v1.23.0", "v1.0.0"),
 ])
 def test_describe_pattern_used_in_advisory_path(
@@ -648,9 +847,9 @@ def test_describe_pattern_used_in_advisory_path(
     reason=f"version_stamp.sh not found at {_VERSION_STAMP_SH}",
 )
 @pytest.mark.parametrize("prefix,tag,bare_ancestor", [
-    # Bare-prefix shape: BUG-0074 regression
+    # Bare-prefix shape: the empty-prefix regression
     ("", "v1.23.0", None),
-    # Prefixed shape: BUG-0078 scenario
+    # Prefixed shape: the branch-prefix scenario
     ("ai_", "ai_v1.23.0", "v1.0.0"),
 ])
 def test_finalize_release_describe_pattern_resolves_correct_tag(

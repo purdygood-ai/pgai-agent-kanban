@@ -17,6 +17,10 @@
 #                                            false-positive candidate (filter it)
 #   literal_grep_tests          LITERAL  TEST_DIRS... — grep test dirs for literal
 #                                            in assertion contexts; echo matches
+#   literal_grep_recorded_output LITERAL RECORDED_DIRS... — grep recorded-output
+#                                            fixture dirs for a bare literal match
+#                                            (no assertion-context constraint);
+#                                            echo matches in the same shape
 #   literal_format_risks        LITERAL MATCHES — format risk entry as markdown lines
 #
 # False-positive filters (literal_is_noise returns true for):
@@ -221,6 +225,12 @@ literal_extract_from_diff() {
 # literal_grep_tests LITERAL TEST_DIR [TEST_DIR...]
 # Search test directories for LITERAL appearing in assertion contexts.
 #
+# This is one of two independent search surfaces the caller runs side by
+# side (see literal_grep_recorded_output below for the other). Keeping them
+# distinct is deliberate: relaxing this assertion-context constraint
+# tree-wide to also catch bare data files would flood the advisory with
+# incidental prose matches in ordinary test source.
+#
 # Assertion context patterns searched (ERE):
 #   ==, !=, assert, expected, assertEqual, assertIn, assertRegex, in
 #   followed by the literal content (with or without quotes)
@@ -259,6 +269,64 @@ literal_grep_tests() {
         hits="$(grep -rn --include="*.py" --include="*.sh" --include="*.bats" \
             -E "(==|!=|assert[A-Za-z]*|expected)[^#]*(\"${escaped_content}\"|'${escaped_content}')" \
             "$test_dir" 2>/dev/null || true)"
+
+        if [[ -n "$hits" ]]; then
+            results="${results}${hits}"$'\n'
+        fi
+    done
+
+    # Emit results (strip trailing blank line)
+    printf '%s' "$results" | grep -v '^$' || true
+}
+
+# ---------------------------------------------------------------------------
+# literal_grep_recorded_output LITERAL RECORDED_DIR [RECORDED_DIR...]
+# Search recorded-output fixture directories for a bare occurrence of
+# LITERAL's content — no assertion-context constraint.
+#
+# A recorded-output fixture (a captured board render, wake log, ship
+# summary, or other golden) is a bare data file: its lines are the captured
+# bytes, not test code, so they never carry assertion syntax (==, assert,
+# expected, ...). literal_grep_tests's assertion-context pattern can
+# therefore never match a line inside one — the whole file's content IS the
+# expected value, so any line containing the literal is a hit. This
+# function runs alongside literal_grep_tests, on a caller-selected set of
+# recorded-output directories, rather than replacing or widening the
+# assertion-context search: the two stay distinct so the source-file half
+# of the check keeps its low false-positive rate.
+#
+# Output: matching lines in grep format (file:line:content), one per line —
+#         the identical shape literal_grep_tests emits, so a caller can
+#         concatenate results from both searches before formatting.
+#         Empty output when no matches are found.
+#
+# LITERAL is the raw value with surrounding quotes preserved.
+# The function searches for the CONTENT (without quotes) as a fixed string
+# (no regex metacharacter escaping needed — grep -F takes it literally).
+# ---------------------------------------------------------------------------
+literal_grep_recorded_output() {
+    local raw_literal="$1"
+    shift
+    local recorded_dirs=("$@")
+
+    # Strip quotes to get content for grepping
+    local content
+    content="$(_literal_strip_quotes "$raw_literal")"
+
+    # Skip empty content
+    [[ -z "$content" ]] && return 0
+
+    local results=""
+
+    local recorded_dir
+    for recorded_dir in "${recorded_dirs[@]}"; do
+        [[ -d "$recorded_dir" ]] || continue
+
+        # Fixed-string, bare search: no assertion keyword to anchor on, and
+        # --binary-files=without-match skips any non-text fixture rather
+        # than emitting a "binary file matches" line.
+        local hits
+        hits="$(grep -rn --binary-files=without-match -F -- "$content" "$recorded_dir" 2>/dev/null || true)"
 
         if [[ -n "$hits" ]]; then
             results="${results}${hits}"$'\n'

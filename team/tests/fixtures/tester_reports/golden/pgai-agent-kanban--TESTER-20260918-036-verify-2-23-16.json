@@ -1,0 +1,357 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `ai_rc/v2.23.16` (HEAD `21cf246`) against\n`requirements/v2.23.16-bugfix-bundle-20260918.md` in the detached per-task worktree. The RC is a\nthree-item bug bundle: BUG-0329 (the gated runners' replay line misclassified an exported variable\nthat also carried a second bash attribute, telling the pasting shell to unset it), BUG-0330 (the\nshared `--help` idiom in twenty operator scripts could be SIGPIPE'd under `pipefail`, so a script\nprinted perfect help and still exited 141 about one run in a hundred), and BUG-0328 (nine\nhygiene-lint `provenance` citations). All three bundled items are addressed. Both code fixes were\nverified behaviorally in both directions — the original failure mode reproduced against `ai_main`\nand confirmed closed on the RC, and the previously-working cases confirmed unbroken — not merely\nread in the diff. Both gated runners exited 0 (`run-unit-tests.sh`: 4744 passed, 31 skipped;\n`run-integration-tests.sh`: 515 passed, 1 skipped), with zero quality-class lint findings on either\nsuite, including a now-clean `lint_doc_command_truth`, the very check whose intermittent failure\nmotivated BUG-0330. The three requirements-doc acceptance criteria all pass. The build ran\nautonomously with no manual intervention. No bug, gap, or stale assertion was found, so nothing was\nfiled via Path C (autonomous follow-up filing — non-blocking).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight — RC intact, worktree clean",
+      "heading": "Finding 1: Pre-flight — RC intact, worktree clean",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `git rev-parse HEAD` = `21cf246d4e8211f8a22fe47f40826b0a40a13788` = `git rev-parse ai_rc/v2.23.16`. Commit identity confirmed (detached HEAD, as the wake script checks out).\n- `git status --porcelain` — empty.\n- `git stash list` — empty.\n- Scanned all 590 task folders under `$PGAI_PROJECT_ROOT/tasks/`. No task with `## State: DONE` and a `## Feature Branch` other than `none` has a locally surviving branch, so Check 1 (merged into the RC) and Check 2 (contributed commits) pass trivially for every one — the normal post-merge shape.\n- One stray local branch exists, `ai_feature/CODER-20260917-020-agent-metrics-avg-wall`, and is NOT an ancestor of `ai_rc/v2.23.16`. Its task is `WONT-DO`, not `DONE`, so Step 2 does not apply to it. Recorded as an observation under Caveats, not a finding.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Step 6.1 — release-state.md schema and version ordering",
+      "heading": "Finding 2: Step 6.1 — release-state.md schema and version ordering",
+      "level": 3,
+      "body": "**Category:** pass\n\n`projects/pgai-agent-kanban/release-state.md` holds exactly the four schema fields:\n`## Active RC` = `v2.23.16`, `## RC Opened At` = `2026-09-18T16:08:28+00:00`,\n`## RC Opened By Task` = `CM-20260918-035-open-rc-2-23-16`, `## Last Released` = `v2.23.15`.\n`## Last Released` is a well-formed `vX.Y.Z`. Version ordering checked with the shared\nhelper (`team/scripts/lib/semver.sh`): `pp_last_released_version pgai-agent-kanban` returns\n`v2.23.15`, and `semver_gt v2.23.16 v2.23.15` succeeds. No inline string comparison used.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Acceptance criterion 1 — bundled item BUG-0329 (replay export detection) is addressed",
+      "heading": "Finding 3: Acceptance criterion 1 — bundled item BUG-0329 (replay export detection) is addressed",
+      "level": 3,
+      "body": "**Category:** pass\n\nProduction change: `team/scripts/lib/gated_runner_lint.sh`, `gated_runner_replay_command`.\nThe classifier `declare -p \"$name\" | grep -q '^declare -x '` was replaced by a capture of the\nwhole attribute run followed by a membership test for `x`:\n\n```bash\ndeclare_output=\"$(declare -p \"$name\" 2>/dev/null)\" || declare_output=\"\"\nif [[ \"$declare_output\" =~ ^declare\\ ([^\\ ]+)\\  ]] && [[ \"${BASH_REMATCH[1]}\" == *x* ]]; then\n```\n\n**Behavioral verification (Step 6.5) — original failure mode AND new normal case, both exercised.**\nRun from the worktree root:\n\n| Case | Declaration | RC (`21cf246`) result | Pre-RC (`ai_main`) result |\n|---|---|---|---|\n| A — original failure mode | `declare -rx PYTEST_ADDOPTS=--basetemp=/x` | `PYTEST_ADDOPTS=--basetemp=/x` (correct) | `-u PYTEST_ADDOPTS` (the defect) |\n| B — new normal case | `export PYTEST_ADDOPTS=...` | `PYTEST_ADDOPTS=--basetemp=/x` (correct) | correct |\n| C — second attribute, integer | `declare -ix PYTHONHASHSEED=0` | `PYTHONHASHSEED=0` (correct) | not re-run; same class as A |\n| D — set but NOT exported | `PYTEST_ADDOPTS=...` | `-u PYTEST_ADDOPTS` (correct) | correct |\n| E — unset entirely | `unset PYTEST_ADDOPTS` | `-u PYTEST_ADDOPTS` (correct) | correct |\n\nThe pre-RC reproduction was executed against the `ai_main` copy of the file, confirming the\ndefect was real and that the RC closes it without breaking the cases that already worked.\nThe fix does not over-match: `x` is the export attribute letter only, and `BASH_REMATCH[1]`\ncaptures only the attribute token (`-x`, `-rx`, `-ix`, `--`), never the variable name, so a\nname containing the letter `x` cannot be misclassified.\n\nRegression test added at `team/tests/unit/test_gated_runner_stated_test_order.py`,\n`test_gated_runner_replay_command_carries_export_with_second_attribute` — it asserts both the\npositive (assignment present) and negative (`-u NAME` absent) halves.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Acceptance criterion 1 — bundled item BUG-0330 (help idiom SIGPIPE) is addressed",
+      "heading": "Finding 4: Acceptance criterion 1 — bundled item BUG-0330 (help idiom SIGPIPE) is addressed",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll twenty scripts named in BUG-0330 (eighteen at-risk plus the two that did not set\n`pipefail`) were converted from `grep '^#' \"$0\" | sed ... | head -N` to\n`mapfile -t __help_lines < <(grep '^#' \"$0\" | sed ...)` followed by\n`printf '%s\\n' \"${__help_lines[@]:0:N}\"`.\n\n**Behavioral verification (Step 6.5).**\n\n- **New normal case:** each of the 20 changed scripts invoked with `--help` 100 times inside a\n  throwaway sandbox root (`env -u PGAI_TASKS_DIR -u PGAI_PROJECT_ROOT KANBAN_ROOT=$S ...`) —\n  **0 non-zero exits out of 2000 invocations**.\n- **Original failure mode reproduced:** the same loop run against a clone of `ai_main` checked out\n  in a correct tree layout gives `team/scripts/dashboard/metrics.sh` **7 non-zero exits out of\n  300** (~2.3 %), matching BUG-0330's measured ~1 % rate. The harness therefore demonstrably\n  catches the pre-repair shape.\n- **No output regression:** `--help` stdout compared byte-for-byte between the `ai_main` clone\n  and the RC for all 20 scripts — **IDENTICAL** in every case, with identical line counts\n  (20/25/30/35/40/45/50/80 as each script specifies).\n- **Class closed, not one instance:** `grep -rn \"grep '\\^#'\" --include='*.sh' . | grep 'head -'`\n  returns zero hits tree-wide. Every `.sh` in the repo that uses the self-header extraction lives\n  under `team/scripts/`, which is exactly the directory the new sweep test scans.\n\nNew test module `team/tests/unit/test_self_header_help_pipe_safety.py` (341 lines, read in full).\nIts three groups are a deterministic static check that no script pipes the extraction into\n`head -N`, a repeated-invocation sweep over the discovered scripts, a **negative proof** that the\npre-repair shape still fails (5000-line synthetic header against `head -1`, asserting at least one\nexit 141), and a proof that the repaired shape holds at header sizes larger than any shipped\nscript. Discovery is by construct, not by a hardcoded path list, and a vacuity guard asserts at\nleast 20 scripts are found. Live discovery confirmed: 20 scripts. Test fidelity is high — the\nnegative proof is exactly the anti-pattern guard Step 6.5 asks for.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "new_normal_case": "each of the 20 changed scripts invoked with `--help` 100 times inside a",
+        "original_failure_mode_reproduced": "the same loop run against a clone of `ai_main` checked out",
+        "no_output_regression": "`--help` stdout compared byte-for-byte between the `ai_main` clone",
+        "class_closed_not_one_instance": "grep -rn \"grep '\\^#'\" --include='*.sh' . | grep 'head -'"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Acceptance criterion 1 — bundled item BUG-0328 (hygiene-lint provenance) is addressed",
+      "heading": "Finding 5: Acceptance criterion 1 — bundled item BUG-0328 (hygiene-lint provenance) is addressed",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CODER-20260918-034-provenance-sweep` closed `WONT-DO` on the grounds that sibling ticket 031\nhad already cleared the citations. **Independently re-verified, not taken on trust:**\n\n- `python3 team/scripts/lint_hygiene.py --classes provenance` → `OK — 0 findings across 8 scan\n  director(y/ies)`, exit 0.\n- `grep -rn \"BUG-0327\" --exclude-dir=.git .` → zero hits tree-wide. All nine instances BUG-0328\n  enumerated (2 in `gated_runner_lint.sh`, 1 in `run-integration-tests.sh`, 1 in\n  `run-unit-tests.sh`, 5 in `test_gated_runner_stated_test_order.py`) are gone.\n\nThe bundled item is addressed in the implementation, which is what the acceptance criterion asks;\nthat it was addressed incidentally by a sibling ticket rather than by its own ticket does not\nchange the outcome. See Caveats for the process note.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Acceptance criterion 2 — all Python files compile cleanly",
+      "heading": "Finding 6: Acceptance criterion 2 — all Python files compile cleanly",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 -m py_compile` over every `.py` in the tree (excluding `.git`) exits 0. Both files the\nRC changed compile individually: `team/tests/unit/test_gated_runner_stated_test_order.py`,\n`team/tests/unit/test_self_header_help_pipe_safety.py`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Acceptance criterion 3 — all bash files pass syntax check",
+      "heading": "Finding 7: Acceptance criterion 3 — all bash files pass syntax check",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash -n` over every `.sh` in the tree (excluding `.git`) reports no syntax error. All 21 `.sh`\nfiles the RC changed pass individually.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Step 6.9 — constraint negative checks",
+      "heading": "Finding 8: Step 6.9 — constraint negative checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `set -euo pipefail` count is unchanged between `ai_main` and the RC in all 21 changed shell\n  scripts — the repair did not weaken the strict-mode guard it was working around.\n- No hardcoded secret, password, API key, or token introduced anywhere in the diff.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Step 6.13 — skip-cites-a-real-bug gate",
+      "heading": "Finding 9: Step 6.13 — skip-cites-a-real-bug gate",
+      "level": 3,
+      "body": "**Category:** pass\n\n- No placeholder shapes (`BUG-SKIP`, or `skip` adjacent to `BUG-` followed by letters) in the test\n  tree. The one text hit is a prose sentence in `team/tests/unit/test_skip_bug_citation_scan.py`\n  describing the gate's own behavior.\n- The only `BUG-NNNN` IDs appearing near skip annotations (`BUG-1234`, `BUG-1235`, `BUG-1236`) are\n  synthetic fixtures inside `test_skip_bug_citation_scan.py`, the gate's own test module — not real\n  skip annotations.\n- `bash team/scripts/lint_skip_bug_gate.sh` → `OK — all skip annotations are compliant`,\n  `BUG-NNNN file-existence check: 0 missing files`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Step 6.10 — prerequisite dependency graph",
+      "heading": "Finding 10: Step 6.10 — prerequisite dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\nAcyclic and correctly bookended. `CM-20260918-035-open-rc-2-23-16` has no prerequisites and ran\nfirst; 031 and 032 depend on it; 033 depends on 035 and 032; 034 depends on 035, 031, 032, 033;\n036 (this task) depends on 031–034; `CM-20260918-038-release-2-23-16` (`WAITING`) depends on\n031–034 and 036. Every referenced task ID resolves to an existing folder. No cycles, no collisions.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Step 6.8 — synthetic release simulation not applicable",
+      "heading": "Finding 11: Step 6.8 — synthetic release simulation not applicable",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe diff touches no release-lifecycle file: not `cm-release.sh`, `cm-open-rc.sh`,\n`cm-cancel-rc.sh`, nor `team/scripts/lib/project_paths.sh`, nor anything in the RC open/close\ncycle. `team/scripts/lib/gated_runner_lint.sh` is under `team/scripts/` but is a test-runner\nhelper, not part of the release cycle. Step skipped with this note, per the step's own condition.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Step 5a / 6.6 / 6.7 — gated unit runner",
+      "heading": "Finding 12: Step 5a / 6.6 / 6.7 — gated unit runner",
+      "level": 3,
+      "body": "**Category:** pass\n\n```\ncd <worktree> && bash team/scripts/run-unit-tests.sh --coverage\nUNIT_EXIT=0\n================= 4744 passed, 31 skipped in 887.83s (0:14:47) =================\nUnit tests PASSED\n[gated-runner] bare_tmp_cleanliness: OK\n[gated-runner] listener_cleanliness: OK\n[gated-runner] findings file written: /tmp/pgai_kanban_tmp/lint/findings-unit.json (0 finding(s))\n```\n\nEvery quality-class pre-flight lint reported clean, including the two this RC bears directly on:\n\n- `lint_doc_command_truth: OK — 0 findings` (656 citations across 13 documents). This is the exact\n  consumer that reported `HELP FAILS ... exited 141` on `ai_rc/v2.23.15` and motivated BUG-0330.\n  It is now clean — independent confirmation of Finding 4 at the consumer level.\n- `lint_hygiene: OK — 0 findings across 8 scan director(y/ies)`, classes `provenance`,\n  `version-named-test`, `comment-drift` — independent confirmation of Finding 5.\n\nAlso clean: `lint_dockerfile_static` (3 Dockerfiles, 0 violations), `lint_test_anti_patterns`\n(0 findings, 529 files), `lint_skip_bug_gate`, `lint_orphan_tests`, `lint_api_parity`,\n`lint_operator_verb_manifest`, `lint_upgrade_no_temp_copy_guard`, `lint_icd_freshness`,\n`lint_icd_compat`, `lint_changelog_freshness`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Step 5a / 6.6 / 6.7 — gated integration runner",
+      "heading": "Finding 13: Step 5a / 6.6 / 6.7 — gated integration runner",
+      "level": 3,
+      "body": "**Category:** pass\n\n```\ncd <worktree> && bash team/scripts/run-integration-tests.sh --coverage\nINTEGRATION_EXIT=0\n================== 515 passed, 1 skipped in 619.65s (0:10:19) ==================\nIntegration tests PASSED\n[gated-runner] bare_tmp_cleanliness: OK\n[gated-runner] listener_cleanliness: OK\n[gated-runner] findings file written: /tmp/pgai_kanban_tmp/lint/findings-integration.json (0 finding(s))\n```\n\nPre-flight clean, including `check_breakage_class: OK — 475 python file(s), 270 shell file(s)\nchecked, 0 breakage-class failures`, `lint_rc_empty_commits: OK -- checked 1 range(s)\n(ai_main..ai_rc/v2.23.16), no empty non-merge commits found`, `lint_dual_channel_pair: OK — 248\nfile(s) checked, 0 offenders`, and `governance_byte_budget: OK` (all seven roles under budget;\ntester is closest at 102384 / 102400).\n\n**PASS evidence is the two gated runners' exit codes**, not a pytest \"N passed\" line. Direct\npytest was not used as a verdict source anywhere in this verification.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Step 6.12 — autonomous operation criterion",
+      "heading": "Finding 14: Step 6.12 — autonomous operation criterion",
+      "level": 3,
+      "body": "**Category:** pass\n\n`Autonomous operation criterion: Manual interventions required: none`\n\n| # | Question | Answer | Evidence |\n|---|---|---|---|\n| 1 | Tasks force-promoted WAITING→BACKLOG by hand? | **NO** | Every promotion in the RC window appears in the wake logs as the wake script's own prerequisite evaluation: `wake(coder)` promoted 2 at 16:09:16 (031, 032, right after the RC opened), `wake(writer)` promoted 1 at 16:37:39 (033, after 032 went DONE), `wake(coder)` promoted 1 at 16:43:14 (034), `wake(tester)` promoted 1 at 16:46:50 (this task). No out-of-band state change. |\n| 2 | `release-state.md` edited outside the cm scripts? | **NO** | File mtime `2026-09-18 16:08` matches its own `## RC Opened At` of `2026-09-18T16:08:28+00:00` and its `## RC Opened By Task` of `CM-20260918-035-open-rc-2-23-16`. Schema holds exactly the four fields. |\n| 3 | Scripts patched mid-build (out-of-band commits to `team/scripts/`, `subagents/`, tooling)? | **NO** | The RC's first-parent history is exactly three `--no-ff` merge commits, one per DONE ticket, with no direct-to-RC commit: `199637d` (031), `54d516a` (032), `21cf246` (033). Each merge's second parent is the ticket's own feature-branch commit off the merge-base `0179b08`. `ai_main` has not moved since `0179b08` at 16:01:57, before the RC opened. The `team/scripts/` edits in this RC ARE the deliverables of tickets 031/032, landed through the normal branch-and-merge law, not out-of-band patches. |\n| 4 | Queue files edited by hand? | **NO** | No HALT flag present at the kanban root or the project root. No entry in `logs/activity.log` during the RC window (last entry 2026-09-03). |",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Step 6.11 — spot-checks outside the spec",
+      "heading": "Finding 15: Step 6.11 — spot-checks outside the spec",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **State drift:** none. `## Active RC` = `v2.23.16` and the branch `ai_rc/v2.23.16` exists at the\n  commit under test. `VERSION` reads `v2.23.15` on the RC, which is correct — its git history shows\n  it is written by CM at release time (\"Add committed VERSION for v2.23.15\"), and `ai_main` carries\n  the same value. `CHANGELOG.md`'s top entry is `v2.23.15`; `release-notes/v2.23.16.md` does not yet\n  exist. Both are CM's release-time work, not RC drift. `lint_changelog_freshness` agrees (`ok`).\n- **Untested new mechanisms:** none found. Both code changes shipped with regression tests, and the\n  help-idiom test discovers its subjects by construct rather than by a hardcoded list, so a future\n  script adopting or regressing the shape is covered without a test edit.\n- **Regressions of prior gaps:** BUG-0330 names three previously closed bugs in the same family\n  (BUG-0270, BUG-0272, BUG-0325), each of which had repaired one script while leaving the idiom in\n  place. This RC closes the class rather than the instance, and adds a static check that fails on\n  the pre-repair shape anywhere under `team/scripts/`. That is the correct response to a recurring\n  family.\n- **Per-script slice-limit audit (judgment spot-check):** for all 20 converted scripts, the new\n  array slice bound is byte-identical to the `head -N` limit it replaced (20/25/30/35/40/45/50/80,\n  each matching its own script). No script silently changed how much help it prints.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "state_drift": "none. `## Active RC` = `v2.23.16` and the branch `ai_rc/v2.23.16` exists at the",
+        "untested_new_mechanisms": "none found. Both code changes shipped with regression tests, and the",
+        "regressions_of_prior_gaps": "BUG-0330 names three previously closed bugs in the same family",
+        "per_script_slice_limit_audit_judgment_spot_check": "for all 20 converted scripts, the new"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "Step 6.14 — coding-standards spot-check",
+      "heading": "Finding 16: Step 6.14 — coding-standards spot-check",
+      "level": 3,
+      "body": "**Category:** pass\n\n- No new script was added, so the \"`--help` naming every argument\" directive has no new subject.\n- No new comment, docstring, help line, or log line in the diff cites a bug, task, or version\n  identifier — confirmed by grepping the diff's added lines and by `lint_hygiene`'s `provenance`\n  class reporting zero.\n- No new hardcoded operational value: the slice bounds are the pre-existing per-script limits.\n- The new `docs/coding-standards.md` section (\"A help path prints completely and exits 0\") was read\n  in full. It states the rule, shows the failing shape, shows the required shape, explains the\n  SIGPIPE-under-`pipefail` mechanism accurately, gives a by-reading checkability test, and says to\n  apply it whether or not the script sets `pipefail` today. The prescribed shape matches the shape\n  actually implemented in all 20 scripts byte-for-byte. Documentation-layer review (Step 6.3) found\n  no error that would fail the first time an agent uses the file.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

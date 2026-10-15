@@ -37,7 +37,7 @@
 #   purge-old-files.sh --days 14 --include-blocked --archive --apply
 #
 #   # Just one project
-#   purge-old-files.sh --project pgai-video-generator --apply
+#   purge-old-files.sh --project pgai-chomp-man --apply
 #
 #   # Long-term retention for bugs, short for tasks
 #   purge-old-files.sh --tasks-days 14 --bugs-days 90 --apply
@@ -94,8 +94,11 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
-usage() {
-    cat <<'EOF'
+# shellcheck source=../lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
+
+# Usage text as data (per lib/script_common.sh's print_usage_and_exit contract).
+_USAGE_TEXT="$(cat <<'EOF'
 Usage: purge-old-files.sh [OPTIONS]
 
 Disk hygiene for the kanban project. Removes old task folders, log
@@ -139,7 +142,7 @@ EXAMPLES:
   purge-old-files.sh --days 14 --include-blocked --archive --apply
 
   # Restrict to one project
-  purge-old-files.sh --project pgai-video-generator --apply
+  purge-old-files.sh --project pgai-chomp-man --apply
 
   # Different retention per category
   purge-old-files.sh --tasks-days 14 --bugs-days 90 --apply
@@ -154,7 +157,7 @@ EXIT CODES:
   0  success
   1  error (missing environment, unreadable root, bad arguments, archive failure)
 EOF
-}
+)"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -251,8 +254,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            usage
-            exit 0
+            print_usage_and_exit 0 "$_USAGE_TEXT"
             ;;
         *)
             echo "ERROR: unknown argument: $1" >&2

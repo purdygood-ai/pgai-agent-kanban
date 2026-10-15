@@ -1,0 +1,134 @@
+{
+ "_about": "GET /board (body without generated_at) on build_synthetic_board(with_queues=True), recorded from the route before the classifier moved to pgai_agent_kanban.board. The WONT-DO task is \"wont-do\" on /board, the board's one token for WONT-DO; see team/tests/unit/test_board_classifier_module.py.",
+ "board": {
+  "columns": [
+   {
+    "items": [
+     {
+      "active_rc": false,
+      "color": "#378ADD",
+      "id": "golden-fixture/bug/BUG-0001",
+      "key": "BUG-0001",
+      "kind": "bug",
+      "project": "golden-fixture",
+      "status": "open",
+      "title": "BUG-0001-fixture-deferred-example",
+      "version_label": ""
+     }
+    ],
+    "name": "BUGS",
+    "truncated": 0
+   },
+   {
+    "items": [],
+    "name": "PRIORITIES",
+    "truncated": 0
+   },
+   {
+    "items": [],
+    "name": "REQUIREMENTS",
+    "truncated": 0
+   },
+   {
+    "items": [],
+    "name": "PM",
+    "truncated": 0
+   },
+   {
+    "items": [
+     {
+      "active_rc": false,
+      "color": "#378ADD",
+      "id": "golden-fixture/task/CODER-20260101-006-golden-wontdo",
+      "key": "CODER-20260101-006-golden-wontdo",
+      "kind": "task",
+      "project": "golden-fixture",
+      "status": "wont-do",
+      "title": "CODER-20260101-006-golden-wontdo",
+      "version_label": ""
+     },
+     {
+      "active_rc": false,
+      "color": "#378ADD",
+      "id": "golden-fixture/task/CODER-20260101-005-golden-done",
+      "key": "CODER-20260101-005-golden-done",
+      "kind": "task",
+      "project": "golden-fixture",
+      "status": "done",
+      "title": "CODER-20260101-005-golden-done",
+      "version_label": ""
+     },
+     {
+      "active_rc": false,
+      "color": "#378ADD",
+      "id": "golden-fixture/task/CODER-20260101-004-golden-blocked",
+      "key": "CODER-20260101-004-golden-blocked",
+      "kind": "task",
+      "project": "golden-fixture",
+      "status": "blocked",
+      "title": "CODER-20260101-004-golden-blocked",
+      "version_label": ""
+     },
+     {
+      "active_rc": true,
+      "color": "#378ADD",
+      "id": "golden-fixture/task/CODER-20260101-003-golden-working",
+      "key": "CODER-20260101-003-golden-working",
+      "kind": "task",
+      "project": "golden-fixture",
+      "status": "working",
+      "title": "CODER-20260101-003-golden-working",
+      "version_label": ""
+     },
+     {
+      "active_rc": false,
+      "color": "#378ADD",
+      "id": "golden-fixture/task/CODER-20260101-002-golden-waiting",
+      "key": "CODER-20260101-002-golden-waiting",
+      "kind": "task",
+      "project": "golden-fixture",
+      "status": "open",
+      "title": "CODER-20260101-002-golden-waiting",
+      "version_label": ""
+     },
+     {
+      "active_rc": false,
+      "color": "#378ADD",
+      "id": "golden-fixture/task/CODER-20260101-001-golden-backlog",
+      "key": "CODER-20260101-001-golden-backlog",
+      "kind": "task",
+      "project": "golden-fixture",
+      "status": "open",
+      "title": "CODER-20260101-001-golden-backlog",
+      "version_label": ""
+     }
+    ],
+    "name": "CODER",
+    "truncated": 0
+   },
+   {
+    "items": [],
+    "name": "WRITER",
+    "truncated": 0
+   },
+   {
+    "items": [],
+    "name": "TESTER",
+    "truncated": 0
+   },
+   {
+    "items": [],
+    "name": "CM",
+    "truncated": 0
+   }
+  ],
+  "projects": [
+   {
+    "color": "#378ADD",
+    "halt": false,
+    "name": "golden-fixture"
+   }
+  ],
+  "warnings": []
+ }
+}

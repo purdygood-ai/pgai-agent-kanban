@@ -1,0 +1,16 @@
+# team/config/echo-pipe-grep-q-allowlist.txt
+#
+# Per-file ceiling on echo/printf output piped into a quiet grep (grep -q,
+# --quiet, --silent) in non-test bash under team/ and install.sh, read by
+# team/scripts/lint_echo_pipe_grep_q.py (quality class, never fatal).
+# Under set -o pipefail that pipeline can report "no match" for text that
+# matches: grep exits at its first match and the writer dies of SIGPIPE.
+# Format: one "<path>\t<sites>" line per file, path relative to the
+# repository root. A file not listed here must carry no such site.
+#
+# Ratchet rule: an entry is lowered or removed when a site is rewritten
+# race-free (grep -q PATTERN <<< "$text", or [[ $text =~ $re ]]), and is
+# never raised or added. The lint reports a file below its entry so the
+# entry is tightened in the same change; its --emit-allowlist mode prints
+# the measured counts in this format. The tree carries no sites, so this
+# file has no entries.

@@ -29,6 +29,13 @@ Coverage:
     step boundaries (post-squash, post-notes, post-CHANGELOG).  Asserts that
     re-invocation after each induced failure completes the release end-to-end
     (tag created, RC branch deleted, release-state Active RC cleared).
+  - Release-path push gate (TestReleasePathPushGate): open-rc and release
+    push only for a project registered in projects.cfg whose own project.cfg
+    names dev_tree_path. No project.cfg, an unregistered project, and a
+    project.cfg without dev_tree_path each release locally with zero git
+    network calls (git network stub) and one skipped-unresolved-project
+    line per script; a registered project with no push_to_remote key still
+    pushes, and push_to_remote = false stays local.
 
 Design notes:
   - All tests use pytest's tmp_path for scratch.  No bare /tmp paths.
@@ -57,6 +64,24 @@ import textwrap
 from typing import Optional
 
 import pytest
+from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.git_network_stub import install_git_network_stub
+from tests.fixtures.scrubbed_subprocess_env import (
+    AGENT_SCOPED_ENV_NAMES,
+    build_scrubbed_env,
+    scrub_agent_scoped_env,
+)
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="cm-release-synthetic")
 
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.
@@ -227,23 +252,30 @@ def _build_kanban_root(
     return root
 
 
-def _run_cm_script(
-    script_path: pathlib.Path,
-    args: list[str],
+def _build_cm_script_env(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
     repo_root: Optional[pathlib.Path] = None,
     extra_env: Optional[dict] = None,
-    timeout: int = 90,
-) -> subprocess.CompletedProcess:
-    """Run a CM script against a temporary kanban root.
+) -> dict:
+    """Build the environment `_run_cm_script` hands to its child process.
 
     Sets PGAI_AGENT_KANBAN_ROOT_PATH, KANBAN_ROOT, TEAM_ROOT, and
     PGAI_PROJECT_NAME so the script operates against the caller's temp tree
     rather than the live install.  REPO_ROOT is also set when provided.
 
-    Returns subprocess.CompletedProcess with returncode, stdout, stderr.
+    The base environment inherits the invoking shell's `os.environ` (this
+    fixture drives a real, unstubbed `git`/`bash` toolchain end-to-end, so it
+    cannot enumerate everything those need) but always scrubs
+    `tests.fixtures.scrubbed_subprocess_env.AGENT_SCOPED_ENV_NAMES` first --
+    a caller that wants the script under test to see an agent-wake context
+    passes it explicitly through *extra_env*, applied last, rather than
+    relying on whatever the shell that launched pytest happened to export.
+
+    Returns a plain dict suitable for `subprocess.run(..., env=...)`.  Split
+    out from `_run_cm_script` so a test can obtain and assert on the built
+    environment directly, without driving a real subprocess.
     """
     base_env = dict(os.environ)
     base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
@@ -253,13 +285,37 @@ def _run_cm_script(
     if repo_root is not None:
         base_env["REPO_ROOT"] = str(repo_root)
     base_env.pop("PGAI_DEV_TREE_PATH", None)
+    scrub_agent_scoped_env(base_env)
     if extra_env:
         base_env.update(extra_env)
+    return base_env
 
+
+def _run_cm_script(
+    script_path: pathlib.Path,
+    args: list[str],
+    kanban_root: pathlib.Path,
+    project_name: str,
+    *,
+    repo_root: Optional[pathlib.Path] = None,
+    extra_env: Optional[dict] = None,
+    timeout: int = 90,
+    cwd: Optional[pathlib.Path] = None,
+) -> subprocess.CompletedProcess:
+    """Run a CM script against a temporary kanban root.
+
+    See `_build_cm_script_env` for how the child's environment is
+    constructed.  The child runs in *cwd* when given, else in the kanban
+    root.  Returns subprocess.CompletedProcess with returncode, stdout,
+    stderr.
+    """
+    env = _build_cm_script_env(
+        kanban_root, project_name, repo_root=repo_root, extra_env=extra_env,
+    )
     return subprocess.run(
         ["bash", str(script_path)] + args,
-        capture_output=True, text=True, env=base_env,
-        cwd=str(kanban_root), timeout=timeout,
+        capture_output=True, text=True, env=env,
+        cwd=str(cwd if cwd is not None else kanban_root), timeout=timeout,
     )
 
 
@@ -308,6 +364,63 @@ def _commit_on_branch(
     _git_local(repo_path, "commit", "-m", message)
     if return_branch is not None:
         _git_local(repo_path, "checkout", return_branch)
+
+
+# ---------------------------------------------------------------------------
+# _run_cm_script's environment scrub guarantee
+# ---------------------------------------------------------------------------
+
+
+class TestRunCmScriptEnvironmentScrub:
+    """`_build_cm_script_env` must never let an agent-scoped signal reach a
+    CM script by inheritance, only through an explicit `extra_env` opt-in.
+
+    No test in this class drives a real CM script, git, or bash — each
+    builds the environment dict directly and asserts on its contents.
+    """
+
+    def test_ambient_agent_scoped_signal_is_absent_from_built_env(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An agent-scoped name present in the current process must not
+        survive into the built environment, regardless of whether the
+        invoking shell happens to carry it — the guard sets the signal
+        itself rather than relying on the ambient state of any one host."""
+        for name in AGENT_SCOPED_ENV_NAMES:
+            monkeypatch.setenv(name, "1")
+
+        built_env = _build_cm_script_env(
+            tmp_path / "kanban_root", "scrub_guard_project",
+        )
+
+        for name in AGENT_SCOPED_ENV_NAMES:
+            assert name not in built_env, (
+                f"{name} was present in the current process and must be "
+                f"scrubbed from the environment _run_cm_script builds, but "
+                f"was found in the result: {built_env.get(name)!r}"
+            )
+
+    def test_extra_env_still_delivers_agent_scoped_signal_explicitly(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A caller that deliberately wants the wake context still gets it
+        through `extra_env`, applied after the scrub — the opt-in path the
+        scrub is not allowed to break."""
+        for name in AGENT_SCOPED_ENV_NAMES:
+            monkeypatch.delenv(name, raising=False)
+
+        opted_in = {name: "1" for name in AGENT_SCOPED_ENV_NAMES}
+        built_env = _build_cm_script_env(
+            tmp_path / "kanban_root", "scrub_guard_project",
+            extra_env=opted_in,
+        )
+
+        for name in AGENT_SCOPED_ENV_NAMES:
+            assert built_env.get(name) == "1", (
+                f"{name} was passed explicitly through extra_env and must "
+                f"reach the built environment unchanged, but was "
+                f"{built_env.get(name)!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +527,112 @@ class TestCleanRelease:
             f"RC branch '{rc_branch}' still exists after cm-release.sh (should be deleted).\n"
             f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Fixed-In writeback: cwd-independent, scoped to the bugs this release closed
+# ---------------------------------------------------------------------------
+
+
+def _ledger_bug(name: str, status: str) -> str:
+    """A minimal ledger bug file with an empty, template-commented Fixed In."""
+    return (
+        f"# {name}\n\n"
+        f"## Status\n{status}\n\n"
+        "## Symptom\nSomething misbehaves.\n\n"
+        "## Fixed In\n<!-- Written by the release engine at the fixing release. -->\n\n"
+        "## Public ID\n<!-- Assigned at first disclosure. -->\n"
+    )
+
+
+class TestFixedInWriteback:
+    """Step 16b stamps ## Fixed In on this release's bugs, from any cwd."""
+
+    def test_release_from_shadowing_cwd_stamps_only_bugs_this_release_closed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Release run from a directory whose child ``pgai_agent_kanban/`` is
+        not a Python package (the kanban root seen from its parent), with
+        PYTHONPATH empty so only the release engine's own path composition
+        can make the package importable.
+
+        Asserts:
+          - Step 16b prints its result line with 1 stamped and no traceback.
+          - The bug this release promoted to done carries ## Fixed In: v0.1.0.
+          - A done bug from an earlier release with an empty ## Fixed In is
+            byte-for-byte unchanged.
+          - The closing summary reports the stamp count, not a bare claim.
+        """
+        version = "v0.1.0"
+        project_name = "fixed_in_release_test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+        kanban_root = _build_kanban_root(
+            tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+        proj = kanban_root / "projects" / project_name
+
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path,
+        )
+        assert result_open.returncode == 0, (
+            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        )
+        _commit_on_branch(
+            repo_path, f"rc/{version}", "feature_fixed_in.txt", "fix\n",
+            "fix: resolve the bundled defect", return_branch="main",
+        )
+
+        # Ledger: one bug bundled into this RC, one closed by an earlier release.
+        bugs_dir = proj / "bugs"
+        bugs_dir.mkdir(parents=True, exist_ok=True)
+        current = bugs_dir / "BUG-0002-closed-by-this-release.md"
+        current.write_text(_ledger_bug(current.stem, "running"), encoding="utf-8")
+        earlier = bugs_dir / "BUG-0001-closed-by-an-earlier-release.md"
+        earlier.write_text(_ledger_bug(earlier.stem, "done"), encoding="utf-8")
+        earlier_before = earlier.read_bytes()
+
+        # The bundle that produced this RC, and the DONE task that fixed it.
+        req_dir = proj / "requirements"
+        req_dir.mkdir(parents=True, exist_ok=True)
+        (req_dir / f"{version}-bugfix-bundle.md").write_text(
+            f"# {version} bugfix bundle\n\n## Status\nrunning\n\n"
+            f"## Bundled Items\n\n- {current.name} (`{current}`)\n",
+            encoding="utf-8",
+        )
+        task_dir = proj / "tasks" / "CODER-20990101-001-fix-bundled-defect"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "README.md").write_text(
+            f"# Task\n\n## Inputs\n- {current.name}\n\n## Release Version\n{version}\n", encoding="utf-8"
+        )
+        (task_dir / "status.md").write_text("# Status\n\n## State\nDONE\n", encoding="utf-8")
+
+        shadow_parent = tmp_path / "operator_home"
+        (shadow_parent / "pgai_agent_kanban" / "projects").mkdir(parents=True)
+
+        result = _run_cm_script(
+            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+            extra_env={"PYTHONPATH": ""}, cwd=shadow_parent,
+        )
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, f"cm-release.sh failed.\n{output}"
+
+        step16b = [line for line in output.splitlines() if line.startswith("[Step 16b]")]
+        assert "Traceback" not in "\n".join(step16b) and "ImportError" not in output, output
+        assert any(
+            line.startswith("[Step 16b] Fixed-In writeback: 1 stamped,") for line in step16b
+        ), "Step 16b result line missing or wrong count:\n" + "\n".join(step16b)
+
+        assert f"<!-- Written by the release engine at the fixing release. -->\n{version}\n" in (
+            current.read_text(encoding="utf-8")
+        ), current.read_text(encoding="utf-8")
+        assert earlier.read_bytes() == earlier_before, (
+            "a done bug from an earlier release must not be stamped with this "
+            f"release's version:\n{earlier.read_text(encoding='utf-8')}"
+        )
+        assert f"  - ## Fixed In: {version} — 1 stamped," in result.stdout, result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -716,7 +935,7 @@ def _assert_changelog_fresh_at_commit(
     # We use the repo_path directly but at this point in the test the working
     # tree is on main and already has the release-notes committed, so we can
     # run the writer directly against the working tree when the ref is the
-    # current HEAD.  For the tag (which equals the tip in the post-fix world),
+    # current HEAD.  For the tag (which equals the tip once the release completes),
     # the working tree has the same content, so this is safe.
     #
     # Regenerate via subprocess, mirroring the cm-release.sh Step 11b invocation:
@@ -810,7 +1029,7 @@ class TestChangelogFreshnessAfterRelease:
           - cm-release.sh exits 0.
           - CHANGELOG.md at the branch tip is byte-identical to a fresh
             changelog_writer regeneration (freshness at tip — the load-bearing
-            condition that failed before the fix).
+            condition a tag cut ahead of the CHANGELOG commit breaks).
           - CHANGELOG.md at the release tag is byte-identical to the same
             regeneration (freshness at tag — regression lock on the
             currently-working half).
@@ -941,7 +1160,7 @@ class TestChangelogFreshnessAfterRelease:
         # commit and the branch tip.
         # git describe --tags returns "vX.Y.Z" when HEAD is the tagged commit
         # and "vX.Y.Z-N-gSHA" when HEAD is N commits ahead of the tag.
-        # After the fix, release.sh creates the tag on the last housekeeping
+        # release.sh creates the tag on the last housekeeping
         # commit (README.md reference update), which is also the branch tip —
         # no subsequent commits are added.
         describe_result = subprocess.run(
@@ -1442,7 +1661,7 @@ class TestVerifyBeforeDestroy:
         )
 
         # Assertion: the step log states verification is complete before the
-        # first destructive action (the narration this fix adds). Both lines
+        # first destructive action (the verification-complete narration). Both lines
         # are plain stdout echoes in release.sh, so their relative position in
         # stdout alone (not stderr-interleaved) reliably reflects execution order.
         stdout_2 = result_release_2.stdout
@@ -1716,9 +1935,9 @@ class TestHookOrderRecurrence:
 # ship-policy refusal, any of cm-release.sh's nine HALT triggers) must freeze
 # projects/<name>/HALT only. The global $KANBAN_ROOT/HALT sentinel is reserved
 # for the operator and framework-wide emergencies; a single project's release
-# failure must never freeze sibling projects' chains. This is the exact
-# incident named in the ticket: "the same event froze the kanban's own
-# chains" — one project's cm-release.sh HALT tripped wake_common_run's
+# failure must never freeze sibling projects' chains. The failure this
+# guards against froze the kanban's own chains: one project's
+# cm-release.sh HALT tripped wake_common_run's
 # startup-level global HALT check, which exits the ENTIRE wake invocation
 # before the per-project iteration loop even begins, starving every sibling
 # project regardless of its own state.
@@ -1820,9 +2039,9 @@ class TestHaltScopeRecurrence:
     `[[ -f "$TEAM_ROOT/HALT" ]]`, evaluated ONCE before the per-project
     iteration loop even starts) treats that global file as a chain-wide stop.
     So a single project's release failure tripped the startup gate and froze
-    every sibling project's chain in the same wake — reproducing the exact
-    production incident named in this ticket ("the same event froze the
-    kanban's own chains"). The read-side fix alone could never have prevented
+    every sibling project's chain in the same wake — reproducing the
+    production failure in which one release event froze the kanban's own
+    chains. The read-side fix alone could never have prevented
     this: pp_project_halted() is never reached when the startup gate above it
     already exited the whole process.
 
@@ -1858,13 +2077,12 @@ class TestHaltScopeRecurrence:
             the per-project iteration loop rather than exiting the whole
             process before iteration starts.
 
-        Without the fix (write_halt_file() pointed at
-        "${{KANBAN_ROOT}}/HALT"), the first two assertions invert — the
-        global file exists and the project-scoped one does not — and the
-        startup-gate assertion fails, reproducing the original cross-project
-        freeze. This was confirmed by temporarily reverting
-        team/scripts/cm/release.sh's write_halt_file() to the pre-fix global
-        path and observing this test fail on exactly those three points.
+        With write_halt_file() pointed at "${{KANBAN_ROOT}}/HALT", the first
+        two assertions invert — the global file exists and the project-scoped
+        one does not — and the startup-gate assertion fails, reproducing the
+        cross-project freeze. Pointing team/scripts/cm/release.sh's
+        write_halt_file() at the global path makes this test fail on exactly
+        those three points.
         """
         version = "v0.30.0"
         project_a = "halt_scope_project_a"
@@ -1997,25 +2215,26 @@ _TEMP_LIB = _SCRIPTS_DIR / "lib" / "temp.sh"
 
 
 def _make_scan_dir() -> pathlib.Path:
-    """Create a scratch directory for content that lint_comment_provenance.py
-    itself will scan, deliberately OUTSIDE pytest's own tmp_path tree.
+    """Create a scratch directory for content that lint_hygiene.py's
+    provenance class itself will scan, deliberately OUTSIDE pytest's own
+    tmp_path tree.
 
     Used for both the prose surface (release-notes-shaped .md fixtures) and
     the code surface (.py/.sh fixtures carrying a planted comment) — the
     exclusion problem this helper works around applies identically to
     either kind of content.
 
-    lint_comment_provenance.py excludes any path containing a 'tests/' (or
+    lint_hygiene.py excludes any path containing a 'tests/' (or
     'fixtures/') segment by design, so its own test suite is never
-    self-scanned (see scripts/lint_comment_provenance.py's
-    _PATH_EXCLUDE_SEGMENTS). This repo's own tests/conftest.py redirects
+    self-scanned (see scripts/lint_hygiene.py's
+    _CODE_EXCLUDE_SEGMENTS). This repo's own tests/conftest.py redirects
     pytest tmp_path fixtures under
     "$PGAI_AGENT_KANBAN_TEMP_DIR/tests/pytest-of-.../..." whenever
     PGAI_AGENT_KANBAN_TEMP_DIR is set (the framework's own /tmp-pollution
     guard) — so a fixture built via tmp_path would collide with that same
     exclusion and silently never be scanned. This helper instead creates a
     directory directly under the configured framework temp root (never bare
-    /tmp, per SOP "Temporary File Hygiene") with no 'tests/' segment in the
+    /tmp, per roles/CODER.md "Temporary File Hygiene") with no 'tests/' segment in the
     path, so the real production lint actually scans it.
     """
     framework_temp_root = os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR")
@@ -2090,11 +2309,11 @@ class TestHandsFreeDemoEndToEnd:
 
       1. hands_free_demo_runner.sh (a fixture gated-runner-shaped script)
          reuses scripts/lib/gated_runner_lint.sh and the real
-         scripts/lint_comment_provenance.py to scan a deliberately-violating
-         release-notes-shaped prose fixture — the runner exits 0 (the
-         provenance finding is quality-class, never fatal) with the findings
-         file written, while its own green pytest fixture still runs and
-         passes.
+         scripts/lint_hygiene.py (provenance class) to scan a
+         deliberately-violating release-notes-shaped prose fixture — the
+         runner exits 0 (the provenance finding is quality-class, never
+         fatal) with the findings file written, while its own green pytest
+         fixture still runs and passes.
       2. A bug is filed citing the finding (the cite-an-open-bug-or-file-one
          rule from team/roles/TESTER.md Step 5c), and a synthetic TESTER
          report (report.md) cites it in a "Lint Findings (non-blocking)"
@@ -2112,8 +2331,8 @@ class TestHandsFreeDemoEndToEnd:
 
         Asserts:
           - hands_free_demo_runner.sh exits 0.
-          - Its findings file contains exactly the deliberate
-            content_described_notes finding.
+          - Its findings file contains the deliberate hygiene provenance
+            finding.
           - cm-release.sh exits 0 for the RC carrying the resulting TESTER
             report.
           - release-notes/<version>.md on main carries `## Status` FUNCTIONAL.
@@ -2125,8 +2344,8 @@ class TestHandsFreeDemoEndToEnd:
         # --- Step 1: the fixture tree's deliberate quality-class finding ---
         # A release-notes-shaped prose file citing a bare internal task ID
         # instead of describing the fix by substance — the exact class of
-        # finding lint_comment_provenance.py exists to catch. A bare BUG-ID
-        # citation is deliberately NOT used here: since BUG-0054,
+        # finding lint_hygiene.py's provenance class exists to catch. A bare
+        # BUG-ID citation is deliberately NOT used here:
         # BUG-NNNN/PRIORITY-NNNN references are the sanctioned content of
         # the release-notes prose surface and are exempt from this lint, so
         # a task-ID citation (still enforced everywhere, including prose)
@@ -2174,9 +2393,12 @@ class TestHandsFreeDemoEndToEnd:
             f"stderr: {result_runner.stderr}"
         )
         findings_doc = json.loads(findings_file.read_text(encoding="utf-8"))
-        finding_names = [f.get("lint") for f in findings_doc.get("findings", [])]
-        assert "content_described_notes" in finding_names, (
-            "Expected the deliberate content_described_notes finding in the "
+        provenance_findings = [
+            f for f in findings_doc.get("findings", [])
+            if f.get("lint") == "hygiene" and f.get("class") == "provenance"
+        ]
+        assert provenance_findings, (
+            "Expected a deliberate hygiene provenance finding in the "
             f"findings file. Got: {findings_doc}"
         )
 
@@ -2227,7 +2449,7 @@ class TestHandsFreeDemoEndToEnd:
             recommendation="PASS",
             systemic_risk="low",
             lint_findings_section=(
-                "- `content_described_notes` — release-notes prose cited a "
+                "- `hygiene` (provenance) — release-notes prose cited a "
                 "bare internal task ID instead of describing the fix by "
                 "substance — cites BUG-0001-notes-prose-cites-ledger-id (open)"
             ),
@@ -2280,9 +2502,9 @@ class TestHandsFreeDemoEndToEnd:
 
 
 # ---------------------------------------------------------------------------
-# Case (j2) — The hands-free demo, code surface (BUG-0055 acceptance 2)
+# Case (j2) — The hands-free demo, code surface
 #
-# BUG-0055 retires the completion gate's diff-scope comment-provenance lint:
+# The completion gate's diff-scope comment-provenance lint is retired:
 # a task's own diff is no longer refused for a planted ledger-ID comment.
 # This fixture tree proves the litter class the gate no longer catches is
 # still caught downstream — the SAME quality-class provenance lint the
@@ -2301,11 +2523,11 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
     same TESTER-report shape, same cm-release.sh drive); the only difference
     is the scan target — hands_free_demo_runner.sh's --code-dir (a planted
     .py comment citing a bare internal task ID) instead of --prose-dir (a
-    planted release-notes citation). This is exactly the litter class BUG-0055
-    describes: previously caught (also) at the completion gate's diff-scope
-    check, and — after that check's retirement — caught ONLY downstream, at
-    verification time, by the same lint this class already proves for the
-    prose surface.
+    planted release-notes citation). This is exactly the litter class this
+    fixture describes: previously caught (also) at the completion gate's
+    diff-scope check, and — after that check's retirement — caught ONLY
+    downstream, at verification time, by the same lint this class already
+    proves for the prose surface.
     """
 
     def test_code_surface_ledger_comment_flows_hands_free_to_functional_release(
@@ -2315,7 +2537,7 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
 
         Asserts:
           - hands_free_demo_runner.sh exits 0 (--code-dir surface).
-          - Its findings file contains the deliberate content_described_notes
+          - Its findings file contains the deliberate hygiene provenance
             finding, naming the planted file and citing the planted token.
           - cm-release.sh exits 0 for the RC carrying the resulting TESTER
             report (non-blocking Lint Findings section citing the filed bug).
@@ -2330,7 +2552,7 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
         # team/pgai_agent_kanban/ carry in production) whose comment cites a
         # bare internal task ID instead of describing the fix by substance —
         # exactly the litter class the completion gate's now-retired
-        # diff-scope lint used to refuse at done-claim time (BUG-0055).
+        # diff-scope lint used to refuse at done-claim time.
         # Built via _make_scan_dir(), not tmp_path — see that helper's
         # docstring for why (tmp_path collides with the lint's own 'tests/'
         # exclusion segment under this repo's PYTEST_DEBUG_TEMPROOT redirect).
@@ -2377,23 +2599,22 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
             f"stderr: {result_runner.stderr}"
         )
         findings_doc = json.loads(findings_file.read_text(encoding="utf-8"))
-        finding_names = [f.get("lint") for f in findings_doc.get("findings", [])]
-        assert "content_described_notes" in finding_names, (
-            "Expected the deliberate content_described_notes finding in the "
+        provenance_findings = [
+            f for f in findings_doc.get("findings", [])
+            if f.get("lint") == "hygiene" and f.get("class") == "provenance"
+        ]
+        assert provenance_findings, (
+            "Expected a deliberate hygiene provenance finding in the "
             f"findings file. Got: {findings_doc}"
         )
-        finding_detail = next(
-            f.get("detail", "")
-            for f in findings_doc["findings"]
-            if f.get("lint") == "content_described_notes"
+        finding_cause = provenance_findings[0].get("cause", "")
+        assert "fixture_retry_loop_helper.py" in finding_cause, (
+            "Expected the finding cause to name the planted code file.\n"
+            f"cause: {finding_cause}"
         )
-        assert "fixture_retry_loop_helper.py" in finding_detail, (
-            "Expected the finding detail to name the planted code file.\n"
-            f"detail: {finding_detail}"
-        )
-        assert "CODER-20260101-042" in finding_detail, (
-            "Expected the finding detail to cite the planted ledger-ID "
-            f"token.\ndetail: {finding_detail}"
+        assert "CODER-20260101-042" in finding_cause, (
+            "Expected the finding cause to cite the planted ledger-ID "
+            f"token.\ncause: {finding_cause}"
         )
 
         # --- Step 2: file the bug the finding cites, and write the TESTER report ---
@@ -2443,7 +2664,7 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
             recommendation="PASS",
             systemic_risk="low",
             lint_findings_section=(
-                "- `content_described_notes` — a code comment cited a bare "
+                "- `hygiene` (provenance) — a code comment cited a bare "
                 "internal task ID instead of describing the fix by "
                 "substance — cites BUG-0001-code-comment-cites-ledger-id "
                 "(open)"
@@ -2669,3 +2890,223 @@ class TestDualChannelForcedGateRefusal:
             "Expected the message to name the specific BLOCKED TESTER task in "
             f"plain language.\noutput:\n{combined_output}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Release-path push gate: open-rc.sh and release.sh decide through the shared
+# push-decision resolver
+#
+# Only a project registered in projects.cfg whose own project.cfg names
+# dev_tree_path may push. Each unresolved shape -- (a) no project.cfg, (b) a
+# project not in projects.cfg, (c) a project.cfg without dev_tree_path --
+# runs the whole RC locally while REPO_ROOT and PGAI_DEV_TREE_PATH both point
+# at a real checkout: zero git network calls, one skipped-unresolved-project
+# line per script. A registered project with no push_to_remote key still
+# pushes; push_to_remote = false stays local.
+#
+# Every git network verb goes to the git network stub; the fixture repo is
+# built without any push (origin/main is set with update-ref), and each
+# subprocess environment is an explicit set built by build_scrubbed_env.
+# ---------------------------------------------------------------------------
+
+_PUSH_GATE_SKIP = "skipped-unresolved-project"
+
+
+def _init_git_repo_offline(repo_path: pathlib.Path, bare_remote: pathlib.Path) -> None:
+    """A dev repo on main with an ``origin`` remote that is never contacted.
+
+    ``refs/remotes/origin/main`` is set locally to the initial commit, so a
+    pushing run's ff-only pull from origin/main is a no-op, without any real
+    push having built it.
+    """
+    subprocess.run(["git", "init", "--bare", str(bare_remote)], capture_output=True, check=True)
+    repo_path.mkdir(parents=True, exist_ok=True)
+    for args in (
+        ["init", "--initial-branch=main"],
+        ["config", "--local", "user.email", "test@pgai.local"],
+        ["config", "--local", "user.name", "PGAI Test"],
+    ):
+        subprocess.run(["git", "-C", str(repo_path), *args], capture_output=True, check=True)
+    (repo_path / "README.md").write_text("# Push gate fixture\n", encoding="utf-8")
+    (repo_path / "release-notes").mkdir()
+    (repo_path / "release-notes" / "PUBLISHED").write_text("", encoding="utf-8")
+    _git_local(repo_path, "add", "README.md", "release-notes/PUBLISHED")
+    _git_local(repo_path, "commit", "-m", "Initial commit")
+    _git_local(repo_path, "remote", "add", "origin", str(bare_remote))
+    _git_local(repo_path, "update-ref", "refs/remotes/origin/main", "main")
+
+
+class _PushGateCase:
+    """One fixture shape: kanban root, offline dev repo, stubbed git, env."""
+
+    def __init__(self, tmp_path: pathlib.Path, shape: str) -> None:
+        self.tmp_path = tmp_path
+        self.project = "push_gate_project"
+        self.repo = tmp_path / "dev_repo"
+        self.origin = tmp_path / "origin.git"
+        _init_git_repo_offline(self.repo, self.origin)
+        self.root = _build_kanban_root(tmp_path, self.project, self.repo, push_to_remote="false")
+        (self.root / "tmp").mkdir(exist_ok=True)
+        cfg = self.root / "projects" / self.project / "project.cfg"
+        kept = cfg.read_text(encoding="utf-8").splitlines(keepends=True)
+        if shape == "push-default":
+            cfg.write_text("".join(l for l in kept if not l.startswith("push_to_remote")), encoding="utf-8")
+        elif shape == "no-project-cfg":
+            cfg.unlink()
+        elif shape == "not-registered":
+            (self.root / "projects.cfg").write_text("[project:another_project]\npriority=1\n", encoding="utf-8")
+        elif shape == "no-dev-tree-path":
+            cfg.write_text(
+                "".join(l for l in kept if not l.startswith(("push_to_remote", "dev_tree_path"))),
+                encoding="utf-8",
+            )
+        elif shape != "local-only":
+            raise ValueError(f"unknown push-gate fixture shape {shape!r}")
+        self.stub_log = tmp_path / "git-network-calls.log"
+        self.stub_bin = tmp_path / "stub-bin"
+        # A pushing run must get past its fetch to reach the push it is
+        # judged on; the stub logs both and contacts nothing.
+        install_git_network_stub(self.stub_bin, self.stub_log, succeed_verbs=("fetch", "push"))
+        (tmp_path / "home").mkdir()
+
+    def run(self, script: pathlib.Path, args: list[str]) -> subprocess.CompletedProcess:
+        env = build_scrubbed_env(
+            home_dir=self.tmp_path / "home",
+            extra_path_dirs=[self.stub_bin, pathlib.Path(sys.executable).parent],
+            extra_env={
+                "KANBAN_ROOT": str(self.root),
+                "PGAI_AGENT_KANBAN_ROOT_PATH": str(self.root),
+                "TEAM_ROOT": str(self.root),
+                "PGAI_AGENT_KANBAN_TEMP_DIR": str(self.root / "tmp"),
+                "PGAI_PROJECT_NAME": self.project,
+                # Both ways a script could inherit a checkout point at a real
+                # repo; neither may make an unresolved project pushable.
+                "REPO_ROOT": str(self.repo),
+                "PGAI_DEV_TREE_PATH": str(self.repo),
+            },
+        )
+        return subprocess.run(
+            ["bash", str(script), *args],
+            capture_output=True, text=True, env=env, cwd=str(self.root), timeout=180,
+        )
+
+    def network_calls(self) -> list[str]:
+        if not self.stub_log.is_file():
+            return []
+        return [l for l in self.stub_log.read_text(encoding="utf-8").splitlines() if l]
+
+    def pushes(self) -> list[str]:
+        return [l for l in self.network_calls() if "push" in l.split()]
+
+    def open_and_release(self, version: str):
+        """Open the RC, land one commit on it, run the release."""
+        opened = self.run(_OPEN_RC_SCRIPT, [version])
+        open_calls = self.network_calls()
+        if opened.returncode == 0:
+            _commit_on_branch(
+                self.repo, f"rc/{version}", "gate_feature.txt", "gate feature\n",
+                "feat: push gate fixture feature", return_branch="main",
+            )
+        released = self.run(_RELEASE_SCRIPT, []) if opened.returncode == 0 else None
+        return opened, open_calls, released
+
+
+def _out(result: Optional[subprocess.CompletedProcess]) -> str:
+    return "" if result is None else result.stdout + result.stderr
+
+
+def _gate_skip_lines(text: str) -> list[str]:
+    return [l for l in text.splitlines() if _PUSH_GATE_SKIP in l]
+
+
+class TestReleasePathPushGate:
+    """open-rc.sh and release.sh push only for a resolved project."""
+
+    @pytest.mark.parametrize(
+        ("shape", "token"),
+        [
+            ("no-project-cfg", "missing project-cfg"),
+            ("not-registered", "missing registration"),
+            ("no-dev-tree-path", "missing dev-tree-path"),
+        ],
+    )
+    def test_unresolved_project_releases_locally_without_contacting_a_remote(
+        self, tmp_path: pathlib.Path, shape: str, token: str
+    ) -> None:
+        version = "v0.1.0"
+        case = _PushGateCase(tmp_path, shape)
+
+        opened, open_calls, released = case.open_and_release(version)
+
+        assert opened.returncode == 0, f"{shape}: open-rc failed\n{_out(opened)}"
+        assert open_calls == [], f"{shape}: open-rc made a git network call\n{_out(opened)}"
+        open_skips = _gate_skip_lines(_out(opened))
+        assert len(open_skips) == 1 and token in open_skips[0], (
+            f"{shape}: expected one open-rc {_PUSH_GATE_SKIP} line naming {token!r}\n{_out(opened)}"
+        )
+        assert open_skips[0].startswith("[cm-open-rc] "), open_skips[0]
+
+        assert released is not None and released.returncode == 0, (
+            f"{shape}: release failed\n{_out(released)}"
+        )
+        assert case.network_calls() == [], (
+            f"{shape}: the release made a git network call: {case.network_calls()}\n{_out(released)}"
+        )
+        release_skips = _gate_skip_lines(_out(released))
+        assert len(release_skips) == 1 and token in release_skips[0], (
+            f"{shape}: expected one release {_PUSH_GATE_SKIP} line naming {token!r}\n{_out(released)}"
+        )
+        assert release_skips[0].startswith("[cm-release] "), release_skips[0]
+        assert _git_tag_exists(case.repo, version), _out(released)
+        assert _git_local(case.origin, "for-each-ref") == ""
+
+    def test_registered_project_without_push_key_still_pushes(self, tmp_path: pathlib.Path) -> None:
+        version = "v0.1.0"
+        case = _PushGateCase(tmp_path, "push-default")
+
+        opened, open_calls, released = case.open_and_release(version)
+
+        assert opened.returncode == 0, _out(opened)
+        assert any(f"rc/{version}" in l.split() for l in open_calls if "push" in l.split()), (
+            f"open-rc must push the rc branch; stub log: {open_calls}\n{_out(opened)}"
+        )
+        assert released is not None and released.returncode == 0, _out(released)
+        assert any(f"refs/tags/{version}" in l.split() for l in case.pushes()), (
+            f"the release must push its tag by its ref; stub log: {case.network_calls()}\n{_out(released)}"
+        )
+        assert _gate_skip_lines(_out(opened) + _out(released)) == []
+        assert "Push policy: push_to_remote=true" in _out(released)
+
+    def test_release_pushes_its_own_tag_ref_and_no_other_local_tag(self, tmp_path: pathlib.Path) -> None:
+        """Step 14 names the release tag's ref; an unrelated, unpublished
+        local tag in the same repository is never pushed."""
+        version = "v0.1.0"
+        unrelated = "v0.0.5"
+        case = _PushGateCase(tmp_path, "push-default")
+        _git_local(case.repo, "tag", unrelated)
+
+        opened, _open_calls, released = case.open_and_release(version)
+
+        assert opened.returncode == 0, _out(opened)
+        assert released is not None and released.returncode == 0, _out(released)
+        tag_pushes = [l for l in case.pushes() if "--tags" in l.split() or "refs/tags/" in l]
+        assert tag_pushes, f"the release must push its tag; stub log: {case.network_calls()}\n{_out(released)}"
+        for line in tag_pushes:
+            assert line.split()[-1] == f"refs/tags/{version}", (
+                f"a tag push must name only the release tag ref: {line!r}\n{_out(released)}"
+            )
+        assert not any(unrelated in l for l in case.pushes()), case.network_calls()
+
+    def test_push_to_remote_false_stays_local(self, tmp_path: pathlib.Path) -> None:
+        version = "v0.1.0"
+        case = _PushGateCase(tmp_path, "local-only")
+
+        opened, open_calls, released = case.open_and_release(version)
+
+        assert opened.returncode == 0, _out(opened)
+        assert open_calls == [], _out(opened)
+        assert released is not None and released.returncode == 0, _out(released)
+        assert case.network_calls() == [], _out(released)
+        assert _gate_skip_lines(_out(opened) + _out(released)) == []
+        assert "Push policy: push_to_remote=false" in _out(released)
+        assert _git_tag_exists(case.repo, version)

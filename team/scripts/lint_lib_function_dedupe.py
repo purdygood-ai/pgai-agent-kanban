@@ -5,6 +5,25 @@ lint_lib_function_dedupe.py
 Pre-flight lint that asserts no function name is defined in more than one
 file matching ``team/scripts/lib/*.sh`` (non-recursive glob).
 
+SUPERSEDED AS A GATED-RUNNER CALL SITE
+--------------------------------------
+``run-unit-tests.sh`` and ``run-integration-tests.sh`` no longer call this
+script directly -- both now call ``lint_engine_size_dupe.py``, whose
+duplication check is a tree-wide (not just ``lib/*.sh``), reachability-aware
+generalization of the same concern (see that script's module docstring).
+Running both scanners inside the gated-runner quality-lint pipeline would
+have been exactly the duplicated-lint surface this generalization exists to
+avoid.
+
+This file is UNCHANGED and still exists for its own narrower purpose: it
+keeps its own passing test suite (``test_lint_lib_function_dedupe.py``), its
+own census row (row 40, ``docs/blocking-site-census.md``), and its one
+remaining caller, ``audit_coding_standards.sh``'s D01 check -- a manually-run
+compliance audit, not a per-run quality gate. Deleting it outright would
+have required rewriting that audit script, its census row, and its
+dedicated test file for no behavioral gain over simply retargeting the two
+gated-runner call sites.
+
 WHY THIS EXISTS
 ---------------
 A past defect uncovered two functions (``overwatch_backup_file``,
@@ -18,6 +37,16 @@ This lint converts an earlier grep-zero acceptance criterion into a
 permanent, gated-suite check.  When future edits reintroduce a duplicate
 function name across lib/*.sh files, this script exits 1 and the suite
 catches it before it reaches production.
+
+IDENTIFIER-BY-NECESSITY
+------------------------
+This lint's invariant ("no function name is defined in more than one
+lib/*.sh file") is targeted at identifiers -- shell function names -- by
+necessity, not oversight. Name collision is the actual defect class: two
+functions sharing a name is a problem regardless of what either function
+does, because bash's last-definition-wins load order silently picks one
+over the other. There is no behavior pattern to generalize this to; the
+check IS a check on names.
 
 WHAT IS CHECKED
 ---------------
@@ -37,16 +66,21 @@ the name and the files, then exits 1.
 ALLOW-LIST
 ----------
 Some lib files intentionally define the same function names as a
-provider-interface implementation.  For example, ``wake_claude_provider.sh``
-and ``wake_codex_provider.sh`` each define ``provider_preflight``,
-``provider_model_preflight``, and ``provider_invoke_agent`` — only one file
-is ever sourced per invocation.  These pairs are explicitly allow-listed via
-``--allow-file`` so the lint does not flag them as a violation.
+provider-interface implementation.  For example, ``provider_claude.sh`` and
+``provider_codex.sh`` both define ``provider_model_preflight`` — only
+one file is ever sourced per invocation.  These pairs are explicitly
+allow-listed via ``--allow-file`` so the lint does not flag them as a
+violation.
 
 Default allow-listed files (both files in each pair must be listed)::
 
-    wake_claude_provider.sh
-    wake_codex_provider.sh
+    provider_claude.sh
+    provider_codex.sh
+
+(``provider_claude.sh`` folded Claude's provider-interface implementation
+out of the former ``wake_claude_provider.sh``; ``provider_codex.sh``
+folded Codex's provider-interface implementation out of the former
+``wake_codex_provider.sh`` the same way.)
 
 When all files that define a given duplicated name are in the allow-list,
 that duplicate is silently skipped.  If even one file defining the name is
@@ -75,8 +109,8 @@ USAGE
                          resolved from this script's own location).
   --allow-file FILENAME  Filename (basename only) whose functions are exempt
                          from the duplicate check.  May be repeated.
-                         Default allow-list: wake_claude_provider.sh,
-                         wake_codex_provider.sh.  Passing ``--allow-file``
+                         Default allow-list: provider_claude.sh,
+                         provider_codex.sh.  Passing ``--allow-file``
                          once REPLACES the defaults; pass all desired files
                          when using this flag.
   --verbose, -v          Print each scanned file and function extracted from it.
@@ -91,8 +125,8 @@ EXAMPLES
 
   # Custom allow-list (replaces defaults):
   python3 team/scripts/lint_lib_function_dedupe.py \\
-      --allow-file wake_claude_provider.sh \\
-      --allow-file wake_codex_provider.sh \\
+      --allow-file provider_claude.sh \\
+      --allow-file provider_codex.sh \\
       --allow-file my_new_provider.sh
 """
 
@@ -112,8 +146,8 @@ from pathlib import Path
 # one of the files defining the name is NOT in this set.
 # ---------------------------------------------------------------------------
 _DEFAULT_ALLOW_FILES: frozenset[str] = frozenset({
-    "wake_claude_provider.sh",
-    "wake_codex_provider.sh",
+    "provider_claude.sh",
+    "provider_codex.sh",
 })
 
 # ---------------------------------------------------------------------------
@@ -181,7 +215,7 @@ def find_duplicate_functions(
         Directory containing the lib ``*.sh`` files to scan.  Non-recursive:
         only files directly inside ``lib_dir`` are examined.
     allow_files:
-        Set of basenames (e.g. ``{"wake_claude_provider.sh"}``) whose
+        Set of basenames (e.g. ``{"provider_claude.sh"}``) whose
         functions are exempt from duplicate detection.  A duplicate is only
         reported when at least one defining file is NOT in this set.
         Defaults to ``_DEFAULT_ALLOW_FILES`` when ``None``.
@@ -273,7 +307,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "duplicate check (provider-interface implementations).  May be "
             "repeated.  Passing this flag once REPLACES the defaults; list "
             "all desired files when using this flag.  "
-            "Default: wake_claude_provider.sh, wake_codex_provider.sh."
+            "Default: provider_claude.sh, provider_codex.sh."
         ),
     )
     parser.add_argument(

@@ -12,7 +12,7 @@ origin.
 Two layers:
 
   1. Pure matching (the heart of the authority boundary). ``BlockFacts``
-     carries the six deterministic facts the requirements doc names:
+     carries six deterministic facts:
      trigger class, findings-all-filed, anything-shipped-or-tagged,
      approval-gate-present, operator-commits-in-lineage, and
      attempts-below-ceiling. ``match_resolution(facts, matrix)`` compares a
@@ -39,6 +39,26 @@ Two layers:
 the matrix, extracts facts, and matches in one call — the shape OVERWATCH's
 resolution stage is expected to use.
 
+A third, independent reader lives here too: ``resolve_overwatch_resolve()``
+is the Python counterpart of ``pp_overwatch_resolve()``
+(team/scripts/lib/project_paths.sh) — the master switch gating whether
+OVERWATCH may act autonomously on a block at all, as opposed to
+``resolve_max_rc_retries()``'s narrower retry-ceiling concern. Same
+project.cfg-overrides-kanban.cfg precedence, opposite fail-safe direction:
+absence resolves to False rather than raising. Its sibling
+``resolve_block_triage()`` is the Python counterpart of ``pp_block_triage()``
+— whether the block-triage sweep may act on a Block Record or only record
+and diagnose — with the same resolver semantics under ``[overwatch]``, but
+absence resolves to True, the shipped default.
+
+``resolve_ship_posture()`` is the Python counterpart of ``pp_ship_posture()``
+— the project's ship posture (``"matrix"`` or ``"always"``) through the
+same project.cfg-then-kanban.cfg chain, with a remote-lane guard that keeps
+a ``push_to_remote`` lane on ``"matrix"`` unless
+``ship_posture_confirm_remote = true``. It never raises: an unrecognized
+value and an unconfirmed remote lane both resolve to ``"matrix"`` with one
+warning line.
+
 Usage (CLI):
     python3 resolution_matrix.py resolve <evidence.json> [--matrix <path>] [--kanban-root <path>]
     python3 resolution_matrix.py match <facts.json> [--matrix <path>] [--kanban-root <path>]
@@ -57,10 +77,10 @@ Usage (import):
 from __future__ import annotations
 
 import argparse
-import configparser
 import glob
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -68,6 +88,23 @@ from dataclasses import asdict, dataclass, fields
 from typing import Optional
 
 import yaml
+
+# Run by file path (``python3 .../resolution_matrix.py``) or loaded from a file
+# outside its package, this module has no parent package and the interpreter
+# puts only its own directory on sys.path, so the package import below would
+# not resolve. Put this file's own package root -- the directory holding the
+# pgai_agent_kanban/ this file sits in -- at the front of sys.path so the
+# import resolves from the same tree, never another. Imported as a package
+# member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.cm.ship_policy_report_inputs import all_findings  # noqa: E402
+from pgai_agent_kanban.reports.tester_report import TesterReport, parse_report  # noqa: E402
+from pgai_agent_kanban.lib import ini, project_cfg  # noqa: E402
+from pgai_agent_kanban.lib.branch_prefix import release_tag_name  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -110,13 +147,43 @@ _BOOL_ROW_KEYS = (
 # ship-policy HALT as far as this matcher is concerned.
 _CM_HALT_HEADER_RE = re.compile(r"^#\s*HALT created by CM at\b", re.MULTILINE)
 
-# "Not filed" sentinel values a TESTER report's "Filed As:" field might
-# carry when a finding was, for whatever reason, not filed. Matched
-# case-insensitively against the stripped field value.
+# "Not filed" sentinel values a finding's "filed_as" might carry when it was,
+# for whatever reason, not filed. matrix_findings() already returns None for
+# such a finding; these cover a caller's pre-parsed BlockEvidence.
+# tester_findings, which may carry the value as the report wrote it. Matched
+# case-insensitively against the stripped value.
 _NOT_FILED_VALUES = {"", "n/a", "none", "-", "not filed", "tbd"}
 
-_FINDING_HEADER_RE = re.compile(r"^#{2,4}\s*Finding\s+\d+\s*:\s*(.*)$", re.IGNORECASE)
-_FILED_AS_RE = re.compile(r"^Filed As\s*:\s*(.*)$", re.IGNORECASE)
+# Finding categories that record a passing check rather than a defect.
+# TESTER files nothing for them (team/roles/TESTER.md, "## Findings": only a
+# bug, gap or stale-assertion carries Filed As), so findings_all_filed()
+# skips them. Exact parser tokens only (Finding.category is already one
+# lowercase token or None): every other category, and a missing or
+# unrecognised one, still counts -- the check fails closed.
+_NO_FILING_CATEGORIES = frozenset({"pass", "pass-with-caveat"})
+
+# Finding.regression token -> the bool a matrix finding carries (see
+# matrix_findings()); an absent or unreadable value maps to None.
+_REGRESSION_FLAGS = {"yes": True, "no": False}
+
+# Lane classification constants — the three-lane OVERWATCH block classifier
+# (see classify_lane() below). Never confused with HALT_HARD: HALT_HARD is
+# match_resolution()'s "no matrix row matched" sentinel for the pre-existing
+# CANCEL-AND-REBUNDLE matrix; the three lanes are what a HALT_HARD result
+# further resolves into when resolution_stage.py's caller has
+# overwatch_resolve=true (see that module's "three-lane classification"
+# section). LANE_A/LANE_B are classification-only in this module — the
+# recovery/force-ship playbooks that ACT on a Lane A/B classification live
+# in resolution_stage.py (its "Lane A recovery playbook" and "Lane B
+# force-ship playbook" sections).
+LANE_A = "A"  # bad-fix regression
+LANE_B = "B"  # declared operator intent
+LANE_C = "C"  # everything else — the default, never a fallback reached for
+
+# The two ship postures resolve_ship_posture() returns (see that function).
+# "matrix" is the default and applies the ship-policy matrix as written.
+SHIP_POSTURE_MATRIX = "matrix"
+SHIP_POSTURE_ALWAYS = "always"
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +213,34 @@ class CeilingConfigError(ResolutionMatrixError):
     the kanban-wide kanban.cfg, or when either source supplies a
     non-integer value. This is never silently defaulted — the ceiling is
     required at resolve time.
+    """
+
+
+class InvalidOverwatchResolveValue(ResolutionMatrixError):
+    """Raised when [release] overwatch_resolve holds a value that is
+    neither 'true' nor 'false'.
+
+    Mirrors pp_overwatch_resolve()'s refusal in
+    team/scripts/lib/project_paths.sh: absence, blank, or an unreadable/
+    unparseable config file resolves to False and never raises this — only
+    a present, non-blank, non-boolean value does. This is the opposite
+    fail-safe direction from CeilingConfigError above: overwatch_resolve
+    gates an autonomy grant, so silence must resolve to the safe default
+    (False) rather than an error, and only a value that could not possibly
+    mean either boolean is refused.
+    """
+
+
+class InvalidBlockTriageValue(ResolutionMatrixError):
+    """Raised when [overwatch] block_triage holds a value that is neither
+    'true' nor 'false'.
+
+    Mirrors pp_block_triage()'s refusal in team/scripts/lib/project_paths.sh:
+    absence, blank, or an unreadable/unparseable config file resolves to
+    the shipped default (True) and never raises this — only a present,
+    non-blank, non-boolean value does, since guessing it into either
+    boolean could grant or withhold the triage sweep's authority to act
+    against the operator's intent.
     """
 
 
@@ -224,6 +319,7 @@ class BlockFacts:
         )
 
     def to_dict(self) -> dict:
+        """Return every block fact as a dict, keyed by field name."""
         return asdict(self)
 
 
@@ -236,6 +332,11 @@ class ResolutionResult:
     matched_row: Optional[MatrixRow]
 
     def to_dict(self) -> dict:
+        """Return the result as a JSON-ready dict.
+
+        Keys: ``resolution``, ``facts`` (``BlockFacts.to_dict``) and
+        ``matched_row`` (the matrix row's fields, or None when no row matched).
+        """
         return {
             "resolution": self.resolution,
             "facts": self.facts.to_dict(),
@@ -260,11 +361,13 @@ class BlockEvidence:
                                block (e.g. $KANBAN_ROOT/HALT). Consulted
                                for trigger_class when trigger_class is None.
         tester_findings:        Pre-parsed findings list — each item a dict
-                               with at least a "filed_as" key. Takes
+                               with at least a "filed_as" key, and
+                               optionally a "category" key in
+                               matrix_findings()'s vocabulary. Takes
                                precedence over tester_report_path.
         tester_report_path:     Path to a TESTER verification report
-                               markdown file; parsed for Finding sections
-                               and their "Filed As:" values when
+                               markdown file; read through parse_report
+                               into matrix_findings() when
                                tester_findings is None.
         release_state_path:     Path to the blocked RC's per-RC
                                release-state JSON (release-state/<version>.json,
@@ -277,6 +380,12 @@ class BlockEvidence:
         target_version:         The blocked RC's version string (e.g.
                                "v2.0.1"). Used for the git-tag check and the
                                HUMAN-APPROVE task glob.
+        branch_prefix:          The project's configured branch_prefix
+                               (e.g. "ai_"). The git-tag check looks for the
+                               tag the release cuts, release_tag_name(
+                               target_version, branch_prefix) -- "ai_v2.0.1"
+                               on a prefixed project. None or "" checks the
+                               bare version, an unprefixed project's tag.
         rc_branch:              The RC branch name (e.g. "ai_rc/v2.0.1"),
                                used for the RC-lineage walk.
         base_branch:            The branch the RC branched from (e.g.
@@ -306,6 +415,7 @@ class BlockEvidence:
     release_state_path: Optional[str] = None
     dev_tree_path: Optional[str] = None
     target_version: Optional[str] = None
+    branch_prefix: Optional[str] = None
     rc_branch: Optional[str] = None
     base_branch: Optional[str] = None
     project_tasks_dir: Optional[str] = None
@@ -457,9 +567,8 @@ def match_resolution(facts: BlockFacts, matrix: list) -> str:
     Returns HALT_HARD when no row matches — including when *matrix* is
     empty, when *facts* differs from every row in even one field, or when
     *facts*.trigger_class is a value the matrix has no row for at all
-    (an "unknown shape"). This is the fail-closed default the requirements
-    doc mandates: "Unmatched or unknown shapes resolve to HALT-hard —
-    never a default action."
+    (an "unknown shape"). This is the fail-closed default: unmatched or
+    unknown shapes resolve to HALT-hard, never to a default action.
     """
     target = facts.facts_key()
     for row in matrix:
@@ -469,54 +578,309 @@ def match_resolution(facts: BlockFacts, matrix: list) -> str:
 
 
 # ---------------------------------------------------------------------------
-# TESTER report finding parsing (findings_all_filed evidence)
+# TESTER report findings (findings_all_filed and Lane A evidence)
 # ---------------------------------------------------------------------------
 
 
-def parse_tester_report_findings(report_text: str) -> list:
-    """Extract Finding sections and their "Filed As:" values from a TESTER
-    report's markdown text.
+def matrix_findings(report: TesterReport) -> list:
+    """Return *report*'s findings in the shape the matrix and the lane
+    classifier read.
 
-    Recognizes headers of the form "### Finding N: <title>" (2-4 leading
-    '#', case-insensitive "Finding", per team/roles/TESTER.md's report
-    template) and, within a finding's body, a line of the form
-    "**Filed As:** <value>" (markdown bold markers and surrounding
-    whitespace are stripped before matching, so both bold and plain forms
-    match). A finding with no "Filed As:" line at all gets filed_as=None.
+    This module never reads TESTER-report text itself. *report* is a
+    pgai_agent_kanban.reports.tester_report.TesterReport (parse_report's
+    result), whose module docstring states the whole reading contract: what
+    opens a finding, where it ends, how a field line is recognised and how
+    each value is normalised. The findings are
+    pgai_agent_kanban.cm.ship_policy_report_inputs.all_findings -- each
+    finding followed by its nested sub-findings, in report order -- which
+    are the findings the release path's readers (the ship-policy matrix
+    inputs, the Known Issues stop list, the Bugs Skipped table) read, so
+    OVERWATCH and the release path see the same findings in every report.
 
-    Returns a list of {"title": str, "filed_as": str | None} dicts, one per
-    Finding section, in document order. Returns [] when the report has no
-    recognizable Finding sections (e.g. a clean PASS report).
+    Returns a list of dicts, one per finding, in that order:
+        {"title": str, "category": str | None, "filed_as": str | None,
+         "regression": bool | None, "body": str}
+    "title" is Finding.title: the heading text after its label ("stale
+    assertion" for a "Finding 2: stale assertion" heading; "" when the
+    heading carries nothing more). "category" is Finding.category: one of
+    pass, pass-with-caveat, gap, bug, pre-existing-bug or stale-assertion,
+    or None when the finding has no readable Category value (a nested
+    sub-finding usually carries none) -- findings_all_filed() skips a pass
+    or pass-with-caveat finding, which TESTER never files, and counts every
+    other finding, None included. "filed_as" is Finding.filed_as: the
+    canonical BUG-NNNN or PRIORITY-NNNN id the finding's own Filed As value
+    names, or None when it names none (no Filed As line, or a value such as
+    "none", "N/A" or "not filed") -- findings_all_filed() counts None as
+    unfiled. "regression" is True for a Regression of "yes", False for
+    "no", and None when the finding carries no readable Regression value
+    (most findings: the field is only present on Systemic-Risk-high
+    findings), distinct from an explicit "no". "body" is Finding.body, the
+    finding's text below its heading, a nested sub-finding's lines
+    included; classify_lane()'s Lane A match scans it for the BUG-NNNN ids
+    the finding names as the regression's origin. Returns [] when the
+    report has no findings (e.g. a clean PASS report).
     """
-    findings: list = []
-    current: Optional[dict] = None
-    for raw_line in report_text.splitlines():
-        line = raw_line.strip()
-        header_match = _FINDING_HEADER_RE.match(line)
-        if header_match:
-            if current is not None:
-                findings.append(current)
-            current = {"title": header_match.group(1).strip(), "filed_as": None}
+    return [
+        {
+            "title": finding.title,
+            "category": finding.category,
+            "filed_as": finding.filed_as,
+            "regression": _REGRESSION_FLAGS.get(finding.regression),
+            "body": finding.body,
+        }
+        for finding in all_findings(report)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Three-lane block classification (pure, side-effect-free — see this
+# module's docstring's Layer 1). resolution_stage.py's run_resolution_stage
+# calls classify_lane() only when a block has already fallen through to
+# HALT_HARD against the pre-existing CANCEL-AND-REBUNDLE matrix AND the
+# caller's overwatch_resolve flag is true; see that module's "three-lane
+# classification" section for the full wiring and for what Lane A/B/C
+# execution does (this module only classifies — see LANE_A/LANE_B's
+# module-level comment above).
+# ---------------------------------------------------------------------------
+
+
+def extract_bug_ids(text: Optional[str]) -> list:
+    """Order-preserving, de-duplicated list of BUG-NNNN ids named in *text*
+    (the short id only — any trailing slug is not part of the match).
+    Returns [] for empty or None text.
+    """
+    if not text:
+        return []
+    seen: list = []
+    for match in _BUG_ID_ONLY_RE.finditer(text):
+        token = match.group(0)
+        if token not in seen:
+            seen.append(token)
+    return seen
+
+
+def cargo_bug_ids(cargo: list) -> set:
+    """Normalize a bundle family's cargo basenames (e.g. "BUG-0042-foo.md",
+    the shape pgai_agent_kanban.cm.bundle_family.compute_bundle_family's
+    "cargo" list carries) to the short BUG-NNNN id set Lane A's
+    regression-tracing match compares against. Non-bug cargo entries
+    (PRIORITY-* files, anything not BUG-NNNN-prefixed) are silently
+    excluded — this RC's bundle can only have "fixed" a bug it bundled.
+    """
+    result = set()
+    for basename in cargo:
+        match = _BUG_ID_ONLY_RE.match(basename)
+        if match:
+            result.add(match.group(0))
+    return result
+
+
+def find_regression_source_finding(findings: list, cargo_ids) -> Optional[tuple]:
+    """Return (finding, bug_id) for the first finding (document order) that
+    is Lane A's bad-fix-regression shape: carries Regression=yes AND its
+    body text names a BUG-NNNN id that is a member of *cargo_ids* — i.e.
+    the finding traces to a bug this RC's own bundle fixed. Returns None
+    when no finding qualifies (including when *findings* or *cargo_ids* is
+    empty) — the fail-closed default that sends the block on to the Lane B
+    check rather than Lane A.
+    """
+    for finding in findings:
+        if finding.get("regression") is not True:
             continue
-        if current is None:
+        for bug_id in extract_bug_ids(finding.get("body")):
+            if bug_id in cargo_ids:
+                return finding, bug_id
+    return None
+
+
+# Identifier vocabulary Lane B's full-explanation match test is built on:
+# BUG ids, vX.Y.Z version strings, slash-qualified refs (branch/path
+# names such as "ai_rc/v2.4.0"), and underscore-compound tokens
+# (config-style names such as "last_run_ai_main"). Order matters only
+# for the BUG-id alternative, which must be tried before the bare
+# _BUG_ID_ONLY_RE so a trailing slug is captured as part of one token.
+_IDENTIFIER_RE = re.compile(
+    r"BUG-\d{4}(?:-[A-Za-z0-9._-]+)?"
+    r"|v\d+\.\d+\.\d+"
+    r"|[A-Za-z][A-Za-z0-9_.-]*/[A-Za-z0-9_./-]+"
+    r"|[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+"
+)
+_BUG_ID_ONLY_RE = re.compile(r"BUG-\d{4}")
+
+
+def extract_identifiers(*texts: Optional[str]) -> list:
+    """Deterministic, order-preserving, de-duplicated list of "identifier"
+    tokens found across *texts* — see _IDENTIFIER_RE above for the exact
+    vocabulary.
+
+    This is the vocabulary intent_entry_fully_explains() is built on: an
+    INTENT.md entry only counts as explaining a block when every one of
+    these exact tokens is reproduced verbatim in its declaration text —
+    never a generic keyword or thematic match (Lane B's match test: the
+    finding's evidence is fully explained by the declaration — a partial
+    or thematic resemblance is not a match). Requiring exact reproduction of specific,
+    structured identifiers is what makes "fully explained" a checkable
+    fact rather than a vibe: a declaration using similar-sounding words
+    without naming the specific version/bug/branch the block is actually
+    about does not match.
+    """
+    seen: list = []
+    for text in texts:
+        if not text:
             continue
-        clean = line.replace("*", "").strip()
-        filed_match = _FILED_AS_RE.match(clean)
-        if filed_match:
-            current["filed_as"] = filed_match.group(1).strip()
-    if current is not None:
-        findings.append(current)
-    return findings
+        for match in _IDENTIFIER_RE.finditer(text):
+            token = match.group(0)
+            if token not in seen:
+                seen.append(token)
+    return seen
+
+
+def intent_entry_fully_explains(declaration: str, identifiers: list) -> bool:
+    """True when *declaration* verbatim-reproduces every token in
+    *identifiers* — the Lane B match test.
+
+    False when *identifiers* is empty: an entry cannot "fully explain" a
+    block with no extractable identifying evidence, so an empty identifier
+    list always fails closed to no-match rather than vacuously matching
+    every declaration in the ledger.
+    """
+    if not identifiers:
+        return False
+    return all(token in declaration for token in identifiers)
+
+
+def find_lane_b_declaration(identifiers: list, declarations: list) -> Optional[int]:
+    """Return the index of the first declaration (file/ledger order) that
+    fully explains *identifiers*, or None when no declaration does —
+    including when *declarations* is empty (an emptied or never-populated
+    INTENT.md ledger, which is the shipped zero-entry default).
+    """
+    for index, declaration in enumerate(declarations):
+        if intent_entry_fully_explains(declaration, identifiers):
+            return index
+    return None
+
+
+@dataclass(frozen=True)
+class LaneClassification:
+    """The outcome of classify_lane(): which of the three lanes a block
+    falls into, plus the specific evidence that drove the decision — for
+    narration and for the OVERWATCH Decision event resolution_stage.py's
+    write_decision_event() records.
+    """
+
+    lane: str  # LANE_A | LANE_B | LANE_C
+    reason: str
+    regression_finding: Optional[dict] = None
+    regression_bug_id: Optional[str] = None
+    intent_declaration: Optional[str] = None
+    identifiers: tuple = ()
+
+    def to_dict(self) -> dict:
+        """Return the classification as a JSON-ready dict.
+
+        Keys: ``lane``, ``reason``, ``regression_finding``, ``regression_bug_id``,
+        ``intent_declaration`` and ``identifiers`` (a list).
+        """
+        return {
+            "lane": self.lane,
+            "reason": self.reason,
+            "regression_finding": self.regression_finding,
+            "regression_bug_id": self.regression_bug_id,
+            "intent_declaration": self.intent_declaration,
+            "identifiers": list(self.identifiers),
+        }
+
+
+def classify_lane(
+    findings: list,
+    cargo_ids,
+    intent_declarations: list,
+    evidence_texts: list,
+) -> LaneClassification:
+    """Classify a block into exactly one of Lane A, Lane B, or Lane C.
+
+    Fail-closed by construction: Lane A requires a positive, traceable
+    regression match (find_regression_source_finding()); failing that,
+    Lane B requires a positive, fully-explaining INTENT.md declaration
+    (find_lane_b_declaration()); failing both, the block is Lane C — the
+    default, never a fallback that had to be specially reached for (every
+    return path other than the two positive matches above lands here by
+    simply falling through).
+
+    Args:
+        findings: The block's TESTER report findings (matrix_findings()'s
+            return shape).
+        cargo_ids: The set of BUG-NNNN ids this RC's own bundle fixed
+            (cargo_bug_ids() of the bundle family's cargo list).
+        intent_declarations: This project's INTENT.md declaration strings,
+            in file order (e.g. [e.declaration for e in
+            pgai_agent_kanban.overwatch.intent.read_project_intent(...)]).
+            An empty list — including a shipped zero-entry ledger — can
+            never produce a Lane B match, per find_lane_b_declaration().
+        evidence_texts: Free text to extract Lane B's identifier
+            vocabulary from — typically every finding's body plus the
+            block's own target_version/rc_branch/base_branch strings.
+    """
+    match = find_regression_source_finding(findings, cargo_ids)
+    if match is not None:
+        finding, bug_id = match
+        return LaneClassification(
+            lane=LANE_A,
+            reason=(
+                f"TESTER finding {finding.get('title') or '(untitled)'!r} carries "
+                f"Regression=yes and traces to {bug_id}, which this RC's own bundle "
+                f"fixed — bad-fix regression."
+            ),
+            regression_finding=finding,
+            regression_bug_id=bug_id,
+        )
+
+    identifiers = extract_identifiers(*evidence_texts)
+    if intent_declarations:
+        idx = find_lane_b_declaration(identifiers, intent_declarations)
+        if idx is not None:
+            declaration = intent_declarations[idx]
+            return LaneClassification(
+                lane=LANE_B,
+                reason=(
+                    f"the block's evidence ({', '.join(identifiers)}) is fully "
+                    f"explained by a declared INTENT.md entry: {declaration!r}."
+                ),
+                intent_declaration=declaration,
+                identifiers=tuple(identifiers),
+            )
+
+    return LaneClassification(
+        lane=LANE_C,
+        reason=(
+            "no TESTER finding traces a bad-fix regression to a bug this RC's own "
+            "bundle fixed, and no INTENT.md entry fully explains the block's "
+            "evidence — Lane C, the default."
+        ),
+        identifiers=tuple(identifiers),
+    )
 
 
 def findings_all_filed(findings: list) -> bool:
-    """True when every finding in *findings* carries a non-empty, non-sentinel
-    "filed_as" value. Vacuously true for an empty list — no findings means
-    nothing was left unfiled.
+    """True when every finding in *findings* that must be filed carries a
+    non-empty, non-sentinel "filed_as" value.
+
+    A finding whose "category" is pass or pass-with-caveat records a passing
+    check, which TESTER never files, so it is skipped whatever its
+    "filed_as". Every other finding must be filed: gap, bug,
+    pre-existing-bug and stale-assertion, and -- failing closed -- a finding
+    with no "category" key, a None category, or a value outside
+    matrix_findings()'s vocabulary. Vacuously true for an empty list or one
+    holding only pass and pass-with-caveat findings: nothing that needed
+    filing was left unfiled.
     """
     if not findings:
         return True
     for finding in findings:
+        category = finding.get("category")
+        if isinstance(category, str) and category in _NO_FILING_CATEGORIES:
+            continue
         value = (finding.get("filed_as") or "").strip().lower()
         if value in _NOT_FILED_VALUES:
             return False
@@ -537,10 +901,9 @@ def _read_ini_int(cfg_path: str, section: str, key: str) -> Optional[int]:
     """
     if not cfg_path or not os.path.isfile(cfg_path):
         return None
-    parser = configparser.ConfigParser()
     try:
-        parser.read(cfg_path, encoding="utf-8")
-    except configparser.Error as exc:
+        parser = ini.load(cfg_path)
+    except ini.IniError as exc:
         raise CeilingConfigError(f"Cannot parse config file '{cfg_path}': {exc}") from exc
     if not parser.has_option(section, key):
         return None
@@ -585,6 +948,248 @@ def resolve_max_rc_retries(project_name: str, kanban_root: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Autonomy-gate resolution (Python counterpart of pp_overwatch_resolve)
+# ---------------------------------------------------------------------------
+
+
+def _read_ini_str(cfg_path: str, section: str, key: str) -> Optional[str]:
+    """Read a raw string value from an INI-format config file's [section] key.
+
+    Returns None when the file, section, or key is absent, when the file
+    cannot be parsed, or when the value is present but blank — every one
+    of those collapses to "nothing found here", matching read_ini's own
+    blank-on-miss behavior in team/scripts/lib/ini_parser.sh. Unlike
+    _read_ini_int, this never raises: both switches read through it
+    (overwatch_resolve and block_triage) resolve "absent/unreadable" to
+    their own documented default, never to an error.
+    """
+    if not cfg_path or not os.path.isfile(cfg_path):
+        return None
+    try:
+        parser = ini.load(cfg_path)
+    except ini.IniError:
+        return None
+    if not parser.has_option(section, key):
+        return None
+    raw = parser.get(section, key).strip()
+    return raw or None
+
+
+def resolve_overwatch_resolve(project_name: str, kanban_root: str) -> bool:
+    """Python counterpart of pp_overwatch_resolve() (team/scripts/lib/project_paths.sh).
+
+    Resolution order (first non-blank source wins), the same project.cfg-
+    overrides-kanban.cfg precedence resolve_max_rc_retries() uses:
+      1. <kanban_root>/projects/<project_name>/project.cfg [release] overwatch_resolve
+      2. <kanban_root>/kanban.cfg [release] overwatch_resolve
+
+    Absent from both sources, or a config file that cannot be read or
+    parsed, resolves to False — the opposite fail-safe direction from
+    resolve_max_rc_retries()/CeilingConfigError: this key gates OVERWATCH's
+    autonomous-resolution authority, so silence must mean "off", never an
+    error and never "on".
+
+    Raises InvalidOverwatchResolveValue, naming the offending value, the
+    project, and the file it came from, when a present value is neither
+    'true' nor 'false'. Never silently guessed into either boolean.
+    """
+    project_cfg = os.path.join(kanban_root, "projects", project_name, "project.cfg")
+    kanban_cfg = os.path.join(kanban_root, "kanban.cfg")
+
+    raw = _read_ini_str(project_cfg, "release", "overwatch_resolve")
+    source = project_cfg
+    if raw is None:
+        raw = _read_ini_str(kanban_cfg, "release", "overwatch_resolve")
+        source = kanban_cfg
+
+    if raw is None:
+        return False
+    if raw == "true":
+        return True
+    if raw == "false":
+        return False
+
+    raise InvalidOverwatchResolveValue(
+        f"resolution_matrix: unrecognized value '{raw}' for project "
+        f"'{project_name}' in {source} [release] overwatch_resolve "
+        f"(expected 'true' or 'false')."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Block-triage switch (Python counterpart of pp_block_triage)
+# ---------------------------------------------------------------------------
+
+
+def resolve_block_triage(project_name: str, kanban_root: str) -> bool:
+    """Python counterpart of pp_block_triage() (team/scripts/lib/project_paths.sh).
+
+    Whether OVERWATCH's block-triage sweep may act on a blocked task's
+    Block Record (requeue, promote, escalate) for this project, or must
+    only write the record and its diagnosis.
+
+    Resolution order (first non-blank source wins), the same project.cfg-
+    overrides-kanban.cfg precedence resolve_overwatch_resolve() uses:
+      1. <kanban_root>/projects/<project_name>/project.cfg [overwatch] block_triage
+      2. <kanban_root>/kanban.cfg [overwatch] block_triage
+
+    Absent from both sources, or a config file that cannot be read or
+    parsed, resolves to True — the shipped kanban.cfg_example default, so
+    an upgraded install whose kanban.cfg predates the key behaves the same
+    as a fresh one.
+
+    Raises InvalidBlockTriageValue, naming the offending value, the
+    project, and the file it came from, when a present value is neither
+    'true' nor 'false'. Never silently guessed into either boolean.
+    """
+    project_cfg = os.path.join(kanban_root, "projects", project_name, "project.cfg")
+    kanban_cfg = os.path.join(kanban_root, "kanban.cfg")
+
+    raw = _read_ini_str(project_cfg, "overwatch", "block_triage")
+    source = project_cfg
+    if raw is None:
+        raw = _read_ini_str(kanban_cfg, "overwatch", "block_triage")
+        source = kanban_cfg
+
+    if raw is None or raw == "true":
+        return True
+    if raw == "false":
+        return False
+
+    raise InvalidBlockTriageValue(
+        f"resolution_matrix: unrecognized value '{raw}' for project "
+        f"'{project_name}' in {source} [overwatch] block_triage "
+        f"(accepted: true|false)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ship posture (Python counterpart of pp_ship_posture)
+# ---------------------------------------------------------------------------
+
+
+def _release_key_chain(
+    project_cfg_path: Optional[str], kanban_cfg: str, key: str
+) -> tuple:
+    """Return ``(raw, source)`` for ``[release] <key>`` by the bash chain.
+
+    The Python twin of ``_pp_release_key_chain`` in
+    team/scripts/lib/project_paths.sh: the project's own config file
+    (project.cfg, or a legacy PROJECT.cfg) first, then kanban.cfg, the
+    first non-blank value winning. Both files are read by the bash
+    ``read_ini`` rules (inline comments stripped, keys matched exactly), so
+    the two resolvers see the same value in the same file. ``("", "")``
+    when neither file carries a non-blank value.
+    """
+    if project_cfg_path:
+        raw = project_cfg.read_cfg_key(pathlib.Path(project_cfg_path), "release", key)
+        if raw:
+            return raw, project_cfg_path
+    raw = ini.read_line_value(kanban_cfg, "release", key) or ""
+    if raw:
+        return raw, kanban_cfg
+    return "", ""
+
+
+def _project_pushes_to_remote(project_cfg_path: Optional[str]) -> bool:
+    """Whether the project is configured to publish to origin (the posture guard's rule).
+
+    This is the configured intent bash ``pp_ship_posture`` reads through
+    ``_pp_push_to_remote_configured``, not the push decision itself (that is
+    :mod:`pgai_agent_kanban.lib.push_decision`): the remote-lane guard fails
+    safe, so an unresolved project still counts as a publishing lane here.
+
+    Only the exact value ``false`` in ``[project] push_to_remote`` (one
+    surrounding double quote stripped from each side) is False; an absent
+    config file, an absent or blank key, and any other value are True.
+    """
+    if not project_cfg_path:
+        return True
+    raw = project_cfg.read_cfg_key(pathlib.Path(project_cfg_path), "project", "push_to_remote")
+    return project_cfg.strip_one_quote_each_side(raw, '"') != "false"
+
+
+def resolve_ship_posture(project_name: str, kanban_root: str, *, stream=None) -> str:
+    """Python counterpart of pp_ship_posture() (team/scripts/lib/project_paths.sh).
+
+    Returns the project's ship posture, exactly ``"matrix"`` or
+    ``"always"``: how CM answers a ship-policy trigger that would otherwise
+    HALT. ``"matrix"`` applies the ship-policy matrix as written;
+    ``"always"`` ships through the triggers the posture covers and records
+    what they would have stopped on.
+
+    Resolution order (first non-blank source wins), the same project.cfg-
+    overrides-kanban.cfg precedence resolve_max_rc_retries() uses:
+      1. <kanban_root>/projects/<project_name>/project.cfg [release] ship_posture
+         (or a legacy PROJECT.cfg, as the bash resolver reads)
+      2. <kanban_root>/kanban.cfg [release] ship_posture
+      3. ``"matrix"`` when both are absent or blank
+
+    Any value other than ``matrix`` or ``always`` resolves to ``"matrix"``
+    and writes ONE warning line to *stream* (default ``sys.stderr``) naming
+    the file and the raw value.
+
+    Remote-lane guard: when the project's ``[project] push_to_remote`` is
+    not ``false``, ``"always"`` takes effect only if ``[release]
+    ship_posture_confirm_remote`` is exactly ``true`` through the same
+    chain. Anything short of that resolves to ``"matrix"`` and writes ONE
+    warning line. On a ``push_to_remote = false`` lane the confirm key is
+    not consulted.
+
+    Neither the fallback nor the guard raises: the caller always gets a
+    posture back and carries on. The warning text after its
+    ``resolution_matrix: resolve_ship_posture: `` prefix is the same text
+    the bash resolver prints after its own prefix.
+    """
+    out = stream if stream is not None else sys.stderr
+    kanban_cfg = os.path.join(kanban_root, "kanban.cfg")
+    project_root = os.path.join(kanban_root, "projects", project_name)
+    found = project_cfg.project_cfg_file(pathlib.Path(project_root))
+    project_cfg_path = os.path.join(project_root, found.name) if found is not None else None
+    prefix = "resolution_matrix: resolve_ship_posture: "
+
+    raw, source = _release_key_chain(project_cfg_path, kanban_cfg, "ship_posture")
+    if raw in ("", SHIP_POSTURE_MATRIX):
+        return SHIP_POSTURE_MATRIX
+    if raw != SHIP_POSTURE_ALWAYS:
+        print(
+            f"{prefix}WARNING: unrecognized value '{raw}' for project "
+            f"'{project_name}' in {source} [release] ship_posture "
+            f"(accepted: matrix|always); resolving to 'matrix'.",
+            file=out,
+        )
+        return SHIP_POSTURE_MATRIX
+
+    if not _project_pushes_to_remote(project_cfg_path):
+        return SHIP_POSTURE_ALWAYS
+
+    confirm_raw, confirm_source = _release_key_chain(
+        project_cfg_path, kanban_cfg, "ship_posture_confirm_remote"
+    )
+    if confirm_raw == "true":
+        return SHIP_POSTURE_ALWAYS
+
+    # The remedy names the file whose confirm value wins the chain: the one
+    # already carrying a non-true value, else the one that set "always".
+    if confirm_raw:
+        confirm_desc = f"'{confirm_raw}' in {confirm_source}"
+        confirm_target = confirm_source
+    else:
+        shown_project_cfg = project_cfg_path or os.path.join(project_root, "project.cfg")
+        confirm_desc = f"absent from {shown_project_cfg} and {kanban_cfg}"
+        confirm_target = source
+    print(
+        f"{prefix}WARNING: ship_posture 'always' for project '{project_name}' "
+        f"in {source} is not confirmed for a push_to_remote = true lane "
+        f"([release] ship_posture_confirm_remote is {confirm_desc}); "
+        f"resolving to 'matrix'. Set ship_posture_confirm_remote = true under "
+        f"[release] in {confirm_target} to confirm.",
+        file=out,
+    )
+    return SHIP_POSTURE_MATRIX
+
+
+# ---------------------------------------------------------------------------
 # Git-backed evidence helpers
 # ---------------------------------------------------------------------------
 
@@ -605,15 +1210,19 @@ def _run_git(dev_tree_path: str, args: list) -> str:
     return result.stdout
 
 
-def git_tag_exists(dev_tree_path: str, version: str) -> bool:
-    """True when *version* (e.g. "v2.0.1") exists as a git tag in *dev_tree_path*.
+def git_tag_exists(dev_tree_path: str, tag: str) -> bool:
+    """True when the tag named *tag* exists in *dev_tree_path*.
+
+    *tag* is the full tag name: a release tag is named through
+    release_tag_name(version, branch_prefix) (e.g. "ai_v2.0.1"), never the
+    bare version on a prefixed project.
 
     Raises EvidenceError if the git command itself fails (bad path, not a
     repository) — a plumbing failure, distinct from "tag legitimately
     absent" (which returns False cleanly).
     """
-    stdout = _run_git(dev_tree_path, ["tag", "-l", version])
-    return version in stdout.split()
+    stdout = _run_git(dev_tree_path, ["tag", "-l", tag])
+    return tag in stdout.split()
 
 
 def operator_commit_in_rc_lineage(dev_tree_path: str, rc_branch: str, base_branch: str) -> bool:
@@ -622,8 +1231,8 @@ def operator_commit_in_rc_lineage(dev_tree_path: str, rc_branch: str, base_branc
     Walks --first-parent of *rc_branch* since it diverged from *base_branch*
     (git log --first-parent --pretty=%P <rc_branch> --not <base_branch>).
     Every legitimate contribution to an RC branch under this kanban's
-    workflow (SOP.md "Release Lifecycle" / roles/CODER.md "Git Operates
-    Locally for CODER") lands as a --no-ff merge commit of a feature/<TASK-ID>
+    workflow (roles/CM.md "The release lifecycle" / roles/CODER.md "Git
+    Operates Locally for CODER") lands as a --no-ff merge commit of a feature/<TASK-ID>
     branch — a commit with exactly two parents. A commit with any other
     parent count (one, for a direct commit; more than two only in
     pathological octopus-merge cases this kanban never produces) sitting
@@ -673,10 +1282,10 @@ def _resolve_findings(evidence: BlockEvidence) -> Optional[list]:
         return evidence.tester_findings
     if evidence.tester_report_path and os.path.isfile(evidence.tester_report_path):
         try:
-            text = open(evidence.tester_report_path, "r", encoding="utf-8").read()
+            report = parse_report(pathlib.Path(evidence.tester_report_path))
         except OSError:
             return None
-        return parse_tester_report_findings(text)
+        return matrix_findings(report)
     return None
 
 
@@ -715,7 +1324,10 @@ def _fact_shipped_or_tagged(evidence: BlockEvidence) -> bool:
             return True
 
     if have_tag_evidence:
-        if git_tag_exists(evidence.dev_tree_path, evidence.target_version):
+        # The tag the release cuts: <branch_prefix><version>, so a prefixed
+        # project's shipped tag counts and another lane's bare tag does not.
+        release_tag = release_tag_name(evidence.target_version, evidence.branch_prefix or "")
+        if git_tag_exists(evidence.dev_tree_path, release_tag):
             return True
 
     return False

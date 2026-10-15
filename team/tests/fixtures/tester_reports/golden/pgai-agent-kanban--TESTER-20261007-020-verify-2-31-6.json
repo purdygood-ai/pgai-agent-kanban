@@ -1,0 +1,10 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "RC v2.31.6 bundles two medium bugs, and both fixes are correct. BUG-0595 (the doc-lint command reader crashed when started by file path) is fixed by a package self-location guard. It now runs by path from any directory with PYTHONPATH unset (exit 0; the ai_main baseline still exits 1), and it binds its own tree even when a competing package is on PYTHONPATH. BUG-0596 (wake-lock integration tests were coupled to the wake's exported `[wake]` tunables) is fixed in two places: both gated runners unset all 15 `[wake]` exports before pytest, and the three affected test fixtures scrub them before layering their own environment. The loader's env-over-cfg operator override is unchanged. I ran both gated runners with `--coverage` from inside this agent wake, with `LOCK_WAIT_SECONDS=120` / `LOCK_STARVATION_FIRINGS=3` inherited, which is the exact shape that failed in v2.31.5. Both exited 0: unit 10159+5 passed, 41 skipped; integration 948 passed, 1 skipped. Lint findings were 0 for both suites. Every acceptance command in both bug files passes. The original failure modes were reproduced on ai_main and shown absent on the RC. Pre-flight, the prerequisite graph and the autonomous-operation checks are clean. No bugs, gaps or stale assertions were found.",
+  "findings": [],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

@@ -1,9 +1,23 @@
 #!/usr/bin/env bash
 # team/scripts/lib/overwatch-checks/check-transient-api-error.sh
 #
-# OVERWATCH Tier-1 detection module: detect BLOCKED tasks whose agent log
-# tail matches known transient API error signatures, then either auto-requeue
-# the task or bug-file it (if the requeue ceiling is reached).
+# OVERWATCH Tier-1 detection module: detect BLOCKED tasks whose provider
+# output tail matches known transient API error signatures, then either
+# auto-requeue the task or bug-file it (if the requeue ceiling is reached).
+#
+# Which log is read: the provider CLI's stdout/stderr for a dispatched task
+# goes to the wake firing's batch log ($KANBAN_ROOT/logs/agents/
+# <agent>-batch-<ts>.log), not to the task's own logs/ directory (which
+# holds only what the agent itself writes). The wake records, per dispatch,
+# which batch log it wrote and the byte span belonging to that task in the
+# task's logs/dispatch.jsonl ledger (dispatch_record_* in
+# overwatch_protocol.sh). This check resolves the task's most recent
+# dispatch from that ledger, extracts that span of the batch log, and
+# matches the signatures against its last 50 lines. A BLOCKED task with no
+# ledger (never dispatched by a wake, or dispatched before the ledger
+# existed) or whose recorded batch log is gone is narrated as skipped —
+# never an error, never a handled case, and never a reason to stop the
+# sweep. The task's own logs/*.log files are no longer consulted.
 #
 # Transient signatures (any match triggers):
 #   - "API Error: 5xx"  (any 5-series HTTP status in that phrase)
@@ -23,7 +37,16 @@
 # value (kanban.cfg [wake] transient_retry_cap, default 3 — the same value
 # handle_working_after_exit enforces).
 #
-# Requeue path (ceiling not reached):
+# Backoff (ceiling not reached): a requeue waits out a window that grows with
+# the record's retry_count — 5, 10, then 20 minutes as shipped (the
+# transient_api_error row of the block-triage classifier table) — measured
+# from the ## Block Record's last_blocked_at (transient_backoff_due in
+# overwatch_protocol.sh, the same gate the wake's auto-retry uses). Inside
+# the window the task is left exactly as found, a "transient-requeue-backoff"
+# row is logged, and a later sweep looks again. No Block Record means no
+# window (requeued at once, as before the backoff existed).
+#
+# Requeue path (ceiling not reached, backoff window passed):
 #   1. Back up status.md via overwatch_backup_file.
 #   2. Reset State to BACKLOG.
 #   3. Increment retry_count in the durable ## Transient Retry record via
@@ -36,16 +59,25 @@
 #   2. Log action via overwatch_log_action.
 #   (Task is NOT modified — a human or future iteration acts on the bug.)
 #
-# Companion residue cleanup (runs for every transient-matched task, after the
-# requeue-or-bug-file decision):
-#   - For each per-task worktree found in the dev tree:
-#     - If the worktree has no commits not reachable from its source branch
-#       (determined by checking whether git worktree can be pruned) AND the
-#       worktree directory exists with no extra commits ahead of origin/main:
-#         → git worktree prune + log (worktree-prune class).
-#     - If the worktree carries commits (has commits not in any named branch
-#       other than itself):
-#         → bug-file and preserve the worktree.
+# Worktree cleanup (requeue path only, inside the locked fix):
+#   The requeue runs under overwatch_halt_first_fix, holding the project's
+#   repo lock. Before the task's state flips to BACKLOG, each of the task's
+#   worktrees in the dev tree goes through the same safe removal path the
+#   stale-worktree check uses for finished tasks
+#   (pgai_agent_kanban.overwatch.worktree_residue assess-finished /
+#   remove-finished): `git worktree remove` without --force, then prune.
+#     - A clean worktree reaching no commit found elsewhere is removed and
+#       logged "worktree-pruned" with backup "none" (nothing restorable is
+#       saved for a checkout git can recreate).
+#     - A worktree reaching commits no other branch, tag or remote-tracking
+#       ref holds (checked against every ref, never a bare "main") is kept
+#       and bug-filed ("worktree-carries-commits-bug-filed").
+#     - Any other worktree that must be kept — uncommitted or untracked
+#       changes, locked, unreadable — is kept and logged "worktree-kept".
+#   A wake cannot take the lock between the cleanup and the requeue, so it
+#   never dispatches the task onto a worktree being removed. The ceiling
+#   (escalation) path leaves every worktree in place: it is the state the
+#   human is asked to investigate.
 #
 # This script is both:
 #   - Sourceable (for the OVERWATCH driver or sweep runner): source this file and call
@@ -173,58 +205,78 @@ _ctae_extract_field() {
 
 # ---------------------------------------------------------------------------
 # _ctae_log_tail <task_id> <tasks_root>
-# Emit the last 50 lines of the most recently modified .log file under
-# $tasks_root/$task_id/logs/, or empty output if no logs exist.
+# Emit the last 50 lines of the provider output belonging to the task's most
+# recent dispatch: the byte span of the wake batch log that the task's
+# logs/dispatch.jsonl ledger records (dispatch_record_latest). An open span
+# (no "returned" record yet) runs to the end of the batch log.
+#
+# Returns:
+#   0 — span extracted (output may still be empty if the span is empty)
+#   2 — no dispatch ledger / no usable record for this task
+#   3 — the recorded batch log no longer exists (rotated or deleted)
+# On 2 and 3 nothing is emitted; the caller narrates the skip from the exit
+# code. Neither is an error condition.
 # ---------------------------------------------------------------------------
 _ctae_log_tail() {
     local task_id="$1"
     local tasks_root="$2"
 
-    local logs_dir="${tasks_root}/${task_id}/logs"
-    if [[ ! -d "${logs_dir}" ]]; then
-        return 0
+    local task_dir="${tasks_root}/${task_id}"
+    local record
+    if ! record="$(dispatch_record_latest "${task_dir}")" || [[ -z "${record}" ]]; then
+        return 2
     fi
 
-    # Find the most recently modified .log file under the task's logs dir.
-    local newest_log
-    newest_log="$(find "${logs_dir}" -maxdepth 2 -name '*.log' -type f \
-        -printf '%T@ %p\n' 2>/dev/null \
-        | sort -rn | head -n1 | awk '{print $2}')"
-
-    if [[ -z "${newest_log}" || ! -f "${newest_log}" ]]; then
-        return 0
+    local batch_log offset_start offset_end
+    IFS=$'\t' read -r batch_log offset_start offset_end <<< "${record}"
+    if [[ -z "${batch_log}" || ! -f "${batch_log}" ]]; then
+        return 3
     fi
+    [[ "${offset_start}" =~ ^[0-9]+$ ]] || offset_start=0
 
-    tail -n 50 "${newest_log}"
+    # tail -c +N is 1-based: byte offset N-1 is the first byte emitted.
+    if [[ "${offset_end}" =~ ^[0-9]+$ ]] && (( offset_end > offset_start )); then
+        tail -c +"$(( offset_start + 1 ))" "${batch_log}" 2>/dev/null \
+            | head -c "$(( offset_end - offset_start ))" \
+            | tail -n 50
+    else
+        tail -c +"$(( offset_start + 1 ))" "${batch_log}" 2>/dev/null | tail -n 50
+    fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------
 # _ctae_matches_transient_signature <text>
 # Returns 0 (true) if the text contains any known transient API error signature.
+#
+# Each signature is tested with a here-string, never by piping echo into
+# grep -q: grep -q exits on its first match, a still-writing echo then dies of
+# SIGPIPE, and under the callers' `set -o pipefail` that turns a match into a
+# miss.
 # ---------------------------------------------------------------------------
 _ctae_matches_transient_signature() {
     local text="$1"
 
     # Check each transient signature
-    if echo "${text}" | grep -qE 'API Error: 5[0-9][0-9]'; then
+    if grep -qE 'API Error: 5[0-9][0-9]' <<< "${text}"; then
         return 0
     fi
-    if echo "${text}" | grep -q 'Overloaded'; then
+    if grep -q 'Overloaded' <<< "${text}"; then
         return 0
     fi
-    if echo "${text}" | grep -q 'overloaded_error'; then
+    if grep -q 'overloaded_error' <<< "${text}"; then
         return 0
     fi
-    if echo "${text}" | grep -qi 'rate limit'; then
+    if grep -qi 'rate limit' <<< "${text}"; then
         return 0
     fi
-    if echo "${text}" | grep -qE '\b429\b'; then
+    if grep -qE '\b429\b' <<< "${text}"; then
         return 0
     fi
-    if echo "${text}" | grep -qE '\b503\b'; then
+    if grep -qE '\b503\b' <<< "${text}"; then
         return 0
     fi
-    if echo "${text}" | grep -qE '\b529\b'; then
+    if grep -qE '\b529\b' <<< "${text}"; then
         return 0
     fi
     return 1
@@ -289,7 +341,8 @@ ${task_id}
 ${reason}
 
 ## Description
-OVERWATCH detected a transient API error pattern in the task log but the
+OVERWATCH detected a transient API error pattern in the provider batch log
+recorded for the task's most recent dispatch, but the
 auto-requeue ceiling (${_cap}, from the durable ## Transient Retry record)
 has been reached, or the task has a worktree carrying commits
 that must not be auto-pruned. Manual intervention required.
@@ -297,6 +350,57 @@ EOF
 
     echo "${bug_file}"
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# _ctae_render_requeue <status_file> <new_count>
+# Rewrite <status_file> for a transient requeue through
+# pgai_agent_kanban.task_status (read --raw for ## Labels, then one render
+# committed by pgai_atomic_write), in this order:
+#   ## State -> BACKLOG
+#   ## Labels: "TRANSIENT" appended to the existing labels (one space
+#     between) unless the word is already there; an empty body becomes
+#     "TRANSIENT"; an absent section is appended at the end of the file
+#   ## Blockers -> none, ## Needs Human -> no
+#   ## Summary -> the requeue narration naming <new_count>
+#   every run of blank lines cut to one
+# A section other than Labels that the file lacks is left alone. Returns
+# non-zero, leaving the file untouched, when it cannot be read or written.
+# ---------------------------------------------------------------------------
+_ctae_render_requeue() {
+    local status_file="$1"
+    local new_count="$2"
+
+    overwatch_load_module_runner || return 1
+
+    local labels="" labels_rc=0
+    labels="$(pp_run_ops pgai_agent_kanban.task_status read "${status_file}" \
+        --section=Labels --raw)" || labels_rc=$?
+
+    local -a label_args=()
+    case "${labels_rc}" in
+        0)
+            if [[ "${labels}" != *TRANSIENT* ]]; then
+                label_args=(--section=Labels --body="${labels:+${labels} }TRANSIENT")
+            fi
+            ;;
+        3)
+            label_args=(--section=Labels --body=TRANSIENT --append-missing=Labels)
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    pgai_atomic_write "${status_file}" pp_run_ops pgai_agent_kanban.task_status render \
+        "${status_file}" \
+        --section=State --body=BACKLOG \
+        "${label_args[@]}" \
+        --section=Blockers --body=none \
+        --section="Needs Human" --body=no \
+        --section=Summary \
+        --body="Auto-requeued by OVERWATCH check-transient-api-error: transient API error detected in provider batch log. Requeue #${new_count}." \
+        --skip-missing --collapse-blank-lines
 }
 
 # ---------------------------------------------------------------------------
@@ -333,78 +437,18 @@ _ctae_do_requeue() {
     # Update the ONE durable retry record first (transient_retry_write is the
     # shared writer defined in overwatch_protocol.sh; see the module header).
     if ! transient_retry_write "${status_file}" "transient_api_error" "${new_count}" \
-        "${retry_limit}" "overwatch" "transient signature matched in task log tail"; then
+        "${retry_limit}" "overwatch" "transient signature matched in provider batch log"; then
         echo "check-transient-api-error: transient_retry_write failed for ${status_file}" >&2
         return 1
     fi
 
-    # Use Python to atomically update the remaining status.md fields.
+    # Update the remaining status.md fields in one atomic write: State ->
+    # BACKLOG, TRANSIENT added to ## Labels (the section appended when
+    # absent), Blockers -> none, Needs Human -> no, a requeue Summary, then
+    # blank-line runs cut to one. A section the file lacks (other than
+    # Labels) is left alone.
     local edit_exit=0
-    python3 - "${status_file}" "${new_count}" <<'PY' || edit_exit=$?
-import pathlib, re, sys
-
-status_path = pathlib.Path(sys.argv[1])
-new_count   = sys.argv[2]
-
-try:
-    text = status_path.read_text(encoding="utf-8")
-except OSError as e:
-    raise SystemExit(f"Cannot read status file: {e}")
-
-def replace_section(text, heading, new_body):
-    """Replace the body of a ## heading section; return (new_text, replaced_bool)."""
-    pattern = rf'(^## {re.escape(heading)}\s*\n)(.*?)(\n+##|\Z)'
-    new_text, n = re.subn(
-        pattern,
-        lambda m: m.group(1) + new_body.strip() + "\n" + (m.group(3) if m.group(3) else ''),
-        text,
-        flags=re.S | re.M,
-    )
-    return new_text, n > 0
-
-def append_section(text, heading, body):
-    """Append a new ## heading section at the end of the file."""
-    if not text.endswith('\n'):
-        text += '\n'
-    text += f"\n## {heading}\n{body.strip()}\n"
-    return text
-
-# 1. Reset State to BACKLOG
-text, _ = replace_section(text, "State", "BACKLOG")
-
-# 2. Update or insert Labels with TRANSIENT
-labels_raw, labels_found = "", False
-label_match = re.search(r'^## Labels\s*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M)
-if label_match:
-    labels_raw = label_match.group(1).strip()
-    labels_found = True
-
-if labels_found:
-    if "TRANSIENT" not in labels_raw:
-        new_labels = (labels_raw + " TRANSIENT").strip() if labels_raw else "TRANSIENT"
-        text, _ = replace_section(text, "Labels", new_labels)
-else:
-    text = append_section(text, "Labels", "TRANSIENT")
-
-# 3. Clear blockers / needs human
-text, _ = replace_section(text, "Blockers", "none")
-text, _ = replace_section(text, "Needs Human", "no")
-
-# Update Summary
-new_summary = (
-    f"Auto-requeued by OVERWATCH check-transient-api-error: "
-    f"transient API error detected in task log. Requeue #{new_count}."
-)
-text, _ = replace_section(text, "Summary", new_summary)
-
-# Normalize: collapse 3+ blank lines to 2
-text = re.sub(r'\n\n\n+', '\n\n', text)
-
-try:
-    status_path.write_text(text, encoding="utf-8")
-except OSError as e:
-    raise SystemExit(f"Failed to write status file: {e}")
-PY
+    _ctae_render_requeue "${status_file}" "${new_count}" || edit_exit=$?
 
     if (( edit_exit != 0 )); then
         echo "check-transient-api-error: status update failed for ${task_id}" >&2
@@ -417,7 +461,7 @@ PY
         "${task_id}" \
         "transient-auto-requeued" \
         "${backup_path}" \
-        "Transient API error in log tail; reset to BACKLOG (requeue #${new_count} of ${retry_limit})" \
+        "Transient API error in provider batch log; reset to BACKLOG (requeue #${new_count} of ${retry_limit})" \
     || true
 
     return 0
@@ -450,53 +494,29 @@ _ctae_do_escalate() {
     }
     backup_path="${bpath}"
 
+    # Needs Human -> yes and the ceiling narrated in ## Blocked Reason (the
+    # section appended when absent), then blank-line runs cut to one, in
+    # one atomic write.
     local edit_exit=0
-    python3 - "${status_file}" "${current_count}" "${cap}" <<'PY' || edit_exit=$?
-import pathlib, re, sys
-
-status_path = pathlib.Path(sys.argv[1])
-current_count, cap = sys.argv[2], sys.argv[3]
-
-try:
-    text = status_path.read_text(encoding="utf-8")
-except OSError as e:
-    raise SystemExit(f"Cannot read status file: {e}")
-
-def replace_section(text, heading, new_body):
-    pattern = rf'(^## {re.escape(heading)}\s*\n)(.*?)(\n+##|\Z)'
-    new_text, n = re.subn(
-        pattern,
-        lambda m: m.group(1) + new_body.strip() + "\n" + (m.group(3) if m.group(3) else ''),
-        text,
-        flags=re.S | re.M,
-    )
-    return new_text, n > 0
-
-text, _ = replace_section(text, "Needs Human", "yes")
-text, replaced = replace_section(
-    text, "Blocked Reason",
-    f"Transient API error retry ceiling reached ({current_count}/{cap}, see ## Transient Retry record); human investigation required.",
-)
-if not replaced:
-    if not text.endswith("\n"):
-        text += "\n"
-    text += (
-        "\n## Blocked Reason\n"
-        f"Transient API error retry ceiling reached ({current_count}/{cap}, see ## Transient Retry record); human investigation required.\n"
-    )
-
-text = re.sub(r'\n\n\n+', '\n\n', text)
-
-try:
-    status_path.write_text(text, encoding="utf-8")
-except OSError as e:
-    raise SystemExit(f"Failed to write status file: {e}")
-PY
+    overwatch_load_module_runner || return 1
+    pgai_atomic_write "${status_file}" pp_run_ops pgai_agent_kanban.task_status render \
+        "${status_file}" \
+        --section="Needs Human" --body="yes" \
+        --section="Blocked Reason" \
+        --body="Transient API error retry ceiling reached (${current_count}/${cap}, see ## Transient Retry record); human investigation required." \
+        --append-missing="Blocked Reason" --skip-missing --collapse-blank-lines \
+        || edit_exit=$?
 
     if (( edit_exit != 0 )); then
         echo "check-transient-api-error: needs-human escalation failed for ${task_id}" >&2
         return 1
     fi
+
+    # The escalated block's ## Block Record (block_record.sh, loaded by
+    # overwatch_load_module_runner above); a refused write is only narrated.
+    block_record_write "${status_file}" transient_api_error "$(block_record_owner_role "${status_file}")" \
+        "$(block_record_evidence --task-dir "$(dirname "${status_file}")")" \
+        || echo "check-transient-api-error: ${task_id}: Block Record not written" >&2
 
     overwatch_log_action \
         "check-transient-api-error" \
@@ -529,147 +549,101 @@ _ctae_find_task_worktrees() {
 }
 
 # ---------------------------------------------------------------------------
-# _ctae_worktree_has_commits <worktree_path>
-# Returns 0 (true) if the worktree has local commits not reachable from
-# any named remote or local tracking branch.
-# Returns 1 (false) if the worktree is clean / no extra commits.
-# Returns 1 also if the worktree path is not a valid git worktree
-# (safely treats missing as no-commits so prune is allowed).
+# _ctae_clear_task_worktrees <task_id> <dev_tree> <bugs_dir> <dry_run>
+# The requeue path's worktree cleanup (see the module header). Live runs
+# happen inside the locked fix, before the status edit; a dry run narrates
+# what a live run would do and changes nothing.
+# Returns 0 when every worktree was removed or deliberately kept, 1 when a
+# removal failed partway (narrated on stderr).
 # ---------------------------------------------------------------------------
-_ctae_worktree_has_commits() {
-    local wt_path="$1"
-
-    if [[ ! -d "${wt_path}" ]]; then
-        # Worktree path gone — treat as no commits (prune safe)
-        return 1
-    fi
-
-    # Check if HEAD is detached or on a branch
-    local head_ref
-    head_ref="$(git -C "${wt_path}" symbolic-ref HEAD 2>/dev/null || echo "detached")"
-
-    if [[ "${head_ref}" == "detached" ]]; then
-        # Detached HEAD — check if HEAD commit is reachable from any branch
-        local reachable
-        reachable="$(git -C "${wt_path}" branch --contains HEAD 2>/dev/null | grep -v '^*' | head -n1)"
-        if [[ -z "${reachable}" ]]; then
-            # HEAD commit not in any branch — has unique commits
-            return 0
-        fi
-        return 1
-    fi
-
-    # On a branch — check if there are commits ahead of any remote tracking branch
-    local ahead_count
-    ahead_count="$(git -C "${wt_path}" rev-list --count "@{upstream}..HEAD" 2>/dev/null || echo "0")"
-    if [[ "${ahead_count}" =~ ^[0-9]+$ ]] && [[ "${ahead_count}" -gt 0 ]]; then
-        return 0
-    fi
-
-    # No upstream — count commits not reachable from main
-    local extra_commits
-    extra_commits="$(git -C "${wt_path}" log --oneline main..HEAD 2>/dev/null \
-        | wc -l | tr -d '[:space:]')"
-    if [[ "${extra_commits}" =~ ^[0-9]+$ ]] && [[ "${extra_commits}" -gt 0 ]]; then
-        return 0
-    fi
-
-    return 1
-}
-
-# ---------------------------------------------------------------------------
-# _ctae_handle_worktree_residue <task_id> <dev_tree> <dry_run> <bugs_dir>
-# Inspect any per-task worktrees in the dev tree and either:
-#   - Prune them (worktree-prune class, no commits)
-#   - Bug-file them (carries commits, must not auto-fix)
-# ---------------------------------------------------------------------------
-_ctae_handle_worktree_residue() {
-    local task_id="$1"
-    local dev_tree="$2"
-    local dry_run="$3"
-    local bugs_dir="$4"
+_ctae_clear_task_worktrees() {
+    local task_id="$1" dev_tree="$2" bugs_dir="$3" dry_run="$4"
 
     if [[ -z "${dev_tree}" ]]; then
-        # Dev tree not configured — skip residue cleanup silently
+        # Dev tree not configured — nothing to clean up
         return 0
     fi
 
     local wt_paths
     wt_paths="$(_ctae_find_task_worktrees "${dev_tree}" "${task_id}")"
-
     if [[ -z "${wt_paths}" ]]; then
         echo "check-transient-api-error: ${task_id}: no per-task worktrees found; residue check clean" >&2
         return 0
     fi
+    overwatch_load_module_runner || return 1
 
-    local wt_path
+    local wt_path verdict why out rc failures=0
     while IFS= read -r wt_path; do
         [[ -z "${wt_path}" ]] && continue
-
         echo "check-transient-api-error: ${task_id}: found worktree ${wt_path}" >&2
+        verdict="$(pp_run_ops pgai_agent_kanban.overwatch.worktree_residue assess-finished \
+            --repo "${dev_tree}" --path "${wt_path}" 2>/dev/null)" || verdict="keep"$'\t'"the worktree could not be assessed"
+        why="${verdict#*$'\t'}"
 
-        if _ctae_worktree_has_commits "${wt_path}"; then
-            # Carries commits → bug-file, never auto-prune
-            echo "check-transient-api-error: ${task_id}: worktree ${wt_path} carries commits; bug-filing" >&2
-            if (( dry_run == 0 )); then
-                local bug_path
-                bug_path="$(_ctae_bug_file "${task_id}" \
-                    "Worktree ${wt_path} carries commits; cannot auto-prune" \
-                    "${bugs_dir}")" || true
-
-                overwatch_log_action \
-                    "check-transient-api-error" \
-                    "${wt_path}" \
-                    "worktree-carries-commits-bug-filed" \
-                    "none" \
-                    "Worktree for ${task_id} at ${wt_path} has local commits; bug filed at ${bug_path:-unknown}" \
-                || true
-            else
-                echo "check-transient-api-error: [dry-run] would bug-file worktree ${wt_path} (carries commits)" >&2
-                overwatch_log_action \
-                    "check-transient-api-error" \
-                    "${wt_path}" \
-                    "dry-run-worktree-commits-would-bug-file" \
-                    "none" \
-                    "Worktree for ${task_id} at ${wt_path} has local commits; dry-run, no action" \
-                2>/dev/null || true
+        if [[ "${verdict}" == removable* ]]; then
+            if (( dry_run == 1 )); then
+                echo "check-transient-api-error: [dry-run] would remove worktree ${wt_path}" >&2
+                overwatch_log_action "check-transient-api-error" "${wt_path}" "dry-run-worktree-would-prune" "none" \
+                    "Clean worktree for ${task_id} at ${wt_path}; dry-run, no action" 2>/dev/null || true
+                continue
             fi
+            rc=0
+            out="$(pp_run_ops pgai_agent_kanban.overwatch.worktree_residue remove-finished \
+                --repo "${dev_tree}" --path "${wt_path}" --project "${OVERWATCH_PROJECT:-}")" || rc=$?
+            if (( rc == 0 )); then
+                echo "check-transient-api-error: ${task_id}: removed worktree ${wt_path}" >&2
+                overwatch_log_action "check-transient-api-error" "${wt_path}" "worktree-pruned" "none" \
+                    "Worktree for requeued task ${task_id} removed under the repo lock before the requeue, without --force; no branch or commit deleted; was ${out#*$'\t'}" || true
+                continue
+            elif (( rc == 3 )); then
+                # The re-check under the lock found a reason to keep it (it
+                # refused dual-channel on stderr itself).
+                why="the re-check under the repo lock refused the removal"
+            else
+                echo "check-transient-api-error: ${task_id}: worktree removal of ${wt_path} failed (exit ${rc})" >&2
+                failures=$(( failures + 1 ))
+                continue
+            fi
+        fi
+
+        if [[ "${why}" == *"found nowhere else"* ]]; then
+            echo "check-transient-api-error: ${task_id}: worktree ${wt_path} carries commits; kept and bug-filed" >&2
+            if (( dry_run == 1 )); then
+                overwatch_log_action "check-transient-api-error" "${wt_path}" "dry-run-worktree-commits-would-bug-file" "none" \
+                    "Worktree for ${task_id} at ${wt_path} has local commits; dry-run, no action" 2>/dev/null || true
+                continue
+            fi
+            local bug_path
+            bug_path="$(_ctae_bug_file "${task_id}" \
+                "Worktree ${wt_path} carries commits; cannot auto-prune" \
+                "${bugs_dir}")" || true
+            overwatch_log_action "check-transient-api-error" "${wt_path}" "worktree-carries-commits-bug-filed" "none" \
+                "Worktree for ${task_id} at ${wt_path} kept: ${why}; bug filed at ${bug_path:-unknown}" || true
         else
-            # No extra commits → worktree-prune class
-            echo "check-transient-api-error: ${task_id}: worktree ${wt_path} has no extra commits; pruning" >&2
-            if (( dry_run == 0 )); then
-                # Backup a marker before pruning (satisfies "matching backup" requirement)
-                local backup_marker
-                backup_marker="$(overwatch_backup_file "${wt_path}/.git" 2>/dev/null \
-                    || echo "none")"
-
-                # Remove the worktree if its directory exists; then prune
-                if [[ -d "${wt_path}" ]]; then
-                    git -C "${dev_tree}" worktree remove --force "${wt_path}" 2>/dev/null || true
-                fi
-                git -C "${dev_tree}" worktree prune 2>/dev/null || true
-
-                overwatch_log_action \
-                    "check-transient-api-error" \
-                    "${wt_path}" \
-                    "worktree-pruned" \
-                    "${backup_marker}" \
-                    "Orphaned worktree for ${task_id} had no extra commits; pruned" \
-                || true
-            else
-                echo "check-transient-api-error: [dry-run] would prune worktree ${wt_path}" >&2
-                overwatch_log_action \
-                    "check-transient-api-error" \
-                    "${wt_path}" \
-                    "dry-run-worktree-would-prune" \
-                    "none" \
-                    "Orphaned worktree for ${task_id} at ${wt_path}; dry-run, no action" \
-                2>/dev/null || true
-            fi
+            echo "check-transient-api-error: ${task_id}: worktree ${wt_path} kept: ${why}" >&2
+            overwatch_log_action "check-transient-api-error" "${wt_path}" \
+                "$( (( dry_run == 1 )) && echo dry-run-worktree-would-keep || echo worktree-kept )" "none" \
+                "Worktree for ${task_id} at ${wt_path} kept: ${why}" 2>/dev/null || true
         fi
     done <<< "${wt_paths}"
 
-    return 0
+    (( failures == 0 ))
+}
+
+# ---------------------------------------------------------------------------
+# _ctae_do_requeue_clearing_worktrees
+# The requeue fix run by overwatch_halt_first_fix: the task's worktrees are
+# cleared first (lock held, task still BLOCKED), then _ctae_do_requeue
+# flips it to BACKLOG. Reads _CTAE_FIX_DEV_TREE and _CTAE_FIX_BUGS_DIR besides
+# _ctae_do_requeue's own inputs. A failed removal leaves the task BLOCKED
+# for a later sweep.
+# ---------------------------------------------------------------------------
+_ctae_do_requeue_clearing_worktrees() {
+    _ctae_clear_task_worktrees "${_CTAE_TASK_ID}" "${_CTAE_FIX_DEV_TREE:-}" "${_CTAE_FIX_BUGS_DIR:-}" 0 || {
+        echo "check-transient-api-error: ${_CTAE_TASK_ID}: worktree cleanup failed; task left BLOCKED for a later sweep" >&2
+        return 1
+    }
+    _ctae_do_requeue
 }
 
 # ---------------------------------------------------------------------------
@@ -812,13 +786,23 @@ overwatch_check_transient_api_error() {
             continue
         fi
 
-        # Get the log tail for this task
-        local log_tail
-        log_tail="$(_ctae_log_tail "${task_id}" "${tasks_root}")"
+        # Resolve the provider output span for this task's most recent
+        # dispatch (see _ctae_log_tail). No ledger or a vanished batch log is
+        # a narrated skip, not a fault: the task is left exactly as found and
+        # the sweep continues with the next one.
+        local log_tail log_tail_exit=0
+        log_tail="$(_ctae_log_tail "${task_id}" "${tasks_root}")" || log_tail_exit=$?
+        if (( log_tail_exit == 2 )); then
+            echo "check-transient-api-error: ${task_id}: no dispatch record at ${task_dir}/logs/dispatch.jsonl (task never dispatched by a wake); skipping" >&2
+            continue
+        elif (( log_tail_exit != 0 )); then
+            echo "check-transient-api-error: ${task_id}: batch log named in ${task_dir}/logs/dispatch.jsonl no longer exists; skipping" >&2
+            continue
+        fi
 
         # Check for transient signature
         if ! _ctae_matches_transient_signature "${log_tail}"; then
-            echo "check-transient-api-error: ${task_id}: no transient signature in log tail; skipping" >&2
+            echo "check-transient-api-error: ${task_id}: no transient signature in batch log span; skipping" >&2
             continue
         fi
 
@@ -848,8 +832,10 @@ overwatch_check_transient_api_error() {
                     "Transient count=${current_count}; dry-run, would requeue (#${new_count} of ${transient_cap})" \
                 2>/dev/null || true
             fi
-            # Still run residue check in dry-run mode
-            _ctae_handle_worktree_residue "${task_id}" "${dev_tree}" "${dry_run}" "${bugs_dir}"
+            # A requeue would clear the task's worktrees; narrate what it would do.
+            if (( current_count < transient_cap )); then
+                _ctae_clear_task_worktrees "${task_id}" "${dev_tree}" "${bugs_dir}" 1 || true
+            fi
             continue
         fi
 
@@ -896,6 +882,9 @@ overwatch_check_transient_api_error() {
             elif (( escalate_exit == 4 )); then
                 echo "check-transient-api-error: per-repo flock contended; aborting" >&2
                 break
+            elif (( escalate_exit == 5 )); then
+                echo "check-transient-api-error: fix deferred: HALT present; aborting" >&2
+                break
             elif (( escalate_exit != 0 )); then
                 echo "check-transient-api-error: ${task_id}: needs-human escalation failed (exit ${escalate_exit}); bug remains filed" >&2
                 repair_failures=$(( repair_failures + 1 ))
@@ -903,21 +892,45 @@ overwatch_check_transient_api_error() {
 
             handled=$(( handled + 1 ))
         else
-            # Requeue path: invoke via overwatch_halt_first_fix
+            # Backoff: the requeue waits out the window that grows with the
+            # retry count (transient_backoff_due, overwatch_protocol.sh). A
+            # task inside it is left exactly as found, residue included,
+            # and is looked at again on a later sweep.
+            local not_before=""
+            if declare -F transient_backoff_due >/dev/null 2>&1 \
+                && ! not_before="$(transient_backoff_due "${task_status}")"; then
+                echo "check-transient-api-error: ${task_id}: backoff: requeue #${new_count} of ${transient_cap} not before ${not_before}; skipping" >&2
+                overwatch_log_action \
+                    "check-transient-api-error" \
+                    "${task_id}" \
+                    "transient-requeue-backoff" \
+                    "none" \
+                    "Transient count=${current_count}; requeue #${new_count} waits for its backoff window (not before ${not_before})" \
+                || true
+                continue
+            fi
+
+            # Requeue path: invoke via overwatch_halt_first_fix; the task's
+            # worktrees are cleared inside the same locked fix, first.
             export _CTAE_TASK_ID="${task_id}"
             export _CTAE_STATUS_FILE="${task_status}"
             export _CTAE_NEW_COUNT="${new_count}"
+            export _CTAE_FIX_DEV_TREE="${dev_tree}"
+            export _CTAE_FIX_BUGS_DIR="${bugs_dir}"
 
             local fix_exit=0
-            overwatch_halt_first_fix _ctae_do_requeue || fix_exit=$?
+            overwatch_halt_first_fix _ctae_do_requeue_clearing_worktrees || fix_exit=$?
 
-            unset _CTAE_TASK_ID _CTAE_STATUS_FILE _CTAE_NEW_COUNT
+            unset _CTAE_TASK_ID _CTAE_STATUS_FILE _CTAE_NEW_COUNT _CTAE_FIX_DEV_TREE _CTAE_FIX_BUGS_DIR
 
             if (( fix_exit == 3 )); then
                 echo "check-transient-api-error: HALT_OVERWATCH guard tripped; aborting" >&2
                 break
             elif (( fix_exit == 4 )); then
                 echo "check-transient-api-error: per-repo flock contended; aborting" >&2
+                break
+            elif (( fix_exit == 5 )); then
+                echo "check-transient-api-error: fix deferred: HALT present; aborting" >&2
                 break
             elif (( fix_exit != 0 )); then
                 echo "check-transient-api-error: requeue failed for ${task_id} (exit ${fix_exit}); continuing" >&2
@@ -928,9 +941,6 @@ overwatch_check_transient_api_error() {
             echo "check-transient-api-error: ${task_id}: requeued to BACKLOG (requeue #${new_count})" >&2
             handled=$(( handled + 1 ))
         fi
-
-        # Companion residue cleanup (always runs after requeue or bug-file)
-        _ctae_handle_worktree_residue "${task_id}" "${dev_tree}" "${dry_run}" "${bugs_dir}"
 
     done <<< "${blocked_ids}"
 

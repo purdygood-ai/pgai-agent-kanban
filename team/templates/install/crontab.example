@@ -2,18 +2,35 @@
 #
 # This file documents the every-2-minutes sub-minute stagger scheduling pattern.
 #
-# IMPORTANT: Replace __KANBAN_ROOT__ with the absolute path to your kanban
-# root before installing.  install-crontab.sh performs this substitution
-# automatically using the installed kanban root path.
+# IMPORTANT: Replace both placeholders before installing:
+#   __KANBAN_ROOT__  — the absolute path to your kanban root
+#   __CLAUDE_PATH__  — the directory holding the claude CLI
+# install-crontab.sh performs both substitutions automatically (and keeps
+# your own cron jobs); installing this file unrendered makes every line
+# point at a path that does not exist.
 #
-# To install/update your crontab using this pattern:
-#   team/scripts/install-crontab.sh
+# To install/update your crontab using a tier of this pattern:
+#   scripts/install-crontab.sh --wake-tier=medium --yes
 #
-# To install manually:
-#   KANBAN=$(grep PGAI_AGENT_KANBAN_ROOT_PATH ~/pgai_agent_kanban/kanban.cfg | cut -d= -f2-)
-#   crontab -l > ~/.crontab.backup && crontab - < <(crontab -l; ...)
+# To render this file by hand instead (it replaces the whole crontab, so
+# back the old one up first):
+#   crontab -l > ~/.crontab.backup
+#   sed -e "s|__KANBAN_ROOT__|$HOME/pgai_agent_kanban|g" \
+#       -e "s|__CLAUDE_PATH__|$(dirname "$(command -v claude)")|g" \
+#     team/templates/install/crontab.example | crontab -
 
 # --- Environment ---
+# PGAI_AGENT_KANBAN_ROOT_PATH — the kanban root every job below acts on,
+#   exported to each job. No default: install-crontab.sh writes the
+#   installed root on the line below. Because it is exported,
+#   entry points other than the wake (overwatch-sweep.sh, cleanup.sh) do not
+#   source shell-env or claude-env: anything they need must be on the PATH
+#   line below.
+# PATH — cron's own PATH is minimal. This one must reach the claude CLI, a
+#   python3 of version 3.12+, and the codex CLI when that provider is
+#   active. Default: the directory holding `claude` when install-crontab.sh
+#   runs (/usr/local/bin when claude is not on its PATH), followed by
+#   /usr/local/bin:/usr/bin:/bin.
 PGAI_AGENT_KANBAN_ROOT_PATH=__KANBAN_ROOT__
 PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
 
@@ -53,11 +70,19 @@ PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
 1-59/2 * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=21 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
 
 # --- Cleanup Script (weekly, Sundays at 4:00 AM) ---
+# With no --project, cleanup.sh runs once per project registered in
+# projects.cfg (one result line per project in the log). Add
+# --project <name> to clean a single project instead.
 0 4 * * 0 __KANBAN_ROOT__/scripts/cleanup/cleanup.sh >> __KANBAN_ROOT__/logs/cron-cleanup.log 2>&1
 
 # --- Trivial-log purge (daily at 04:15, opt-in) ---
-# Uncomment to enable daily purge of small stale batch logs:
+# Uncomment to enable daily purge of small stale batch logs. Like the
+# weekly line above it needs no --project; the purge is framework-wide.
 # 15 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup.sh --trivial-only >> __KANBAN_ROOT__/logs/cron-cleanup-trivial.log 2>&1
+
+# --- Weekly coverage run (Sundays at 05:00, opt-in) ---
+# The operator's weekly coverage run of the unit suite (PGAI_TESTING_COVERAGE=1 lets --coverage collect while kanban.cfg [testing] coverage stays false); to enable, replace /path/to/dev-tree with your dev tree checkout and uncomment:
+# 0 5 * * 0 PGAI_TESTING_COVERAGE=1 /path/to/dev-tree/team/scripts/run-unit-tests.sh --coverage >> __KANBAN_ROOT__/logs/cron-coverage.log 2>&1
 
 # --- OVERWATCH Tier-1 sweep (hourly at :30) ---
 # Fires once per hour at minute 30.  Operator-tunable: adjust the minute (30)

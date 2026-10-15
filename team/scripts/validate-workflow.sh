@@ -46,12 +46,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 # ---------------------------------------------------------------------------
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _LIB_DIR="${_SCRIPT_DIR}/lib"
+# shellcheck source=lib/script_common.sh
+source "${_LIB_DIR}/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Usage / help
 # ---------------------------------------------------------------------------
-_usage() {
-    cat <<'EOF'
+# Usage text as data (per lib/script_common.sh's print_usage_and_exit contract).
+_USAGE_TEXT="$(cat <<'EOF'
 Usage: validate-workflow.sh --type <name> [--workflows-dir <dir>]
        validate-workflow.sh --help
 
@@ -114,7 +116,7 @@ Examples:
   # Validate a dev-tree plugin (workflows root auto-resolved):
   validate-workflow.sh --type testing-only
 EOF
-}
+)"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -125,8 +127,7 @@ _workflows_dir=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --help|-h)
-            _usage
-            exit 0
+            print_usage_and_exit 0 "$_USAGE_TEXT"
             ;;
         --type)
             if [[ $# -lt 2 || -z "$2" ]]; then

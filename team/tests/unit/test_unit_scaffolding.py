@@ -13,7 +13,7 @@ These tests are intentionally minimal.  Their purpose is to:
      is still being authored.
 
 Each test is named for the behavior it asserts, not for any scaffolding phase
-or internal ID (SOP.md Anti-pattern 6).
+or internal ID (roles/TESTER.md Anti-pattern 6).
 """
 
 from __future__ import annotations

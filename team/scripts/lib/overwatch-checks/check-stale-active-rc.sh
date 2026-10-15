@@ -130,25 +130,18 @@ _csarc_resolve_env() {
     return 0
 }
 
+# release_state_value reads Active RC through the one release-state reader;
+# pp_run_ops reaches the release-state writer.
+# shellcheck source=../cm/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../cm/common.sh"
+
 # ---------------------------------------------------------------------------
 # _csarc_read_active_rc <release_state_file>
-# Echo the current Active RC value from release-state.md, or "none" if absent.
+# Echo the current Active RC value from release-state.md as written, or
+# "none" when the file, the heading or a value is missing.
 # ---------------------------------------------------------------------------
 _csarc_read_active_rc() {
-    local rs_file="$1"
-    if [[ ! -f "${rs_file}" ]]; then
-        echo "none"
-        return 0
-    fi
-    # Extract the line immediately following "## Active RC"
-    local val
-    val="$(awk '/^## Active RC/{found=1; next} found && /^[[:space:]]*$/{next} found{print; exit}' "${rs_file}" \
-        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-    if [[ -z "${val}" ]]; then
-        echo "none"
-    else
-        echo "${val}"
-    fi
+    release_state_value "$1" "Active RC"
 }
 
 # ---------------------------------------------------------------------------
@@ -190,7 +183,8 @@ _csarc_rc_branch_exists() {
 #
 # Actions:
 #   1. Backup release-state.md via overwatch_backup_file
-#   2. Rewrite the file: set Active RC to none, clear RC Opened At / RC Opened By Task
+#   2. Reset Active RC, RC Opened At and RC Opened By Task to none through
+#      the release-state writer (cm/write_rc_state.py release-state)
 #   3. Log the action via overwatch_log_action
 # ---------------------------------------------------------------------------
 _csarc_do_reset() {
@@ -206,27 +200,13 @@ _csarc_do_reset() {
     }
     backup_path="${bpath}"
 
-    # Rewrite release-state.md: reset Active RC, clear RC Opened At / RC Opened By Task
-    # Strategy: use awk to replace the values while preserving all other lines.
-    local new_content
-    new_content="$(awk '
-        /^## Active RC$/ { in_active_rc=1; print; next }
-        /^## RC Opened At$/ { in_active_rc=0; in_opened_at=1; print; next }
-        /^## RC Opened By Task$/ { in_opened_at=0; in_opened_by=1; print; next }
-        /^##/ { in_active_rc=0; in_opened_at=0; in_opened_by=0 }
-        in_active_rc && /^[^#]/ { print "none"; in_active_rc=0; next }
-        in_opened_at && /^[^#]/ { print "none"; in_opened_at=0; next }
-        in_opened_by && /^[^#]/ { print "none"; in_opened_by=0; next }
-        { print }
-    ' "${rs_file}")"
-
-    if [[ -z "${new_content}" ]]; then
-        echo "check-stale-active-rc: awk produced empty output for ${rs_file}" >&2
-        return 1
-    fi
-
-    if ! printf '%s\n' "${new_content}" > "${rs_file}" 2>/dev/null; then
-        echo "check-stale-active-rc: failed to write reset release-state.md at ${rs_file}" >&2
+    # Reset Active RC, RC Opened At and RC Opened By Task to none through the
+    # release-state writer, which rewrites only those three fields, keeps every
+    # other line (Last Released, appended event blocks), and writes atomically.
+    local write_err
+    if ! write_err="$(pp_run_ops pgai_agent_kanban.cm.write_rc_state release-state "${rs_file}" \
+        --active-rc none --rc-opened-at none --rc-opened-by-task none 2>&1 >/dev/null)"; then
+        echo "check-stale-active-rc: failed to write reset release-state.md at ${rs_file}: ${write_err}" >&2
         return 1
     fi
 
@@ -349,6 +329,9 @@ overwatch_check_stale_active_rc() {
         return 0
     elif (( fix_exit == 4 )); then
         echo "check-stale-active-rc: per-repo flock contended; aborting reset" >&2
+        return 0
+    elif (( fix_exit == 5 )); then
+        echo "check-stale-active-rc: fix deferred: HALT present; aborting reset" >&2
         return 0
     elif (( fix_exit != 0 )); then
         echo "check-stale-active-rc: reset failed (exit ${fix_exit})" >&2

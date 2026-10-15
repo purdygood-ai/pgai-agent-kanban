@@ -1,0 +1,533 @@
+{
+  "cli": {
+    "agent metrics": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== Agent Metrics: demo (last 10 RCs) ===\n\nAgent         Avg Wall (min/task)  Avg Tokens (/RC)  Avg Tasks (/RC)   Total Tokens  Total Tasks\ncoder                        24.0       1,729,750.0              2.5      3,459,500            5\npm                             --           4,900.0              1.0          4,900            1\nwindow: 2 shipped RCs (1 cancelled excluded)\n\n"
+    },
+    "agent metrics all": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "\u001b[0;36m\u001b[1m=== Agent Metrics: demo (all shipped RCs) ===\u001b[0m\n\n\u001b[1mAgent         Avg Wall (min/task)  Avg Tokens (/RC)  Avg Tasks (/RC)   Total Tokens  Total Tasks\u001b[0m\ncoder                        24.0       1,729,750.0              2.5      3,459,500            5\npm                             --           4,900.0              1.0          4,900            1\n\u001b[2mall: 2 shipped RCs (1 cancelled excluded)\u001b[0m\n\n\u001b[0;36m\u001b[1m=== Agent Metrics: quiet (all shipped RCs) ===\u001b[0m\n\n  \u001b[2m(no metrics yet)\u001b[0m\n\n\u001b[0;36m\u001b[1m=== Agent Metrics: fresh (all shipped RCs) ===\u001b[0m\n\n  \u001b[2m(no metrics yet)\u001b[0m\n\n"
+    },
+    "cost conflict": {
+      "exit_code": 1,
+      "stderr": "ERROR: conflicting scope flags: --month and --day cannot be combined.\nRun with --help for usage.\n",
+      "stdout": ""
+    },
+    "cost csv month": {
+      "exit_code": 0,
+      "stderr": "WARNING: cannot read <ROOT>/projects/demo/usage/daily/2026-05-12.json: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)\n",
+      "stdout": "scope_type,scope_value,project,total_input_tokens,total_output_tokens,total_cache_create_tokens,total_cache_read_tokens,total_cost_usd,total_invocations,days_with_activity,rcs_shipped,agent,agent_input_tokens,agent_output_tokens,agent_cost_usd,agent_invocations,model,model_input_tokens,model_output_tokens,model_cost_usd,model_invocations\nmonth,2026-05,demo,134000,33500,10000,3400000,444.854,58,3,1,ALL,134000,33500,444.854,58,ALL,134000,33500,444.854,58\nmonth,2026-05,demo,134000,33500,10000,3400000,444.854,58,3,1,cm,9000,1000,0.9,3,,,,,\nmonth,2026-05,demo,134000,33500,10000,3400000,444.854,58,3,1,coder,100000,28000,413.504,45,,,,,\nmonth,2026-05,demo,134000,33500,10000,3400000,444.854,58,3,1,pm,10000,2000,1.25,2,,,,,\nmonth,2026-05,demo,134000,33500,10000,3400000,444.854,58,3,1,tester,15000,2500,29.2,8,,,,,\nmonth,2026-05,demo,134000,33500,10000,3400000,444.854,58,3,1,,,,,,claude-opus-4-8,115000,30500,442.704,53\nmonth,2026-05,demo,134000,33500,10000,3400000,444.854,58,3,1,,,,,,claude-sonnet-4-6,10000,2000,1.25,2\nmonth,2026-05,demo,134000,33500,10000,3400000,444.854,58,3,1,,,,,,gpt-5-codex,9000,1000,0.9,3\n"
+    },
+    "cost csv range": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "scope_type,scope_value,project,total_input_tokens,total_output_tokens,total_cache_create_tokens,total_cache_read_tokens,total_cost_usd,total_invocations,days_with_activity,rcs_shipped,agent,agent_input_tokens,agent_output_tokens,agent_cost_usd,agent_invocations,model,model_input_tokens,model_output_tokens,model_cost_usd,model_invocations\nrange,2026-05-02|2026-05-03|Range 2026-05-02 through 2026-05-03,demo,75000,20500,6000,2500000,431.204,41,1,1,ALL,75000,20500,431.204,41,ALL,75000,20500,431.204,41\nrange,2026-05-02|2026-05-03|Range 2026-05-02 through 2026-05-03,demo,75000,20500,6000,2500000,431.204,41,1,1,coder,60000,18000,402.004,33,,,,,\nrange,2026-05-02|2026-05-03|Range 2026-05-02 through 2026-05-03,demo,75000,20500,6000,2500000,431.204,41,1,1,tester,15000,2500,29.2,8,,,,,\nrange,2026-05-02|2026-05-03|Range 2026-05-02 through 2026-05-03,demo,75000,20500,6000,2500000,431.204,41,1,1,,,,,,claude-opus-4-8,75000,20500,431.204,41\n"
+    },
+    "cost csv rc": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "scope_type,scope_value,project,total_input_tokens,total_output_tokens,total_cache_create_tokens,total_cache_read_tokens,total_cost_usd,total_invocations,days_with_activity,rcs_shipped,agent,agent_input_tokens,agent_output_tokens,agent_cost_usd,agent_invocations,model,model_input_tokens,model_output_tokens,model_cost_usd,model_invocations\nrc,v1.2.0,demo,125000,32500,10000,3400000,443.954,55,0,1,ALL,125000,32500,443.954,55,ALL,125000,32500,443.954,55\nrc,v1.2.0,demo,125000,32500,10000,3400000,443.954,55,0,1,coder,100000,28000,413.504,45,,,,,\nrc,v1.2.0,demo,125000,32500,10000,3400000,443.954,55,0,1,pm,10000,2000,1.25,2,,,,,\nrc,v1.2.0,demo,125000,32500,10000,3400000,443.954,55,0,1,tester,15000,2500,29.2,8,,,,,\nrc,v1.2.0,demo,125000,32500,10000,3400000,443.954,55,0,1,,,,,,claude-opus-4-8,115000,30500,442.704,53\nrc,v1.2.0,demo,125000,32500,10000,3400000,443.954,55,0,1,,,,,,claude-sonnet-4-6,10000,2000,1.25,2\n"
+    },
+    "cost day": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== Token Usage: Day 2026-05-03 — demo ===\nRCs on this day:    1\nTotal invocations:  41\n\nToken totals:\n  Input (new):                       75,000 tokens\n  Cache writes:                       6,000 tokens\n  Cache reads:                    2,500,000 tokens\n  Output:                            20,500 tokens\n\nBy agent (cost share):\n  CODER   $402.00 (93%)  — 33 invocations/day avg\n  TESTER  $29.20 (7%)  — 8 invocations/day avg\n\nBy model:\n  claude-opus-4-8              $431.20 (100%)\n\nTotal cost:         $431.20\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $411 short\n  Anthropic Max programmatic credit ($200.00):  $231 short\n  Anthropic API direct (pay-as-you-go):           $431.20\n  Codex via ChatGPT Plus ($20.00):              $411 short\n  Codex via ChatGPT Pro ($200.00):               $231 short\n\nCheapest if mixed:\n  Max subscription + API overflow: $431.20 (saves $0.00 vs. pure API)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost day idle": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "no data for day=2026-05-11\n"
+    },
+    "cost help": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "team/scripts/cost-report.sh\nBackward-compatible cost reporting wrapper.\n\nThis script preserves the existing cost-by-day / cost-by-RC interface for\noperators and cron jobs that depend on it.  The human-readable output now\nincludes a footer pointing to the new metrics-report.sh CLI, which provides\nricher per-RC JSON rollup, cumulative CSV, JSONL streaming, and live-tail\nsurfaces.\n\nNew code should use metrics-report.sh directly.  cost-report.sh is retained\nfor backward compatibility.\n\nReads roll-up files produced by team/pm-agent/aggregate_tokens.py and\npricing data from team/scripts/lib/token_pricing.json to produce\nhuman-readable or CSV cost reports.\n\nUSAGE:\n  cost-report.sh [--month YYYY-MM] [--day YYYY-MM-DD] [--rc <version>]\n                 [--week [YYYY-Www|current]] [--year [YYYY|current]]\n                 [--since YYYY-MM-DD] [--until YYYY-MM-DD]\n                 [--last N] [--last-N-days N]\n                 [--project <name>] [--csv]\n                 [--kanban-root <path>] [-h|--help]\n\nSCOPE FLAGS (at most one group; default is month-to-date):\n  --month YYYY-MM       Report on a specific calendar month.\n                        Default (no flag): current month-to-date.\n  --day YYYY-MM-DD      Report on a single day.\n  --rc <version>        Report on a single RC (e.g. v0.23.22).\n  --week [YYYY-Www|current]\n                        Report on an ISO week (Monday through Sunday).\n                        \"current\" or no argument = Monday through today.\n                        Example: --week 2026-W19\n  --year [YYYY|current]\n                        Report on a calendar year. \"current\" or no argument\n                        = Jan 1 through today. Example: --year 2026.\n  --since YYYY-MM-DD    Report from a specific date through today.\n                        May be combined with --until for an explicit range.\n  --until YYYY-MM-DD    Report from the earliest available day through the\n                        specified date. May be combined with --since.\n  --last N              Report on the N most recent days through today.\n                        --last 1 is today only; --last 7 is today + 6 prior.\n  --last-N-days N       Alias for --last N.\n\nOTHER FLAGS:\n  --project <name>      Project name (required; or set PGAI_PROJECT_NAME env).\n  --csv                 Emit machine-readable CSV rows instead of the\n                        human-readable block. Column order is stable.\n  --kanban-root <path>  Override PGAI_AGENT_KANBAN_ROOT_PATH.\n  -h, --help            Show this help and exit.\n\nAUTO-AGGREGATION:\n  If the required roll-up file is missing, the script invokes\n  aggregate_tokens.py to build it on demand, then produces the report.\n\nPRICING:\n  Reads team/scripts/lib/token_pricing.json from the project's dev_tree_path\n  (read from project.cfg) or falls back to the kanban root's copy.\n  Subscription comparison block values come from the \"subscriptions\" key.\n  Dollar amounts are never hardcoded in this script.\n\nAUTHORITATIVE COST SOURCE:\n  The Total cost displayed is sourced directly from the aggregator's cost_usd\n  field, which sums total_cost_usd from each tokens.json (the CLI's\n  authoritative per-invocation cost).  No recomputation from token counts\n  is performed at report time.  When legacy-schema tokens.json files are\n  present (legacy-schema data lacking total_cost_usd), the aggregator falls\n  back to pricing-table computation; a visible WARNING is shown at the top\n  of the report in that case.\n\nGRACEFUL DEGRADATION:\n  - If a model in a roll-up lacks a pricing entry, a warning is emitted to\n    stderr and cost_usd for that entry is treated as 0.\n  - If no data is available for the requested scope, prints a clear message\n    and exits 0.\n\nEXIT CODES:\n  0 -- success (warnings may appear on stderr)\n  1 -- usage error or unrecoverable configuration failure\n\n"
+    },
+    "cost kanban root flag": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== Token Usage: Day 2026-05-01 — demo ===\nRCs on this day:    0\nTotal invocations:  14\n\nToken totals:\n  Input (new):                       50,000 tokens\n  Cache writes:                       4,000 tokens\n  Cache reads:                      900,000 tokens\n  Output:                            12,000 tokens\n\nBy agent (cost share):\n  CODER   $11.50 (90%)  — 12 invocations/day avg\n  PM      $1.25 (10%)  — 2 invocations/day avg\n\nBy model:\n  claude-opus-4-8              $11.50 (90%)\n  claude-sonnet-4-6            $1.25 (10%)\n\nTotal cost:         $12.75\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $7 surplus\n  Anthropic Max programmatic credit ($200.00):  $187 surplus\n  Anthropic API direct (pay-as-you-go):           $12.75\n  Codex via ChatGPT Plus ($20.00):              $7 surplus\n  Codex via ChatGPT Pro ($200.00):               $187 surplus\n\nCheapest if mixed:\n  Max subscription + API overflow: $200.00 (costs $187 MORE vs. pure API at low usage)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost last word": {
+      "exit_code": 1,
+      "stderr": "ERROR: --last requires a positive integer argument (got 'abc')\n",
+      "stdout": ""
+    },
+    "cost last zero": {
+      "exit_code": 1,
+      "stderr": "ERROR: --last requires N >= 1 (got 0). Use --day today for a single day.\n",
+      "stdout": ""
+    },
+    "cost month": {
+      "exit_code": 0,
+      "stderr": "WARNING: cannot read <ROOT>/projects/demo/usage/daily/2026-05-12.json: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)\n",
+      "stdout": "=== Token Usage: 2026-05 — demo ===\nDays with activity: 3 / 31\nRCs shipped:        1\nTotal invocations:  58\n\nToken totals:\n  Input (new):                      134,000 tokens\n  Cache writes:                      10,000 tokens\n  Cache reads:                    3,400,000 tokens\n  Output:                            33,500 tokens\n\nBy agent (cost share):\n  CODER   $413.50 (93%)  — 15 invocations/day avg\n  TESTER  $29.20 (7%)  — 3 invocations/day avg\n  PM      $1.25 (0%)  — 1 invocations/day avg\n  CM      $0.90 (0%)  — 1 invocations/day avg\n\nBy model:\n  claude-opus-4-8              $442.70 (100%)\n  claude-sonnet-4-6            $1.25 (0%)\n  gpt-5-codex                  $0.90 (0%)\n\nTotal cost:         $444.85\nDaily average:      $148.28\nProjected monthly:  $4,449 (extrapolated from observed days)\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $4,429 short\n  Anthropic Max programmatic credit ($200.00):  $4,249 short\n  Anthropic API direct (pay-as-you-go):           $4,449\n  Codex via ChatGPT Plus ($20.00):              $4,429 short\n  Codex via ChatGPT Pro ($200.00):               $4,249 short\n\nCheapest if mixed:\n  Max subscription + API overflow: $4,449 (saves $0.00 vs. pure API)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost month legacy": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "*** WARNING: some or all costs in this report were computed from the\n*** pricing table (legacy tokens.json schema without total_cost_usd).\n*** Total cost may be under-reported.  Upgrade token_capture.sh to fix.\n\n=== Token Usage: 2026-04 — demo ===\nDays with activity: 1 / 30\nRCs shipped:        1\nTotal invocations:  6\n\nToken totals:\n  Input (new):             120,000 tokens    $1.80\n  Cache writes:              8,000 tokens    $0.15\n  Cache reads:             400,000 tokens    $0.60\n  Output:                   30,000 tokens    $0.85\n\nBy agent (cost share):\n  CODER   $3.40 (100%)  — 6 invocations/day avg\n\nBy model:\n  claude-opus-4-7              $3.40 (100%)\n\nTotal cost:         $3.40\nDaily average:      $3.40\nProjected monthly:  $102.00 (extrapolated from observed days)\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $82 short\n  Anthropic Max programmatic credit ($200.00):  $98 surplus\n  Anthropic API direct (pay-as-you-go):           $102.00\n  Codex via ChatGPT Plus ($20.00):              $82 short\n  Codex via ChatGPT Pro ($200.00):               $98 surplus\n\nCheapest if mixed:\n  Max subscription + API overflow: $200.00 (costs $98 MORE vs. pure API at low usage)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost month missing value": {
+      "exit_code": 1,
+      "stderr": "ERROR: --month requires YYYY-MM argument\n",
+      "stdout": ""
+    },
+    "cost month no pricing": {
+      "exit_code": 0,
+      "stderr": "WARNING: token_pricing.json not found; subscription comparison unavailable.\n",
+      "stdout": "=== Token Usage: 2026-05 — quiet ===\nDays with activity: 1 / 31\nRCs shipped:        0\nTotal invocations:  1\n\nToken totals:\n  Input (new):                          500 tokens\n  Cache writes:                           0 tokens\n  Cache reads:                            0 tokens\n  Output:                               100 tokens\n\nBy agent (cost share):\n  PM      $0.05 (100%)  — 1 invocations/day avg\n\nBy model:\n  claude-sonnet-4-6            $0.05 (100%)\n\nTotal cost:         $0.05\nDaily average:      $0.05\nProjected monthly:  $1.50 (extrapolated from observed days)\n\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost no project": {
+      "exit_code": 1,
+      "stderr": "ERROR: no project specified. Pass --project <name> or set PGAI_PROJECT_NAME.\nRun with --help for usage.\n",
+      "stdout": ""
+    },
+    "cost rc": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== Token Usage: RC v1.2.0 — demo ===\nRC:                 v1.2.0\nTotal invocations:  55\n\nToken totals:\n  Input (new):                      125,000 tokens\n  Cache writes:                      10,000 tokens\n  Cache reads:                    3,400,000 tokens\n  Output:                            32,500 tokens\n\nBy agent (cost share):\n  CODER   $413.50 (93%)  — 45 invocations\n  TESTER  $29.20 (7%)  — 8 invocations\n  PM      $1.25 (0%)  — 2 invocations\n\nBy model:\n  claude-opus-4-8              $442.70 (100%)\n  claude-sonnet-4-6            $1.25 (0%)\n\nTotal cost:         $443.95\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $424 short\n  Anthropic Max programmatic credit ($200.00):  $244 short\n  Anthropic API direct (pay-as-you-go):           $443.95\n  Codex via ChatGPT Plus ($20.00):              $424 short\n  Codex via ChatGPT Pro ($200.00):               $244 short\n\nCheapest if mixed:\n  Max subscription + API overflow: $443.95 (saves $0.00 vs. pure API)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost rc bare": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "*** WARNING: some or all costs in this report were computed from the\n*** pricing table (legacy tokens.json schema without total_cost_usd).\n*** Total cost may be under-reported.  Upgrade token_capture.sh to fix.\n\n=== Token Usage: RC v1.1.0 — demo ===\nRC:                 v1.1.0\nTotal invocations:  6\n\nToken totals:\n  Input (new):             120,000 tokens    $1.80\n  Cache writes:              8,000 tokens    $0.15\n  Cache reads:             400,000 tokens    $0.60\n  Output:                   30,000 tokens    $0.85\n\nBy agent (cost share):\n  CODER   $3.40 (100%)  — 6 invocations\n\nBy model:\n  claude-opus-4-7              $3.40 (100%)\n\nTotal cost:         $3.40\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $17 surplus\n  Anthropic Max programmatic credit ($200.00):  $197 surplus\n  Anthropic API direct (pay-as-you-go):           $3.40\n  Codex via ChatGPT Plus ($20.00):              $17 surplus\n  Codex via ChatGPT Pro ($200.00):               $197 surplus\n\nCheapest if mixed:\n  Max subscription + API overflow: $200.00 (costs $197 MORE vs. pure API at low usage)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost since until": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== Token Usage: Range 2026-05-01 through 2026-05-10 — demo ===\nDays with activity: 3 / 10\nTotal invocations:  58\n\nToken totals:\n  Input (new):                      134,000 tokens\n  Cache writes:                      10,000 tokens\n  Cache reads:                    3,400,000 tokens\n  Output:                            33,500 tokens\n\nBy agent (cost share):\n  CODER   $413.50 (93%)  — 15 invocations/day avg\n  TESTER  $29.20 (7%)  — 3 invocations/day avg\n  PM      $1.25 (0%)  — 1 invocations/day avg\n  CM      $0.90 (0%)  — 1 invocations/day avg\n\nBy model:\n  claude-opus-4-8              $442.70 (100%)\n  claude-sonnet-4-6            $1.25 (0%)\n  gpt-5-codex                  $0.90 (0%)\n\nTotal cost:         $444.85\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $425 short\n  Anthropic Max programmatic credit ($200.00):  $245 short\n  Anthropic API direct (pay-as-you-go):           $444.85\n  Codex via ChatGPT Plus ($20.00):              $425 short\n  Codex via ChatGPT Pro ($200.00):               $245 short\n\nCheapest if mixed:\n  Max subscription + API overflow: $444.85 (saves $0.00 vs. pure API)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost unknown arg": {
+      "exit_code": 1,
+      "stderr": "ERROR: unknown argument: --bogus\nRun with --help for usage.\n",
+      "stdout": ""
+    },
+    "cost unknown project": {
+      "exit_code": 1,
+      "stderr": "ERROR: project directory not found: <ROOT>/projects/nope\n",
+      "stdout": ""
+    },
+    "cost until": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "*** WARNING: some or all costs in this report were computed from the\n*** pricing table (legacy tokens.json schema without total_cost_usd).\n*** Total cost may be under-reported.  Upgrade token_capture.sh to fix.\n\n=== Token Usage: Through 2026-05-03 — demo ===\nDays with activity: 3 / 14\nTotal invocations:  61\n\nToken totals:\n  Input (new):             245,000 tokens    $1.80\n  Cache writes:             18,000 tokens    $0.15\n  Cache reads:           3,800,000 tokens    $0.60\n  Output:                   62,500 tokens    $0.85\n\nBy agent (cost share):\n  CODER   $416.90 (93%)  — 17 invocations/day avg\n  TESTER  $29.20 (7%)  — 3 invocations/day avg\n  PM      $1.25 (0%)  — 1 invocations/day avg\n\nBy model:\n  claude-opus-4-8              $442.70 (99%)\n  claude-opus-4-7              $3.40 (1%)\n  claude-sonnet-4-6            $1.25 (0%)\n\nTotal cost:         $447.35\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $427 short\n  Anthropic Max programmatic credit ($200.00):  $247 short\n  Anthropic API direct (pay-as-you-go):           $447.35\n  Codex via ChatGPT Plus ($20.00):              $427 short\n  Codex via ChatGPT Pro ($200.00):               $247 short\n\nCheapest if mixed:\n  Max subscription + API overflow: $447.35 (saves $0.00 vs. pure API)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost week": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== Token Usage: Week 2026-W18 (2026-04-27 through 2026-05-03) — demo ===\nDays with activity: 2 / 7\nTotal invocations:  55\n\nToken totals:\n  Input (new):                      125,000 tokens\n  Cache writes:                      10,000 tokens\n  Cache reads:                    3,400,000 tokens\n  Output:                            32,500 tokens\n\nBy agent (cost share):\n  CODER   $413.50 (93%)  — 22 invocations/day avg\n  TESTER  $29.20 (7%)  — 4 invocations/day avg\n  PM      $1.25 (0%)  — 1 invocations/day avg\n\nBy model:\n  claude-opus-4-8              $442.70 (100%)\n  claude-sonnet-4-6            $1.25 (0%)\n\nTotal cost:         $443.95\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $424 short\n  Anthropic Max programmatic credit ($200.00):  $244 short\n  Anthropic API direct (pay-as-you-go):           $443.95\n  Codex via ChatGPT Plus ($20.00):              $424 short\n  Codex via ChatGPT Pro ($200.00):               $244 short\n\nCheapest if mixed:\n  Max subscription + API overflow: $443.95 (saves $0.00 vs. pure API)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
+    },
+    "cost year empty": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "no data for range (2025-01-01 through 2025-12-31)\n"
+    },
+    "costs pane": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== Costs — today (<TODAY>) ===\n\n  demo\n    claude / claude-sonnet-4-6\n      input:                   2,000 tokens    $0.01\n      cache write:             1,000 tokens    $0.00\n      cache read:             40,000 tokens    $0.01\n      output:                    500 tokens    $0.01\n      ─────────────────────────────────────\n      subtotal:                                   $0.03\n\n    claude / mystery-model\n      input:                   1,000 tokens    $1,234\n      cache write:                 0 tokens    $0.00\n      cache read:                  0 tokens    $0.00\n      output:                    200 tokens    $0.25\n      ─────────────────────────────────────\n      subtotal:                                   $1,235\n\n  quiet\n    (no activity yet today)\n\n  fresh\n    (no data yet)\n\n  Day total: $1235.03\n\n\n=== Costs — current RC ===\n\n  demo v1.3.0 (1 tasks)\n    claude / claude-sonnet-4-6\n      input:                   8,000 tokens    $0.02\n      cache write:                 0 tokens    $0.00\n      cache read:                  0 tokens    $0.00\n      output:                    900 tokens    $0.01\n      ─────────────────────────────────────\n      subtotal:                                   $0.04\n  RC total: $0.04\n\n  (no active RC)\n  (no active RC)\n\nupdated <NOW>\n"
+    },
+    "costs pane color": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "\u001b[0;36m\u001b[1m=== Costs — today (<TODAY>) ===\u001b[0m\n\n  \u001b[1mdemo\u001b[0m\n    claude / claude-sonnet-4-6\n      input:                   2,000 tokens    $0.01\n      cache write:             1,000 tokens    $0.00\n      cache read:             40,000 tokens    $0.01\n      output:                    500 tokens    $0.01\n      ─────────────────────────────────────\n      subtotal:                                   $0.03\n\n    claude / mystery-model\n      input:                   1,000 tokens    $1,234\n      cache write:                 0 tokens    $0.00\n      cache read:                  0 tokens    $0.00\n      output:                    200 tokens    $0.25\n      ─────────────────────────────────────\n      subtotal:                                   $1,235\n\n  \u001b[1mquiet\u001b[0m\n    \u001b[2m(no activity yet today)\u001b[0m\n\n  \u001b[1mfresh\u001b[0m\n    \u001b[2m(no data yet)\u001b[0m\n\n  \u001b[1mDay total: $1235.03\u001b[0m\n\n\n\u001b[0;36m\u001b[1m=== Costs — current RC ===\u001b[0m\n\n  \u001b[1mdemo v1.3.0 (1 tasks)\u001b[0m\n    claude / claude-sonnet-4-6\n      input:                   8,000 tokens    $0.02\n      cache write:                 0 tokens    $0.00\n      cache read:                  0 tokens    $0.00\n      output:                    900 tokens    $0.01\n      ─────────────────────────────────────\n      subtotal:                                   $0.04\n  \u001b[1mRC total: $0.04\u001b[0m\n\n  \u001b[2m(no active RC)\u001b[0m\n  \u001b[2m(no active RC)\u001b[0m\n\n\u001b[2mupdated <NOW>\u001b[0m\n"
+    },
+    "metrics bad format": {
+      "exit_code": 1,
+      "stderr": "ERROR: unsupported --format value: 'xml' (supported: jsonl)\n",
+      "stdout": ""
+    },
+    "metrics csv empty": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "rc,project,workflow_type,opened_at,closed_at,wall_time_minutes,outcome,tasks_total,tasks_pm,tasks_coder,tasks_writer,tasks_tester,tasks_cm,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_hit_rate_pct,bugs_filed_during,operator_waivers,blocked_minutes\n"
+    },
+    "metrics csv env project": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "rc,project,workflow_type,opened_at,closed_at,wall_time_minutes,outcome,tasks_total,tasks_pm,tasks_coder,tasks_writer,tasks_tester,tasks_cm,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_hit_rate_pct,bugs_filed_during,operator_waivers,blocked_minutes\nv1.0.0,demo,,,,,,3,,,,,,1000,500,0,0,,,,\nv1.1.0,demo,,,,95,,2,,,,,,120000,30000,400000,8000,,,,0\nv1.2.0,demo,,,,120.5,,5,,,,,,1234567,32500,3400000,10000,,,,45\nv0.9.0,other,,,,10,,1,,,,,,10,5,,,,,,1234\n"
+    },
+    "metrics csv jsonl": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "{\"outcome\":\"shipped\",\"project\":\"demo\",\"rc\":\"v1.10.0\",\"tasks\":{\"by_agent\":{\"coder\":3,\"pm\":1},\"total\":4},\"tokens\":{\"by_agent\":{\"coder\":{\"cache_read\":900000,\"cache_write\":12000,\"input\":2500000,\"invocations\":6,\"output\":41000},\"pm\":{\"cache_read\":0,\"cache_write\":0,\"input\":4000,\"invocations\":2,\"output\":900}}},\"wall\":{\"by_agent\":{\"coder\":{\"seconds\":5400,\"task_count\":3}}}}\n{\"outcome\":\"shipped\",\"project\":\"demo\",\"rc\":\"v1.9.0\",\"tasks\":{\"by_agent\":{\"coder\":2},\"total\":2},\"tokens\":{\"by_agent\":{\"coder\":{\"cache_read\":5000,\"cache_write\":300,\"input\":1000,\"invocations\":4,\"output\":200}}},\"wall\":{\"by_agent\":{\"coder\":{\"seconds\":1800,\"task_count\":2}}}}\n"
+    },
+    "metrics csv project": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "rc,project,workflow_type,opened_at,closed_at,wall_time_minutes,outcome,tasks_total,tasks_pm,tasks_coder,tasks_writer,tasks_tester,tasks_cm,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_hit_rate_pct,bugs_filed_during,operator_waivers,blocked_minutes\nv1.0.0,demo,,,,,,3,,,,,,1000,500,0,0,,,,\nv1.1.0,demo,,,,95,,2,,,,,,120000,30000,400000,8000,,,,0\nv1.2.0,demo,,,,120.5,,5,,,,,,1234567,32500,3400000,10000,,,,45\n"
+    },
+    "metrics jsonl env project": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "{\"outcome\":\"shipped\",\"project\":\"demo\",\"rc\":\"v1.10.0\",\"tasks\":{\"by_agent\":{\"coder\":3,\"pm\":1},\"total\":4},\"tokens\":{\"by_agent\":{\"coder\":{\"cache_read\":900000,\"cache_write\":12000,\"input\":2500000,\"invocations\":6,\"output\":41000},\"pm\":{\"cache_read\":0,\"cache_write\":0,\"input\":4000,\"invocations\":2,\"output\":900}}},\"wall\":{\"by_agent\":{\"coder\":{\"seconds\":5400,\"task_count\":3}}}}\n{\"outcome\":\"cancelled\",\"project\":\"other\",\"rc\":\"v1.2.0\",\"tasks\":{\"by_agent\":{\"cm\":1},\"total\":1},\"tokens\":{\"by_agent\":{\"cm\":{\"cache_read\":0,\"cache_write\":0,\"input\":7,\"output\":0}}},\"wall\":{\"by_agent\":{}}}\n{\"outcome\":\"shipped\",\"project\":\"demo\",\"rc\":\"v1.9.0\",\"tasks\":{\"by_agent\":{\"coder\":2},\"total\":2},\"tokens\":{\"by_agent\":{\"coder\":{\"cache_read\":5000,\"cache_write\":300,\"input\":1000,\"invocations\":4,\"output\":200}}},\"wall\":{\"by_agent\":{\"coder\":{\"seconds\":1800,\"task_count\":2}}}}\n"
+    },
+    "metrics jsonl project": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "{\"outcome\":\"shipped\",\"project\":\"demo\",\"rc\":\"v1.10.0\",\"tasks\":{\"by_agent\":{\"coder\":3,\"pm\":1},\"total\":4},\"tokens\":{\"by_agent\":{\"coder\":{\"cache_read\":900000,\"cache_write\":12000,\"input\":2500000,\"invocations\":6,\"output\":41000},\"pm\":{\"cache_read\":0,\"cache_write\":0,\"input\":4000,\"invocations\":2,\"output\":900}}},\"wall\":{\"by_agent\":{\"coder\":{\"seconds\":5400,\"task_count\":3}}}}\n{\"outcome\":\"shipped\",\"project\":\"demo\",\"rc\":\"v1.9.0\",\"tasks\":{\"by_agent\":{\"coder\":2},\"total\":2},\"tokens\":{\"by_agent\":{\"coder\":{\"cache_read\":5000,\"cache_write\":300,\"input\":1000,\"invocations\":4,\"output\":200}}},\"wall\":{\"by_agent\":{\"coder\":{\"seconds\":1800,\"task_count\":2}}}}\n"
+    },
+    "metrics rc": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "{\n  \"rc\": \"v1.9.0\",\n  \"tasks\": {\n    \"total\": 2,\n    \"by_agent\": {\n      \"coder\": 2\n    }\n  },\n  \"tokens\": {\n    \"by_agent\": {\n      \"coder\": {\n        \"input\": 1000,\n        \"output\": 200,\n        \"cache_read\": 5000,\n        \"cache_write\": 300,\n        \"invocations\": 4\n      }\n    }\n  },\n  \"wall\": {\n    \"by_agent\": {\n      \"coder\": {\n        \"seconds\": 1800,\n        \"task_count\": 2\n      }\n    }\n  },\n  \"outcome\": \"shipped\",\n  \"project\": \"demo\"\n}"
+    },
+    "show all projects": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\nNo data\n=== RC Metrics: fresh ===\n\n  (no releases yet)\n\n"
+    },
+    "show all projects color": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked tracked from v2.24.0\u001b[0m\nNo data\n\u001b[0;36m\u001b[1m=== RC Metrics: fresh ===\u001b[0m\n\n  \u001b[2m(no releases yet)\u001b[0m\n\n"
+    },
+    "show dumb term": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\n"
+    },
+    "show fresh": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: fresh ===\u001b[0m\n\n  \u001b[2m(no releases yet)\u001b[0m\n\n"
+    },
+    "show help": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "!/usr/bin/env bash\nshow-metrics.sh\nHistorical RC metrics viewer for the pgai kanban dashboard.\n\nReads metrics from:\n  projects/<name>/metrics/history.csv   (default view, all projects)\n  projects/<name>/metrics/rc/v*.json    (--per-agent view, single project)\n\nUsage:\n  show-metrics.sh [options]\n\nOptions:\n  --project <name>          Project name (default: all registered projects)\n  --last <N>                Show last N rows (default: 10)\n  --history-csv <path>      Override CSV path (for testing; implies single-project mode)\n  --per-agent               Show per-agent token breakdown for most recent RC\n  --kanban-root <path>      Override kanban root directory\n  --no-color                Disable ANSI color output\n  -h, --help                Show this help and exit\n\nDefault CSV columns:  rc | wall_time | blocked | input | output | cache_read | cache_write | tasks\nPer-agent columns:    agent | input | output | cache_read | cache_write | invocations\n\nWall time shows '--' when opened_at/closed_at/wall_time_minutes\nare not yet populated in history.csv.\n\nBlocked shows the merged blocked-interval minutes for the row's RC, a\nreal 0 for a clean run, or a single '-' when the row's history.csv\nentry carries no value for that column -- the table then prints one\nfooter line explaining when the column started being tracked.\n\nNumbers are formatted with commas for readability (e.g. 5,644,879).\n\nEnvironment:\n  PGAI_AGENT_KANBAN_ROOT_PATH  Kanban root override\n  NO_COLOR                            Set non-empty to disable colors\n  TERM=dumb                           Also disables colors\nshellcheck source=../lib/env_bootstrap.sh\n---------------------------------------------------------------------------\nResolve script directory (before set -euo pipefail so sourcing works safely)\n"
+    },
+    "show history csv": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 1) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv0.9.0       10            1,234         10          5           --            --      1\n"
+    },
+    "show history csv missing": {
+      "exit_code": 1,
+      "stderr": "No history CSV found at: <ROOT>/nope.csv\n",
+      "stdout": ""
+    },
+    "show history csv no project": {
+      "exit_code": 1,
+      "stderr": "ERROR: no project specified; pass --project <name> or set PGAI_PROJECT_NAME\n",
+      "stdout": ""
+    },
+    "show kanban root flag": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\n"
+    },
+    "show last": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== RC Metrics: demo (last 2) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n"
+    },
+    "show no color env": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\n"
+    },
+    "show per agent": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== RC Metrics: demo — per-agent (v1.10.0) ===\n\nAgent             Input     Output   Cache Read   Cache Write Invocations\ncoder         2,500,000     41,000      900,000        12,000           6\npm                4,000        900            0             0           2\n"
+    },
+    "show per agent color": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo — per-agent (v1.10.0) ===\u001b[0m\n\n\u001b[1mAgent             Input     Output   Cache Read   Cache Write Invocations\u001b[0m\ncoder         2,500,000     41,000      900,000        12,000           6\npm                4,000        900            0             0           2\n"
+    },
+    "show per agent no project": {
+      "exit_code": 1,
+      "stderr": "ERROR: no project specified; pass --project <name> or set PGAI_PROJECT_NAME\n",
+      "stdout": ""
+    },
+    "show per agent no rollups": {
+      "exit_code": 1,
+      "stderr": "No RC metrics files found in <ROOT>/projects/quiet/metrics/rc\n",
+      "stdout": ""
+    },
+    "show project": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\n"
+    },
+    "show project color": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked tracked from v2.24.0\u001b[0m\n"
+    },
+    "show quiet": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "No data\n"
+    },
+    "show unknown arg": {
+      "exit_code": 1,
+      "stderr": "ERROR: Unknown argument: --per_agent\nUsage: <SCRIPT> [--project <name>] [--last N] [--per-agent] [--no-color] [--kanban-root <path>]\n",
+      "stdout": ""
+    }
+  },
+  "deliberate_changes": {
+    "rest": {
+      "GET /metrics per agent": {
+        "outcome": {
+          "body": {
+            "exit_code": 0,
+            "stderr": "",
+            "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo — per-agent (v1.10.0) ===\u001b[0m\n\n\u001b[1mAgent             Input     Output   Cache Read   Cache Write Invocations\u001b[0m\ncoder         2,500,000     41,000      900,000        12,000           6\npm                4,000        900            0             0           2\n",
+            "warnings": []
+          },
+          "status": 200
+        },
+        "reason": "The route passed per_agent=true to show-metrics.sh as --per_agent, which the script refused as an unknown argument (HTTP 500). The route now calls show_metrics(per_agent=True), the --per-agent view its own documentation and docs/operator-api.md describe."
+      }
+    },
+    "cli": {
+      "show help": {
+        "outcome": {
+          "exit_code": 0,
+          "stdout": "show-metrics.sh\nHistorical RC metrics viewer for the pgai kanban dashboard.\n\nReads metrics from:\n  projects/<name>/metrics/history.csv   (default view, all projects)\n  projects/<name>/metrics/rc/v*.json    (--per-agent view, single project)\n\nUsage:\n  show-metrics.sh [options]\n\nOptions:\n  --project <name>          Project name (default: all registered projects)\n  --last <N>                Show last N rows (default: 10)\n  --history-csv <path>      Override CSV path (for testing; implies single-project mode)\n  --per-agent               Show per-agent token breakdown for most recent RC\n  --kanban-root <path>      Override kanban root directory\n  --no-color                Disable ANSI color output\n  -h, --help                Show this help and exit\n\nDefault CSV columns:  rc | wall_time | blocked | input | output | cache_read | cache_write | tasks\nPer-agent columns:    agent | input | output | cache_read | cache_write | invocations\n\nWall time shows '--' when opened_at/closed_at/wall_time_minutes\nare not yet populated in history.csv.\n\nBlocked shows the merged blocked-interval minutes for the row's RC, a\nreal 0 for a clean run, or a single '-' when the row's history.csv\nentry carries no value for that column -- the table then prints one\nfooter line explaining when the column started being tracked.\n\nNumbers are formatted with commas for readability (e.g. 5,644,879).\n\nEnvironment:\n  PGAI_AGENT_KANBAN_ROOT_PATH  Kanban root override\n  NO_COLOR                            Set non-empty to disable colors\n  TERM=dumb                           Also disables colors\n",
+          "stderr": ""
+        },
+        "reason": "--help printed the '#!' shebang as its first help line ('!/usr/bin/env bash'). The header extraction now drops it, so help opens on the script name and the fixed line-count slice reaches one header line further. The slice now ends at the last line of the usage header, so help no longer carries the implementation comments that follow it in the script body (a shellcheck directive, divider rules and a 'Resolve script directory' note)."
+      }
+    }
+  },
+  "rest": {
+    "GET /agent-metrics": {
+      "body": {
+        "agents": [
+          {
+            "agent": "coder",
+            "avg_tasks": 2.5,
+            "avg_tokens": 1729750.0,
+            "avg_wall_minutes": 24.0,
+            "rc_count": 2,
+            "total_tasks": 5,
+            "total_tokens": 3459500
+          },
+          {
+            "agent": "pm",
+            "avg_tasks": 1.0,
+            "avg_tokens": 4900.0,
+            "avg_wall_minutes": null,
+            "rc_count": 1,
+            "total_tasks": 1,
+            "total_tokens": 4900
+          }
+        ],
+        "excluded_count": 1,
+        "project": "demo",
+        "shipped_count": 2,
+        "span": {
+          "count": 10,
+          "kind": "last",
+          "since": null
+        },
+        "warnings": [],
+        "window": 10
+      },
+      "status": 200
+    },
+    "GET /costs conflict": {
+      "body": {
+        "exit_code": 1,
+        "stderr": "ERROR: conflicting scope flags: --month and --rc cannot be combined.\nRun with --help for usage.\n",
+        "stdout": "",
+        "warnings": []
+      },
+      "status": 500
+    },
+    "GET /costs day": {
+      "body": {
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "=== Token Usage: Day 2026-05-03 — demo ===\nRCs on this day:    1\nTotal invocations:  41\n\nToken totals:\n  Input (new):                       75,000 tokens\n  Cache writes:                       6,000 tokens\n  Cache reads:                    2,500,000 tokens\n  Output:                            20,500 tokens\n\nBy agent (cost share):\n  CODER   $402.00 (93%)  — 33 invocations/day avg\n  TESTER  $29.20 (7%)  — 8 invocations/day avg\n\nBy model:\n  claude-opus-4-8              $431.20 (100%)\n\nTotal cost:         $431.20\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $411 short\n  Anthropic Max programmatic credit ($200.00):  $231 short\n  Anthropic API direct (pay-as-you-go):           $431.20\n  Codex via ChatGPT Plus ($20.00):              $411 short\n  Codex via ChatGPT Pro ($200.00):               $231 short\n\nCheapest if mixed:\n  Max subscription + API overflow: $431.20 (saves $0.00 vs. pure API)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n",
+        "warnings": []
+      },
+      "status": 200
+    },
+    "GET /costs json": {
+      "body": [
+        {
+          "cache_read_pct": 0.0,
+          "tokens_in": 8000,
+          "tokens_out": 900,
+          "version": "v1.3.0"
+        },
+        {
+          "cache_read_pct": 76.9,
+          "est_cost": 3.4,
+          "tasks": 2,
+          "tokens_in": 120000,
+          "tokens_out": 30000,
+          "version": "v1.1.0"
+        },
+        {
+          "cache_read_pct": 96.5,
+          "est_cost": 443.954,
+          "tasks": 5,
+          "tokens_in": 125000,
+          "tokens_out": 32500,
+          "version": "v1.2.0"
+        }
+      ],
+      "status": 200
+    },
+    "GET /costs json month": {
+      "body": [
+        {
+          "cache_read_pct": 96.5,
+          "est_cost": 443.954,
+          "tasks": 5,
+          "tokens_in": 125000,
+          "tokens_out": 32500,
+          "version": "v1.2.0"
+        }
+      ],
+      "status": 200
+    },
+    "GET /costs json rc": {
+      "body": [
+        {
+          "cache_read_pct": 76.9,
+          "est_cost": 3.4,
+          "tasks": 2,
+          "tokens_in": 120000,
+          "tokens_out": 30000,
+          "version": "v1.1.0"
+        }
+      ],
+      "status": 200
+    },
+    "GET /costs month": {
+      "body": {
+        "exit_code": 0,
+        "stderr": "WARNING: cannot read <ROOT>/projects/demo/usage/daily/2026-05-12.json: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)\n",
+        "stdout": "=== Token Usage: 2026-05 — demo ===\nDays with activity: 3 / 31\nRCs shipped:        1\nTotal invocations:  58\n\nToken totals:\n  Input (new):                      134,000 tokens\n  Cache writes:                      10,000 tokens\n  Cache reads:                    3,400,000 tokens\n  Output:                            33,500 tokens\n\nBy agent (cost share):\n  CODER   $413.50 (93%)  — 15 invocations/day avg\n  TESTER  $29.20 (7%)  — 3 invocations/day avg\n  PM      $1.25 (0%)  — 1 invocations/day avg\n  CM      $0.90 (0%)  — 1 invocations/day avg\n\nBy model:\n  claude-opus-4-8              $442.70 (100%)\n  claude-sonnet-4-6            $1.25 (0%)\n  gpt-5-codex                  $0.90 (0%)\n\nTotal cost:         $444.85\nDaily average:      $148.28\nProjected monthly:  $4,449 (extrapolated from observed days)\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $4,429 short\n  Anthropic Max programmatic credit ($200.00):  $4,249 short\n  Anthropic API direct (pay-as-you-go):           $4,449\n  Codex via ChatGPT Plus ($20.00):              $4,429 short\n  Codex via ChatGPT Pro ($200.00):               $4,249 short\n\nCheapest if mixed:\n  Max subscription + API overflow: $4,449 (saves $0.00 vs. pure API)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n",
+        "warnings": []
+      },
+      "status": 200
+    },
+    "GET /costs no pricing": {
+      "body": {
+        "exit_code": 0,
+        "stderr": "WARNING: token_pricing.json not found; subscription comparison unavailable.\n",
+        "stdout": "=== Token Usage: 2026-05 — quiet ===\nDays with activity: 1 / 31\nRCs shipped:        0\nTotal invocations:  1\n\nToken totals:\n  Input (new):                          500 tokens\n  Cache writes:                           0 tokens\n  Cache reads:                            0 tokens\n  Output:                               100 tokens\n\nBy agent (cost share):\n  PM      $0.05 (100%)  — 1 invocations/day avg\n\nBy model:\n  claude-sonnet-4-6            $0.05 (100%)\n\nTotal cost:         $0.05\nDaily average:      $0.05\nProjected monthly:  $1.50 (extrapolated from observed days)\n\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n",
+        "warnings": []
+      },
+      "status": 200
+    },
+    "GET /costs rc": {
+      "body": {
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "=== Token Usage: RC v1.2.0 — demo ===\nRC:                 v1.2.0\nTotal invocations:  55\n\nToken totals:\n  Input (new):                      125,000 tokens\n  Cache writes:                      10,000 tokens\n  Cache reads:                    3,400,000 tokens\n  Output:                            32,500 tokens\n\nBy agent (cost share):\n  CODER   $413.50 (93%)  — 45 invocations\n  TESTER  $29.20 (7%)  — 8 invocations\n  PM      $1.25 (0%)  — 2 invocations\n\nBy model:\n  claude-opus-4-8              $442.70 (100%)\n  claude-sonnet-4-6            $1.25 (0%)\n\nTotal cost:         $443.95\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $424 short\n  Anthropic Max programmatic credit ($200.00):  $244 short\n  Anthropic API direct (pay-as-you-go):           $443.95\n  Codex via ChatGPT Plus ($20.00):              $424 short\n  Codex via ChatGPT Pro ($200.00):               $244 short\n\nCheapest if mixed:\n  Max subscription + API overflow: $443.95 (saves $0.00 vs. pure API)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n",
+        "warnings": []
+      },
+      "status": 200
+    },
+    "GET /costs unknown project": {
+      "body": {
+        "exit_code": 1,
+        "stderr": "ERROR: project directory not found: <ROOT>/projects/nope\n",
+        "stdout": "",
+        "warnings": []
+      },
+      "status": 500
+    },
+    "GET /metrics": {
+      "body": {
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked tracked from v2.24.0\u001b[0m\n",
+        "warnings": []
+      },
+      "status": 200
+    },
+    "GET /metrics all projects": {
+      "body": {
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked tracked from v2.24.0\u001b[0m\nNo data\n\u001b[0;36m\u001b[1m=== RC Metrics: fresh ===\u001b[0m\n\n  \u001b[2m(no releases yet)\u001b[0m\n\n",
+        "warnings": []
+      },
+      "status": 200
+    },
+    "GET /metrics json": {
+      "body": [
+        {
+          "cache_read_pct": 0.0,
+          "tasks": 3,
+          "tokens_in": 1000,
+          "tokens_out": 500,
+          "version": "v1.0.0"
+        },
+        {
+          "blocked_seconds": 0.0,
+          "cache_read_pct": 76.9,
+          "est_cost": 3.4,
+          "tasks": 2,
+          "tokens_in": 120000,
+          "tokens_out": 30000,
+          "version": "v1.1.0",
+          "wall_seconds": 5700.0
+        },
+        {
+          "blocked_seconds": 2700.0,
+          "cache_read_pct": 73.4,
+          "est_cost": 443.954,
+          "tasks": 5,
+          "tokens_in": 1234567,
+          "tokens_out": 32500,
+          "version": "v1.2.0",
+          "wall_seconds": 7230.0
+        },
+        {
+          "blocked_seconds": 74040.0,
+          "tasks": 1,
+          "tokens_in": 10,
+          "tokens_out": 5,
+          "version": "v0.9.0",
+          "wall_seconds": 600.0
+        }
+      ],
+      "status": 200
+    },
+    "GET /metrics json last": {
+      "body": [
+        {
+          "blocked_seconds": 74040.0,
+          "tasks": 1,
+          "tokens_in": 10,
+          "tokens_out": 5,
+          "version": "v0.9.0",
+          "wall_seconds": 600.0
+        }
+      ],
+      "status": 200
+    },
+    "GET /metrics last": {
+      "body": {
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 2) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n",
+        "warnings": []
+      },
+      "status": 200
+    },
+    "GET /metrics per agent": {
+      "body": {
+        "exit_code": 1,
+        "stderr": "ERROR: Unknown argument: --per_agent\nUsage: <TEAM>/scripts/dashboard/show-metrics.sh [--project <name>] [--last N] [--per-agent] [--no-color] [--kanban-root <path>]\n",
+        "stdout": "",
+        "warnings": []
+      },
+      "status": 500
+    }
+  }
+}

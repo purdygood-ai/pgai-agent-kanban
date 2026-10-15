@@ -1,0 +1,164 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.13.1 is a five-item bug bundle: refresh the engine-baseline wake-log golden\n(BUG-0213), convert the three `cm/release.sh` census Locator Index entries from\nline numbers to named anchors (BUG-0215), route the gated runners' RC-branch\ndetection through a shared prefix helper so the shell and Python halves agree on\nan unconfigured install (BUG-0211), and clear shipped comments that point at the\nunshipped `requirements/` directory or cite a real internal bug number, plus the\nlint patterns that keep them out (BUG-0212, BUG-0214). Verification read the full\n`ai_main..ai_rc/v2.13.1` diff (46 files, +531/-157), ran both gated runners with\ncoverage, executed every acceptance criterion of all five bundled bug reports as\na command, and behaviorally exercised the two pieces of guard logic this RC\ntouched (the census anchor's line-shift immunity and the new provenance lint\npatterns) by triggering their failure modes rather than reading the code. Both\ngated runners exit 0 and both findings files are empty. Every acceptance\ncriterion of every bundled item passes. One pre-existing defect unrelated to the\nbundle surfaced in the Step 6.11 spot-check and is filed as BUG-0216; it is why\nthe recommendation is SHIP-WITH-CONCERNS rather than PASS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0213 — engine-baseline wake-log golden refreshed",
+      "heading": "Finding 1: BUG-0213 — engine-baseline wake-log golden refreshed",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe golden at `team/tests/fixtures/engine-baseline/wake-log.txt` now carries the\nfour `config_loader: load_config: [release] ... applying documented default ...`\nnarration lines, and `git diff ai_main..ai_rc/v2.13.1` on that file contains\nthose four added lines and nothing else (acceptance 3). The gated integration\nrunner exits 0 (acceptance 1) and\n`tests/integration/test_engine_behavior_baseline_harness.py` reports `..` — 2\npassed (acceptance 2). The gated unit runner exits 0 (acceptance 4).\n`team/scripts/lib/config_loader.sh` is untouched by the diff, so the narration\nitself was not weakened to make the lock green.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0215 — `cm/release.sh` census entries converted to named anchors",
+      "heading": "Finding 2: BUG-0215 — `cm/release.sh` census entries converted to named anchors",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 team/scripts/lint_gate_census_compliance.py` reports\n`OK -- 34 file(s) checked, 0 offenders.` with 111 anchored sites exempted\n(acceptance 1). All three Locator Index entries for `team/scripts/cm/release.sh`\nare now `path:token CLASS` form — `operator-force-reason-required-01`,\n`operator-force-wake-context-01`, `release-git-step-failure-01` — and each token\nresolves to a real marker in the file (acceptance 2). The `git_step` refusal,\nwhich previously carried neither a class comment nor an emitter call and was\nexempt only through its stale line number, now carries a `BLOCK-WORTHY` class\ncomment, a `pgai_emit_error_contract` call with all three fields populated, and\nits own anchor. The unit runner exits 0 and\n`${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-unit.json` contains\n`\"findings\": []` — no `gate_census_compliance` entries (acceptance 3).\n\n**Behavioral verification (Step 6.5).** Structural checks alone would not show\nthat the anchors actually buy line-movement immunity, so the failure mode was\ntriggered in a throwaway `git archive` copy of the RC:\n\n- Inserting five filler lines near the top of `cm/release.sh` moved the three\n  `exit 1` sites from 171/189/264 to 176/194/269. The census lint stayed at\n  `0 offenders` — the exact edit shape that produced BUG-0215 no longer produces\n  a finding.\n- Deleting the new `# CENSUS-ANCHOR: release-git-step-failure-01` marker made the\n  lint report that site again (`team/scripts/cm/release.sh:274 -- refusal site is\n  missing a call to the dual-channel error-contract emitter`), confirming the\n  exemption is the marker's doing and not an unconditional pass.\n- Restoring the marker and deleting its Locator Index line produced the same\n  finding — the token only exempts when both halves are present, as SOP.md\n  requires.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0211 — gated-runner RC-branch prefix fallback",
+      "heading": "Finding 3: BUG-0211 — gated-runner RC-branch prefix fallback",
+      "level": 3,
+      "body": "**Category:** pass\n\n`pp_rc_branch_prefix()` was added to `team/scripts/lib/project_paths.sh` with\n`PP_RC_BRANCH_PREFIX_DEFAULT=\"ai_\"`, and both runners now call it with\n`${PGAI_PROJECT_NAME:-pgai-agent-kanban}` instead of reading\n`${TEAM_ROOT}/projects/pgai-agent-kanban/project.cfg` by hardcoded path\n(acceptance 2). Resolution was verified against six sandbox kanban roots, each\nbuilt under `$PGAI_AGENT_KANBAN_TEMP_DIR` with `PGAI_AGENT_KANBAN_ROOT_PATH`\nrepointed, never against the live install:\n\n| Sandbox root | `pp_rc_branch_prefix` |\n|---|---|\n| empty root, no `projects.cfg` | `ai_` |\n| project dir present, no `project.cfg` | `ai_` |\n| `project.cfg` present, no `branch_prefix` key | `ai_` |\n| `branch_prefix = \"\"` | `` (empty) |\n| `branch_prefix =` (bare empty) | `` (empty) |\n| `branch_prefix = zz_` | `zz_` |\n\nThe assembled regex was then matched against branch names, reproducing the whole\nrunner block:\n\n| Root | Regex | `ai_rc/v2.13.1` | `rc/v2.13.1` | other |\n|---|---|---|---|---|\n| no `project.cfg` | `^(rc/\\|ai_rc/)` | MATCH | MATCH | `feature/x` NO-MATCH |\n| `branch_prefix = \"\"` | `^(rc/)` | NO-MATCH | MATCH | — |\n| `branch_prefix = zz_` | `^(rc/\\|zz_rc/)` | NO-MATCH | MATCH (`rc/v1.0.0`), MATCH (`zz_rc/v1.0.0`) | — |\n\nThat is acceptance 1 (unconfigured install still enters RC mode for an\n`ai_rc/*` HEAD, agreeing with `lint_changelog_freshness._resolve_branch_prefix()`,\nwhich returns `'ai_'` under the same roots) and acceptance 3 (bare `rc/` always\nmatches; a deliberately empty configured prefix gets `rc/` only).\n\nThe production shape was exercised too, not just the sandbox: in this detached-HEAD\nworktree `git symbolic-ref --short HEAD` is empty, the `--points-at HEAD` fallback\nresolves `ai_rc/v2.13.1`, the regex matches, and the unit run's CHANGELOG gate\nreports `lint_changelog_freshness: ok — CHANGELOG.md is fresh` with\n`changelog_freshness: OK`. Both gated runners exit 0 (acceptance 4).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0212 — shipped comments no longer point at unshipped `requirements/`",
+      "heading": "Finding 4: BUG-0212 — shipped comments no longer point at unshipped `requirements/`",
+      "level": 3,
+      "body": "**Category:** pass\n\n`grep -rn 'requirements/v[0-9]' team/scripts/ team/pgai_agent_kanban/ install.sh`\nreturns nothing outside `team/tests/` (acceptance 1). The 38 rewritten headers\nwere sampled (`lib/wake_task_transition.sh`, `lib/discovery_bundle.sh`,\n`lib/discovery.sh`, `lib/cm/release_known_issue.sh`, `lint_engine_size_dupe.py`,\n`lint_lib_function_dedupe.py`, `lint_governance_byte_budgets.sh`) and each states\nits reason inline — the shared per-file line ceiling, the split-out, the\ninvariant — without naming an internal release or a document the reader cannot\nopen (acceptance 2). `python3 team/scripts/lint_comment_provenance.py` reports\n`OK — 0 findings across 569 file(s)` and exits 0, and the diff adds no new\n`# provenance-allowlist:` marker anywhere (acceptance 4). Both gated runners exit\n0 (acceptance 5).\n\n**Behavioral verification of the two new lint patterns (acceptance 3, Step 6.5).**\nRather than trusting the added unit cases, three files were planted in a\nthrowaway directory and scanned with `--code-dirs`:\n\n| Planted comment | Result |\n|---|---|\n| `# Rationale lives in the plan (see requirements/v9.9.9-widget-split.md).` | exit 1, finding — correct |\n| `# Rationale recorded in docs/audits/v9.9.9-widget-split.md, which ships.` | exit 0, no finding — correct |\n| `# Split out during v9.9.9-widget-split to stay under the line ceiling.` | exit 1, finding — correct |\n\nThe eight added unit cases in `team/tests/unit/test_lint_comment_provenance.py`\ncover the same two patterns plus the `.md`-filename-value, the\n`match this pattern` format-description, the release-notes prose exemption for\nthe bare slug (but not for the path form), and the `team/tests/` Exception 7\nlabel set. Read in full; they assert the behavior, not the implementation.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0214 — `defer_scope.sh` no longer cites a real bug number",
+      "heading": "Finding 5: BUG-0214 — `defer_scope.sh` no longer cites a real bug number",
+      "level": 3,
+      "body": "**Category:** pass\n\n`grep -n 'BUG-0107' team/scripts/dashboard/lib/defer_scope.sh` returns nothing\n(acceptance 2). `python3 team/scripts/lint_comment_provenance.py` exits 0 with\n`OK` and 0 offenders (acceptance 1). The comment is a rewording, not a deletion —\nit still explains that a bug filed as `BUG-NNNN-some-title.md` renders as the\ncard `BUG-NNNN` and therefore why the deferred-ID set has to speak the compact\nform (acceptance 3). The unit runner exits 0 (acceptance 4).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "requirements-doc acceptance criteria",
+      "heading": "Finding 6: requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"Each bundled item is addressed in the implementation\" — Findings 1-5 above;\n  every acceptance criterion of all five bundled bug reports was executed as a\n  command and passed.\n- \"All Python files compile cleanly\" — `py_compile` on every changed `.py`, then\n  `python3 -m compileall -q team/pgai_agent_kanban team/scripts` — OK.\n- \"All bash files pass syntax check\" — `bash -n` on every changed `.sh` (26\n  files) and on every `.sh` under `team/scripts/` — 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "census anchor markers that no Locator Index entry names",
+      "heading": "Finding 7: census anchor markers that no Locator Index entry names",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (inventory-accuracy only; no runtime behavior is affected, and every affected refusal still refuses correctly)\n**Regression:** no (`ai_main` carries 21 unpaired markers; this RC reduced the count to 19 and introduced none of them)\n**Integrity Damage:** no\n**Filed As:** BUG-0216 (Path C-A — filed as BUG; code defect / regression / test failure)\n\nFound in the Step 6.11 spot-check under the \"regressions of prior gaps\" category\n(the BUG-0196 -> BUG-0215 lineage). 19 `# CENSUS-ANCHOR: <token>` markers in the\nshipped tree have no matching `path:token CLASS` line in the census's fenced\n`CENSUS-LOCATOR-INDEX` block. Two of them sit in files the lint scans:\n`team/scripts/run-unit-tests.sh:dockerfile-static-lint-01` (line 234) and\n`team/scripts/lint_engine_size_dupe.py:engine-size-dupe-01` (line 723).\n`team/SOP.md` (\"Writing a compliant anchor\") states that neither half inventories\na site on its own, that \"the lint reports each half-authored anchor as its own\nfinding\", and that the lint \"reconciles the census against the tree in both\ndirections\". The shipped `lint_gate_census_compliance.py` implements only one\nfinding kind — missing class comment and/or missing dual-channel emitter — and\nuses the parsed Locator Index solely to build an exemption set\n(`_resolve_anchor_marker_lines()` returns the empty set when a file has no token\nentries). There is no marker-to-index reconciliation code path, so the lint\nprints `0 offenders` on a tree carrying two half-authored anchors in scanned\nfiles. Several of the 19 are narrated in census prose (`engine-size-dupe-01` at\n`docs/blocking-site-census.md:374`, `dockerfile-static-lint-01` in the row-54\ntable at line 152) but prose is not the machine-read index.\n\nThis does not affect this RC's deliverables and does not weaken any refusal: all\n19 sites still refuse, and the two in scanned files pass the lint today on their\nown inline class comment and emitter call. What is lost is inventory truth — a\nreader or a gate-authoring agent following SOP.md reads a marker as \"inventoried\nand classified\", and for these sites the index makes no claim.",
+      "filed_as": "BUG-0216",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (inventory-accuracy only; no runtime behavior is affected, and every affected refusal still refuses correctly)",
+        "regression": "no (`ai_main` carries 21 unpaired markers; this RC reduced the count to 19 and introduced none of them)",
+        "filed_as": "BUG-0216 (Path C-A — filed as BUG; code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

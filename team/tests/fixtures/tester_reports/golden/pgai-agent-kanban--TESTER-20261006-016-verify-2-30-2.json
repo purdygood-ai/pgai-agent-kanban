@@ -1,0 +1,248 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "This report verifies `ai_rc/v2.30.2` (commit 048cdd7e) against `requirements/v2.30.2-bugfix-bundle-20261006.md`. The bundle has two items. BUG-0567 is the regression: four bare `python3 -m pgai_agent_kanban` calls broke the `pp_run_ops` sweep test and turned the gated unit runner red. BUG-0568 is the hygiene ride-along: `wake_driver_invoke.sh` was at 805 lines, over the 800-line engine ceiling.\n\nBoth bugs are fixed, and the fixes behave as specified. Both gated runners exit 0 with zero lint findings. A before/after harness built from `ai_main` and the RC shows the API port resolution, the dashboard HALT-AFTER describer, and the release-spend narration are byte-identical. The only difference is the remedy string, which was meant to change and now runs as pasted. Both guards fire when their original defect is reintroduced.\n\nA Step 6.11 spot-check of the HALT-AFTER spend path confirmed a defect that predates this RC. When a HALT-AFTER sentinel that is not yet due is armed at ship time, `cm/release.sh` aborts with exit 1 right after tagging. I reproduced this through the real `cm/release.sh` and filed it via Path C-A as BUG-0569 (medium, Regression: no). No sentinel is armed in the live kanban now, so the v2.30.2 ship itself is not exposed.\n\nAgent: tester. Model: claude-opus-5-5.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "AC1 — each bundled item is addressed",
+      "heading": "Finding 1: AC1 — each bundled item is addressed",
+      "level": 4,
+      "body": "**Category:** pass\n\nBUG-0567: all four sites now go through `pp_run_ops`, and no exemption was added. `test_pp_run_ops_sweep.py` is unchanged from `ai_main`, so the sweep was not weakened. `grep -rnE 'python3[[:space:]]+-m[[:space:]]+pgai_agent_kanban' team/scripts` hits only `lib/pp_run_ops.sh` (a comment) and `generate-icd.sh`, and both are in the existing `_EXEMPT_SUFFIXES`. The sweep test passes as part of the green unit runner, and also on its own via `run-unit-tests.sh --files tests/unit/test_pp_run_ops_sweep.py` (exit 0, 4 passed).\n\nBUG-0568: `wc -l team/scripts/lib/wake_driver_invoke.sh` = 767 (was 805). The classifier `_wd_is_safeguard_refusal` moved verbatim into the new stage `team/scripts/lib/wake_safeguard_refusal.sh` (66 lines, mode 755). That stage is registered in `ENGINE_FILES`, and `wake_driver_invoke.sh` sources it itself. The ceiling and allow-list are unchanged. Neither runner's findings file has an `engine_size_dupe` entry (both files have 0 findings). `lint_engine_size_dupe.py` exits 0 on the RC.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "AC2 — all Python files compile cleanly",
+      "heading": "Finding 2: AC2 — all Python files compile cleanly",
+      "level": 4,
+      "body": "**Category:** pass\n\nAll 775 tracked `.py` files compiled in memory with 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "AC3 — all bash files pass syntax check",
+      "heading": "Finding 3: AC3 — all bash files pass syntax check",
+      "level": 4,
+      "body": "**Category:** pass\n\nAll 322 tracked bash files (`*.sh` plus files with a bash/sh shebang) pass `bash -n` with 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0567 behaviour preserved (port, describer text, exit codes)",
+      "heading": "Finding 4: BUG-0567 behaviour preserved (port, describer text, exit codes)",
+      "level": 4,
+      "body": "**Category:** pass\n\nI built installed-layout sandbox roots from `git archive ai_main team` and from the RC, and ran each under `env -i` from a foreign working directory.\n- Port resolution: a listener held the port so `api-server.sh status` would name the port it probed. The probed port is identical on both trees for the kanban.cfg port, for the kanban.cfg port with a decoy `pgai_agent_kanban` package first on PYTHONPATH, and for the `PGAI_API_PORT` override.\n- Malformed `kanban.cfg`: both trees exit 1 with `api-server.port.unresolved`.\n- Remedy text: this is the only output that differs, and the change was intended. The RC remedy now names `bash <root>/scripts/lib/pp_run_ops.sh pgai_agent_kanban.api.config port`. Pasted as printed, it reproduces the `MissingSectionHeaderError` (exit 1), and after the config is repaired it prints `8411` (exit 0).\n- `dashboard_halt_describe_event`, for tokens `rc:v2.9.15`, `coder`, `rc` and empty, each with and without the decoy: byte-identical output and rc=0 on both trees.\n- `cm_release_spend_halt_after_sentinel` under `set -euo pipefail`, with the evaluator stubbed to promote, for version-pinned and event-pinned tokens with and without the decoy: byte-identical narration and rc=0 on both trees.\n\nThe CODER-013 targeted list (`test_api_server_lifecycle_bash.py`, `test_bash_facing_python_clis.py`, `test_posture_bar_truth.py`) passes: exit 0, 72 passed. The new integration test `test_pp_run_ops_routed_sites.py` exercises the real breaking conditions (installed layout, foreign cwd, decoy on PYTHONPATH), not a sanitized stand-in. It passes in the suite and in a targeted run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0567 guard fires on the original failure mode",
+      "heading": "Finding 5: BUG-0567 guard fires on the original failure mode",
+      "level": 4,
+      "body": "**Category:** pass\n\nIn a `git clone` of the RC, I put the bare `python3 -m pgai_agent_kanban.halt_after.describe` call back at `halt_scope.sh:279`. `test_pp_run_ops_sweep.py` then fails and names that line (1 failed, 3 passed). With the file restored, all 4 pass.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0568 behaviour preserved and guard confirmed",
+      "heading": "Finding 6: BUG-0568 behaviour preserved and guard confirmed",
+      "level": 4,
+      "body": "**Category:** pass\n\n- The `_wd_is_safeguard_refusal` body taken from `ai_main`'s `wake_driver_invoke.sh` is byte-identical (`cmp`) to the body in the new stage.\n- Sourcing `wake_driver_invoke.sh` on its own in a sandbox defines `_wd_is_safeguard_refusal`, `_wd_build_governance_line` and `pp_run_ops`. Six probe strings classify as expected.\n- The only production loader is `wake_driver.sh:141`. `install.sh` installs the whole `team/scripts` tree, so the new stage ships.\n- The token-capture `json_field` reads are not touched by the diff.\n- The CODER-014 targeted list plus `test_wake_telemetry_safeguard_retry.py` passes: exit 0, 102 passed.\n- Guard: `lint_engine_size_dupe.py` on the `ai_main` tree reports `lib/wake_driver_invoke.sh -- 805 lines (ceiling: 800)` (exit 3), and on the RC tree it exits 0.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Pre-flight, worktree, release-state, prerequisite graph (Steps 2, 3, 6.1, 6.10)",
+      "heading": "Finding 7: Pre-flight, worktree, release-state, prerequisite graph (Steps 2, 3, 6.1, 6.10)",
+      "level": 4,
+      "body": "**Category:** pass\n\n- Step 2: 618 DONE tasks name a feature branch, and none of those branches exists locally (deleted after merge), so the checks pass trivially.\n- Step 3: HEAD 048cdd7e equals `ai_rc/v2.30.2`. The checkout is clean and there are no stashes.\n- Step 6.1: `pp_last_released_version` = v2.30.1, and `semver_gt v2.30.2 v2.30.1` is true. `## Last Released` is well-formed.\n- Step 6.10: CM-015 → CODER-013/014 → TESTER-016 → CM-018. No cycles and no collisions.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Synthetic release simulation (Step 6.8)",
+      "heading": "Finding 8: Synthetic release simulation (Step 6.8)",
+      "level": 4,
+      "body": "**Category:** pass\n\nThe diff touches `team/scripts/lib/cm/release_halt_after_spend.sh`, which runs in the release close cycle. `run-integration-tests.sh --files tests/integration/test_cm_release_synthetic.py tests/integration/test_halt_after_rc_close_gate.py tests/integration/test_pp_run_ops_routed_sites.py` exits 0 with 26 passed. All three files also pass inside the green certification run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Constraint, skip-gate and coding-standards checks (Steps 6.9, 6.13, 6.14)",
+      "heading": "Finding 9: Constraint, skip-gate and coding-standards checks (Steps 6.9, 6.13, 6.14)",
+      "level": 4,
+      "body": "**Category:** pass\n\n- Naming and provenance: the added lines carry no bug, task, RC or version citations, and nothing that looks like a secret.\n- Skip gate: `lint_skip_bug_gate` is OK in both runner pre-flights. The only new skip is a guarded-binary `narrate_binary_skip`, not a deferral.\n- Coding standards: the new stage is a sourced library with a documented header (no `--help` owed), and the classifier still has exactly one definition in the tree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Pre-existing — release.sh aborts after tagging when a not-yet-due HALT-AFTER is armed",
+      "heading": "Finding 10: Pre-existing — release.sh aborts after tagging when a not-yet-due HALT-AFTER is armed",
+      "level": 4,
+      "body": "**Category:** bug (pre-existing; Step 6.11 spot-check, untested mechanism)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (release-pipeline path; recurs on every ship while a not-yet-due sentinel is armed)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0569-halt-after-errexit-aborts-release (Path C-A — filed as BUG: code defect)\n**Filed By:** TESTER (autonomous Path C) — when a HALT-AFTER sentinel is armed but not yet due at ship time, the release script dies right after tagging, because the HALT-AFTER evaluator wrapper turns \"exit on error\" back on just before returning its non-zero \"not yet\" answer.\n\n`pgai_halt_after_run` in `team/scripts/lib/halt_after_invoke.sh` (lines 46–55) runs `set -e` immediately before `return \"$PGAI_HALT_AFTER_EXIT\"`. The caller, `cm_release_spend_halt_after_sentinel`, wraps the call in `set +e ... set -e`, but that cannot help: the callee has already switched errexit back on when it returns non-zero. A `set -e` shell such as `cm/release.sh` therefore exits on the spot, and the documented \"not yet drained → return 0\" branch never runs.\n\nEvidence:\n1. I called the real functions under `set -euo pipefail` with a stub evaluator that exits 1. The shell exits 1 after printing only the Step 12c header, on both `ai_main` and the RC.\n2. A scratch probe in a throwaway clone drove the real `cm/release.sh` through `test_halt_after_rc_close_gate.py`'s `_ship_one_release`, shipping v0.1.0 with `rc:v0.9.0` armed. Exit code 1. The last step printed was 12c. The tag had already been created (Step 13a), and release-state had been updated (Step 12). Steps 13c, 13d, 14, 15, 16 and 16b never ran, so bundle and bug statuses stayed `running` and nothing was stamped Fixed In. HALT-AFTER remained.\n\n`halt_after_invoke.sh` is unchanged by this RC. CODER-013 noticed the issue and left it out of scope; I reproduced it before filing. Existing release-level tests cover only the promote path.\n\nNot exercised by this ship: no HALT-AFTER is armed at root or project scope in the live kanban. Workaround: do not arm a HALT-AFTER for a later version while an earlier release is shipping. Medium under SOP-core's calibration (a real defect that is not exercised today, has a workaround, and predates the RC). It is not `high`.",
+      "filed_as": "BUG-0569",
+      "filed_by": "TESTER (autonomous Path C) — when a HALT-AFTER sentinel is armed but not yet due at ship time, the release script dies right after tagging, because the HALT-AFTER evaluator wrapper turns \"exit on error\" back on just before returning its non-zero \"not yet\" answer.",
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing; Step 6.11 spot-check, untested mechanism)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (release-pipeline path; recurs on every ship while a not-yet-due sentinel is armed)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0569-halt-after-errexit-aborts-release (Path C-A — filed as BUG: code defect)",
+        "filed_by": "TESTER (autonomous Path C) — when a HALT-AFTER sentinel is armed but not yet due at ship time, the release script dies right after tagging, because the HALT-AFTER evaluator wrapper turns \"exit on error\" back on just before returning its non-zero \"not yet\" answer."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Autonomous operation criterion (Step 6.12)",
+      "heading": "Finding 11: Autonomous operation criterion (Step 6.12)",
+      "level": 4,
+      "body": "**Category:** pass\n\nAll five questions answer NO (detail under \"Autonomous criterion\" below).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

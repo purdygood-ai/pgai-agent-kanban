@@ -27,7 +27,7 @@ Design notes:
   - All scratch is contained under pytest's tmp_path (inherited via two_project_root
     or tmp_path fixture).  No bare /tmp paths appear in this file.
   - Test names describe the behavior under test; no bug IDs, version numbers, or
-    scaffolding labels appear in function names (SOP.md Anti-pattern 6).
+    scaffolding labels appear in function names (roles/TESTER.md Anti-pattern 6).
   - No order dependence: each test is fully self-contained and isolated.
   - Scrubbed-env + foreign-cwd tests (see TestCloseShForeignCwd and
     TestHaltUnhaltGlobalScrubbedEnv) simulate the wake's cron-shaped environment:
@@ -43,6 +43,7 @@ import os
 import pathlib
 import re
 import subprocess
+import time
 from typing import Optional
 
 import pytest
@@ -77,30 +78,23 @@ _INTAKE_SCRIPT = _SCRIPTS_DIR / "intake.sh"
 # ---------------------------------------------------------------------------
 
 
-def _run_operator(
-    script: pathlib.Path,
-    args: list[str],
+def _operator_env(
     kanban_root: pathlib.Path,
-    *,
     extra_env: Optional[dict] = None,
-    timeout: int = 30,
-) -> subprocess.CompletedProcess:
-    """Run an operator bash script against a temporary kanban tree.
+) -> dict:
+    """Build the environment an operator bash script runs under in these tests.
 
     Sets PGAI_AGENT_KANBAN_ROOT_PATH and PYTHONPATH so the script operates
     against the caller's temp tree and can resolve python3 -m pgai_agent_kanban.ops.
 
     Args:
-        script:      Absolute path to the bash script.
-        args:        Additional CLI arguments to pass to the script.
         kanban_root: Path to the temporary kanban root (from two_project_root
                      or equivalent fixture).  Must exist.
         extra_env:   Optional additional environment variables.  Caller wins
                      on collision.
-        timeout:     Subprocess timeout in seconds.
 
     Returns:
-        subprocess.CompletedProcess with returncode, stdout, stderr.
+        A fresh environment dict suitable for subprocess.run / subprocess.Popen.
     """
     base_env = dict(os.environ)
     base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
@@ -117,12 +111,38 @@ def _run_operator(
     base_env.pop("PGAI_DEV_TREE_PATH", None)
     if extra_env:
         base_env.update(extra_env)
+    return base_env
 
+
+def _run_operator(
+    script: pathlib.Path,
+    args: list[str],
+    kanban_root: pathlib.Path,
+    *,
+    extra_env: Optional[dict] = None,
+    timeout: int = 30,
+) -> subprocess.CompletedProcess:
+    """Run an operator bash script against a temporary kanban tree.
+
+    Environment construction is _operator_env's; see it for what is set.
+
+    Args:
+        script:      Absolute path to the bash script.
+        args:        Additional CLI arguments to pass to the script.
+        kanban_root: Path to the temporary kanban root (from two_project_root
+                     or equivalent fixture).  Must exist.
+        extra_env:   Optional additional environment variables.  Caller wins
+                     on collision.
+        timeout:     Subprocess timeout in seconds.
+
+    Returns:
+        subprocess.CompletedProcess with returncode, stdout, stderr.
+    """
     return subprocess.run(
         ["bash", str(script)] + args,
         capture_output=True,
         text=True,
-        env=base_env,
+        env=_operator_env(kanban_root, extra_env),
         cwd=str(kanban_root),
         timeout=timeout,
     )
@@ -143,8 +163,8 @@ def _run_operator_scrubbed_foreign_cwd(
     which must NOT be the kanban root.  No PYTHONPATH is set in the environment —
     pp_run_ops must derive PYTHONPATH from its own file location.
 
-    This shape exercises the production failure mode that BUG-0082 documented:
-    bare ``python3 -m pgai_agent_kanban.*`` invocations failed because PYTHONPATH
+    This shape exercises a production failure mode: bare
+    ``python3 -m pgai_agent_kanban.*`` invocations failed because PYTHONPATH
     was not set and the working directory was not the kanban root.  Scripts that
     route through pp_run_ops must pass this test; scripts that do not will fail.
 
@@ -420,7 +440,7 @@ class TestShowCommand:
             f"show.sh for intake key exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "BUG-0100" in result.stdout, (
-            f"Expected BUG-0100 to appear in show output for intake item.\nstdout: {result.stdout}"
+            f"Expected the intake item's bug identifier to appear in show output.\nstdout: {result.stdout}"
         )
         # Bug file must not have been mutated.
         assert bug_file.exists(), "show.sh must not delete the bug file."
@@ -898,6 +918,76 @@ class TestCloseCommand:
             f"Expected exit code 3 (not found); got {result.returncode}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+    def test_close_refuses_retired_superseded_state_and_writes_nothing(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """close.sh --state superseded exits 1 with a dual-channel refusal whose
+        remedy closes the item as wont-do; the bug file and its marker are
+        untouched."""
+        root = two_project_root
+        bug_file = _build_bug_file(root, "project_a", bug_id="BUG-0130", slug="close-superseded")
+        bug_key = "BUG-0130-close-superseded"
+        before = bug_file.read_text(encoding="utf-8")
+        marker_before = _read_bug_backlog_marker(root, "project_a", bug_key)
+
+        result = _run_operator(
+            _CLOSE_SCRIPT,
+            ["--project", "project_a", "--key", bug_key, "--state", "superseded"],
+            root,
+        )
+
+        assert result.returncode == 1, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        assert "closed" not in result.stdout
+        lines = result.stderr.splitlines()
+        assert "error:   close.invalid_state" in lines, result.stderr
+        assert any(line.startswith("message: ") for line in lines), result.stderr
+        remedy = next(line for line in lines if line.startswith("remedy: "))
+        assert f"--project project_a --key {bug_key} --state wont-do --note" in remedy, remedy
+        assert bug_file.read_text(encoding="utf-8") == before
+        assert _read_bug_backlog_marker(root, "project_a", bug_key) == marker_before
+
+    def test_close_with_state_wont_do_still_closes_an_intake_item(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """wont-do, one of the two closed states, still closes a bug."""
+        root = two_project_root
+        bug_file = _build_bug_file(root, "project_a", bug_id="BUG-0131", slug="close-wont-do")
+        bug_key = "BUG-0131-close-wont-do"
+
+        result = _run_operator(
+            _CLOSE_SCRIPT,
+            ["--project", "project_a", "--key", bug_key, "--state", "wont-do", "--note", "duplicate"],
+            root,
+        )
+
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        assert "## Status\nwont-do\n" in bug_file.read_text(encoding="utf-8")
+        assert _read_bug_backlog_marker(root, "project_a", bug_key) == "x"
+
+    def test_close_help_offers_only_the_closed_states(self, two_project_root: pathlib.Path) -> None:
+        """close.sh --help lists done and wont-do and never offers superseded."""
+        result = _run_operator(_CLOSE_SCRIPT, ["--help"], two_project_root)
+
+        assert result.returncode == 0, result.stderr
+        assert "superseded" not in result.stdout.lower()
+        assert "done" in result.stdout and "wont-do" in result.stdout
+
+    def test_close_help_describes_state_as_closed_states_and_names_both_refusals(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """--state reads done|wont-do (never the task-state list), and the help
+        names both refusals: an invalid --state and an unresolvable key."""
+        result = _run_operator(_CLOSE_SCRIPT, ["--help"], two_project_root)
+
+        assert result.returncode == 0, result.stderr
+        state_lines = [line for line in result.stdout.splitlines() if line.lstrip().startswith("--state")]
+        assert len(state_lines) == 1, result.stdout
+        assert "done|wont-do" in state_lines[0], state_lines[0]
+        assert "BACKLOG" not in result.stdout and "WAITING" not in result.stdout, result.stdout
+        assert "refuses only when the key" not in result.stdout, result.stdout
+        assert "close.invalid_state" in result.stdout, result.stdout
+        assert "ambiguous (exit 2)" in result.stdout and "not found (exit 3)" in result.stdout, result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -1426,6 +1516,119 @@ class TestIntakeCommand:
             "intake.sh must not overwrite an existing file."
         )
 
+    def test_intake_concurrent_depositors_of_one_basename_keep_first_landed_file(
+        self, two_project_root: pathlib.Path, tmp_path: pathlib.Path
+    ) -> None:
+        """Two intake.sh runs of one basename yield exactly one exit 0 and one exit 3.
+
+        The interleaving is forced, not left to the scheduler: depositor A's
+        Python child is held at the point between deposit_intake's pre-check
+        and its placement (a test-only ``sitecustomize`` on A's PYTHONPATH
+        wraps the copy step with a file-based barrier), depositor B runs to
+        completion inside that window, and only then is A released.  A's
+        placement must be refused with the no-clobber exit code, B's content
+        must be what survives, and no deposit temp file may remain.
+        """
+        root = two_project_root
+        bugs_dir = root / "projects" / "project_a" / "bugs"
+        bugs_dir.mkdir(parents=True, exist_ok=True)
+        basename = "BUG-0203-same-basename.md"
+
+        staged_a = tmp_path / "depositor_a" / basename
+        staged_b = tmp_path / "depositor_b" / basename
+        staged_a.parent.mkdir()
+        staged_b.parent.mkdir()
+        content_a = "# BUG-0203: depositor A\n\n## Status\nopen\n"
+        content_b = "# BUG-0203: depositor B\n\n## Status\nopen\n"
+        staged_a.write_text(content_a, encoding="utf-8")
+        staged_b.write_text(content_b, encoding="utf-8")
+
+        # Barrier files: the held child touches ``reached`` once it is past
+        # the pre-check, then spins until ``release`` appears.
+        barrier_dir = tmp_path / "barrier"
+        barrier_dir.mkdir()
+        reached = barrier_dir / "reached"
+        release = barrier_dir / "release"
+
+        shim_dir = tmp_path / "shim"
+        shim_dir.mkdir()
+        (shim_dir / "sitecustomize.py").write_text(
+            "import os\n"
+            "import shutil\n"
+            "import time\n"
+            "_barrier = os.environ.get('INTAKE_TEST_BARRIER_DIR')\n"
+            "if _barrier:\n"
+            "    _real_copy2 = shutil.copy2\n"
+            "    def _held_copy2(src, dst, *args, **kwargs):\n"
+            "        result = _real_copy2(src, dst, *args, **kwargs)\n"
+            "        open(os.path.join(_barrier, 'reached'), 'w').close()\n"
+            "        deadline = time.monotonic() + 30\n"
+            "        while not os.path.exists(os.path.join(_barrier, 'release')):\n"
+            "            if time.monotonic() > deadline:\n"
+            "                raise RuntimeError('barrier release never arrived')\n"
+            "            time.sleep(0.01)\n"
+            "        return result\n"
+            "    shutil.copy2 = _held_copy2\n",
+            encoding="utf-8",
+        )
+
+        env_a = _operator_env(
+            root,
+            {"INTAKE_TEST_BARRIER_DIR": str(barrier_dir)},
+        )
+        # The shim must precede team/ so the interpreter imports this
+        # sitecustomize; pp_run_ops keeps caller-set PYTHONPATH entries first.
+        env_a["PYTHONPATH"] = str(shim_dir) + os.pathsep + env_a["PYTHONPATH"]
+
+        proc_a = subprocess.Popen(
+            ["bash", str(_INTAKE_SCRIPT), "--project", "project_a", str(staged_a)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env_a,
+            cwd=str(root),
+        )
+        try:
+            deadline = time.monotonic() + 30
+            while not reached.exists():
+                if proc_a.poll() is not None:
+                    out, err = proc_a.communicate()
+                    pytest.fail(
+                        "depositor A exited before reaching the barrier "
+                        f"(rc={proc_a.returncode}).\nstdout: {out}\nstderr: {err}"
+                    )
+                assert time.monotonic() < deadline, "depositor A never reached the barrier"
+                time.sleep(0.01)
+
+            # A is past its pre-check and holding; B lands in that window.
+            result_b = _run_operator(
+                _INTAKE_SCRIPT,
+                ["--project", "project_a", str(staged_b)],
+                root,
+            )
+        finally:
+            release.touch()
+            out_a, err_a = proc_a.communicate(timeout=30)
+
+        assert result_b.returncode == 0, (
+            f"depositor B should succeed while A is held; got {result_b.returncode}.\n"
+            f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
+        )
+        assert proc_a.returncode == 3, (
+            f"depositor A should be refused with exit 3 (no clobber); got {proc_a.returncode}.\n"
+            f"stdout: {out_a}\nstderr: {err_a}"
+        )
+        assert "no clobber" in err_a, (
+            f"depositor A's refusal must name the no-clobber contract.\nstderr: {err_a}"
+        )
+        assert (bugs_dir / basename).read_text(encoding="utf-8") == content_b, (
+            "the first file to land (depositor B's) must survive intact"
+        )
+        leftovers = sorted(
+            n for n in os.listdir(bugs_dir) if n.startswith(".deposit_intake_tmp_")
+        )
+        assert leftovers == [], f"deposit temp files left behind: {leftovers}"
+
     def test_intake_prints_deposited_path_on_success(
         self, two_project_root: pathlib.Path, tmp_path: pathlib.Path
     ) -> None:
@@ -1702,7 +1905,7 @@ class TestHaltUnhaltGlobalScrubbedEnv:
 class TestScrubbedEnvCensusCloser:
     """The pp_run_ops-based close_item pathway succeeds under scrubbed env + foreign cwd.
 
-    This is the production failure shape from BUG-0082: the census closer
+    This is a production failure shape: the census closer
     in wake_common.sh calls pp_run_ops to invoke close_item.  When run from
     a cron environment (scrubbed env, foreign cwd, no PYTHONPATH), bare
     python3 -m invocations fail.  pp_run_ops resolves PYTHONPATH from its
@@ -1711,7 +1914,7 @@ class TestScrubbedEnvCensusCloser:
     These tests exercise the same pathway end-to-end by invoking close.sh
     (which sources pp_run_ops and calls close_item) under the same
     scrubbed-env shape the census closer runs in.  A passing test here
-    confirms that the failure mode from BUG-0082 is fixed and remains fixed.
+    confirms that this failure mode is fixed and remains fixed.
     """
 
     @pytest.mark.parametrize(
@@ -1743,10 +1946,10 @@ class TestScrubbedEnvCensusCloser:
         """close_item succeeds when PYTHONPATH is absent and cwd is foreign.
 
         This is the canonical scrubbed-env + foreign-cwd regression: the exact
-        environment shape that caused the production BUG-0082 failure.  close.sh
+        environment shape that caused a production failure.  close.sh
         routes through pp_run_ops, which sets PYTHONPATH correctly from its own
         file location regardless of the caller's environment.  Two independent
-        invocations exercise this: one framed as the BUG-0082 production
+        invocations exercise this: one framed as the original production
         reproduction, one framed as the "no PYTHONPATH required" corollary
         (pp_run_ops derives the own-tree root from BASH_SOURCE and constructs
         PYTHONPATH internally — the calling environment must not need to

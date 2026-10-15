@@ -17,6 +17,11 @@
 #        <root>/scripts/dashboard/<name>.sh (depth 2 below root)
 #   3. Sources <candidate>/shell-env when it exists, giving shell-env the
 #      opportunity to export PGAI_AGENT_KANBAN_ROOT_PATH.
+#   3.5. Sources <candidate>/claude-env when it exists — AFTER shell-env,
+#      always. claude-env carries Claude CLI runtime tuning (see
+#      claude-env_example); it is optional, and an absent file is a clean
+#      no-op. A claude-env with a bash syntax error fails this script loud
+#      rather than silently half-sourcing (see the refusal site below).
 #   4. If PGAI_AGENT_KANBAN_ROOT_PATH is STILL unset after the source
 #      attempt, emits a diagnostic message on stderr and returns 1 (which
 #      exits the calling script when that script runs under set -e).
@@ -107,10 +112,48 @@ if [[ -n "${_eb_candidate}" && -f "${_eb_candidate}/shell-env" ]]; then
     source "${_eb_candidate}/shell-env"
 fi
 
+# --- Source claude-env when present (AFTER shell-env; see claude-env_example) ---
+# claude-env carries Claude CLI runtime tuning -- a concern shell-env,
+# secrets, and kanban.cfg do not own (claude-env_example's header states the
+# four-file separation in full). It is optional -- most installs will never
+# create one -- and an absent file is a clean no-op: no error, no warning,
+# no output, no exit-status change, mirroring shell-env's own optional-file
+# idiom immediately above. It must be sourced strictly AFTER shell-env
+# because shell-env is what establishes PGAI_AGENT_KANBAN_ROOT_PATH and the
+# virtualenv -- a claude-env sourced first would have no root to resolve
+# against.
+#
+# A syntax error in claude-env is checked with `bash -n` BEFORE sourcing,
+# never discovered mid-source: `source` executes a script's earlier
+# top-level statements as it parses along, so sourcing a syntactically
+# broken file directly can silently half-configure the caller's
+# environment before the parser ever reaches the bad line. Refusing here is
+# BLOCK-WORTHY (docs/blocking-site-census.md): a half-sourced claude-env is
+# a state-corrupting failure a cron or pseudocron firing has no human
+# present to notice, so the wake firing must stop rather than continue on a
+# partial, unverifiable environment. Note: naming the file's PATH below is
+# fine; this refusal never prints the VALUE of anything claude-env sets.
+if [[ -n "${_eb_candidate}" && -f "${_eb_candidate}/claude-env" ]]; then
+    _eb_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # shellcheck source=error_contract.sh
+    source "${_eb_lib_dir}/error_contract.sh"
+    if ! bash -n "${_eb_candidate}/claude-env" 2>/dev/null; then
+        pgai_emit_error_contract \
+            "env_bootstrap.claude_env_syntax_error" \
+            "claude-env at ${_eb_candidate}/claude-env has a bash syntax error and was not sourced." \
+            "Run: bash -n ${_eb_candidate}/claude-env -- fix the reported syntax error, then re-run this script."
+        # CENSUS-ANCHOR: env-bootstrap-claude-env-01
+        unset _eb_caller _eb_candidate _eb_dir _eb_walk _eb_base _eb_lib_dir
+        return 1
+    fi
+    # shellcheck source=/dev/null
+    source "${_eb_candidate}/claude-env"
+    unset _eb_lib_dir
+fi
+
 # --- Fail loud when the root is still unset after the source attempt ---
 # Partial remedy (docs/coding-standards.md "Gates prescribe, not just
-# diagnose", classified in docs/audits/v1.27.2-gate-remedy-census.md): the
-# candidate shell-env path is fully derivable and named below, but the
+# diagnose"): the candidate shell-env path is fully derivable and named below, but the
 # correct PGAI_AGENT_KANBAN_ROOT_PATH value for a non-standard install layout
 # is site-specific — only the operator knows it — so the fix command below is
 # a filled-in example the reader adapts, not a claimed universal literal.

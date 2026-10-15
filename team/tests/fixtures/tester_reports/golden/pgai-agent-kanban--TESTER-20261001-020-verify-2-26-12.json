@@ -1,0 +1,393 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "I verified RC `ai_rc/v2.26.12` (HEAD 87d83cc3) against `requirements/v2.26.12-bugfix-bundle-20261001.md`, which bundles BUG-0489 (version-divergence check ignores the branch prefix), BUG-0487 (verdict report and REST publish an mtime age as the lock age) and BUG-0488 (BUG-0481/0482 are missing `## Fixed In`). Three CODER tasks landed: 016, 017 and 018, each one work commit plus a `--no-ff` merge. Both gated runners exited 0. Every bundled code fix was exercised in a sandbox, covering both the original failure mode and the fixed case. All behaved as specified. One gap remains: BUG-0488's primary acceptance is a data action on the live bug files, the restamp of BUG-0481/0482. The RC shipped the code follow-up but did not perform that action, so both files still lack `## Fixed In`. This gap is filed via Path C (autonomous follow-up filing, non-blocking) as BUG-0490.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "RC integrity pre-flight (Step 2)",
+      "heading": "Finding 1: RC integrity pre-flight (Step 2)",
+      "level": 4,
+      "body": "**Category:** pass\n\nI scanned every DONE task under `projects/pgai-agent-kanban/tasks/` that names a feature branch. None of those branches still exists locally; all were deleted after merge, which passes both checks trivially. The cycle's three CODER merges are on the RC: d60d33d9 (016, work commit 7011200b), 96c93007 (017, work commit 2fc11b73), 87d83cc3 (018, work commit d199393c).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Worktree identity and cleanliness (Step 3)",
+      "heading": "Finding 2: Worktree identity and cleanliness (Step 3)",
+      "level": 4,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` = `git rev-parse ai_rc/v2.26.12` = 87d83cc3f37e7fde1295ea22a08f7ab27991b7dd. `git status --porcelain` is empty, and so is `git stash list`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "release-state sanity (Step 6.1)",
+      "heading": "Finding 3: release-state sanity (Step 6.1)",
+      "level": 4,
+      "body": "**Category:** pass\n\n`## Active RC` v2.26.12, `## Last Released` v2.26.11 (well-formed). `pp_last_released_version pgai-agent-kanban` returns v2.26.11, and `semver_gt v2.26.12 v2.26.11` is true. `## RC Opened By Task` CM-20261001-019-open-rc-2-26-12 matches the cycle's open-RC task.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "run-unit-tests.sh --coverage",
+      "heading": "Finding 4: run-unit-tests.sh --coverage",
+      "level": 4,
+      "body": "**Category:** pass\n\n`UNIT_EXIT=0`. Lint pre-flight OK, sentinel_leak OK, scratch_sweep OK. Output: `/tmp/pgai_kanban_tmp/tester/TESTER-20261001-020/unit.log`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "run-integration-tests.sh --coverage",
+      "heading": "Finding 5: run-integration-tests.sh --coverage",
+      "level": 4,
+      "body": "**Category:** pass\n\n`INTEGRATION_EXIT=0`. Lint pre-flight OK, sentinel_leak OK. Output: `/tmp/pgai_kanban_tmp/tester/TESTER-20261001-020/integration.log`.\n\nCoverage is informational only (Step 5b), taken from the `totals` object in `/tmp/pgai_kanban_tmp/coverage/{unit,integration}.json`. Field names were checked against the generated files.\n- unit: line 78.27% (15216/19441 statements), branch 64.13% (3600/5614).\n- integration: line 12.75% (2478/19429 statements), branch 10.05% (564/5614).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Committed unprefixed VERSION plus prefixed tag reads as no divergence",
+      "heading": "Finding 6: Committed unprefixed VERSION plus prefixed tag reads as no divergence",
+      "level": 4,
+      "body": "**Category:** pass\n\nI ran a sandbox per the bug's reproduction: a git repo with committed `VERSION` v1.23.0 and annotated tag `ai_v1.23.0`, `branch_prefix = ai_`, VERSION stamped through `version_stamp.sh stamp_version_files`, and the check run with KANBAN_ROOT, PGAI_AGENT_KANBAN_ROOT_PATH and TEMP_DIR pointed at the sandbox. The RC logged `version-match ... installed=v1.23.0 matches dev=ai_v1.23.0 (branch_prefix='ai_' ignored); no divergence`. The same probe on an `ai_main` export reproduces the original defect: `report:version-divergence installed=v1.23.0 differs from dev git-describe=ai_v1.23.0`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Real version difference still reported; empty-prefix lane unchanged",
+      "heading": "Finding 7: Real version difference still reported; empty-prefix lane unchanged",
+      "level": 4,
+      "body": "**Category:** pass\n\nOn the RC:\n- `v1.22.0` + `ai_v1.23.0` (ai_): divergence, and the report names both raw values.\n- `v1.23.0` + `v1.23.0` (empty prefix): clean.\n- `v1.22.0` + `v1.23.0` (empty prefix): divergence.\n- `ai_v1.23.0` + `ai_v1.23.0` (ai_, the describe-fallback shape): clean.\n\nai_main gives the same results for all four, so there is no regression. An invalid `branch_prefix` narrates `could not be read; comparing without branch-prefix normalization` to stderr and stays report-only (exit 0).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Production-shape probe",
+      "heading": "Finding 8: Production-shape probe",
+      "level": 4,
+      "body": "**Category:** pass\n\nI ran the RC check with the live install's `VERSION` (v2.26.10) and the live dev tree `$HOME/develop/pgai-agent-kanban`, with every write confined to a sandbox root. It reported `comparing installed=v2.26.10 with dev=v2.26.11 ... DIVERGENCE DETECTED`. That is the correct real signal: the live install lags the shipped v2.26.11. It is not a finding against the RC. Header comment and test additions (production-shape cases beside the existing prefixed cases in `test_describe_tag_filter.py`) are present as required.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "verdict-report.sh --details publishes held_seconds from acquired_at",
+      "heading": "Finding 9: verdict-report.sh --details publishes held_seconds from acquired_at",
+      "level": 4,
+      "body": "**Category:** pass\n\nIn a sandbox, I seeded a lock with `acquired_at` 3h ago and touched it so the mtime was fresh. The result was `held_seconds=10801` and `age_seconds=1`. A record without `acquired_at` gave `held_seconds=none`, and a future `acquired_at` (clock skew) gave `held_seconds=0`. `why.sh --details` on the same sandbox renders `held: 3h 0m`, `held: acquired_at not recorded (pre-upgrade lock)` and `held: 0s`, so the two surfaces agree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "GET /verdicts?details=true carries the same value",
+      "heading": "Finding 10: GET /verdicts?details=true carries the same value",
+      "level": 4,
+      "body": "**Category:** pass\n\nI used a FastAPI TestClient against the RC app with the same sandbox and a loopback base_url. The response was `repo-wake-demo.lock held_seconds=10801 age_seconds=1` and `repo-legacy-demo.lock held_seconds=null`. The first attempt with the default `testserver` host was refused dual-channel (`api.host_not_loopback`), which is correct guard behavior.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "ICD contract handled as an additive minor bump",
+      "heading": "Finding 11: ICD contract handled as an additive minor bump",
+      "level": 4,
+      "body": "**Category:** pass\n\n`age_seconds` is unchanged and is now documented as refresh age. `held_seconds` was added. Both ICD_VERSION files read 1.12.0, `SUPPORTED` lists 1.12.0, `docs/api/icd.json` is JSON-equal to the frozen `baselines/icd-v1.12.0.json`, no earlier baseline changed, and `ICD_CHANGELOG.md` and `docs/operator-api.md` are updated in the same commit (Documentation Discipline).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "STUCK-LOCK wording decision recorded and correct",
+      "heading": "Finding 12: STUCK-LOCK wording decision recorded and correct",
+      "level": 4,
+      "body": "**Category:** pass\n\nThe `verdict.sh` header records the decision to keep the mtime heartbeat as the staleness clock. I triggered the guard with a stale lock (mtime 20h ago, `acquired_at` 30h ago). It renders `has not been refreshed for 20h 0m (held 30h 0m)`. Without `acquired_at` it renders `(acquired_at not recorded (pre-upgrade lock))`. Neither form calls the mtime age \"held\".",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Step 16b narration names done bugs lacking Fixed In",
+      "heading": "Finding 13: Step 16b narration names done bugs lacking Fixed In",
+      "level": 4,
+      "body": "**Category:** pass\n\nI ran `fixed_in_writeback stamp` from the RC on a scratch copy of the live bugs/ directory. It printed `Done bug without ## Fixed In:` for BUG-0481 and BUG-0482 only (2 of 328 bug files), and the result line stayed last with exit 0. The bugs/ tree hash was unchanged, so the narration is read-only. After the restamp on the copy, the narration printed nothing. A done bug whose `## Fixed In` holds only a template comment is also named. The finalizer prefixes each line with `[Step 16b]` and still parses the final `Fixed-In writeback:` line. The `restamp-fixed-in.sh` that the narration cites exists in both the RC and the live install.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "BUG-0481 and BUG-0482 still lack ## Fixed In on the live tree",
+      "heading": "Finding 14: BUG-0481 and BUG-0482 still lack ## Fixed In on the live tree",
+      "level": 4,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks; in practice one CM or operator command, since CODER cannot write live bug files)\n**Systemic Risk:** low (isolated data gap on two bug files)\n**Filed As:** BUG-0490-fixed-in-restamp-not-run (Path C-A, filed as BUG)\n**Filed By:** TESTER (autonomous Path C) — the two v2.26.10 bug files still have no Fixed In version because the restamp that BUG-0488 asked for was never run, even though this release closes BUG-0488.\n\nCriterion: BUG-0488 acceptance items 1 and 2 (\"BUG-0481 and BUG-0482 each contain `## Fixed In` followed by `v2.26.10`\"; the restamp re-run is idempotent), together with the bundle criterion \"Each bundled item is addressed in the implementation\". Expected: both files carry `## Fixed In` / `v2.26.10`. Actual: `grep -A2 '^## Fixed In'` on both live files prints nothing, and `## Status` is `done`. CODER-018 correctly did not write live data, which is outside its boundary. It shipped the optional narration instead and recorded the exact restamp command. On a scratch copy the command gives `2 stamped, 0 skipped`, then `0 stamped, 2 skipped`. This release's Step 13c will mark BUG-0488 `done` with its acceptance unmet, so BUG-0490 carries the data action forward. Severity is low: the effect is the CHANGELOG/Fixed In metadata of two already-fixed bugs, and nothing at runtime.",
+      "filed_as": "BUG-0490",
+      "filed_by": "TESTER (autonomous Path C) — the two v2.26.10 bug files still have no Fixed In version because the restamp that BUG-0488 asked for was never run, even though this release closes BUG-0488.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks; in practice one CM or operator command, since CODER cannot write live bug files)",
+        "systemic_risk": "low (isolated data gap on two bug files)",
+        "filed_as": "BUG-0490-fixed-in-restamp-not-run (Path C-A, filed as BUG)",
+        "filed_by": "TESTER (autonomous Path C) — the two v2.26.10 bug files still have no Fixed In version because the restamp that BUG-0488 asked for was never run, even though this release closes BUG-0488."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Bundle acceptance (Python compiles, bash syntax)",
+      "heading": "Finding 15: Bundle acceptance (Python compiles, bash syntax)",
+      "level": 4,
+      "body": "**Category:** pass\n\nAll 597 tracked `.py` files parse (`ast.parse`) and all 305 tracked `.sh` files pass `bash -n`, with no failures. The changed shell files keep their prior `set -euo pipefail` state (present in verdict-report.sh and release_finalize.sh both before and after; absent by design in sourced libs both before and after). No secrets appear in the added lines.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "Prereq dependency graph (Step 6.10)",
+      "heading": "Finding 16: Prereq dependency graph (Step 6.10)",
+      "level": 4,
+      "body": "**Category:** pass\n\nCM-20261001-019 (open RC) is followed by CODER 016, 017 and 018, each depending only on CM-019. TESTER-020 depends on all three, and CM-20261001-022 (release) is `[W]` waiting. No cycles, every ID exists, and there are no sequence collisions.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 17,
+      "label": "17",
+      "title": "Skip-cites-real-bug gate (Step 6.13)",
+      "heading": "Finding 17: Skip-cites-real-bug gate (Step 6.13)",
+      "level": 4,
+      "body": "**Category:** pass\n\nThe only skip markers added are two `skipif` guards on script-file existence in `test_describe_tag_filter.py`. Neither defers a fix and neither cites a bug ID. There are no `BUG-SKIP` placeholders.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 18,
+      "label": "18",
+      "title": "Coding standards and provenance (Step 6.14)",
+      "heading": "Finding 18: Coding standards and provenance (Step 6.14)",
+      "level": 4,
+      "body": "**Category:** pass\n\nThe BUG/version-shaped strings in added lines are test fixture values (`BUG-0031-done-unstamped` and similar), usage examples in comments (`e.g. \"v2.26.10\"`), and the ICD support-table row `| 1.12.0 | supported | v2.26.12 |`. All are sanctioned shapes. No new script was added without `--help`. Both gated runners report 0 lint findings.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

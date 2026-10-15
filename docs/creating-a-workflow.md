@@ -637,8 +637,8 @@ CM tags and pushes. When the release ships, every operator running
 ### Step 7 — Verify the plugin survives upgrade
 
 The upgrade-survival contract cuts both ways. Custom types under
-`$KANBAN_ROOT/workflows/<custom>/` survive an upgrade untouched — that
-is Goal 9 of v1.1.0. Shipped types are refreshed in place. Your new
+`$KANBAN_ROOT/workflows/<custom>/` survive an upgrade untouched.
+Shipped types are refreshed in place. Your new
 shipped plugin lives in the source tree at `team/workflows/my-new-type/`
 and lands in the live install at `$KANBAN_ROOT/workflows/my-new-type/`
 via the overlay copy on install and every subsequent upgrade.
@@ -646,10 +646,7 @@ via the overlay copy on install and every subsequent upgrade.
 The framework's own upgrade-survival tests verify this by running
 `upgrade.sh --force` against a sandbox root that contains both a
 shipped plugin and a fixture custom plugin, then asserting the shipped
-one refreshed while the custom one is byte-identical. If your new
-shipped plugin ships in the same release that introduced upgrade
-survival, add your plugin's name to the shipped-plugin refresh fixture
-so the test proves it comes across on upgrade.
+one refreshed while the custom one is byte-identical.
 
 ### That is the contributor path
 

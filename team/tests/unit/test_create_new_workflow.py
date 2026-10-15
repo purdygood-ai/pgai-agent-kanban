@@ -3,7 +3,7 @@ test_create_new_workflow.py
 ===========================
 Unit tests for the create_new_workflow generator.
 
-Covers the six scenarios required by the task spec:
+Covers six scenarios:
 
 (a) Generator refuses shipped type names (release, document, testing-only)
     with clear errors.
@@ -49,6 +49,18 @@ from pgai_agent_kanban.workflows.create_new_workflow import (  # noqa: E402
     _resolve_workflows_dir,
     create_new_workflow,
 )
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="create-new-workflow")
 
 
 # ---------------------------------------------------------------------------

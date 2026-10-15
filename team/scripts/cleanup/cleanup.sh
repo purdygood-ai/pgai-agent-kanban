@@ -6,8 +6,15 @@
 # Actions (full run, default):
 #   0. Purge trivial logs (small AND old) from $KANBAN_ROOT/logs/agents/
 #   1. Delete log files older than PGAI_CLEANUP_RETENTION_DAYS from PGAI_LOGS_DIR
-#   2. Delete DONE/WONT-DO task folders older than N days from PGAI_TASKS_DIR
-#   3. Archive requirements docs where Target Version <= Last Released
+#   2. Report DONE/WONT-DO task folders older than N days in PGAI_TASKS_DIR.
+#      Task folders are never deleted: finished tasks, bugs, priorities and
+#      shipped requirements leave the live project only through the archive
+#      run (scripts/archive.sh, also run after each release), which moves
+#      them to $KANBAN_ROOT/archive/<project>/ with a ledger row and can
+#      restore them. Nothing in that archive is deleted by cleanup.
+#   3. (none: requirements are archived by scripts/archive.sh, which also
+#      folds any projects/<p>/tasks/archive/requirements/ left by older
+#      installs into $KANBAN_ROOT/archive/<project>/)
 #   4. Rotate per-project debug logs whose mtime is from a previous UTC date
 #   5. Archive briefs older than N days from PGAI_BRIEFS_DIR
 #   6. Purge contents of PGAI_AGENT_KANBAN_TEMP_DIR (framework temp space)
@@ -21,35 +28,74 @@
 # With --temp-only:
 #   Runs ONLY the temp-dir purge (Step 6) and exits. Safe to run at any time;
 #   does NOT touch logs, task folders, archives, or any non-temp path.
-#   Purges all contents of PGAI_AGENT_KANBAN_TEMP_DIR without deleting
-#   the directory itself, so the temp root stays around for the next run.
+#   Purges the kanban-owned (allowlisted) contents of PGAI_AGENT_KANBAN_TEMP_DIR
+#   and of every project's temp dir without deleting the directories
+#   themselves, so the temp roots stay around for the next run. Entries
+#   outside the allowlist (lib/temp_purge.sh) are kept, and a task worktree
+#   under a project's worktrees/ is kept while that project's own task is
+#   WORKING, BLOCKED or TESTING. The wake locks are probed before the purge
+#   and again before each project's sweep; a held lock skips the purge.
+#
+# Without a project (no --project and PGAI_PROJECT_NAME unset or empty):
+#   Runs once per project registered in projects.cfg, in projects.cfg
+#   priority order, by re-invoking this script as `cleanup.sh --project <p>`
+#   with the same --dry-run / --trivial-only / --temp-only flags. Each
+#   per-project run is exactly the single-project run described above, with
+#   its own summary log. One result line per project is printed; a failing
+#   project does not stop the remaining ones. The exit status is 0 when every
+#   per-project run succeeded (or no project is registered) and otherwise the
+#   exit status of the first per-project run that failed. This is the mode
+#   the bare weekly cron line uses.
+#   --trivial-only and --temp-only iterate the same way. Their purges are
+#   framework-wide (batch logs under $KANBAN_ROOT/logs/agents/, and the
+#   install-wide plus every project's temp dir), so the first project's run
+#   does the work and later runs find nothing left to remove.
 #
 # Usage:
-#   cleanup.sh --project <name> [--dry-run] [--trivial-only] [--temp-only]
+#   cleanup.sh [--project <name>] [--dry-run] [--trivial-only] [--temp-only]
+#   cleanup.sh --help
 #
 # Options:
-#   --project <name>  Project name (required when PGAI_PROJECT_NAME is not set)
+#   --project <name>  Clean only this project. When omitted (and
+#                     PGAI_PROJECT_NAME is unset or empty), run once per
+#                     project registered in projects.cfg
 #   --dry-run         Preview actions without making any changes
 #   --trivial-only    Run only the trivial-log purge (Step 0) and exit
 #   --temp-only       Run only the framework temp-dir purge (Step 6) and exit
+#   --help            Print this usage message and exit 0. Short-circuits
+#                     before any filesystem action — no logs, archives, or
+#                     temp purge run.
 #
-# Configuration (set in config.cfg or environment):
-#   PGAI_CLEANUP_RETENTION_DAYS        Days to retain logs (default: 30)
-#   PGAI_CLEANUP_TASK_RETENTION_DAYS   Days to retain terminal task folders before deletion
-#                                      (default: 7). Independent of log retention.
+# Configuration (kanban.cfg [cleanup], or the environment, which wins):
+#   PGAI_CLEANUP_RETENTION_DAYS        Days to retain logs (default: 30).
+#                                      kanban.cfg [cleanup] retention_days; the
+#                                      deprecated [paths] cleanup_retention_days
+#                                      is used when that key is absent, with one
+#                                      warning per run.
+#   PGAI_CLEANUP_TASK_RETENTION_DAYS   Age in days past which Step 2 counts a terminal task
+#                                      folder in its report (default: 7). No folder is
+#                                      deleted at any age. Independent of log retention.
 #   PGAI_CLEANUP_TRIVIAL_LOG_BYTES     Byte threshold for "trivial" logs (default: 1700).
+#                                      kanban.cfg [cleanup] trivial_log_bytes.
 #                                      Logs SMALLER than this value are eligible for
 #                                      aggressive purge when also older than the hours
 #                                      threshold below.
 #   PGAI_CLEANUP_TRIVIAL_LOG_HOURS     Age threshold in hours for trivial purge (default: 6).
+#                                      kanban.cfg [cleanup] trivial_log_hours.
 #                                      Only logs OLDER than this many hours are purged.
 #                                      Two-tier model: trivial (small+old) purged daily;
 #                                      substantive logs kept for PGAI_CLEANUP_RETENTION_DAYS.
 #   PGAI_LOGS_DIR                      Directory for log files
 #   PGAI_TASKS_DIR                Directory for task folders
 #   PGAI_BRIEFS_DIR               Directory for PM briefs
-#   PGAI_ARCHIVE_DIR              Archive destination root
+#   PGAI_ARCHIVE_DIR              Destination root for archived briefs (Step 5)
 #   PGAI_AGENT_KANBAN_ROOT_PATH  Kanban root (default: $HOME/pgai_agent_kanban)
+#   KANBAN_ROOT                  Kanban root read directly by lib/project_paths.sh.
+#                                 Reconciled against PGAI_AGENT_KANBAN_ROOT_PATH before
+#                                 any destructive step runs: whichever of the two is
+#                                 unset is derived from the other, and the script
+#                                 refuses (exit 1) if both are set and disagree, so a
+#                                 single override always sandboxes the whole run.
 #   PGAI_AGENT_KANBAN_TEMP_DIR          Framework temp directory to purge (canonical override)
 #                                       (resolved via temp.sh resolver; see temp.sh for fallback)
 #
@@ -60,7 +106,9 @@
 #
 # Exit codes:
 #   0 = success
-#   1 = error (archive dir not writable, release-state.md unreadable, etc.)
+#   1 = error (archive dir not writable, release-state.md unreadable,
+#       KANBAN_ROOT and PGAI_AGENT_KANBAN_ROOT_PATH disagree, etc.)
+#   Without a project, the exit status of the first failing per-project run.
 
 # ---------------------------------------------------------------------------
 # Bootstrap: resolve kanban root and source config files BEFORE strict mode.
@@ -82,6 +130,8 @@ source "${_SCRIPT_DIR}/../lib/projects.sh"
 source "${_SCRIPT_DIR}/../lib/dev_tree.sh"
 # shellcheck source=lib/temp_purge.sh
 source "${_SCRIPT_DIR}/../lib/temp_purge.sh"
+# shellcheck source=lib/config_loader.sh
+source "${_SCRIPT_DIR}/../lib/config_loader.sh"
 unset _SCRIPT_DIR
 
 # Source user-wide config first (lowest precedence among files)
@@ -94,8 +144,9 @@ unset _SCRIPT_DIR
 # read_ini available via project_paths.sh (sourced above).
 if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
     export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$TEAM_ROOT/kanban.cfg" chain pm_mode automatic)}"
-    export PGAI_CLEANUP_RETENTION_DAYS="${PGAI_CLEANUP_RETENTION_DAYS:-$(read_ini "$TEAM_ROOT/kanban.cfg" paths cleanup_retention_days 30)}"
 fi
+# The [cleanup] tunables are resolved after root reconciliation below, so
+# they are read from the same root every other step uses.
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 # Classification (a): cleanup purges logs, task folders, archives, briefs, and
 # temp dirs under $KANBAN_ROOT; it does not access any project dev tree.
@@ -112,12 +163,16 @@ set -euo pipefail
 DRY_RUN=false
 TRIVIAL_ONLY=false
 TEMP_ONLY=false
+HELP=false
 _CLEANUP_PROJECT_ARG=""
 _args=("$@")
 _ai=0
 while [[ $_ai -lt ${#_args[@]} ]]; do
   arg="${_args[$_ai]}"
   case "$arg" in
+    --help|-h)
+      HELP=true
+      ;;
     --dry-run)
       DRY_RUN=true
       ;;
@@ -131,7 +186,7 @@ while [[ $_ai -lt ${#_args[@]} ]]; do
       _next=$(( _ai + 1 ))
       if [[ $_next -ge ${#_args[@]} ]] || [[ -z "${_args[$_next]:-}" ]]; then
         echo "ERROR: --project requires a project name" >&2
-        echo "Usage: $(basename "$0") --project <name> [--dry-run] [--trivial-only] [--temp-only]" >&2
+        echo "Usage: $(basename "$0") [--project <name>] [--dry-run] [--trivial-only] [--temp-only]" >&2
         exit 1
       fi
       _CLEANUP_PROJECT_ARG="${_args[$_next]}"
@@ -139,7 +194,7 @@ while [[ $_ai -lt ${#_args[@]} ]]; do
       ;;
     *)
       echo "ERROR: unknown argument: $arg" >&2
-      echo "Usage: $(basename "$0") --project <name> [--dry-run] [--trivial-only] [--temp-only]" >&2
+      echo "Usage: $(basename "$0") [--project <name>] [--dry-run] [--trivial-only] [--temp-only]" >&2
       exit 1
       ;;
   esac
@@ -148,39 +203,269 @@ done
 unset _args _ai _next
 
 # ---------------------------------------------------------------------------
-# Paths and tunables (apply defaults after config is sourced)
+# --help short-circuit: print usage and exit BEFORE any filesystem action.
+# Deliberately placed ahead of project resolution, path/tunable defaults,
+# and log-directory creation so --help never deletes, archives, purges, or
+# writes a summary log — it only needs to know which flags this script
+# accepts, not which project it would otherwise run against.
 # ---------------------------------------------------------------------------
-PGAI_CLEANUP_RETENTION_DAYS="${PGAI_CLEANUP_RETENTION_DAYS:-30}"
-# Separate threshold for task folder deletion (default: 7 days).
-# Keeps recently-completed tasks available for short-term inspection even if
-# log retention is set lower. Override via PGAI_CLEANUP_TASK_RETENTION_DAYS.
+if [[ "$HELP" == "true" ]]; then
+  cat <<EOF
+Usage: $(basename "$0") [--project <name>] [--dry-run] [--trivial-only] [--temp-only]
+       $(basename "$0") --help
+
+Options:
+  --project <name>  Clean only this project. When omitted (and
+                    PGAI_PROJECT_NAME is unset or empty), run once per
+                    project registered in projects.cfg -- see below
+  --dry-run         Preview actions without making any changes
+  --trivial-only    Run only the trivial-log purge (Step 0) and exit
+  --temp-only       Run only the framework temp-dir purge (Step 6) and exit
+  --help            Print this usage message and exit 0 (no filesystem action)
+
+What a full run does (per project):
+  Step 0  delete trivial batch logs (small and old) from logs/agents/
+  Step 1  delete log files older than the log retention (default 30 days)
+  Step 2  report DONE/WONT-DO task folders older than the task retention
+          (default 7 days); task folders are never deleted, at any age
+  Step 4  rotate debug logs from a previous UTC day into logs/debug/archive/
+  Step 5  move briefs older than the log retention into the briefs archive
+  Step 6  purge the framework temp directory
+  Finished tasks, bugs, priorities and shipped requirements leave the live
+  project only through scripts/archive.sh (also run after each release),
+  which moves them to archive/<project>/ and can restore them; cleanup never
+  deletes anything there. (There is no Step 3: archive.sh archives shipped
+  requirements and folds any older projects/<p>/tasks/archive/requirements/
+  into archive/<project>/.)
+
+Without a project:
+  The run repeats once per project registered in projects.cfg, in priority
+  order, as '$(basename "$0") --project <p>' with the same flags. One result
+  line is printed per project, and a failing project does not stop the rest.
+  Exit status is 0 when every project succeeded (or none is registered),
+  otherwise the exit status of the first project run that failed.
+  --trivial-only and --temp-only repeat per project too; their purges are
+  framework-wide, so the first project's run does the work and later runs
+  find nothing left to remove.
+EOF
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Root reconciliation: TEAM_ROOT (above) governs the Step 0 existence guard
+# and the optional kanban.cfg lookup; KANBAN_ROOT (required by
+# lib/project_paths.sh's pp_* helpers, sourced above) governs every
+# destructive step below (1-6) and the summary log's own write path. The
+# two normally carry the same value -- the wake bootstrap sets KANBAN_ROOT
+# directly from PGAI_AGENT_KANBAN_ROOT_PATH -- but an invocation that
+# repoints only one of them (the Live-Install Safety sandboxing procedure
+# in the role files names PGAI_AGENT_KANBAN_ROOT_PATH) leaves the two
+# disagreeing, and every destructive step would then act on whichever root
+# KANBAN_ROOT still holds rather than the one the caller meant to sandbox.
+# Reconcile once, here, before either variable is read again: refuse when
+# both are explicitly set and disagree (never guess which root the caller
+# meant), and derive whichever is unset from the other so a single
+# override sandboxes every step, not just the Step 0 guard.
+# ---------------------------------------------------------------------------
+if [[ -n "${KANBAN_ROOT:-}" && -n "${PGAI_AGENT_KANBAN_ROOT_PATH:-}" \
+      && "$KANBAN_ROOT" != "$PGAI_AGENT_KANBAN_ROOT_PATH" ]]; then
+  # No project has been resolved yet at this point in the script (the
+  # --project/PGAI_PROJECT_NAME resolution below hasn't run), so this
+  # refusal is deliberately recorded with no project scope -- run in a
+  # subshell with PGAI_PROJECT_NAME cleared so pgai_emit_error_contract's
+  # ambient fallback can't record into whichever project an inherited
+  # PGAI_PROJECT_NAME happens to name under the disagreeing (and
+  # therefore untrusted) KANBAN_ROOT this refusal exists to leave alone.
+  (
+    unset PGAI_PROJECT_NAME
+    pgai_emit_error_contract \
+        "cleanup.root_mismatch" \
+        "KANBAN_ROOT ('${KANBAN_ROOT}') and PGAI_AGENT_KANBAN_ROOT_PATH ('${PGAI_AGENT_KANBAN_ROOT_PATH}') disagree; cleanup.sh will not guess which root to operate on." \
+        "Export both variables to the same root before invoking cleanup.sh, e.g.: env KANBAN_ROOT=<root> PGAI_AGENT_KANBAN_ROOT_PATH=<root> bash team/scripts/cleanup/cleanup.sh --project <name> ..."
+  )
+  # CENSUS-ANCHOR: cleanup-root-mismatch-01
+  # BLOCK-WORTHY (docs/blocking-site-census.md): a disagreement here means
+  # the Step 0 guard and the destructive steps (1-6) would act on two
+  # different roots; continuing risks mutating whichever root neither the
+  # caller's override nor the inherited environment unambiguously named.
+  exit 1
+fi
+
+if [[ -z "${KANBAN_ROOT:-}" && -n "${PGAI_AGENT_KANBAN_ROOT_PATH:-}" ]]; then
+  # Only the role-file-documented override is set; derive KANBAN_ROOT from
+  # it so a single override sandboxes both the Step 0 guard and Steps 1-6
+  # (mirrors the fallback pattern in lib/projects.sh's projects_cfg_path).
+  export KANBAN_ROOT="$PGAI_AGENT_KANBAN_ROOT_PATH"
+elif [[ -n "${KANBAN_ROOT:-}" ]]; then
+  # KANBAN_ROOT is the authoritative value here (PGAI_AGENT_KANBAN_ROOT_PATH
+  # is either unset or already confirmed to agree with it above); point
+  # TEAM_ROOT at the same root so the Step 0 guard and kanban.cfg lookup
+  # never drift from the root the destructive steps will actually use.
+  TEAM_ROOT="$KANBAN_ROOT"
+fi
+# When both are unset, KANBAN_ROOT stays unset and TEAM_ROOT keeps its
+# $HOME/pgai_agent_kanban default from above; project_paths.sh's pp_*
+# helpers already fail closed on a missing KANBAN_ROOT (see
+# _pp_kanban_root) instead of silently operating against that default --
+# that fail-closed behaviour is preserved unchanged.
+
+# ---------------------------------------------------------------------------
+# [cleanup] tunables: retention_days, trivial_log_bytes, trivial_log_hours
+# from the reconciled root's kanban.cfg, an environment value winning over
+# the cfg (config_cleanup_tunables in lib/config_loader.sh). Resolved and
+# exported here, ahead of the project-less fan-out below, so each
+# per-project child inherits the values and a deprecated
+# [paths] cleanup_retention_days is narrated once per run, not once per
+# project.
+# ---------------------------------------------------------------------------
+config_cleanup_tunables "$TEAM_ROOT/kanban.cfg"
+
+# ---------------------------------------------------------------------------
+# Project-less invocation: run once per registered project.
+# Resolution order for the target project: --project flag, then
+# $PGAI_PROJECT_NAME. When neither names a project -- the bare cron line --
+# this script re-invokes itself as `cleanup.sh --project <p>` for every
+# project projects_cfg_list returns (projects.cfg priority order), passing
+# the same --dry-run / --trivial-only / --temp-only flags, so each
+# per-project run is exactly the single-project run below. There is still
+# no fallback to just the first registered project.
+#
+# Each child runs in its own process so one project's failure (set -e,
+# a preflight refusal, an export-mismatch refusal) cannot abort the
+# remaining projects. The child prints its own error; this loop only
+# records which project failed and propagates the first failing child's
+# exit status, so it adds no refusal site of its own.
+# ---------------------------------------------------------------------------
+_CLEANUP_PROJECT="${_CLEANUP_PROJECT_ARG:-${PGAI_PROJECT_NAME:-}}"
+if [[ -z "$_CLEANUP_PROJECT" ]]; then
+  # Fail closed the same way the --project path does when neither root
+  # variable is set: _pp_kanban_root prints the error and returns non-zero,
+  # which ends the script under set -e. Without this, projects_cfg_path
+  # would read $HOME/pgai_agent_kanban/projects.cfg -- an unnamed root.
+  _pp_kanban_root >/dev/null
+
+  _each_flags=()
+  [[ "$DRY_RUN" == "true" ]] && _each_flags+=(--dry-run)
+  [[ "$TRIVIAL_ONLY" == "true" ]] && _each_flags+=(--trivial-only)
+  [[ "$TEMP_ONLY" == "true" ]] && _each_flags+=(--temp-only)
+  _each_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+  # projects_cfg_list fails when projects.cfg is missing or registers no
+  # project. With nothing registered there is nothing to clean, so that is
+  # a logged no-op, not a failure; its own stderr error is replaced by the
+  # single line below so the cron log does not read as a failed run.
+  _each_list="$(projects_cfg_list 2>/dev/null)" || _each_list=""
+  if [[ -z "$_each_list" ]]; then
+    echo "[$(date -Iseconds)] cleanup: no --project given and no project registered in $(projects_cfg_path); nothing to clean (register one with scripts/create-project.sh or scripts/add-project.sh)"
+    exit 0
+  fi
+
+  _each_count="$(grep -c . <<< "$_each_list")"
+  echo "[$(date -Iseconds)] cleanup: no --project given; running once per registered project (${_each_count}): $(tr '\n' ' ' <<< "$_each_list" | sed 's/ *$//')"
+
+  _each_rc_overall=0
+  _each_ok=0
+  _each_failed=0
+  while IFS= read -r _each_proj; do
+    [[ -n "$_each_proj" ]] || continue
+    _each_rc=0
+    # Child stdin is detached so a child can never consume the project
+    # list this loop is reading.
+    "${BASH:-bash}" "$_each_self" --project "$_each_proj" \
+        ${_each_flags[@]+"${_each_flags[@]}"} < /dev/null || _each_rc=$?
+    if [[ "$_each_rc" -eq 0 ]]; then
+      _each_ok=$(( _each_ok + 1 ))
+      echo "[$(date -Iseconds)] cleanup: project '${_each_proj}': ok"
+    else
+      _each_failed=$(( _each_failed + 1 ))
+      [[ "$_each_rc_overall" -eq 0 ]] && _each_rc_overall="$_each_rc"
+      echo "[$(date -Iseconds)] cleanup: project '${_each_proj}': FAILED (exit ${_each_rc}); see the error above"
+    fi
+  done <<< "$_each_list"
+
+  echo "[$(date -Iseconds)] cleanup: per-project runs complete: ${_each_ok} ok, ${_each_failed} failed"
+  exit "$_each_rc_overall"
+fi
+
+# ---------------------------------------------------------------------------
+# Paths and tunables. PGAI_CLEANUP_RETENTION_DAYS, _TRIVIAL_LOG_BYTES and
+# _TRIVIAL_LOG_HOURS were resolved from kanban.cfg [cleanup] above.
+# ---------------------------------------------------------------------------
+# Age (default: 7 days) past which Step 2 counts a terminal task folder in
+# its report. Task folders are never deleted at any age. Independent of the
+# log-retention threshold. Override via PGAI_CLEANUP_TASK_RETENTION_DAYS.
 PGAI_CLEANUP_TASK_RETENTION_DAYS="${PGAI_CLEANUP_TASK_RETENTION_DAYS:-7}"
 # Trivial-log purge thresholds (two-tier retention model).
 # A log is "trivial" if it is SMALLER than PGAI_CLEANUP_TRIVIAL_LOG_BYTES bytes
 # AND OLDER than PGAI_CLEANUP_TRIVIAL_LOG_HOURS hours. These logs are purged
 # aggressively (Step 0 / --trivial-only) to prevent cron-driven accumulation.
 # Substantive logs (>= threshold size) are kept for PGAI_CLEANUP_RETENTION_DAYS.
-PGAI_CLEANUP_TRIVIAL_LOG_BYTES="${PGAI_CLEANUP_TRIVIAL_LOG_BYTES:-1700}"
-PGAI_CLEANUP_TRIVIAL_LOG_HOURS="${PGAI_CLEANUP_TRIVIAL_LOG_HOURS:-6}"
 
-# --- Resolve target project (required) ---
-# Resolution order: --project flag > $PGAI_PROJECT_NAME > fail loud.
-# There is no fallback to the first registered project.
-_CLEANUP_PROJECT="${_CLEANUP_PROJECT_ARG:-${PGAI_PROJECT_NAME:-}}"
-if [[ -z "$_CLEANUP_PROJECT" ]]; then
-  echo "ERROR: no project specified; pass --project <name> or set PGAI_PROJECT_NAME" >&2
+# --- Resolve paths for the target project ---
+# _CLEANUP_PROJECT is non-empty here: the project-less case above re-invoked
+# this script once per registered project and exited.
+_pp_project_root="$(pp_project_root "$_CLEANUP_PROJECT")"
+_pp_tasks="$(pp_tasks_dir "$_CLEANUP_PROJECT")"
+
+# ---------------------------------------------------------------------------
+# Pre-resolved export reconciliation: PGAI_PROJECT_ROOT and PGAI_TASKS_DIR
+# are fully-resolved live-install paths the wake bootstrap exports ahead of
+# invoking any agent, and they outrank anything KANBAN_ROOT /
+# PGAI_AGENT_KANBAN_ROOT_PATH derive. The root reconciliation above only
+# compares the two root variables, so it leaves a residual seam: an
+# invocation that repoints both roots at a throwaway directory but still
+# carries one of these two exports from an earlier, live-install
+# invocation would still resolve Step 6's WORKING-worktree check (which
+# decides what the temp purge may remove) or the release-state lookup
+# from the exported path instead of the sandboxed one. Refuse rather than
+# silently preferring the export, for the same reason the root mismatch
+# above refuses rather than guesses: an operator who set PGAI_TASKS_DIR
+# deliberately would be surprised by a silent rewrite.
+# ---------------------------------------------------------------------------
+# The comparison strips a single trailing slash before comparing so a
+# value that names the reconciled directory is accepted however it is
+# spelled ('<root>' and '<root>/' are the same directory); it still does
+# not implement containment — a genuine sub-path ('<root>/subdir') is
+# refused exactly as before. The message says "does not match", not
+# "does not sit underneath", because equality (mod trailing slash) is the
+# only test performed here.
+if [[ -n "${PGAI_PROJECT_ROOT:-}" && "${PGAI_PROJECT_ROOT%/}" != "$_pp_project_root" ]]; then
+  pgai_emit_error_contract \
+      "cleanup.project_root_export_mismatch" \
+      "PGAI_PROJECT_ROOT ('${PGAI_PROJECT_ROOT}') does not match the reconciled root ('${_pp_project_root}'); cleanup.sh will not guess which one the caller meant." \
+      "Unset PGAI_PROJECT_ROOT, or point it at '${_pp_project_root}' before invoking cleanup.sh." \
+      "$_CLEANUP_PROJECT"
+  # CENSUS-ANCHOR: cleanup-project-root-export-mismatch-01
+  # BLOCK-WORTHY (docs/blocking-site-census.md): a disagreement here means
+  # the release-state lookup and every other pp_project_root()-derived
+  # path below could be read from outside the root the caller reconciled
+  # above.
   exit 1
 fi
+[[ -n "${PGAI_PROJECT_ROOT:-}" ]] && PGAI_PROJECT_ROOT="${PGAI_PROJECT_ROOT%/}"
 
-_pp_tasks="$(pp_tasks_dir "$_CLEANUP_PROJECT")"
-_pp_req="$(pp_requirements_dir "$_CLEANUP_PROJECT")"
+if [[ -n "${PGAI_TASKS_DIR:-}" && "${PGAI_TASKS_DIR%/}" != "$_pp_tasks" ]]; then
+  pgai_emit_error_contract \
+      "cleanup.tasks_dir_export_mismatch" \
+      "PGAI_TASKS_DIR ('${PGAI_TASKS_DIR}') does not match the reconciled root ('${_pp_tasks}'); cleanup.sh will not guess which one the caller meant." \
+      "Unset PGAI_TASKS_DIR, or point it at '${_pp_tasks}' before invoking cleanup.sh." \
+      "$_CLEANUP_PROJECT"
+  # CENSUS-ANCHOR: cleanup-tasks-dir-export-mismatch-01
+  # BLOCK-WORTHY (docs/blocking-site-census.md): Step 6's temp purge reads
+  # task state from this directory to decide which task worktrees are
+  # WORKING and must survive the purge (Step 2 only reads it for its
+  # report); a disagreement here means a live agent's worktree could be
+  # purged on the strength of a tasks directory the caller did not sandbox.
+  exit 1
+fi
+[[ -n "${PGAI_TASKS_DIR:-}" ]] && PGAI_TASKS_DIR="${PGAI_TASKS_DIR%/}"
+
 # Wake batch logs live at $KANBAN_ROOT/logs/agents/.
 PGAI_LOGS_DIR="${PGAI_LOGS_DIR:-${KANBAN_ROOT}/logs/agents}"
 PGAI_TASKS_DIR="${PGAI_TASKS_DIR:-${_pp_tasks}}"
 PGAI_BRIEFS_DIR="${PGAI_BRIEFS_DIR:-$TEAM_ROOT/briefs}"
 PGAI_ARCHIVE_DIR="${PGAI_ARCHIVE_DIR:-${_pp_tasks}/archive}"
-PGAI_REQUIREMENTS_DIR="${PGAI_REQUIREMENTS_DIR:-${_pp_req}}"
-unset _pp_tasks _pp_req
+unset _pp_project_root _pp_tasks
 
 # release-state.md location.
 # Prefer project-scoped release-state.md; fall back to legacy team/release-state.md
@@ -200,12 +485,8 @@ CLEANUP_LOG="$PGAI_LOGS_DIR/cleanup-${RUN_TIMESTAMP}.log"
 # ---------------------------------------------------------------------------
 # Cleanup trap
 # ---------------------------------------------------------------------------
-cleanup_on_exit() {
-  local exit_code=$?
-  jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
-  wait 2>/dev/null || true
-  exit $exit_code
-}
+# shellcheck source=../lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
 trap cleanup_on_exit EXIT
 
 # ---------------------------------------------------------------------------
@@ -235,8 +516,7 @@ log_action() {
 # ---------------------------------------------------------------------------
 TRIVIAL_LOGS_DELETED=0
 LOGS_DELETED=0
-TASKS_DELETED=0
-REQUIREMENTS_ARCHIVED=0
+TASKS_KEPT=0
 LOGS_ROTATED=0
 BRIEFS_ARCHIVED=0
 TEMP_ITEMS_PURGED=0
@@ -250,9 +530,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/semver.sh"
 # ---------------------------------------------------------------------------
 # Preflight checks
 # ---------------------------------------------------------------------------
-# In --trivial-only or --temp-only mode we do not need release-state.md
-# (no archival step).  Skip the preflight in those cases so these flags are
-# safe to run even before the first release ships.
+# A full run requires the project's release-state.md and logs the last
+# released version; no step's behaviour depends on that version.
+# --trivial-only and --temp-only skip the preflight so those flags are safe
+# to run even before the first release ships.
 LAST_RELEASED=""
 if [[ "$TRIVIAL_ONLY" == "false" && "$TEMP_ONLY" == "false" ]]; then
   if [[ ! -f "$RELEASE_STATE_FILE" ]]; then
@@ -269,7 +550,7 @@ if [[ "$TRIVIAL_ONLY" == "false" && "$TEMP_ONLY" == "false" ]]; then
 
   if [[ -z "$LAST_RELEASED" ]] || [[ "$LAST_RELEASED" == "none" ]] || [[ "$LAST_RELEASED" == "v0.0.0" ]]; then
     LAST_RELEASED=""
-    log "release-state.md has no Last Released version; skipping requirements archival"
+    log "release-state.md has no Last Released version"
   fi
 fi
 
@@ -282,11 +563,12 @@ log "last_released=${LAST_RELEASED:-n/a}"
 # ---------------------------------------------------------------------------
 # Lazy create archive directories
 # ---------------------------------------------------------------------------
+# Only the briefs archive (Step 5) lives here. Requirements and task folders
+# are archived by scripts/archive.sh under $KANBAN_ROOT/archive/<project>/,
+# so no requirements directory is created under PGAI_ARCHIVE_DIR.
 ensure_archive_dirs() {
   local dirs=(
     "$PGAI_ARCHIVE_DIR"
-    "$PGAI_ARCHIVE_DIR/requirements"
-    "$PGAI_ARCHIVE_DIR/requirements/priority"
     "$PGAI_ARCHIVE_DIR/briefs"
   )
   for d in "${dirs[@]}"; do
@@ -332,6 +614,13 @@ fi
 # Substantive logs (>= size threshold) are left for the normal retention sweep.
 # ---------------------------------------------------------------------------
 
+# Deletes (or, in dry-run, narrates) trivial batch logs and reports how many
+# it found through the TRIVIAL_LOGS_DELETED global rather than stdout, so the
+# per-file narration this function logs in the dry-run branch never shares a
+# channel with the count -- the same nameref/global shape TEMP_ITEMS_PURGED
+# already uses below for the analogous temp-purge count. Sets
+# TRIVIAL_LOGS_DELETED as a side effect; callers read it after the call
+# returns instead of capturing this function's output.
 purge_trivial_logs() {
   local trivial_bytes="$1"
   local trivial_hours="$2"
@@ -340,8 +629,9 @@ purge_trivial_logs() {
   local count=0
   local batch_log_dir="${KANBAN_ROOT}/logs/agents"
 
+  TRIVIAL_LOGS_DELETED=0
+
   if [[ ! -d "$batch_log_dir" ]]; then
-    echo "$count"
     return 0
   fi
 
@@ -361,7 +651,7 @@ purge_trivial_logs() {
       -print0 \
       2>/dev/null)
 
-  echo "$count"
+  TRIVIAL_LOGS_DELETED="$count"
 }
 
 # ---------------------------------------------------------------------------
@@ -378,30 +668,6 @@ purge_trivial_logs() {
 #      Projects without a temp_dir config default to projects/<project_name>
 #      under the install-wide root (pp_load_config applies the default).
 # ---------------------------------------------------------------------------
-
-# Internal helper: sweep all contents of a single temp directory, preserving
-# the directory root itself. Logs each item removed. Updates TEMP_ITEMS_PURGED.
-# Used for per-project temp dirs whose contents are project-owned and not
-# subject to the install-wide allowlist.  For allowlist-guarded sweeps of the
-# install-wide root, use temp_purge_sweep_dir (from lib/temp_purge.sh).
-#   $1 — directory path to sweep
-#   $2 — label for log messages (e.g. "install-wide" or "project pgai-agent-kanban")
-_sweep_temp_dir() {
-  local _dir="$1"
-  local _label="$2"
-  if [[ -d "$_dir" ]]; then
-    for _item in "${_dir}"/*; do
-      [[ -e "$_item" ]] || continue
-      log_action "temp-only purge (${_label}): $_item"
-      if [[ "$DRY_RUN" == "false" ]]; then
-        rm -rf "$_item"
-      fi
-      TEMP_ITEMS_PURGED=$(( TEMP_ITEMS_PURGED + 1 ))
-    done
-  else
-    log "temp-only: directory does not exist, skipping (${_label}): $_dir"
-  fi
-}
 
 if [[ "$TEMP_ONLY" == "true" ]]; then
   _temp_root="$(pgai_temp_dir)"
@@ -430,10 +696,12 @@ if [[ "$TEMP_ONLY" == "true" ]]; then
   # (<framework_temp_root>/<temp_dir>); if the install-wide sweep ran first
   # it would rm -rf those subdirs and the per-project sweep would find nothing.
   # Enumerate per-project paths first, exclude them from the install-wide sweep,
-  # then sweep each per-project dir's contents via _sweep_temp_dir (which already
-  # preserves the root).
+  # then sweep each per-project dir's contents via temp_purge_sweep_dir (which
+  # preserves the root), judging its worktrees/ against that project's own
+  # tasks dir.
   log "--- temp-only: enumerating per-project temp directories ---"
   declare -A _per_project_dirs  # associative array: path → project label
+  declare -A _per_project_tasks # associative array: path → that project's tasks dir
   _project_list="$(projects_cfg_list 2>/dev/null)" || _project_list=""
   if [[ -n "$_project_list" ]]; then
     while IFS= read -r _proj; do
@@ -442,6 +710,7 @@ if [[ "$TEMP_ONLY" == "true" ]]; then
         _proj_temp_dir="${PP_TEMP_DIR:-}"
         if [[ -n "$_proj_temp_dir" ]]; then
           _per_project_dirs["$_proj_temp_dir"]="project ${_proj}"
+          _per_project_tasks["$_proj_temp_dir"]="$(pp_tasks_dir "$_proj" 2>/dev/null || true)"
           log "temp-only: registered per-project temp dir for '$_proj': $_proj_temp_dir"
         else
           log "temp-only: PP_TEMP_DIR empty after pp_load_config for '$_proj', skipping"
@@ -475,7 +744,7 @@ if [[ "$TEMP_ONLY" == "true" ]]; then
         log "temp purge: skipping foreign entry $_item"
         continue
       fi
-      # worktrees/ gets per-task WORKING-state treatment.
+      # worktrees/ gets the per-task live-state guard.
       if [[ "$_item_basename" == "worktrees" && -d "$_item" ]]; then
         temp_purge_sweep_worktrees "$_item" "install-wide/worktrees" "${PGAI_TASKS_DIR:-}"
         continue
@@ -492,13 +761,23 @@ if [[ "$TEMP_ONLY" == "true" ]]; then
   unset _item _item_basename
 
   # --- 3. Sweep each per-project dir's CONTENTS (preserving the root dirs) ---
+  # Same allowlist and live-task guard as the install-wide sweep: a
+  # non-allowlisted entry is foreign and kept, and worktrees/ goes through
+  # temp_purge_sweep_worktrees against THIS project's tasks dir, so a
+  # WORKING, BLOCKED or TESTING task's worktree survives. The wake locks are
+  # probed again right before each project: a wake that started since the
+  # check above has its project's sweep skipped rather than run under it.
   log "--- temp-only: purging per-project temp directory contents ---"
   for _ppath in "${!_per_project_dirs[@]}"; do
     _plabel="${_per_project_dirs[$_ppath]}"
+    if ! temp_purge_check_wake_locks "${TEAM_ROOT}/locks"; then
+      log "WARNING: temp purge of per-project temp dir skipped (${_plabel}) — a wake lock is held; re-run after all agents finish"
+      continue
+    fi
     log "temp-only: sweeping per-project temp dir (${_plabel}): $_ppath"
-    _sweep_temp_dir "$_ppath" "$_plabel"
+    temp_purge_sweep_dir "$_ppath" "$_plabel" "${_per_project_tasks[$_ppath]:-}"
   done
-  unset _ppath _plabel _per_project_dirs
+  unset _ppath _plabel _per_project_dirs _per_project_tasks
 
   unset _temp_root
 
@@ -513,18 +792,15 @@ fi
 
 log "--- Step 0: purge trivial logs (size<${PGAI_CLEANUP_TRIVIAL_LOG_BYTES}B, age>${PGAI_CLEANUP_TRIVIAL_LOG_HOURS}h) ---"
 
-_trivial_result=0
+TRIVIAL_LOGS_DELETED=0
 if [[ -d "${TEAM_ROOT}/projects" ]]; then
-  _trivial_result="$(purge_trivial_logs \
+  purge_trivial_logs \
       "$PGAI_CLEANUP_TRIVIAL_LOG_BYTES" \
       "$PGAI_CLEANUP_TRIVIAL_LOG_HOURS" \
-      "$DRY_RUN")"
+      "$DRY_RUN"
 else
   log "projects/ directory not found under $TEAM_ROOT, skipping trivial-log purge"
 fi
-
-TRIVIAL_LOGS_DELETED="${_trivial_result:-0}"
-unset _trivial_result
 
 if [[ "$DRY_RUN" == "true" ]]; then
   log "[DRY-RUN] trivial-purge: would delete $TRIVIAL_LOGS_DELETED trivial logs (size<${PGAI_CLEANUP_TRIVIAL_LOG_BYTES}B, age>${PGAI_CLEANUP_TRIVIAL_LOG_HOURS}h)"
@@ -566,174 +842,61 @@ fi
 log "logs pruned: $LOGS_DELETED"
 
 # ---------------------------------------------------------------------------
-# Step 2: Delete terminal task folders (DONE or WONT-DO) older than N days
+# Step 2: Report terminal task folders (DONE or WONT-DO) older than N days
 # ---------------------------------------------------------------------------
-log "--- Step 2: prune terminal task folders from $PGAI_TASKS_DIR ---"
+# Task folders are kanban state nothing reconstructs, so cleanup never
+# deletes one, at any age, in a dry run or a real one. Finished tasks leave
+# the live project only through the archive run (scripts/archive.sh, also
+# run after each release), which moves each to
+# $KANBAN_ROOT/archive/<project>/tasks/ with a ledger row and can restore it;
+# cleanup deletes nothing under that archive either. This step only counts
+# the terminal folders whose status.md is older than
+# PGAI_CLEANUP_TASK_RETENTION_DAYS and names the command that previews what
+# the archive run would move.
+# ---------------------------------------------------------------------------
+log "--- Step 2: report terminal task folders in $PGAI_TASKS_DIR (none are deleted) ---"
 
-# Walk CLAUDE-* folders, skip queues/ subdirectory
+# _task_state <status_file>
+# Print the first non-blank value under the '## State' heading, or nothing
+# when the heading is absent or has no value.
+_task_state() {
+  local status_file="$1" line val_line
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^##[[:space:]]*State[[:space:]]*$ ]]; then
+      while IFS= read -r val_line; do
+        val_line="${val_line#"${val_line%%[![:space:]]*}"}"
+        val_line="${val_line%"${val_line##*[![:space:]]}"}"
+        [[ "$val_line" == "##"* ]] && break
+        if [[ -n "$val_line" ]]; then
+          printf '%s\n' "$val_line"
+          break
+        fi
+      done
+      break
+    fi
+  done < "$status_file"
+}
+
 if [[ -d "$PGAI_TASKS_DIR" ]]; then
-  for task_dir in "$PGAI_TASKS_DIR"/CLAUDE-*/; do
+  for task_dir in "$PGAI_TASKS_DIR"/*/; do
     [[ -d "$task_dir" ]] || continue
-
-    # Skip the queues subdirectory (safety guard in case glob matched it)
-    case "$task_dir" in
-      */queues/*|*/queues/) continue ;;
+    # queues/ holds the agent backlogs and archive/ the briefs archive;
+    # neither is a task folder.
+    case "$(basename "$task_dir")" in
+      queues|archive) continue ;;
     esac
-
-    status_file="$task_dir/status.md"
+    status_file="${task_dir}status.md"
     [[ -f "$status_file" ]] || continue
-
-    # Read state from status.md
-    task_state=""
-    while IFS= read -r line; do
-      if [[ "$line" =~ ^##[[:space:]]*State[[:space:]]*$ ]]; then
-        while IFS= read -r val_line; do
-          val_line="${val_line#"${val_line%%[![:space:]]*}"}"
-          if [[ -n "$val_line" ]] && [[ "$val_line" != "##"* ]]; then
-            task_state="$val_line"
-            break
-          fi
-          [[ "$val_line" == "##"* ]] && break
-        done
-        break
-      fi
-    done < "$status_file"
-
-    # Safeguard: only delete terminal-state folders (DONE or WONT-DO).
-    # Any other state (WORKING, BLOCKED, WAITING, BACKLOG, empty, unknown)
-    # is explicitly skipped to prevent accidental deletion of active work.
-    if [[ "$task_state" != "DONE" ]] && [[ "$task_state" != "WONT-DO" ]]; then
-      log "SAFEGUARD: skip non-terminal task (state=${task_state:-UNKNOWN}): $task_dir"
-      continue
-    fi
-
-    # Check folder age using the status.md modification time
-    # (status.md is written last when a task finishes).
-    # Uses PGAI_CLEANUP_TASK_RETENTION_DAYS (default: 7), which is independent of
-    # the log-retention threshold (PGAI_CLEANUP_RETENTION_DAYS, default: 30).
-    # Skip tasks that are too recent (not yet old enough to delete).
-    if ! find "$status_file" -mtime +"$PGAI_CLEANUP_TASK_RETENTION_DAYS" -print 2>/dev/null | grep -q .; then
-      log "SAFEGUARD: skip recently-completed task (state=$task_state, age<=${PGAI_CLEANUP_TASK_RETENTION_DAYS}d): $task_dir"
-      continue
-    fi
-
-    # Defense-in-depth: re-read and verify state immediately before deletion.
-    # Protects against the state changing between the read above and the rm below
-    # (e.g. a concurrent agent updating the task while cleanup is running).
-    local_state_check=""
-    while IFS= read -r recheck_line; do
-      if [[ "$recheck_line" =~ ^##[[:space:]]*State[[:space:]]*$ ]]; then
-        while IFS= read -r recheck_val; do
-          recheck_val="${recheck_val#"${recheck_val%%[![:space:]]*}"}"
-          if [[ -n "$recheck_val" ]] && [[ "$recheck_val" != "##"* ]]; then
-            local_state_check="$recheck_val"
-            break
-          fi
-          [[ "$recheck_val" == "##"* ]] && break
-        done
-        break
-      fi
-    done < "$status_file"
-
-    if [[ "$local_state_check" != "DONE" ]] && [[ "$local_state_check" != "WONT-DO" ]]; then
-      log "SAFEGUARD: skipping deletion of $task_dir — state changed to '$local_state_check' during cleanup run"
-      continue
-    fi
-
-    log_action "delete task folder (state=$local_state_check age>${PGAI_CLEANUP_TASK_RETENTION_DAYS}d): $task_dir"
-    if [[ "$DRY_RUN" == "false" ]]; then
-      rm -rf "$task_dir"
-    fi
-    TASKS_DELETED=$(( TASKS_DELETED + 1 ))
+    task_state="$(_task_state "$status_file")"
+    [[ "$task_state" == "DONE" || "$task_state" == "WONT-DO" ]] || continue
+    find "$status_file" -mtime +"$PGAI_CLEANUP_TASK_RETENTION_DAYS" -print 2>/dev/null | grep -q . || continue
+    TASKS_KEPT=$(( TASKS_KEPT + 1 ))
   done
+  log "terminal task folders older than ${PGAI_CLEANUP_TASK_RETENTION_DAYS}d: ${TASKS_KEPT}; left in place (cleanup never deletes task folders)"
+  log "finished tasks move to ${KANBAN_ROOT}/archive/${_CLEANUP_PROJECT}/tasks/ through the archive run; preview it with: scripts/archive.sh --project ${_CLEANUP_PROJECT} --dry-run"
 else
   log "tasks directory not found, skipping: $PGAI_TASKS_DIR"
 fi
-
-log "task folders deleted: $TASKS_DELETED"
-
-# ---------------------------------------------------------------------------
-# Step 3: Archive requirements docs where Target Version <= Last Released
-# ---------------------------------------------------------------------------
-log "--- Step 3: archive shipped requirements from $PGAI_REQUIREMENTS_DIR ---"
-
-archive_requirements_from_dir() {
-  local src_dir="$1"
-  local dest_dir="$2"
-  local label="$3"
-
-  [[ -d "$src_dir" ]] || return 0
-  [[ -n "$LAST_RELEASED" ]] && [[ "$LAST_RELEASED" != "none" ]] || return 0
-
-  for req_file in "$src_dir"/*.md "$src_dir"/*.txt; do
-    [[ -f "$req_file" ]] || continue
-
-    # Parse Target Version from the requirements file.
-    # Canonical two-line markdown format:
-    #   ## Target Version
-    #   vX.Y.Z
-    target_version=""
-    while IFS= read -r line; do
-      if [[ "$line" =~ ^##[[:space:]]*Target[[:space:]]*Version[[:space:]]*$ ]]; then
-        # Next non-empty line is the value
-        while IFS= read -r val_line; do
-          val_line="${val_line#"${val_line%%[![:space:]]*}"}"  # ltrim
-          if [[ -n "$val_line" ]] && [[ "$val_line" != "##"* ]]; then
-            target_version="$val_line"
-            target_version="${target_version%"${target_version##*[![:space:]]}"}"  # rtrim
-            break
-          fi
-          [[ "$val_line" == "##"* ]] && break
-        done
-        break
-      fi
-    done < "$req_file"
-
-    [[ -n "$target_version" ]] || continue
-
-    if semver_lte "$target_version" "$LAST_RELEASED"; then
-      local dest_file="$dest_dir/$(basename "$req_file")"
-      # Idempotent: skip if already archived
-      if [[ -f "$dest_file" ]]; then
-        log "already archived ($label): $(basename "$req_file") (target=$target_version)"
-        continue
-      fi
-      log_action "archive $label requirement: $(basename "$req_file") (target=$target_version <= last_released=$LAST_RELEASED)"
-      if [[ "$DRY_RUN" == "false" ]]; then
-        cp "$req_file" "$dest_file"
-        rm -f "$req_file"
-      fi
-      REQUIREMENTS_ARCHIVED=$(( REQUIREMENTS_ARCHIVED + 1 ))
-    fi
-  done
-}
-
-# Archive standard requirements
-# Defensive guard — when PGAI_REQUIREMENTS_DIR is set (non-empty) but points to a
-# path that does not exist, log a clear warning and skip rather than silently
-# no-op'ing. This most commonly happens when config.cfg has stale paths that
-# override the per-project helper (_pp_req).
-# If PGAI_REQUIREMENTS_DIR is unset, the ${VAR:-default} assignment above already
-# resolved it via _pp_req to the correct per-project path; no guard needed.
-if [[ -n "$PGAI_REQUIREMENTS_DIR" ]] && [[ ! -d "$PGAI_REQUIREMENTS_DIR" ]]; then
-  log "WARNING: PGAI_REQUIREMENTS_DIR='$PGAI_REQUIREMENTS_DIR' does not exist; skipping archive step"
-  log "  Likely cause: config.cfg has stale pre-multi-project paths that override the per-project helper."
-  log "  Fix: comment out PGAI_REQUIREMENTS_DIR in config.cfg (see example_config.cfg for instructions)."
-else
-  archive_requirements_from_dir \
-    "$PGAI_REQUIREMENTS_DIR" \
-    "$PGAI_ARCHIVE_DIR/requirements" \
-    "standard"
-fi
-
-# Archive priority requirements
-PGAI_PRIORITY_DIR="${PGAI_PRIORITY_DIR:-$(pp_tasks_dir "$_CLEANUP_PROJECT")/queues/priority}"
-archive_requirements_from_dir \
-  "$PGAI_REQUIREMENTS_DIR/priority" \
-  "$PGAI_ARCHIVE_DIR/requirements/priority" \
-  "priority"
-
-log "requirements archived: $REQUIREMENTS_ARCHIVED"
 
 # ---------------------------------------------------------------------------
 # Step 4: Rotate debug logs
@@ -880,7 +1043,8 @@ log "briefs archived: $BRIEFS_ARCHIVED"
 #   - Foreign entries (claude-*, codex-*, unknown) are skipped with a notice.
 #   - If any wake lock under $TEAM_ROOT/locks/ is held, the purge is aborted
 #     (the rest of the full run — logs, archives — has already completed).
-#   - worktrees/<task-id> entries whose task status is WORKING are preserved.
+#   - worktrees/<task-id> entries whose task status is WORKING, BLOCKED or
+#     TESTING are preserved.
 # ---------------------------------------------------------------------------
 log "--- Step 6: purge framework temp directory ---"
 
@@ -908,8 +1072,7 @@ log "trivial_log_bytes:          $PGAI_CLEANUP_TRIVIAL_LOG_BYTES"
 log "trivial_log_hours:          $PGAI_CLEANUP_TRIVIAL_LOG_HOURS"
 log "trivial_logs_deleted:  $TRIVIAL_LOGS_DELETED"
 log "logs_deleted:          $LOGS_DELETED"
-log "task_folders_deleted:  $TASKS_DELETED"
-log "requirements_archived: $REQUIREMENTS_ARCHIVED"
+log "task_folders_kept:     $TASKS_KEPT (terminal, older than ${PGAI_CLEANUP_TASK_RETENTION_DAYS}d; never deleted)"
 log "debug_logs_rotated:    $LOGS_ROTATED"
 log "briefs_archived:       $BRIEFS_ARCHIVED"
 log "temp_items_purged:     $TEMP_ITEMS_PURGED"

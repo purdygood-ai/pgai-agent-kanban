@@ -3,13 +3,13 @@ test_cert_three_ticket_testing_only_pipeline.py
 ===============================================
 Certification fixture: three-ticket testing-only wake dispatch closure.
 
-This test exercises the end-to-end fix for BUG-0068 through the REAL wake
-substrate (close_intake_on_finalize_report + completion census from
-CODER-20260715-007) using a three-ticket testing-only PM plan.
+This test exercises the end-to-end behavior of intake closure through the
+REAL wake substrate (close_intake_on_finalize_report + the sibling-scan
+completion census) using a three-ticket testing-only PM plan.
 
-BUG-0068 production diagnosis anchor:
+Production diagnosis anchor this fixture guards against regressing:
   [2026-07-14T14:04:10+00:00] wake(tester): task
-  TESTER-20260714-008-verify-pvg-closure-check:
+  <task-id>-verify-my-app-closure-check:
   close_intake_on_finalize_report: finalize_mode:report not found
   in README constraints — skipping intake closure (not a
   finalize=report terminal ticket)
@@ -17,7 +17,7 @@ BUG-0068 production diagnosis anchor:
 Root cause: the old guard looked for a 'finalize_mode:report' marker
 in the task README ## Constraints section.  That marker was only written
 by inject_simple_tester_task (the synthetic companion path), not by
-PM-authored tickets.  The census fix (CODER-20260715-007) replaced the
+PM-authored tickets.  The sibling-scan census fix replaced the
 marker guard with a full sibling scan so the logic is shape-blind
 regardless of how many tickets the PM emits.
 
@@ -46,7 +46,7 @@ Design notes
 - close_intake_on_finalize_report is exercised via the REAL wake substrate.
   No test calls the function from Python or simulates closure inline.
 - All temp paths use pytest's tmp_path (never bare /tmp).
-- Test names describe behavior, not bug IDs or ticket IDs (SOP.md anti-pattern 6).
+- Test names describe behavior, not bug IDs or ticket IDs (roles/TESTER.md anti-pattern 6).
 """
 
 from __future__ import annotations
@@ -193,7 +193,7 @@ def _build_three_tester_plan(
 
     Three PM-authored TESTER tickets with the same requirements path in ##
     Inputs.  None carries a 'finalize_mode:report' constraint marker — this
-    is the worst-case topology for BUG-0068: the old marker-based guard would
+    is the worst-case topology: the old marker-based guard would
     skip closure on all three tickets.  The census-based fix must detect that
     all three are terminal and fire closure exactly once (when the last ticket
     completes).
@@ -383,6 +383,12 @@ def _run_wake_harness(
     env.pop("PGAI_TASKS_DIR", None)
     env.pop("PGAI_REQUIREMENTS_DIR", None)
     env.pop("PGAI_DEV_TREE_PATH", None)
+    # Drop reasoning-effort settings an agent wake exports into the calling
+    # process: this run exercises wake dispatch against its own temp
+    # kanban.cfg, so its outcome must not depend on the operator's effort.
+    for _role in ("PM", "CODER", "WRITER", "TESTER", "CM", "PO"):
+        env.pop(f"PGAI_{_role}_EFFORT", None)
+    env.pop("CLAUDE_EFFORT", None)
     # Ensure pgai_agent_kanban is importable in the subprocess environment:
     # close_intake_on_finalize_report in wake_common.sh calls
     # `python3 -m pgai_agent_kanban.ops close_item`, and the package lives
@@ -450,12 +456,12 @@ class TestThreeTicketWakeDispatchClosure:
     """Wake-dispatch certification fixture: three-ticket testing-only closure.
 
     Each test exercises the real wake substrate (close_intake_on_finalize_report
-    + completion census from CODER-20260715-007, BUG-0068 fix) via subprocess
+    + the sibling-scan completion census) via subprocess
     invocation of wake/harness.sh against a three-ticket PM plan.
 
-    BUG-0068 production diagnosis anchor (must be caught by these tests):
+    Production diagnosis anchor these tests must catch a regression of:
       [2026-07-14T14:04:10+00:00] wake(tester): task
-      TESTER-20260714-008-verify-pvg-closure-check:
+      <task-id>-verify-my-app-closure-check:
       close_intake_on_finalize_report: finalize_mode:report not found
       in README constraints — skipping intake closure (not a
       finalize=report terminal ticket)
@@ -478,9 +484,10 @@ class TestThreeTicketWakeDispatchClosure:
         plan), the harness processes all three.  When all reach DONE, the census
         returns ok:3 and close_intake_on_finalize_report closes the intake item.
 
-        This is the strongest regression test for BUG-0068: three PM-authored
-        tickets, none with the 'finalize_mode:report' marker — the old guard
-        would skip closure on every ticket; the census fix must succeed.
+        This is the strongest regression test for the closure fix: three
+        PM-authored tickets, none with the 'finalize_mode:report' marker —
+        the old guard would skip closure on every ticket; the census fix
+        must succeed.
 
         Asserts:
         - Intake ## Status == 'done' after harness run.

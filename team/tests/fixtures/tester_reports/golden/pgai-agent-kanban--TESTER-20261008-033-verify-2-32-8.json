@@ -1,0 +1,210 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "I verified RC ai_rc/v2.32.8 (058a0367) against `requirements/v2.32.8-bugfix-bundle-20261008.md`. The RC bundles one bug, BUG-0625: the three report readers disagreed about which headings start a finding. The work is CODER-20261008-031, two commits (16765591, merged `--no-ff` as 058a0367) across six files. The gated runners pass (`UNIT_EXIT=0`, `INTEGRATION_EXIT=0`). Every BUG-0625 and CODER-031 acceptance criterion is met: I checked them by running the gated and targeted runners, by an independent before/after matrix over eight heading shapes, and by a byte-identical comparison of reader output over all 215 TESTER reports in the install.\n\nTwo concerns are filed via Path C (autonomous follow-up filing, non-blocking), both pre-existing in code:\n\n- A fourth finding-heading reader, the SHIP-KNOWN-ISSUE bug resolver, still uses its own level-3-only rule. The docstrings this RC added say every reader shares one rule, which is not true for it (BUG-0626, medium).\n- A nested finding heading makes the stop-list splitter drop the outer finding (BUG-0627, low).\n\nOne quality-class lint finding (`inline_python`) is filed as BUG-0628 and does not affect the verdict.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Gated suites pass",
+      "heading": "Finding 1: Gated suites pass",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `bash team/scripts/run-unit-tests.sh --coverage` from the worktree root: `UNIT_EXIT=0` (10652 passed, 41 skipped; lint pre-flight green, with one quality finding, see Lint Findings).\n- `bash team/scripts/run-integration-tests.sh --coverage`: `INTEGRATION_EXIT=0` (959 passed, 1 skipped).\n- Logs: `/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/tester/unit-033.log`, `integration-033.log`; exit codes in `exits-033.txt`. Green-ledger records were written for commit 058a0367e3e1.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "The three named readers agree on all six acceptance heading shapes",
+      "heading": "Finding 2: The three named readers agree on all six acceptance heading shapes",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Criterion: BUG-0625 Acceptance 1 and CODER-031 AC1.\n- `test_all_three_report_readers_agree_on_each_heading_shape` exists in `team/tests/unit/test_release_notes_bugs_skipped_render.py` with all six parameter IDs (`### Finding 1:`, `#### Finding 1:`, `##### Finding 1:`, `###Finding 1:`, `### Findings summary`, `## Findings`). It drives the real libs (`read_ship_policy_skipped_bug_pairs`, `read_ship_policy_finding_dimensions` via bash, and `resolve_stop_bug_files`), so nothing is mocked away.\n- Independent sandbox matrix (ai_main export vs RC export, eight shapes: the six plus `####### Finding 1:` and `### Finding1:`):\n  - On the RC, Bugs Skipped, the stop list and ship-policy dims agree on all eight. Only `###`/`####`/`##### Finding` open a block.\n  - On ai_main they disagreed on four shapes (`###Finding`, `### Findings summary`, seven hashes, `Finding1`). The fix changes those, matching the bug's Actual table.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Reproduction steps 3-5 now agree and match the documented rule",
+      "heading": "Finding 3: Reproduction steps 3-5 now agree and match the documented rule",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Criterion: CODER-031 AC2.\n- RC behaviour, with the `c_nospace.md` fixture (`###Finding 1: nospace`): Bugs Skipped prints nothing and dims prints `unknown unknown` with the \"zero finding blocks\" stderr line. Both readers skip it.\n- `### Findings summary` variant: both skip it.\n- This matches `finding_heading_level`'s docstring, which says both shapes deliberately open no block.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Docstring agreement and the single-regex grep",
+      "heading": "Finding 4: Docstring agreement and the single-regex grep",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n- Criterion: CODER-031 AC3 and BUG-0625 Acceptance 2.\n- The `skipped_bug_pairs.py` module docstring now names exactly what is shared: the Bugs Skipped table and the stop list share `finding_blocks`, and ship-policy shares `finding_heading_level`. That is true for the three readers it names.\n- `grep` on `team/scripts/lib/cm/release_ship_policy_report.sh` finds no finding-heading regex. The only heading-shaped regex left is `finding_section`'s level-aware cut, `(?m)^#{1,%d}\\s+\\S` at line 349, which the CODER constraints permit.\n- Caveat: two other docstrings and one role-file sentence added by this RC claim more than the code delivers. Finding 8 covers them.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Output unchanged over every existing report",
+      "heading": "Finding 5: Output unchanged over every existing report",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Criterion: CODER-031 AC4 and Constraints 2, and BUG-0625 Acceptance 3.\n- `bash team/scripts/run-unit-tests.sh --files team/tests/unit/test_release_notes_bugs_skipped_render.py team/tests/unit/test_stop_bug_files.py team/tests/unit/test_cm_ship_policy_bash.py team/tests/unit/test_cm_known_issue_carry_forward_bash.py` exits 0 (193 passed). It is a superset of BUG-0625's single-file command.\n- Before (ai_main export) and after (RC export), over all 215 `TESTER-*/artifacts/report.md*` files under the kanban root, I captured stdout of six calls per report:\n  - `read_ship_policy_skipped_bug_pairs`\n  - `read_ship_policy_finding_dimensions`\n  - `read_ship_policy_report_values`\n  - stop list `systemic-risk-high`\n  - stop list `fix-effort-large`\n  - `read_ship_policy_known_issue_bug_files`\n- Result: `diff -rq` is clean, so all outputs are byte-identical. This project's own `tasks/` holds 10 of those reports, and they are included.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Compile and syntax checks, bundle-level criteria",
+      "heading": "Finding 6: Compile and syntax checks, bundle-level criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Criterion: CODER-031 AC5, and bundle AC2 and AC3.\n- `python3 -m py_compile` succeeds on `stop_bug_files.py`, `skipped_bug_pairs.py` and both changed test files.\n- `bash -n` exits 0 on `release_ship_policy_report.sh` and `release_known_issue.sh`.\n- Whole tree: all 849 tracked `.py` files compile and all 334 tracked `.sh` files parse. The runner's breakage-class gate also reports 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Merge and constraints",
+      "heading": "Finding 7: Merge and constraints",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Criterion: CODER-031 AC6 and Constraints.\n- Merge: 058a0367 has parents 470cfcf7 (ai_main) and 16765591 (feature), a `--no-ff` merge.\n- Live-runtime import rule: the heredoc imports `finding_heading_level` under `PYTHONPATH=\"$(pp_pythonpath)\"`. The diff adds no `sys.path` or `PYTHONPATH` edits and no dev-tree fallback. Dims mode now carries the same import dependency that values mode already had, and the Step 4d caller is unchanged.\n- `finding_section` and `field_value` are unchanged.\n- Naming rule: no bug, task or version tokens in added lines. Fixtures use the placeholders `rc/v9.9.9`, `BUG-0003` and `BUG-0001`.\n- Documentation Discipline: the header comments and docstrings in all three changed modules, and `team/roles/TESTER.md`, change in the same commit.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "The SHIP-KNOWN-ISSUE resolver keeps its own finding-heading rule, so new \"every reader\" docstrings are untrue",
+      "heading": "Finding 8: The SHIP-KNOWN-ISSUE resolver keeps its own finding-heading rule, so new \"every reader\" docstrings are untrue",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the same reader-drift class has recurred across consecutive RCs)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0626 (Path C-A, filed as BUG: code defect)\n\n- Traces to: CODER-031 Goal, \"Leave one rule in the tree and make all three readers use it\", and BUG-0625 Expected (one heading rule; the docstrings true).\n- Location: `team/scripts/lib/cm/release_known_issue.sh` around line 160. `read_ship_policy_known_issue_bug_files` uses `(?im)^###\\s*Finding\\b.*$`, which matches level 3 only, and a level-2-only section cut.\n- Effect: a `#### Finding` high-risk finding with Regression no, Integrity none and Fix Effort small makes dims read `no none`, and `cm_ship_policy done high ship-with-concerns no yes no none` returns `SHIP-KNOWN-ISSUE`. This resolver then returns 0 bug files, while `stop_bug_files` returns 1. So a known-issue ship names no bug in Known Issues and stamps no carry-forward marker. I reproduced this verbatim from the filed bug's steps. One real install report (TESTER-028, v2.32.7) already uses `#### Finding` headings.\n- New text that overclaims:\n  - `stop_bug_files.py` module docstring: \"every reader of a TESTER report's findings uses it\".\n  - `release_ship_policy_report.sh` Dependencies: \"so no report reader can disagree\".\n  - `team/roles/TESTER.md` Step 9: \"shares with the release notes' Bugs Skipped and Known Issues readers\".\n- Pre-existing in code (ai_main behaves identically). The CODER left the resolver alone because its README scoped the file read-only, and flagged it in their Summary. Severity medium: incorrect on a real shape, with a workaround (level-3 headings).",
+      "filed_as": "BUG-0626",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the same reader-drift class has recurred across consecutive RCs)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0626 (Path C-A, filed as BUG: code defect)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "A nested finding heading drops the outer finding in the stop-list splitter",
+      "heading": "Finding 9: A nested finding heading drops the outer finding in the stop-list splitter",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one function; no install report uses the shape)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0627 (Path C-A, filed as BUG: code defect)\n\n- Traces to: BUG-0625 Expected, \"any report is split into the same blocks by all three\", and Step 6.11 (an untested mechanism).\n- Location: `team/pgai_agent_kanban/cm/stop_bug_files.py` `finding_blocks`. When a deeper finding heading opens inside an open finding, `body` is reset without the outer block being appended.\n- Effect: for `### Finding 1` (high risk) followed by `#### Finding 2`, Bugs Skipped and the stop list miss the outer finding, while dims (`no none`) and the SHIP-KNOWN-ISSUE resolver read it. `finding_blocks` returns one block, the inner one.\n- Pre-existing (ai_main identical). 0 of 215 install reports nest findings. Severity low. The CODER also flagged this in their Summary.",
+      "filed_as": "BUG-0627",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one function; no install report uses the shape)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0627 (Path C-A, filed as BUG: code defect)"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

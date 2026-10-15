@@ -26,17 +26,24 @@
 # single-project show-header.sh (legacy single-project layout).
 #
 # Usage:
-#   show-multi.sh [--kanban-root <path>] [--mode header|queues|progress]
+#   show-multi.sh [--kanban-root <path>] [--mode header|queues|progress] [-h|--help]
+#
+# Flags:
+#   --kanban-root <path>  Kanban root to render (default: $PGAI_AGENT_KANBAN_ROOT_PATH);
+#                         passed on to each per-project show-*.sh
+#   --mode <mode>         What to render (see Modes; default: header)
+#   -h, --help            Print this usage and exit 0
+#   Any other argument is passed on to each per-project show-*.sh unchanged.
 #
 # Modes:
 #   header    — render the stacked header (default)
 #   queues    — render queues for each registered project
 #   progress  — render progress for each registered project
 #
-# Configuration (via config.cfg):
-#   PGAI_DASHBOARD_COLOR_HEADER   — header text color (default: cyan)
-#   PGAI_DASHBOARD_COLOR_HALT     — halt warning color (default: red)
-#   PGAI_DASHBOARD_COLOR_OK       — ok indicator color (default: green)
+# Configuration (kanban.cfg [dashboard], overridden by the environment):
+#   color_header / PGAI_DASHBOARD_COLOR_HEADER   — header text color (default: cyan)
+#   color_halt   / PGAI_DASHBOARD_COLOR_HALT     — halt warning color (default: red)
+#   color_ok     / PGAI_DASHBOARD_COLOR_OK       — ok indicator color (default: green)
 #
 # Environment:
 #   TERM=dumb  — disables ANSI codes
@@ -61,6 +68,16 @@ export PGAI_GIT_LOCAL_ONLY=1
 source "${SCRIPT_DIR}/../lib/projects.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
+# shellcheck source=../lib/header_help.sh
+source "${SCRIPT_DIR}/../lib/header_help.sh"
+# get_val reads one KEY=VALUE pair from DATA (lib/dashboard_common.sh).
+# shellcheck source=../lib/dashboard_common.sh
+source "${SCRIPT_DIR}/../lib/dashboard_common.sh"
+# release_state_active_rc reads each project's Active RC (lib/cm/common.sh).
+# shellcheck source=../lib/cm/common.sh
+source "${SCRIPT_DIR}/../lib/cm/common.sh"
 # Source shared version helper (single tier-order decision point — same as show-header.sh).
 # Note: lib/version.sh lives at dashboard/lib/version.sh (SCRIPT_DIR/lib/), not ../lib/.
 # shellcheck source=lib/version.sh
@@ -82,7 +99,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help|-h)
-      sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+      header_help_print "${BASH_SOURCE[0]}"
       exit 0
       ;;
     *)
@@ -117,20 +134,11 @@ COLOR_HALT="${PGAI_DASHBOARD_COLOR_HALT:-red}"
 COLOR_OK="${PGAI_DASHBOARD_COLOR_OK:-green}"
 COLOR_DIM="${PGAI_DASHBOARD_COLOR_DIM:-white}"
 
-ansi_code() {
-  local color="$1"
-  if [[ "$USE_COLOR" != "true" ]]; then echo ""; return; fi
-  case "$color" in
-    red)     printf '\033[0;31m' ;;
-    green)   printf '\033[0;32m' ;;
-    yellow)  printf '\033[0;33m' ;;
-    cyan)    printf '\033[0;36m' ;;
-    bold)    printf '\033[1m' ;;
-    dim)     printf '\033[2m' ;;
-    reset)   printf '\033[0m' ;;
-    *)       echo "" ;;
-  esac
-}
+# ansi_code() is defined in lib/script_common.sh (sourced above). The
+# per-file version this replaced used printf for matched colors and echo
+# for the unmatched/disabled case; every call site captures the result via
+# command substitution, which strips the trailing newline either form
+# leaves behind, so the shared echo-only implementation renders identically.
 
 C_HEADER="$(ansi_code "$COLOR_HEADER")"
 C_HALT="$(ansi_code "$COLOR_HALT")"
@@ -149,7 +157,11 @@ done < <(KANBAN_ROOT="$KANBAN_ROOT" projects_cfg_list 2>/dev/null || true)
 # --- Fallback: if projects.cfg is empty or missing, use single-project mode ---
 if [[ ${#PROJECTS[@]} -eq 0 ]]; then
   # Single-project legacy mode — call the per-project script with no --project
-  # flag, preserving the existing single-project layout.
+  # flag, preserving the existing single-project layout. In queues mode that
+  # reads PGAI_PROJECT_NAME's project; with it unset, show-queues.sh refuses
+  # (show_queues.no_project, exit 1, nothing on stdout) and exec passes the
+  # refusal and its exit status straight through -- the pane never shows
+  # counts that were not read.
   case "$MODE" in
     header)   exec "${SCRIPT_DIR}/show-header.sh" "${PASSTHRU[@]}" ;;
     queues)   exec "${SCRIPT_DIR}/show-queues.sh" "${PASSTHRU[@]}" ;;
@@ -183,13 +195,8 @@ case "$MODE" in
     # Obtain HALT_SUMMARY from the data layer (same mechanism as show-header.sh).
     # HALT_SUMMARY: GLOBAL (global halt active), PROJECT (per-project halt, no global), none.
     # GLOBAL wins when both are present — precedence is enforced inside data.sh.
-    _MULTI_DATA="$("$SCRIPT_DIR/data.sh" --kanban-root "$KANBAN_ROOT" 2>/dev/null || true)"
-    _multi_get_val() {
-      local key="$1" default="${2:-}"
-      echo "$_MULTI_DATA" | awk -F= -v k="$key" \
-        '$1 == k { sub(/^[^=]+=/, ""); print; found=1 } END { if (!found) print "'"$default"'" }'
-    }
-    HALT_SUMMARY="$(_multi_get_val HALT_SUMMARY "none")"
+    DATA="$("$SCRIPT_DIR/data.sh" --kanban-root "$KANBAN_ROOT" 2>/dev/null || true)"
+    HALT_SUMMARY="$(get_val HALT_SUMMARY "none")"
 
     if [[ "$HALT_SUMMARY" == "GLOBAL" ]]; then
       HALT_GLOBAL_STR="${C_HALT}HALT GLOBAL${RESET}"
@@ -213,18 +220,8 @@ case "$MODE" in
 
       # Get project-scoped data
       RELEASE_STATE="${KANBAN_ROOT}/projects/${proj}/release-state.md"
-      ACTIVE_RC="none"
-      if [[ -f "$RELEASE_STATE" ]]; then
-        # Liberal parse — read first ## Active RC header only, trim whitespace,
-        # validate: accept only vX.Y.Z semver; anything else (empty, malformed) → "none".
-        _raw_arc="$(awk '/^## Active RC/{found=1;next} found && /^[[:space:]]*$/{next} found{print; exit}' "$RELEASE_STATE" 2>/dev/null | tr -d '[:space:]')" || _raw_arc=""
-        if [[ "$_raw_arc" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          ACTIVE_RC="$_raw_arc"
-        else
-          ACTIVE_RC="none"
-        fi
-      fi
-      [[ -z "$ACTIVE_RC" ]] && ACTIVE_RC="none"
+      # A vX.Y.Z version; anything else (missing, empty, malformed) reads "none".
+      ACTIVE_RC="$(release_state_active_rc "$RELEASE_STATE" none)"
 
       # Resolve last-released via the canonical helper (pp_last_released_version).
       # Map the v0.0.0 sentinel to "none" to preserve the "no releases yet" UX.
@@ -264,10 +261,11 @@ spec = importlib.util.spec_from_file_location("cron_parser", parser_path)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 result = mod.next_firings(crontab_text)
-agents = ("pm", "coder", "writer", "tester", "cm", "cleanup")
+# Roster comes from the schedule source itself — iterating result.items()
+# preserves crontab line order, never a literal agent tuple that can go
+# stale as the installed schedule grows.
 parts = []
-for agent in agents:
-    val = result.get(agent)
+for agent, val in result.items():
     if val is None:
         continue
     if isinstance(val, int):

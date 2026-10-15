@@ -47,6 +47,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/../lib/project_paths.sh"
 
+# Source script_common.sh for the shared ansi_code() helper.
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
+
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
@@ -64,7 +68,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -35
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:34}"
       exit 0
       ;;
     *)
@@ -97,25 +106,7 @@ if [[ "${TERM:-}" == "dumb" ]] || [[ "${NO_COLOR:-}" == "1" ]]; then
   USE_COLOR=false
 fi
 
-ansi_code() {
-  local color="$1"
-  if [[ "$USE_COLOR" != "true" ]]; then echo ""; return; fi
-  case "$color" in
-    black)   echo $'\033[0;30m' ;;
-    red)     echo $'\033[0;31m' ;;
-    green)   echo $'\033[0;32m' ;;
-    yellow)  echo $'\033[0;33m' ;;
-    blue)    echo $'\033[0;34m' ;;
-    magenta) echo $'\033[0;35m' ;;
-    cyan)    echo $'\033[0;36m' ;;
-    white)   echo $'\033[0;37m' ;;
-    bold)    echo $'\033[1m' ;;
-    dim)     echo $'\033[2m' ;;
-    reset)   echo $'\033[0m' ;;
-    *)       echo "" ;;
-  esac
-}
-
+# ansi_code() is defined in lib/script_common.sh (sourced above).
 RESET="$(ansi_code reset)"
 C_DONE="$(ansi_code "${PGAI_DASHBOARD_COLOR_DONE:-green}")"
 C_WORK="$(ansi_code "${PGAI_DASHBOARD_COLOR_WORKING:-yellow}")"

@@ -1,0 +1,161 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "RC v2.10.2 is a single-item PRIORITY bundle closing PRIORITY-0001: the\n`team/demos/helloworld-demo` flow could not be exercised on a stock install\nbecause it required a `pgai-helloworld` project registered in the operator's\nlive `projects.cfg`, which is why the v2.10.0 acceptance criterion \"agent\nbehavior fixtures unchanged on the helloworld flow\" went unmeasured twice. The\nRC delivers `team/scripts/harness/helloworld-flow-check.sh`, which stands up a\nthrowaway self-registering kanban root under `$PGAI_AGENT_KANBAN_TEMP_DIR` and\ndrives the real decompose → CODER → verify → ship flow through the production\n`create-project.sh`, `intake.sh`, `pm_materialize.py`, `cm/open-rc.sh` and\n`cm/release.sh`; a `--capture` / `--compare` contract with three committed\ngolden outcome files; one integration-test module that runs the harness as a\nreal subprocess and asserts against the golden, including a seed-detect-revert\ncycle proving the check can fail; a resolution of the two-harness overlap with\n`engine-behavior-baseline.sh` recorded in both headers; and a `team/TESTING.md`\nsection naming the check, its question, its command, and — honestly — the limit\nof what a green run proves.\n\nAll seven of PRIORITY-0001's acceptance criteria are met, and all three of the\nbundle's own. Every one was verified by running the thing, not by reading it:\nthe harness was executed five times from this worktree, the live install was\nsnapshotted before and after, the golden compare was seeded with a change and\nwatched to fail, and both gated runners were re-run from scratch rather than\ncited from the CODER verification record.\n\nFour defects were found. None is in the RC's own deliverable's behaviour, and\nnone prevents the release from working. Two are pre-existing defects in the\nshipped release engine and the ticket materializer that the new harness is what\nexposed — which is a strong endorsement of the deliverable, and is exactly the\nclass of thing PRIORITY-0001 said an end-to-end run would surface and a snapshot\ncomparison would not. Two are hygiene defects this RC introduced. All four are\nfiled via Path C (autonomous follow-up filing — non-blocking).",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "`cm-release.sh` Step 13c can never find `promote_bundled_items.py`",
+      "heading": "Finding 1: `cm-release.sh` Step 13c can never find `promote_bundled_items.py`",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a real defect an agent hits on every release, but it predates this RC by three releases, fails loudly rather than silently, and leaves state unchanged rather than corrupted — see the Systemic-Risk Rubric in team/SOP.md)\n**Regression:** no (introduced by the v2.9.20 engine decomposition, commit `58702c4`, which is the entire history of `team/scripts/lib/cm/release_finalize.sh`; this RC's diff touches no file under `team/scripts/cm/` or `team/scripts/lib/`)\n**Integrity Damage:** no (the step prints ERROR and WARNING and advances nothing; no state is lost or corrupted)\n**Filed As:** BUG-0181 (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`team/scripts/lib/cm/release_finalize.sh:469` computes\n\n```bash\n_cm_promote_script=\"$(dirname \"${BASH_SOURCE[0]}\")/promote_bundled_items.py\"\n```\n\n`BASH_SOURCE[0]` names the library stage, so the lookup resolves to\n`team/scripts/lib/cm/promote_bundled_items.py`. That directory holds five shell\nfiles and no Python. The helper has been at `team/scripts/cm/promote_bundled_items.py`\nsince v1.0.0 and never moved. Every release therefore prints, at Step 13c:\n\n```\nERROR: promote_bundled_items.py not found at .../team/scripts/cm/../lib/cm/promote_bundled_items.py\nWARNING: bundled item ## Status fields NOT promoted. Run promote_bundled_items.py manually.\n```\n\nand exits 0 anyway, leaving the bundle file and every item it bundled at\n`## Status: running` — contradicting both `team/SOP.md` and the bundle files'\nown `## Notes`.\n\nFound by running the new harness, which drives the real `cm/release.sh`. This is\nprecisely the class of defect PRIORITY-0001 predicted an end-to-end run would\nsurface. `grep -rl promote_bundled_items team/tests/` returns nothing: the path\nhas no test coverage at all.\n\nCurrently masked on this host because the installed tree still carries the\npre-decomposition monolithic `scripts/cm/release.sh` (199 KB, 2026-09-05) with\nthe helper beside it. The first install of a post-v2.9.20 tree activates it.",
+      "filed_as": "BUG-0181",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no (the step prints ERROR and WARNING and advances nothing; no state is lost or corrupted)"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a real defect an agent hits on every release, but it predates this RC by three releases, fails loudly rather than silently, and leaves state unchanged rather than corrupted — see the Systemic-Risk Rubric in team/SOP.md)",
+        "regression": "no (introduced by the v2.9.20 engine decomposition, commit `58702c4`, which is the entire history of `team/scripts/lib/cm/release_finalize.sh`; this RC's diff touches no file under `team/scripts/cm/` or `team/scripts/lib/`)",
+        "filed_as": "BUG-0181 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "an explicit `--team-root` is silently overridden by ambient env, and did write into the live install",
+      "heading": "Finding 2: an explicit `--team-root` is silently overridden by ambient env, and did write into the live install",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a real defect that already caused ten spurious task folders in the operator's live install; shipping this RC does not worsen it, and this RC in fact adds a local guard against it)\n**Regression:** no (the \"environment variables always win\" precedence is stated in `team/pm-agent/lib/config.py`'s module docstring and is long-standing; this RC's diff touches nothing under `team/pm-agent/`)\n**Integrity Damage:** no (the contamination was additive and fully contained — verified: no queue file references any of the stray IDs, `projects.cfg` is unchanged, and the ten folders are quarantined outside the live tasks tree)\n**Filed As:** BUG-0184 (Path C-A)\n\n`get_config(kanban_root=X)` applies the CLI override to `KANBAN_ROOT` *after*\nthe env-wins merge, so `PGAI_TASKS_DIR` keeps whatever the environment says\nwhile `KANBAN_ROOT` reports the override — an internally inconsistent config\nobject. `pm_materialize.py:4571` then materializes into that env-supplied path.\nEvery agent wake session exports `PGAI_TASKS_DIR` pointing at the live install,\nso this is the normal case, not a corner case.\n\nReproduced directly during this verification against a sandbox root:\n\n```\nenv -u PGAI_TASKS_DIR  → PGAI_TASKS_DIR = <sandbox>/tasks          (flag honoured)\nPGAI_TASKS_DIR=<live>  → PGAI_TASKS_DIR = <live>                    (flag ignored)\n                         KANBAN_ROOT    = <sandbox>                 (flag honoured)\n```\n\nThis is what wrote ten task folders into the operator's live install during\n`CODER-20260907-051`. That agent caught it, quarantined the folders to\n`$PGAI_AGENT_KANBAN_TEMP_DIR/quarantine/live-install-contamination-CODER-20260907-051/`,\nand added a `run_isolated()` (`env -i` plus an allowlist) to the harness. I\nre-verified the containment independently: the live tasks tree holds none of the\nstray IDs, and no queue file references them. The workaround protects the\nharness only; any other caller reaching for `--team-root` still inherits the\ndefect, which is why it is filed rather than considered closed.",
+      "filed_as": "BUG-0184",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "integrity_damage": "no (the contamination was additive and fully contained — verified: no queue file references any of the stray IDs, `projects.cfg` is unchanged, and the ten folders are quarantined outside the live tasks tree)"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a real defect that already caused ten spurious task folders in the operator's live install; shipping this RC does not worsen it, and this RC in fact adds a local guard against it)",
+        "regression": "no (the \"environment variables always win\" precedence is stated in `team/pm-agent/lib/config.py`'s module docstring and is long-standing; this RC's diff touches nothing under `team/pm-agent/`)",
+        "filed_as": "BUG-0184 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "the shipped `--help` output cites the authoring ticket",
+      "heading": "Finding 3: the shipped `--help` output cites the authoring ticket",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (hygiene; nobody is steered into a wrong action, the text is merely incomplete)\n**Regression:** yes (this RC introduced the header text)\n**Integrity Damage:** no\n**Filed As:** BUG-0182 (Path C-A)\n\n`bash team/scripts/harness/helloworld-flow-check.sh --help` prints 192 lines,\nfive of which defer their explanation to documents that exist only in the kanban\ntask tree: \"in this ticket's constraints\" (×2), \"per this ticket's own guidance\",\n\"per this ticket's constraint\", and \"see this task's status.md Summary for the\nrecorded scope decision\". The script builds `_USAGE_TEXT` by self-reading its own\nheader, so header prose is runtime output.\n\n`docs/coding-standards.md` directive 8 requires help text to describe behavior\nand never process history; directive 6 makes `--help` the operator contract. The\nsentences involved are load-bearing — they carry the determinism rationale and\nthe normalizer-reuse rationale — and are incomplete without a document not in the\nrelease.\n\n`lint_comment_provenance.py` does not catch these: its patterns match explicit\nidentifiers (`BUG-\\d+`, `PRIORITY-\\d+`, the task-ID shape, version bundles) and\nthese phrases name none. The same authoring session self-corrected three\n`PRIORITY-0001` citations the lint *did* flag; the un-identified prose survived\nbecause nothing mechanical looks for it. The bug proposes closing that blind spot\nas well as rewording the five lines.",
+      "filed_as": "BUG-0182",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (hygiene; nobody is steered into a wrong action, the text is merely incomplete)",
+        "regression": "yes (this RC introduced the header text)",
+        "filed_as": "BUG-0182 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "a stray empty commit shipped in the RC's history",
+      "heading": "Finding 4: a stray empty commit shipped in the RC's history",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (the commit changes no file; the cost is to provenance, not to behaviour)\n**Regression:** yes (created during this RC's WRITER leg)\n**Integrity Damage:** no (git history is intact; nothing was lost or overwritten)\n**Filed As:** BUG-0183 (Path C-A)\n\n`44a7fad05c9edcb6dd9ec433107c7416c5e0d802`, \"initial empty commit\", sits on\n`ai_feature/WRITER-20260907-054-testing-md-behavior-check` between that branch's\nreal commit and its merge base. Its tree is byte-identical to its parent's. Its\nmessage is verbatim the scratch-repo boilerplate from\n`team/demos/helloworld-demo/README.md:48`. It was committed at 19:51:27, 72\nseconds before the branch's declared commit `2294490` at 19:52:39 — inside the\nWRITER session, whose `status.md` names only `2294490`.\n\nTwo candidate sources were ruled out rather than assumed:\n\n- **The harness library.** `harness_init_scratch_repo` runs\n  `git config --local user.email harness@pgai.local` before committing. For a\n  linked worktree, `--local` writes to `$HOME/develop/pgai-agent-kanban/.git/config`,\n  which `git config --show-origin --get user.email` shows still holds the\n  operator identity. That function never ran against this repository.\n- **The README block as written.** It opens with\n  `mkdir -p ~/pgai-helloworld-src && cd ~/pgai-helloworld-src`, and\n  `~/pgai-helloworld-src` does not exist on this host, so the block was not run\n  as a unit.\n\nWhat remains is the `git commit --allow-empty` line executed on its own with the\ndev-tree worktree as cwd — an ad-hoc state-mutating command against the live\ndevelopment tree, which is the discipline `roles/TESTER.md` § Live-Install Safety\nand `team/TESTING.md` fidelity mode 6 exist to prevent. The RC's diff against\n`ai_main` is unaffected and remains exactly the nine intended file changes.",
+      "filed_as": "BUG-0183",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no (git history is intact; nothing was lost or overwritten)"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (the commit changes no file; the cost is to provenance, not to behaviour)",
+        "regression": "yes (created during this RC's WRITER leg)",
+        "filed_as": "BUG-0183 (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "pre-flight, structure, guards and constraints",
+      "heading": "Finding 5: pre-flight, structure, guards and constraints",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Worktree HEAD `652bb7f` matches `ai_rc/v2.10.2`; `git status --short` empty;\n  `git stash list` empty.\n- Pre-flight merge verification (TESTER.md Step 2a) passed. Every DONE task's\n  feature branch was deleted post-merge, which the procedure treats as merged.\n- All six new/changed deliverable files exist; both new `.sh` files are mode\n  0755.\n- Exit-code contract exercised directly: `--help` → 0, missing `--capture`\n  argument → 2, unknown flag → 2, clean compare → 0, seeded compare → 1.\n- Second and third consecutive invocations succeeded with no manual cleanup of\n  the prior throwaway root.\n- Skip-cites-real-bug gate (Step 6.13): no placeholder `BUG-SKIP` IDs and no\n  unresolvable cited bug IDs in `team/tests/`. The only grep hits are historical\n  coverage logs under `team/tests/artifacts/` quoting the gate's own text.\n- Step 6.1 drift: `pp_last_released_version` → `v2.10.1`; `semver_gt v2.10.2\n  v2.10.1` true; `release-state.md` `## Last Released` is a well-formed\n  `v2.10.1`; `## Active RC` is `v2.10.2` and `ai_rc/v2.10.2` exists. No drift.\n- Step 6.10 dependency graph: linear and acyclic — CM-056 (open-rc) → 051 → 052\n  → 053 → 054 → 055 → TESTER-057 → CM-059 (release). Every referenced task ID\n  exists; bookends correct; no sequence collisions.\n- Step 6.8 synthetic release simulation: **skipped with note.** The RC's diff\n  touches no release-lifecycle file — only `team/scripts/harness/**`,\n  `team/tests/**`, `team/TESTING.md` and the demo README. (The RC's harness\n  *invokes* `cm/open-rc.sh` and `cm/release.sh` but modifies neither.) For the\n  record, `tests/integration/test_cm_release_synthetic.py` ran green as part of\n  the integration suite.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "test fidelity of the RC's new test module",
+      "heading": "Finding 6: test fidelity of the RC's new test module",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`test_helloworld_flow_harness.py` is unusually good on the fidelity checklist:\nit mocks no seam, invokes the harness as a real subprocess, drives real\nproduction scripts, and carries an autouse fixture that snapshots the live\n`projects.cfg` as raw bytes at module-import time — before the suite's own\nautouse redirection fixture fires — so the assertion is against the operator's\nreal file rather than a redirected one. The seed-detect-revert test is genuine\nevidence the check can fail.\n\nThe caveat is stated by the RC itself rather than hidden, which is why it is a\ncaveat and not a gap: the harness invokes no model and performs the CODER and\nTESTER legs directly, so a green run proves the engine still turns the crank the\nsame way and does **not** prove a role file still tells its agent what it needs.\n`team/TESTING.md` says exactly this, in bold. That is the honest scoping\nPRIORITY-0001 asked for, not an overclaim.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

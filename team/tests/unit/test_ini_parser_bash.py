@@ -14,8 +14,15 @@ Behavioral requirements under test:
     - Handles values containing '=' characters
     - Handles section names with dots (e.g. [project.foo])
     - Ignores comment lines (# and ;) and blank lines
+    - Strips an inline comment (whitespace then # or ;) from a value, but
+      keeps a value that itself begins with # or ;
+    - Strips the carriage return of a CRLF-saved file from every value
     - Returns exit 1 and writes to stderr for unreadable files
     - Missing file is not an error — returns default
+
+  list_ini_sections / list_ini_keys:
+    - Enumerate every section header and every "<section>\t<key>" line under
+      the same comment / CRLF rules read_ini applies
 
   write_ini:
     - Updates an existing key's value in-place
@@ -86,6 +93,55 @@ def _write_ini_file(path: pathlib.Path, content: str) -> None:
             "value",
         ),  # ';' comment lines ignored
         ("[project.foo]\nbar = baz\n", "project.foo", "bar", "", "baz"),  # dotted section names
+        (
+            "[wake]\nmax_runtime_seconds = 300 # five min\n",
+            "wake",
+            "max_runtime_seconds",
+            "",
+            "300",
+        ),  # inline '#' comment after the value is stripped
+        (
+            "[wake]\npause_between_tasks = 7 ; semicolon note\n",
+            "wake",
+            "pause_between_tasks",
+            "",
+            "7",
+        ),  # inline ';' comment after the value is stripped
+        (
+            "[dashboard]\ndashboard_status_glyph = #\n",
+            "dashboard",
+            "dashboard_status_glyph",
+            "",
+            "#",
+        ),  # a value that IS '#' is a value, not a comment
+        (
+            "[dashboard]\ndashboard_status_glyph = # # marker\n",
+            "dashboard",
+            "dashboard_status_glyph",
+            "",
+            "#",
+        ),  # leading '#' kept, the later whitespace-prefixed comment stripped
+        (
+            "[section]\nurl = http://host/path#fragment\n",
+            "section",
+            "url",
+            "",
+            "http://host/path#fragment",
+        ),  # '#' with no whitespace before it is part of the value
+        (
+            "[wake]\r\nmax_runtime_seconds = 21600\r\nstop_on_blocked = true\r\n",
+            "wake",
+            "stop_on_blocked",
+            "",
+            "true",
+        ),  # CRLF line endings: no trailing \r in the value
+        (
+            "[wake]\r\nmax_runtime_seconds = 300 # six h\r\n",
+            "wake",
+            "max_runtime_seconds",
+            "",
+            "300",
+        ),  # CRLF and an inline comment together
     ],
 )
 def test_read_ini(
@@ -136,6 +192,63 @@ def test_read_ini_blank_value_is_distinguishable_from_missing(
     assert result.returncode == 0
     # Key is present with a blank value; default should NOT be echoed.
     assert result.stdout.strip() == ""
+
+
+def test_read_ini_crlf_section_header_still_matches(tmp_path: pathlib.Path) -> None:
+    """A section header ending in \\r ([wake]\\r\\n) is matched by its bare name."""
+    cfg = tmp_path / "crlf.cfg"
+    cfg.write_bytes(b"[paths]\r\ndev_tree_path = /srv/tree\r\n\r\n[wake]\r\nmax_tasks_per_wake = 2\r\n")
+    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' wake max_tasks_per_wake"))
+    assert result.returncode == 0
+    assert result.stdout == "2"
+    result = run_bash(tmp_path, _source(f"read_ini '{cfg}' paths dev_tree_path"))
+    assert result.stdout == "/srv/tree"
+
+
+# ---------------------------------------------------------------------------
+# list_ini_sections / list_ini_keys — enumeration under the same rules
+# ---------------------------------------------------------------------------
+
+
+def test_list_ini_sections_enumerates_headers_in_file_order(tmp_path: pathlib.Path) -> None:
+    """list_ini_sections prints every header, bare name only, in file order."""
+    cfg = tmp_path / "test.cfg"
+    _write_ini_file(cfg, "# lead comment\n[alpha]\nk = v\n[ beta.sub ] # trailing\n\n[gamma]\n")
+    result = run_bash(tmp_path, _source(f"list_ini_sections '{cfg}'"))
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["alpha", "beta.sub", "gamma"]
+
+
+def test_list_ini_keys_enumerates_section_tab_key(tmp_path: pathlib.Path) -> None:
+    """list_ini_keys prints <section>\\t<key> per key line, skipping comments and blanks."""
+    cfg = tmp_path / "test.cfg"
+    _write_ini_file(
+        cfg,
+        "orphan = 1\n[alpha]\n# comment = not a key\nk1 = v\n  k2=v # note\n\n[beta]\n; also comment\nk3 =\nnot_a_key_line\n",
+    )
+    result = run_bash(tmp_path, _source(f"list_ini_keys '{cfg}'"))
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["\torphan", "alpha\tk1", "alpha\tk2", "beta\tk3"]
+
+
+def test_list_ini_keys_and_sections_strip_crlf(tmp_path: pathlib.Path) -> None:
+    """Enumeration of a CRLF file carries no \\r in section or key names."""
+    cfg = tmp_path / "crlf.cfg"
+    cfg.write_bytes(b"[wake]\r\nmax_tasks_per_wake = 2\r\n[chain]\r\npm_mode = manual\r\n")
+    sections = run_bash(tmp_path, _source(f"list_ini_sections '{cfg}'"))
+    keys = run_bash(tmp_path, _source(f"list_ini_keys '{cfg}'"))
+    assert sections.stdout.splitlines() == ["wake", "chain"]
+    assert keys.stdout.splitlines() == ["wake\tmax_tasks_per_wake", "chain\tpm_mode"]
+    assert "\r" not in sections.stdout and "\r" not in keys.stdout
+
+
+def test_list_ini_missing_file_prints_nothing_and_exits_zero(tmp_path: pathlib.Path) -> None:
+    """A missing file is not an error for either enumerator."""
+    absent = tmp_path / "does_not_exist.cfg"
+    for fn in ("list_ini_sections", "list_ini_keys"):
+        result = run_bash(tmp_path, _source(f"{fn} '{absent}'"))
+        assert result.returncode == 0, fn
+        assert result.stdout == "", fn
 
 
 # ---------------------------------------------------------------------------

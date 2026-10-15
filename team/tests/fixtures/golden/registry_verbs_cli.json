@@ -1,0 +1,1173 @@
+{
+ "_about": "CLI behaviour of create-project.sh, add-project.sh and remove-project.sh on sandbox roots, including the project README that create and add seed; see team/tests/unit/test_ops_projects.py.",
+ "blobs": {
+  "036e8eb8b576": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n\n## Last Released\nnone\n",
+  "0aebb0caf063": "# registry\n[project:old]\npriority=1\ndashboard_color=#378ADD\n\n[project:two]\npriority = 4\n",
+  "0db8c4f33b0c": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n\n[project:alpha]\npriority=1\ndashboard_color=#378ADD\n",
+  "125bbfabdafb": "# Writer Backlog\n\nTasks ready for the writer agent to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "125df430b76b": "# CM Backlog\n\nTasks ready for the cm agent to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "1a175ac2a1ce": "# registry\n[project:old]\npriority=1\ndashboard_color=#378ADD\n\n[project:two]\npriority = 4\n\n[project:alpha]\npriority=5\ndashboard_color=#8E3FD0\n",
+  "1cba6e976618": "# Tester Backlog\n\nTasks ready for the tester agent (completeness verification) to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "216618e8c691": "# Tester Backlog\n\nTasks ready for the tester agent to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "242b90c1ceb4": "[project]\nproject_name = gamma\nworkflow_type = testing-only\ngit_remote_name = origin\ndev_tree_path =\ngit_repo_url =\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 21\nmax_minor = 13\nmax_major = 0\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "254d99d6fba8": "# CM Backlog\n\nTasks ready for the cm agent (release tagging) to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "28e219ec4715": "# legacy header\n# more\nold:1:#378ADD\ntwo:2\n",
+  "2d78dcd62fe7": "[project]\nproject_name = p3\nworkflow_type = release\ngit_remote_name = origin\ndev_tree_path =\ngit_repo_url =\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 21\nmax_minor = 13\nmax_major = 0\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "2e7bb14fbb39": "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
+  "3a2a9ac838b8": "# legacy header\n# more\nold:1:#378ADD\n",
+  "3d66b563f3ed": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n\n[project:zed]\npriority=1\ndashboard_color=#378ADD\n",
+  "3fef2ff3afca": "# registry\n[project:old]\npriority=1\ndashboard_color=#378ADD\n\n[project:two]\npriority = 4\n\n[project:zed]\npriority=5\ndashboard_color=#8E3FD0\n",
+  "411c00a12ef7": "# registry\n[project:old]\npriority=1\ndashboard_color=#378ADD\n\n[project:two]\npriority = 4\n\n[project:beta]\npriority=7\ndashboard_color=#123456\n",
+  "45195e97ccb6": "# Bug Backlog\n\nTasks ready for the bug triage to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "5574a53c2e15": "# registry\n[project:old]\npriority=1\ndashboard_color=#378ADD\n\n",
+  "599a11a5891c": "# Overwatch Backlog\n\nTasks ready for the overwatch agent to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "5a6aef92d492": "# legacy header\n# more\nold:1:#378ADD\ntwo:2\nzed:3:#8E3FD0\n",
+  "5b6ab90a2433": "# Priority Backlog\n\nTasks ready for the priority intake to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "5e7c83d1c05a": "[project]\nproject_name = beta\nworkflow_type = release\ngit_remote_name = origin\ndev_tree_path =\ngit_repo_url = u\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 21\nmax_minor = 13\nmax_major = 0\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "6757d0e21069": "# PM Backlog\n\nTasks ready for the pm agent to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "70982d2b467b": "[project]\nproject_name = beta\nworkflow_type = document\ngit_remote_name = up\ndev_tree_path = /nonexistent/x\ngit_repo_url = git@example:x.git\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 3\nmax_minor = 4\nmax_major = 1\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "773b98a5c8ff": "[project]\nproject_name = zed\nworkflow_type = release\ngit_remote_name = origin\ndev_tree_path =\ngit_repo_url =\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 21\nmax_minor = 13\nmax_major = 0\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "77f51d02f26e": "# Writer Backlog\n\nTasks ready for the writer agent (drafting and integration) to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "788d743e5016": "# Coder Backlog\n\nTasks ready for the coder agent to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "894e75d4a1ac": "# registry\n[project:two]\npriority = 4\n",
+  "8992e77ee6f8": "[project]\nproject_name = envproj\nworkflow_type = release\ngit_remote_name = origin\ndev_tree_path =\ngit_repo_url =\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 21\nmax_minor = 13\nmax_major = 0\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "8ed280092317": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n\n[project:p2]\npriority=2\ndashboard_color=#D85A30\n\n[project:p3]\npriority=3\ndashboard_color=#378ADD\n",
+  "96421406a4cf": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n\n[project:gamma]\npriority=1\ndashboard_color=#378ADD\n",
+  "97be327df9bd": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n\n[project:old]\npriority=1\ndashboard_color=#378ADD\n\n[project:two]\npriority=2\n\n[project:zed]\npriority=3\ndashboard_color=#8E3FD0\n",
+  "9af8e0f41649": "# registry\n[project:old]\npriority=1\ndashboard_color=#378ADD\n\n[project:two]\npriority = 4\n\n[project:zed]\npriority=9\ndashboard_color=#ABCDEF\n",
+  "a330caa117b2": "[project:a1]\npriority=3\n\n[project:a2]\npriority=1\n\n[project:zed]\npriority=4\ndashboard_color=#8E3FD0\n",
+  "b4f869fe08ae": "[project]\nproject_name = alpha\nworkflow_type = custom\ngit_remote_name = origin\ndev_tree_path =\ngit_repo_url =\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 21\nmax_minor = 13\nmax_major = 0\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "ba65fafa3e42": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n",
+  "bef986e98f71": "# registry\n[project:old]\npriority=5\ndashboard_color=#000000\n\n[project:two]\npriority = 4\n",
+  "bf78d4f3fc3e": "# registry\n[project:old]\npriority=5\ndashboard_color=#378ADD\n\n[project:two]\npriority = 4\n",
+  "c33b5a85ec28": "[project]\nproject_name = old\n",
+  "c5c3f156dc22": "[project]\nproject_name = two\n",
+  "cc090500b53f": "[project:a1]\npriority=3\n\n[project:a2]\npriority=1\n\n[project:alpha]\npriority=4\ndashboard_color=#8E3FD0\n",
+  "ced701ca32dd": "# legacy header\n# more\nold:1:#378ADD\ntwo:2\nalpha:3:#8E3FD0\n",
+  "e0609fcaa35f": "# legacy header\n# more\nold:1:#378ADD\ntwo:8\n",
+  "e1feb7cf7f10": "[project]\nproject_name = alpha\nworkflow_type = release\ngit_remote_name = origin\ndev_tree_path =\ngit_repo_url =\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 21\nmax_minor = 13\nmax_major = 0\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "e37ec4f7c5a7": "[project]\nproject_name = beta\nworkflow_type = release\ngit_remote_name = origin\ndev_tree_path = /tmp\ngit_repo_url = u\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 21\nmax_minor = 13\nmax_major = 0\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "e6d9df16646a": "# PM Backlog\n\nTasks ready for the pm agent (decomposition) to pull. Markers:\n\n- `[ ]` pending (BACKLOG, ready to pull)\n- `[W]` waiting on prerequisites\n- `[A]` actively being worked\n- `[B]` blocked, needs human intervention\n- `[x]` done or won't-do\n\n",
+  "e74a5f78443c": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n\n[project:old]\npriority=1\ndashboard_color=#378ADD\n\n[project:two]\npriority=2\n\n[project:alpha]\npriority=3\ndashboard_color=#8E3FD0\n",
+  "e7f462a7a957": "[project]\nproject_name = p2\nworkflow_type = release\ngit_remote_name = origin\ndev_tree_path =\ngit_repo_url =\nbranch_prefix = ai_\npush_to_remote = true\n[versioning]\nmax_patch = 21\nmax_minor = 13\nmax_major = 0\nmax_priorities_per_run = 1\n[release]\n[locks]\n[overwatch]\n[archive]\n[hooks]\ncm_release_pre_squash_hook =\ncm_release_pre_squash_hook_required = false\ncm_release_pre_tag_hook =\ncm_release_pre_tag_hook_required = false\ncm_release_post_tag_hook =\ncm_release_post_tag_hook_required = false\n[debug]\nverbose_mode = false\nverbose_agents = pm,coder,writer,tester,cm\n[training]\nreasoning_trace = false\ntraining_agents =\n",
+  "f283efd227e2": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n\n[project:envproj]\npriority=1\ndashboard_color=#378ADD\n",
+  "f8a5f8dbdcba": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n\n[project:beta]\npriority=1\ndashboard_color=#378ADD\n",
+  "fe031d2ea941": "# projects.cfg \u2014 Registry of projects this kanban installation manages.\n#\n# Format: INI-style with one [project:NAME] section per project.\n#\n# Fields per section:\n#   priority             \u2014 integer; lower = higher priority for wake-script iteration (required)\n#   description          \u2014 free-text description (optional)\n#   enabled              \u2014 true|false; default true (optional)\n#   dashboard_color      \u2014 hex color #RRGGBB for dashboard tag (optional)\n#   dashboard_max_rows   \u2014 integer rows shown per visibility column (optional; default 20)\n#                          Valid range: 5\u2013100. Values outside that range are clamped with a warning.\n#\n# Future dashboard_* fields can be added without format changes.\n#\n# Edit by hand or via operator scripts (create-project.sh, add-project.sh, remove-project.sh).\n# Restart the tmux dashboard session after edits.\n#\n# Example:\n#\n#   [project:pgai-chomp-man]\n#   priority=1\n#   description=Release-workflow demo project (see demos/chomp-man-demo/)\n#   enabled=true\n#   dashboard_color=#378ADD\n#   dashboard_max_rows=20\n#\n#   # Minimal: only priority set; color comes from the palette by\n#   # registration order, all other fields use defaults.\n#   [project:pgai-three-bears]\n#   priority=2\n\n[project:old]\npriority=1\ndashboard_color=#378ADD\n\n[project:two]\npriority=8\n"
+ },
+ "scenarios": {
+  "add-bad-color": {
+   "rc": 1,
+   "stderr": "ERROR: --color requires a color in #RRGGBB format (e.g. #378ADD); got: '#12'\n",
+   "stdout": "",
+   "tree": {
+    "projects/": null,
+    "projects/zed/": null
+   }
+  },
+  "add-colon": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: zed\n  Project root: <ROOT>/projects/zed\n  Will register at priority=<next available>, color=#8E3FD0\n  projects.cfg:   colon-legacy (will auto-migrate to INI before registering)\n  Will seed README.md from the project README template (none present)\n  Will write project.cfg from the project.cfg template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/zed/README.md\n  + wrote project.cfg from the project.cfg template (none present); set dev_tree_path and git_repo_url in it\n[migration] projects.cfg: converted from colon-legacy to INI format (2 entries)\n  + registered (priority=3, color=#8E3FD0)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:97be327df9bd",
+    "projects/": null,
+    "projects/zed/": null,
+    "projects/zed/README.md": null,
+    "projects/zed/project.cfg": "blob:773b98a5c8ff"
+   }
+  },
+  "add-colon-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: zed\n  Project root: <ROOT>/projects/zed\n  Will register at priority=<next available>, color=#8E3FD0\n  projects.cfg:   colon-legacy (will auto-migrate to INI before registering)\n  Will seed README.md from the project README template (none present)\n  Will write project.cfg from the project.cfg template (none present)\n\n[DRY-RUN] No changes will be made.\n",
+   "tree": {
+    "projects.cfg": "blob:28e219ec4715",
+    "projects/": null,
+    "projects/zed/": null
+   }
+  },
+  "add-colon-nomig": {
+   "rc": 0,
+   "stderr": "WARNING: projects.cfg is in colon-legacy format and --no-migrate was given.\nWARNING: The new project will be appended as a colon-format line.\nWARNING: This produces a mixed-format file that is not a supported stable state.\nWARNING: Run 'scripts/migrate/projects-cfg.sh' (or re-run without --no-migrate)\nWARNING: to convert projects.cfg to INI format.\n",
+   "stdout": "Registering project: zed\n  Project root: <ROOT>/projects/zed\n  Will register at priority=<next available>, color=#8E3FD0\n  projects.cfg:   colon-legacy (--no-migrate: will append colon line; WARNING: mixed format)\n  Will seed README.md from the project README template (none present)\n  Will write project.cfg from the project.cfg template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/zed/README.md\n  + wrote project.cfg from the project.cfg template (none present); set dev_tree_path and git_repo_url in it\n  + registered (priority=3, color=#8E3FD0)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:5a6aef92d492",
+    "projects/": null,
+    "projects/zed/": null,
+    "projects/zed/README.md": null,
+    "projects/zed/project.cfg": "blob:773b98a5c8ff"
+   }
+  },
+  "add-colon-update": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: two\n  Project root: <ROOT>/projects/two\n  Already registered at priority=2; will update to 8\n  Will seed README.md from the project README template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/two/README.md\n[migration] projects.cfg: converted from colon-legacy to INI format (2 entries)\n  + registered (priority=8, color=#D85A30)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:fe031d2ea941",
+    "projects/": null,
+    "projects/two/": null,
+    "projects/two/README.md": null,
+    "projects/two/project.cfg": "blob:c5c3f156dc22"
+   }
+  },
+  "add-colon-update-nomig": {
+   "rc": 0,
+   "stderr": "WARNING: projects.cfg is in colon-legacy format and --no-migrate was given.\nWARNING: The new project will be appended as a colon-format line.\nWARNING: This produces a mixed-format file that is not a supported stable state.\nWARNING: Run 'scripts/migrate/projects-cfg.sh' (or re-run without --no-migrate)\nWARNING: to convert projects.cfg to INI format.\n",
+   "stdout": "Registering project: two\n  Project root: <ROOT>/projects/two\n  Already registered at priority=2; will update to 8\n  Will seed README.md from the project README template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/two/README.md\n  + registered (priority=8, color=#378ADD)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:e0609fcaa35f",
+    "projects/": null,
+    "projects/two/": null,
+    "projects/two/README.md": null,
+    "projects/two/project.cfg": "blob:c5c3f156dc22"
+   }
+  },
+  "add-existing-noop": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: two\n  Project root: <ROOT>/projects/two\n  Already registered at priority=4; registry unchanged.\n  Will seed README.md from the project README template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/two/README.md\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:0aebb0caf063",
+    "projects/": null,
+    "projects/two/": null,
+    "projects/two/README.md": null,
+    "projects/two/project.cfg": "blob:c5c3f156dc22"
+   }
+  },
+  "add-existing-same": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: two\n  Project root: <ROOT>/projects/two\n  Already registered at priority=4; registry unchanged.\n  Will seed README.md from the project README template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/two/README.md\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:0aebb0caf063",
+    "projects/": null,
+    "projects/two/": null,
+    "projects/two/README.md": null,
+    "projects/two/project.cfg": "blob:c5c3f156dc22"
+   }
+  },
+  "add-existing-update": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: old\n  Project root: <ROOT>/projects/old\n  Already registered at priority=1; will update to 5\n  Will seed README.md from the project README template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/old/README.md\n  + registered (priority=5, color=#378ADD)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:bf78d4f3fc3e",
+    "projects/": null,
+    "projects/old/": null,
+    "projects/old/README.md": null,
+    "projects/old/project.cfg": "blob:c33b5a85ec28"
+   }
+  },
+  "add-existing-update-color": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: old\n  Project root: <ROOT>/projects/old\n  Already registered at priority=1; will update to 5\n  Will seed README.md from the project README template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/old/README.md\n  + registered (priority=5, color=#000000)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:bef986e98f71",
+    "projects/": null,
+    "projects/old/": null,
+    "projects/old/README.md": null,
+    "projects/old/project.cfg": "blob:c33b5a85ec28"
+   }
+  },
+  "add-existing-update-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: old\n  Project root: <ROOT>/projects/old\n  Already registered at priority=1; will update to 5\n  Will seed README.md from the project README template (none present)\n\n[DRY-RUN] No changes will be made.\n",
+   "tree": {
+    "projects.cfg": "blob:0aebb0caf063",
+    "projects/": null,
+    "projects/old/": null,
+    "projects/old/project.cfg": "blob:c33b5a85ec28"
+   }
+  },
+  "add-existing-update-spaced": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: two\n  Project root: <ROOT>/projects/two\n  Already registered at priority=4; will update to 5\n  Will seed README.md from the project README template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/two/README.md\n  + registered (priority=4, color=#D85A30)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:0aebb0caf063",
+    "projects/": null,
+    "projects/two/": null,
+    "projects/two/README.md": null,
+    "projects/two/project.cfg": "blob:c5c3f156dc22"
+   }
+  },
+  "add-help": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Usage: add-project.sh [OPTIONS]\n\nRegister an existing on-disk project directory in projects.cfg.\n\nOptions:\n  --project NAME     Project name (default: $PGAI_PROJECT_NAME)\n  --dry-run          Report what would happen without making changes\n  --help, -h         Show this help and exit\n\n  --priority INT       registry priority (default: next available)\n  --color '#RRGGBB'    registry display color (default: next unused)\n  --no-migrate         skip auto-migration of projects.cfg (not recommended)\n",
+   "tree": {}
+  },
+  "add-missing-dir": {
+   "rc": 2,
+   "stderr": "ERROR: project directory does not exist: <ROOT>/projects/zed\n       To create a new project, use: create-project.sh zed\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "add-new-ini": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: zed\n  Project root: <ROOT>/projects/zed\n  Will register at priority=<next available>, color=#8E3FD0\n  projects.cfg:   INI format\n  Will seed README.md from the project README template (none present)\n  Will write project.cfg from the project.cfg template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/zed/README.md\n  + wrote project.cfg from the project.cfg template (none present); set dev_tree_path and git_repo_url in it\n  + registered (priority=5, color=#8E3FD0)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:3fef2ff3afca",
+    "projects/": null,
+    "projects/zed/": null,
+    "projects/zed/README.md": null,
+    "projects/zed/project.cfg": "blob:773b98a5c8ff"
+   }
+  },
+  "add-new-ini-nocolor": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: zed\n  Project root: <ROOT>/projects/zed\n  Will register at priority=<next available>, color=#8E3FD0\n  projects.cfg:   INI format\n  Will seed README.md from the project README template (none present)\n  Will write project.cfg from the project.cfg template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/zed/README.md\n  + wrote project.cfg from the project.cfg template (none present); set dev_tree_path and git_repo_url in it\n  + registered (priority=4, color=#8E3FD0)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:a330caa117b2",
+    "projects/": null,
+    "projects/zed/": null,
+    "projects/zed/README.md": null,
+    "projects/zed/project.cfg": "blob:773b98a5c8ff"
+   }
+  },
+  "add-new-ini-prio-color": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: zed\n  Project root: <ROOT>/projects/zed\n  Will register at priority=9, color=#ABCDEF\n  projects.cfg:   INI format\n  Will seed README.md from the project README template (none present)\n  Will write project.cfg from the project.cfg template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/zed/README.md\n  + wrote project.cfg from the project.cfg template (none present); set dev_tree_path and git_repo_url in it\n  + registered (priority=9, color=#ABCDEF)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:9af8e0f41649",
+    "projects/": null,
+    "projects/zed/": null,
+    "projects/zed/README.md": null,
+    "projects/zed/project.cfg": "blob:773b98a5c8ff"
+   }
+  },
+  "add-new-nocfg": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: zed\n  Project root: <ROOT>/projects/zed\n  Will register at priority=<next available>, color=#378ADD\n  projects.cfg:   INI format\n  Will seed README.md from the project README template (none present)\n  Will write project.cfg from the project.cfg template (none present)\n\n  + seeded README.md from the project README template; fill in this project's rules:\n     $EDITOR <ROOT>/projects/zed/README.md\n  + wrote project.cfg from the project.cfg template (none present); set dev_tree_path and git_repo_url in it\n  + registered (priority=1, color=#378ADD)\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:3d66b563f3ed",
+    "projects/": null,
+    "projects/zed/": null,
+    "projects/zed/README.md": null,
+    "projects/zed/project.cfg": "blob:773b98a5c8ff"
+   }
+  },
+  "add-new-nocfg-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Registering project: zed\n  Project root: <ROOT>/projects/zed\n  Will register at priority=<next available>, color=#378ADD\n  projects.cfg:   INI format\n  Will seed README.md from the project README template (none present)\n  Will write project.cfg from the project.cfg template (none present)\n\n[DRY-RUN] No changes will be made.\n",
+   "tree": {
+    "projects.cfg": "blob:ba65fafa3e42",
+    "projects/": null,
+    "projects/zed/": null
+   }
+  },
+  "add-no-name": {
+   "rc": 1,
+   "stderr": "ERROR: project name is required (--project <name>)\nUsage: add-project.sh --project <name> [--priority <int>]\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-aliases": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: beta\n  Project root:   <ROOT>/projects/beta\n  Workflow:       release\n  Dev tree:       /tmp\n  Git repo:       u\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=1, color=#378ADD)\n\nDone. Project 'beta' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/beta/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/beta/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project beta\n  4. Drop requirements docs in: <ROOT>/projects/beta/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project beta --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:f8a5f8dbdcba",
+    "projects/": null,
+    "projects/beta/": null,
+    "projects/beta/INTENT.md": null,
+    "projects/beta/README.md": null,
+    "projects/beta/artifacts/": null,
+    "projects/beta/bugs/": null,
+    "projects/beta/bugs/README.md": null,
+    "projects/beta/bugs/templates/": null,
+    "projects/beta/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/beta/logs/": null,
+    "projects/beta/metrics/": null,
+    "projects/beta/priority/": null,
+    "projects/beta/priority/README.md": null,
+    "projects/beta/priority/templates/": null,
+    "projects/beta/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/beta/project.cfg": "blob:e37ec4f7c5a7",
+    "projects/beta/release-notes/": null,
+    "projects/beta/release-state.md": "blob:036e8eb8b576",
+    "projects/beta/requirements/": null,
+    "projects/beta/requirements/README.md": null,
+    "projects/beta/requirements/templates/": null,
+    "projects/beta/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/beta/tasks/": null,
+    "projects/beta/tasks/queues/": null,
+    "projects/beta/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/beta/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/beta/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/beta/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/beta/tasks/queues/plans/": null,
+    "projects/beta/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/beta/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/beta/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/beta/tasks/queues/writer_backlog.md": "blob:125bbfabdafb"
+   }
+  },
+  "create-all-flags": {
+   "rc": 0,
+   "stderr": "WARNING: --dev-tree path does not currently exist: /nonexistent/x\n         Writing it into project.cfg anyway; clone or create the tree before the first release.\n",
+   "stdout": "Creating project: beta\n  Project root:   <ROOT>/projects/beta\n  Workflow:       document\n  Dev tree:       /nonexistent/x\n  Git repo:       git@example:x.git\n  Git remote:     up\n  max_patch:      3\n  max_minor:      4\n  max_major:      1\n  Priority:       7\n  Color:          #123456\n  projects.cfg:   INI format\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 6 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded brief-example.md\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=7, color=#123456)\n\nDone. Project 'beta' is ready (max_patch=3, max_minor=4, max_major=1).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/beta/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/beta/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project beta\n  4. Drop requirements docs in: <ROOT>/projects/beta/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project beta --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:411c00a12ef7",
+    "projects/": null,
+    "projects/beta/": null,
+    "projects/beta/INTENT.md": null,
+    "projects/beta/README.md": null,
+    "projects/beta/artifacts/": null,
+    "projects/beta/brief-example.md": null,
+    "projects/beta/bugs/": null,
+    "projects/beta/bugs/README.md": null,
+    "projects/beta/bugs/templates/": null,
+    "projects/beta/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/beta/logs/": null,
+    "projects/beta/metrics/": null,
+    "projects/beta/priority/": null,
+    "projects/beta/priority/README.md": null,
+    "projects/beta/priority/templates/": null,
+    "projects/beta/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/beta/project.cfg": "blob:70982d2b467b",
+    "projects/beta/release-notes/": null,
+    "projects/beta/release-state.md": "blob:036e8eb8b576",
+    "projects/beta/requirements/": null,
+    "projects/beta/requirements/README.md": null,
+    "projects/beta/requirements/templates/": null,
+    "projects/beta/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/beta/tasks/": null,
+    "projects/beta/tasks/queues/": null,
+    "projects/beta/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/beta/tasks/queues/cm_backlog.md": "blob:254d99d6fba8",
+    "projects/beta/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/beta/tasks/queues/plans/": null,
+    "projects/beta/tasks/queues/pm_backlog.md": "blob:e6d9df16646a",
+    "projects/beta/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/beta/tasks/queues/tester_backlog.md": "blob:1cba6e976618",
+    "projects/beta/tasks/queues/writer_backlog.md": "blob:77f51d02f26e"
+   }
+  },
+  "create-bad-color-0x": {
+   "rc": 1,
+   "stderr": "ERROR: --color got '0x123456': use #RRGGBB format (not 0xRRGGBB)\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-bad-color-junk": {
+   "rc": 1,
+   "stderr": "ERROR: --color requires a color in #RRGGBB format (e.g. #378ADD); got: 'red'\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-bad-color-short": {
+   "rc": 1,
+   "stderr": "ERROR: --color got '#abc': short-form #RGB is not supported; use full #RRGGBB\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-bad-int": {
+   "rc": 1,
+   "stderr": "ERROR: --max-minor requires a non-negative integer; got: 'x1'\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-bad-int-major": {
+   "rc": 1,
+   "stderr": "ERROR: --max-major requires a non-negative integer; got: '-1'\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-bad-name": {
+   "rc": 1,
+   "stderr": "error:   create_project.project_invalid\nmessage: create_project refused the 'project' field: the value '1abc' does not start with a letter followed only by letters, digits, '-' and '_'. A project name starts with a letter and holds only letters, digits, '-' and '_'. Nothing was written.\nremedy:  team/scripts/create-project.sh --project my-app --dry-run\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-bad-name2": {
+   "rc": 1,
+   "stderr": "error:   create_project.project_invalid\nmessage: create_project refused the 'project' field: the value 'a.b' does not start with a letter followed only by letters, digits, '-' and '_'. A project name starts with a letter and holds only letters, digits, '-' and '_'. Nothing was written.\nremedy:  team/scripts/create-project.sh --project my-app --dry-run\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-broken-wf": {
+   "rc": 1,
+   "stderr": "ERROR: workflow type 'broken' is not valid: workflow type 'broken': invalid [capabilities] git_mode 'zz' (must be none, ro, or rw) in <ROOT>/workflows/broken/workflow.cfg\n",
+   "stdout": "",
+   "tree": {
+    "workflows/": null,
+    "workflows/broken/": null,
+    "workflows/broken/workflow.cfg": null,
+    "workflows/broken/workflow.sh": null,
+    "workflows/custom/": null,
+    "workflows/custom/workflow.cfg": null,
+    "workflows/custom/workflow.sh": null,
+    "workflows/noagents/": null,
+    "workflows/noagents/workflow.cfg": null,
+    "workflows/noagents/workflow.sh": null,
+    "workflows/nosh/": null,
+    "workflows/nosh/workflow.cfg": null,
+    "workflows/release/": null,
+    "workflows/release/workflow.cfg": null,
+    "workflows/release/workflow.sh": null,
+    "workflows/scaf/": null,
+    "workflows/scaf/workflow.cfg": null,
+    "workflows/scaf/workflow.sh": null
+   }
+  },
+  "create-colon": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n  projects.cfg:   colon-legacy (will auto-migrate to INI before registering)\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n[migration] projects.cfg: converted from colon-legacy to INI format (2 entries)\n  + registered in projects.cfg (priority=3, color=#8E3FD0)\n\nDone. Project 'alpha' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/alpha/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/alpha/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project alpha\n  4. Drop requirements docs in: <ROOT>/projects/alpha/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project alpha --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:e74a5f78443c",
+    "projects/": null,
+    "projects/alpha/": null,
+    "projects/alpha/INTENT.md": null,
+    "projects/alpha/README.md": null,
+    "projects/alpha/artifacts/": null,
+    "projects/alpha/bugs/": null,
+    "projects/alpha/bugs/README.md": null,
+    "projects/alpha/bugs/templates/": null,
+    "projects/alpha/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/alpha/logs/": null,
+    "projects/alpha/metrics/": null,
+    "projects/alpha/priority/": null,
+    "projects/alpha/priority/README.md": null,
+    "projects/alpha/priority/templates/": null,
+    "projects/alpha/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/alpha/project.cfg": "blob:e1feb7cf7f10",
+    "projects/alpha/release-notes/": null,
+    "projects/alpha/release-state.md": "blob:036e8eb8b576",
+    "projects/alpha/requirements/": null,
+    "projects/alpha/requirements/README.md": null,
+    "projects/alpha/requirements/templates/": null,
+    "projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/alpha/tasks/": null,
+    "projects/alpha/tasks/queues/": null,
+    "projects/alpha/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/alpha/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/alpha/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/alpha/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/alpha/tasks/queues/plans/": null,
+    "projects/alpha/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/alpha/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/alpha/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/alpha/tasks/queues/writer_backlog.md": "blob:125bbfabdafb"
+   }
+  },
+  "create-colon-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n  projects.cfg:   colon-legacy (will auto-migrate to INI before registering)\n\n[DRY-RUN] No changes will be made.\n\n[DRY-RUN] Template files that would be copied from <TREE>/scripts/../templates/project/release:\n  cp <TREE>/scripts/../templates/project/release/BUG-TEMPLATE.md -> <ROOT>/projects/alpha/bugs/templates/BUG-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/PRIORITY-TEMPLATE.md -> <ROOT>/projects/alpha/priority/templates/PRIORITY-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/REQUIREMENTS-TEMPLATE.md -> <ROOT>/projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/README-bugs.md -> <ROOT>/projects/alpha/bugs/README.md\n  cp <TREE>/scripts/../templates/project/release/README-priority.md -> <ROOT>/projects/alpha/priority/README.md\n  cp <TREE>/scripts/../templates/project/release/README-requirements.md -> <ROOT>/projects/alpha/requirements/README.md\n  cp <TREE>/scripts/../templates/project/release/INTENT-TEMPLATE.md -> <ROOT>/projects/alpha/INTENT.md\n  cp <TREE>/scripts/../templates/project/README-TEMPLATE.md -> <ROOT>/projects/alpha/README.md\n",
+   "tree": {
+    "projects.cfg": "blob:28e219ec4715"
+   }
+  },
+  "create-colon-nomig": {
+   "rc": 0,
+   "stderr": "WARNING: projects.cfg is in colon-legacy format and --no-migrate was given.\nWARNING: The new project will be appended as a colon-format line.\nWARNING: This produces a mixed-format file that is not a supported stable state.\nWARNING: Run 'scripts/migrate/projects-cfg.sh' (or re-run without --no-migrate)\nWARNING: to convert projects.cfg to INI format.\n",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n  projects.cfg:   colon-legacy (--no-migrate: will append colon line; WARNING: mixed format)\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=3, color=#8E3FD0)\n\nDone. Project 'alpha' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/alpha/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/alpha/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project alpha\n  4. Drop requirements docs in: <ROOT>/projects/alpha/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project alpha --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:ced701ca32dd",
+    "projects/": null,
+    "projects/alpha/": null,
+    "projects/alpha/INTENT.md": null,
+    "projects/alpha/README.md": null,
+    "projects/alpha/artifacts/": null,
+    "projects/alpha/bugs/": null,
+    "projects/alpha/bugs/README.md": null,
+    "projects/alpha/bugs/templates/": null,
+    "projects/alpha/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/alpha/logs/": null,
+    "projects/alpha/metrics/": null,
+    "projects/alpha/priority/": null,
+    "projects/alpha/priority/README.md": null,
+    "projects/alpha/priority/templates/": null,
+    "projects/alpha/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/alpha/project.cfg": "blob:e1feb7cf7f10",
+    "projects/alpha/release-notes/": null,
+    "projects/alpha/release-state.md": "blob:036e8eb8b576",
+    "projects/alpha/requirements/": null,
+    "projects/alpha/requirements/README.md": null,
+    "projects/alpha/requirements/templates/": null,
+    "projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/alpha/tasks/": null,
+    "projects/alpha/tasks/queues/": null,
+    "projects/alpha/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/alpha/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/alpha/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/alpha/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/alpha/tasks/queues/plans/": null,
+    "projects/alpha/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/alpha/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/alpha/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/alpha/tasks/queues/writer_backlog.md": "blob:125bbfabdafb"
+   }
+  },
+  "create-colon-nomig-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n  projects.cfg:   colon-legacy (--no-migrate: will append colon line; WARNING: mixed format)\n\n[DRY-RUN] No changes will be made.\n\n[DRY-RUN] Template files that would be copied from <TREE>/scripts/../templates/project/release:\n  cp <TREE>/scripts/../templates/project/release/BUG-TEMPLATE.md -> <ROOT>/projects/alpha/bugs/templates/BUG-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/PRIORITY-TEMPLATE.md -> <ROOT>/projects/alpha/priority/templates/PRIORITY-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/REQUIREMENTS-TEMPLATE.md -> <ROOT>/projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/README-bugs.md -> <ROOT>/projects/alpha/bugs/README.md\n  cp <TREE>/scripts/../templates/project/release/README-priority.md -> <ROOT>/projects/alpha/priority/README.md\n  cp <TREE>/scripts/../templates/project/release/README-requirements.md -> <ROOT>/projects/alpha/requirements/README.md\n  cp <TREE>/scripts/../templates/project/release/INTENT-TEMPLATE.md -> <ROOT>/projects/alpha/INTENT.md\n  cp <TREE>/scripts/../templates/project/README-TEMPLATE.md -> <ROOT>/projects/alpha/README.md\n",
+   "tree": {
+    "projects.cfg": "blob:28e219ec4715"
+   }
+  },
+  "create-custom-wf": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       custom\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 6 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=1, color=#378ADD)\n\nDone. Project 'alpha' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/alpha/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/alpha/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project alpha\n  4. Drop requirements docs in: <ROOT>/projects/alpha/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project alpha --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:0db8c4f33b0c",
+    "projects/": null,
+    "projects/alpha/": null,
+    "projects/alpha/INTENT.md": null,
+    "projects/alpha/README.md": null,
+    "projects/alpha/artifacts/": null,
+    "projects/alpha/bugs/": null,
+    "projects/alpha/bugs/README.md": null,
+    "projects/alpha/bugs/templates/": null,
+    "projects/alpha/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/alpha/logs/": null,
+    "projects/alpha/metrics/": null,
+    "projects/alpha/priority/": null,
+    "projects/alpha/priority/README.md": null,
+    "projects/alpha/priority/templates/": null,
+    "projects/alpha/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/alpha/project.cfg": "blob:b4f869fe08ae",
+    "projects/alpha/release-notes/": null,
+    "projects/alpha/release-state.md": "blob:036e8eb8b576",
+    "projects/alpha/requirements/": null,
+    "projects/alpha/requirements/README.md": null,
+    "projects/alpha/requirements/templates/": null,
+    "projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/alpha/tasks/": null,
+    "projects/alpha/tasks/queues/": null,
+    "projects/alpha/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/alpha/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/alpha/tasks/queues/plans/": null,
+    "projects/alpha/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/alpha/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/alpha/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/alpha/tasks/queues/writer_backlog.md": "blob:125bbfabdafb",
+    "workflows/": null,
+    "workflows/broken/": null,
+    "workflows/broken/workflow.cfg": null,
+    "workflows/broken/workflow.sh": null,
+    "workflows/custom/": null,
+    "workflows/custom/workflow.cfg": null,
+    "workflows/custom/workflow.sh": null,
+    "workflows/noagents/": null,
+    "workflows/noagents/workflow.cfg": null,
+    "workflows/noagents/workflow.sh": null,
+    "workflows/nosh/": null,
+    "workflows/nosh/workflow.cfg": null,
+    "workflows/release/": null,
+    "workflows/release/workflow.cfg": null,
+    "workflows/release/workflow.sh": null,
+    "workflows/scaf/": null,
+    "workflows/scaf/workflow.cfg": null,
+    "workflows/scaf/workflow.sh": null
+   }
+  },
+  "create-document-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: gamma\n  Project root:   <ROOT>/projects/gamma\n  Workflow:       document\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n\n[DRY-RUN] No changes will be made.\n\n[DRY-RUN] Template files that would be copied from <TREE>/scripts/../templates/project/document:\n  cp <TREE>/scripts/../templates/project/document/BUG-TEMPLATE.md -> <ROOT>/projects/gamma/bugs/templates/BUG-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/document/PRIORITY-TEMPLATE.md -> <ROOT>/projects/gamma/priority/templates/PRIORITY-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/document/REQUIREMENTS-TEMPLATE.md -> <ROOT>/projects/gamma/requirements/templates/REQUIREMENTS-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/document/README-bugs.md -> <ROOT>/projects/gamma/bugs/README.md\n  cp <TREE>/scripts/../templates/project/document/README-priority.md -> <ROOT>/projects/gamma/priority/README.md\n  cp <TREE>/scripts/../templates/project/document/README-requirements.md -> <ROOT>/projects/gamma/requirements/README.md\n  cp <TREE>/scripts/../templates/project/document/BRIEF-EXAMPLE.md -> <ROOT>/projects/gamma/brief-example.md\n  cp <TREE>/scripts/../templates/project/document/INTENT-TEMPLATE.md -> <ROOT>/projects/gamma/INTENT.md\n  cp <TREE>/scripts/../templates/project/README-TEMPLATE.md -> <ROOT>/projects/gamma/README.md\n",
+   "tree": {}
+  },
+  "create-empty-devtree": {
+   "rc": 1,
+   "stderr": "ERROR: --dev-tree/--dev-tree-path requires a non-empty value.\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-env-name": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: envproj\n  Project root:   <ROOT>/projects/envproj\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=1, color=#378ADD)\n\nDone. Project 'envproj' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/envproj/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/envproj/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project envproj\n  4. Drop requirements docs in: <ROOT>/projects/envproj/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project envproj --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:f283efd227e2",
+    "projects/": null,
+    "projects/envproj/": null,
+    "projects/envproj/INTENT.md": null,
+    "projects/envproj/README.md": null,
+    "projects/envproj/artifacts/": null,
+    "projects/envproj/bugs/": null,
+    "projects/envproj/bugs/README.md": null,
+    "projects/envproj/bugs/templates/": null,
+    "projects/envproj/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/envproj/logs/": null,
+    "projects/envproj/metrics/": null,
+    "projects/envproj/priority/": null,
+    "projects/envproj/priority/README.md": null,
+    "projects/envproj/priority/templates/": null,
+    "projects/envproj/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/envproj/project.cfg": "blob:8992e77ee6f8",
+    "projects/envproj/release-notes/": null,
+    "projects/envproj/release-state.md": "blob:036e8eb8b576",
+    "projects/envproj/requirements/": null,
+    "projects/envproj/requirements/README.md": null,
+    "projects/envproj/requirements/templates/": null,
+    "projects/envproj/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/envproj/tasks/": null,
+    "projects/envproj/tasks/queues/": null,
+    "projects/envproj/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/envproj/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/envproj/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/envproj/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/envproj/tasks/queues/plans/": null,
+    "projects/envproj/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/envproj/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/envproj/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/envproj/tasks/queues/writer_backlog.md": "blob:125bbfabdafb"
+   }
+  },
+  "create-exists": {
+   "rc": 2,
+   "stderr": "ERROR: project directory already exists: <ROOT>/projects/alpha\n       Use add-project.sh to register an existing project, or\n       remove-project.sh to clear it before re-creating.\n",
+   "stdout": "",
+   "tree": {
+    "projects/": null,
+    "projects/alpha/": null,
+    "projects/alpha/x": null
+   }
+  },
+  "create-fresh": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=1, color=#378ADD)\n\nDone. Project 'alpha' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/alpha/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/alpha/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project alpha\n  4. Drop requirements docs in: <ROOT>/projects/alpha/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project alpha --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:0db8c4f33b0c",
+    "projects/": null,
+    "projects/alpha/": null,
+    "projects/alpha/INTENT.md": null,
+    "projects/alpha/README.md": null,
+    "projects/alpha/artifacts/": null,
+    "projects/alpha/bugs/": null,
+    "projects/alpha/bugs/README.md": null,
+    "projects/alpha/bugs/templates/": null,
+    "projects/alpha/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/alpha/logs/": null,
+    "projects/alpha/metrics/": null,
+    "projects/alpha/priority/": null,
+    "projects/alpha/priority/README.md": null,
+    "projects/alpha/priority/templates/": null,
+    "projects/alpha/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/alpha/project.cfg": "blob:e1feb7cf7f10",
+    "projects/alpha/release-notes/": null,
+    "projects/alpha/release-state.md": "blob:036e8eb8b576",
+    "projects/alpha/requirements/": null,
+    "projects/alpha/requirements/README.md": null,
+    "projects/alpha/requirements/templates/": null,
+    "projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/alpha/tasks/": null,
+    "projects/alpha/tasks/queues/": null,
+    "projects/alpha/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/alpha/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/alpha/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/alpha/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/alpha/tasks/queues/plans/": null,
+    "projects/alpha/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/alpha/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/alpha/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/alpha/tasks/queues/writer_backlog.md": "blob:125bbfabdafb"
+   }
+  },
+  "create-fresh-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n\n[DRY-RUN] No changes will be made.\n\n[DRY-RUN] Template files that would be copied from <TREE>/scripts/../templates/project/release:\n  cp <TREE>/scripts/../templates/project/release/BUG-TEMPLATE.md -> <ROOT>/projects/alpha/bugs/templates/BUG-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/PRIORITY-TEMPLATE.md -> <ROOT>/projects/alpha/priority/templates/PRIORITY-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/REQUIREMENTS-TEMPLATE.md -> <ROOT>/projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/README-bugs.md -> <ROOT>/projects/alpha/bugs/README.md\n  cp <TREE>/scripts/../templates/project/release/README-priority.md -> <ROOT>/projects/alpha/priority/README.md\n  cp <TREE>/scripts/../templates/project/release/README-requirements.md -> <ROOT>/projects/alpha/requirements/README.md\n  cp <TREE>/scripts/../templates/project/release/INTENT-TEMPLATE.md -> <ROOT>/projects/alpha/INTENT.md\n  cp <TREE>/scripts/../templates/project/README-TEMPLATE.md -> <ROOT>/projects/alpha/README.md\n",
+   "tree": {}
+  },
+  "create-gitrepo-only": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: beta\n  Project root:   <ROOT>/projects/beta\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       u\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=1, color=#378ADD)\n\nDone. Project 'beta' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/beta/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/beta/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project beta\n  4. Drop requirements docs in: <ROOT>/projects/beta/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project beta --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:f8a5f8dbdcba",
+    "projects/": null,
+    "projects/beta/": null,
+    "projects/beta/INTENT.md": null,
+    "projects/beta/README.md": null,
+    "projects/beta/artifacts/": null,
+    "projects/beta/bugs/": null,
+    "projects/beta/bugs/README.md": null,
+    "projects/beta/bugs/templates/": null,
+    "projects/beta/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/beta/logs/": null,
+    "projects/beta/metrics/": null,
+    "projects/beta/priority/": null,
+    "projects/beta/priority/README.md": null,
+    "projects/beta/priority/templates/": null,
+    "projects/beta/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/beta/project.cfg": "blob:5e7c83d1c05a",
+    "projects/beta/release-notes/": null,
+    "projects/beta/release-state.md": "blob:036e8eb8b576",
+    "projects/beta/requirements/": null,
+    "projects/beta/requirements/README.md": null,
+    "projects/beta/requirements/templates/": null,
+    "projects/beta/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/beta/tasks/": null,
+    "projects/beta/tasks/queues/": null,
+    "projects/beta/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/beta/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/beta/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/beta/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/beta/tasks/queues/plans/": null,
+    "projects/beta/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/beta/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/beta/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/beta/tasks/queues/writer_backlog.md": "blob:125bbfabdafb"
+   }
+  },
+  "create-help": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Usage: create-project.sh [OPTIONS]\n\nBootstrap a new project under $KANBAN_ROOT/projects/<name>/.\n\nOptions:\n  --project NAME     Project name (default: $PGAI_PROJECT_NAME)\n  --dry-run          Report what would happen without making changes\n  --help, -h         Show this help and exit\n\n  --workflow-type TYPE workflow_type: any registered ready plugin type (default: release)\n  --max-patch N        max_patch ceiling (default: 21)\n  --max-minor N        max_minor ceiling (default: 13)\n  --max-major N        max_major ceiling (default: 0)\n  --git-remote NAME    git_remote_name (default: origin)\n  --priority INT       registry priority (default: next available)\n  --color '#RRGGBB'    registry display color (default: next unused)\n  --dev-tree PATH      dev_tree_path (alias: --dev-tree-path; default: empty, edit manually)\n  --git-repo URL       git_repo_url (alias: --git-repo-url; default: empty, edit manually)\n  --no-migrate         skip auto-migration of projects.cfg (not recommended)\n\nNote: when --dev-tree names a path that does not currently exist, the\nscript WARNs (naming the path) but still writes the value and exits 0.\n",
+   "tree": {}
+  },
+  "create-ini": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n  projects.cfg:   INI format\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=5, color=#8E3FD0)\n\nDone. Project 'alpha' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/alpha/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/alpha/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project alpha\n  4. Drop requirements docs in: <ROOT>/projects/alpha/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project alpha --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:1a175ac2a1ce",
+    "projects/": null,
+    "projects/alpha/": null,
+    "projects/alpha/INTENT.md": null,
+    "projects/alpha/README.md": null,
+    "projects/alpha/artifacts/": null,
+    "projects/alpha/bugs/": null,
+    "projects/alpha/bugs/README.md": null,
+    "projects/alpha/bugs/templates/": null,
+    "projects/alpha/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/alpha/logs/": null,
+    "projects/alpha/metrics/": null,
+    "projects/alpha/priority/": null,
+    "projects/alpha/priority/README.md": null,
+    "projects/alpha/priority/templates/": null,
+    "projects/alpha/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/alpha/project.cfg": "blob:e1feb7cf7f10",
+    "projects/alpha/release-notes/": null,
+    "projects/alpha/release-state.md": "blob:036e8eb8b576",
+    "projects/alpha/requirements/": null,
+    "projects/alpha/requirements/README.md": null,
+    "projects/alpha/requirements/templates/": null,
+    "projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/alpha/tasks/": null,
+    "projects/alpha/tasks/queues/": null,
+    "projects/alpha/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/alpha/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/alpha/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/alpha/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/alpha/tasks/queues/plans/": null,
+    "projects/alpha/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/alpha/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/alpha/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/alpha/tasks/queues/writer_backlog.md": "blob:125bbfabdafb"
+   }
+  },
+  "create-ini-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n  projects.cfg:   INI format\n\n[DRY-RUN] No changes will be made.\n\n[DRY-RUN] Template files that would be copied from <TREE>/scripts/../templates/project/release:\n  cp <TREE>/scripts/../templates/project/release/BUG-TEMPLATE.md -> <ROOT>/projects/alpha/bugs/templates/BUG-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/PRIORITY-TEMPLATE.md -> <ROOT>/projects/alpha/priority/templates/PRIORITY-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/REQUIREMENTS-TEMPLATE.md -> <ROOT>/projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md\n  cp <TREE>/scripts/../templates/project/release/README-bugs.md -> <ROOT>/projects/alpha/bugs/README.md\n  cp <TREE>/scripts/../templates/project/release/README-priority.md -> <ROOT>/projects/alpha/priority/README.md\n  cp <TREE>/scripts/../templates/project/release/README-requirements.md -> <ROOT>/projects/alpha/requirements/README.md\n  cp <TREE>/scripts/../templates/project/release/INTENT-TEMPLATE.md -> <ROOT>/projects/alpha/INTENT.md\n  cp <TREE>/scripts/../templates/project/README-TEMPLATE.md -> <ROOT>/projects/alpha/README.md\n",
+   "tree": {
+    "projects.cfg": "blob:0aebb0caf063"
+   }
+  },
+  "create-ini-nocolor": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: alpha\n  Project root:   <ROOT>/projects/alpha\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n  projects.cfg:   INI format\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=4, color=#8E3FD0)\n\nDone. Project 'alpha' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/alpha/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/alpha/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project alpha\n  4. Drop requirements docs in: <ROOT>/projects/alpha/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project alpha --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:cc090500b53f",
+    "projects/": null,
+    "projects/alpha/": null,
+    "projects/alpha/INTENT.md": null,
+    "projects/alpha/README.md": null,
+    "projects/alpha/artifacts/": null,
+    "projects/alpha/bugs/": null,
+    "projects/alpha/bugs/README.md": null,
+    "projects/alpha/bugs/templates/": null,
+    "projects/alpha/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/alpha/logs/": null,
+    "projects/alpha/metrics/": null,
+    "projects/alpha/priority/": null,
+    "projects/alpha/priority/README.md": null,
+    "projects/alpha/priority/templates/": null,
+    "projects/alpha/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/alpha/project.cfg": "blob:e1feb7cf7f10",
+    "projects/alpha/release-notes/": null,
+    "projects/alpha/release-state.md": "blob:036e8eb8b576",
+    "projects/alpha/requirements/": null,
+    "projects/alpha/requirements/README.md": null,
+    "projects/alpha/requirements/templates/": null,
+    "projects/alpha/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/alpha/tasks/": null,
+    "projects/alpha/tasks/queues/": null,
+    "projects/alpha/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/alpha/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/alpha/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/alpha/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/alpha/tasks/queues/plans/": null,
+    "projects/alpha/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/alpha/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/alpha/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/alpha/tasks/queues/writer_backlog.md": "blob:125bbfabdafb"
+   }
+  },
+  "create-missing-value": {
+   "rc": 1,
+   "stderr": "ERROR: --max-minor requires a value.\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-no-name": {
+   "rc": 1,
+   "stderr": "ERROR: project name is required (--project <name>)\nUsage: create-project.sh --project <name> [--workflow-type <type>] [--max-minor <N>] [--max-major <N>]\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-noagents-wf": {
+   "rc": 1,
+   "stderr": "ERROR: workflow type 'noagents' is not valid: workflow type 'noagents': manifest missing [capabilities] agents in <ROOT>/workflows/noagents/workflow.cfg\n",
+   "stdout": "",
+   "tree": {
+    "workflows/": null,
+    "workflows/broken/": null,
+    "workflows/broken/workflow.cfg": null,
+    "workflows/broken/workflow.sh": null,
+    "workflows/custom/": null,
+    "workflows/custom/workflow.cfg": null,
+    "workflows/custom/workflow.sh": null,
+    "workflows/noagents/": null,
+    "workflows/noagents/workflow.cfg": null,
+    "workflows/noagents/workflow.sh": null,
+    "workflows/nosh/": null,
+    "workflows/nosh/workflow.cfg": null,
+    "workflows/release/": null,
+    "workflows/release/workflow.cfg": null,
+    "workflows/release/workflow.sh": null,
+    "workflows/scaf/": null,
+    "workflows/scaf/workflow.cfg": null,
+    "workflows/scaf/workflow.sh": null
+   }
+  },
+  "create-nosh-wf": {
+   "rc": 1,
+   "stderr": "ERROR: workflow type 'nosh' is not valid: workflow type 'nosh': plugin script not found at <ROOT>/workflows/nosh/workflow.sh\n",
+   "stdout": "",
+   "tree": {
+    "workflows/": null,
+    "workflows/broken/": null,
+    "workflows/broken/workflow.cfg": null,
+    "workflows/broken/workflow.sh": null,
+    "workflows/custom/": null,
+    "workflows/custom/workflow.cfg": null,
+    "workflows/custom/workflow.sh": null,
+    "workflows/noagents/": null,
+    "workflows/noagents/workflow.cfg": null,
+    "workflows/noagents/workflow.sh": null,
+    "workflows/nosh/": null,
+    "workflows/nosh/workflow.cfg": null,
+    "workflows/release/": null,
+    "workflows/release/workflow.cfg": null,
+    "workflows/release/workflow.sh": null,
+    "workflows/scaf/": null,
+    "workflows/scaf/workflow.cfg": null,
+    "workflows/scaf/workflow.sh": null
+   }
+  },
+  "create-positional": {
+   "rc": 1,
+   "stderr": "ERROR: unexpected positional argument: alpha\nUsage: create-project.sh --project <name> [--workflow-type <type>] [--max-minor <N>] [--max-major <N>]\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-scaffold-wf": {
+   "rc": 1,
+   "stderr": "ERROR: workflow type 'scaf' cannot be used: plugin status is 'scaffold' \u2014 flip status to 'ready' after implementing all hooks\n",
+   "stdout": "",
+   "tree": {
+    "workflows/": null,
+    "workflows/broken/": null,
+    "workflows/broken/workflow.cfg": null,
+    "workflows/broken/workflow.sh": null,
+    "workflows/custom/": null,
+    "workflows/custom/workflow.cfg": null,
+    "workflows/custom/workflow.sh": null,
+    "workflows/noagents/": null,
+    "workflows/noagents/workflow.cfg": null,
+    "workflows/noagents/workflow.sh": null,
+    "workflows/nosh/": null,
+    "workflows/nosh/workflow.cfg": null,
+    "workflows/release/": null,
+    "workflows/release/workflow.cfg": null,
+    "workflows/release/workflow.sh": null,
+    "workflows/scaf/": null,
+    "workflows/scaf/workflow.cfg": null,
+    "workflows/scaf/workflow.sh": null
+   }
+  },
+  "create-testing-only": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Creating project: gamma\n  Project root:   <ROOT>/projects/gamma\n  Workflow:       testing-only\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 4 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=1, color=#378ADD)\n\nDone. Project 'gamma' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/gamma/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/gamma/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project gamma\n  4. Drop requirements docs in: <ROOT>/projects/gamma/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project gamma --minor <N>\n",
+   "tree": {
+    "projects.cfg": "blob:96421406a4cf",
+    "projects/": null,
+    "projects/gamma/": null,
+    "projects/gamma/INTENT.md": null,
+    "projects/gamma/README.md": null,
+    "projects/gamma/artifacts/": null,
+    "projects/gamma/bugs/": null,
+    "projects/gamma/bugs/README.md": null,
+    "projects/gamma/bugs/templates/": null,
+    "projects/gamma/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/gamma/logs/": null,
+    "projects/gamma/metrics/": null,
+    "projects/gamma/priority/": null,
+    "projects/gamma/priority/README.md": null,
+    "projects/gamma/priority/templates/": null,
+    "projects/gamma/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/gamma/project.cfg": "blob:242b90c1ceb4",
+    "projects/gamma/release-notes/": null,
+    "projects/gamma/release-state.md": "blob:036e8eb8b576",
+    "projects/gamma/requirements/": null,
+    "projects/gamma/requirements/README.md": null,
+    "projects/gamma/requirements/templates/": null,
+    "projects/gamma/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/gamma/tasks/": null,
+    "projects/gamma/tasks/queues/": null,
+    "projects/gamma/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/gamma/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/gamma/tasks/queues/plans/": null,
+    "projects/gamma/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/gamma/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/gamma/tasks/queues/tester_backlog.md": "blob:216618e8c691"
+   }
+  },
+  "create-twice": {
+   "steps": [
+    {
+     "rc": 0,
+     "stderr": "",
+     "stdout": "Creating project: p1\n  Project root:   <ROOT>/projects/p1\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=1, color=#378ADD)\n\nDone. Project 'p1' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/p1/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/p1/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project p1\n  4. Drop requirements docs in: <ROOT>/projects/p1/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project p1 --minor <N>\n"
+    },
+    {
+     "rc": 0,
+     "stderr": "",
+     "stdout": "Creating project: p2\n  Project root:   <ROOT>/projects/p2\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n  projects.cfg:   INI format\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=2, color=#D85A30)\n\nDone. Project 'p2' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/p2/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/p2/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project p2\n  4. Drop requirements docs in: <ROOT>/projects/p2/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project p2 --minor <N>\n"
+    },
+    {
+     "rc": 0,
+     "stderr": "",
+     "stdout": "Registering project: p1\n  Project root: <ROOT>/projects/p1\n  Already registered at priority=1; will update to 3\n\n  + registered (priority=3, color=#378ADD)\n\nDone.\n"
+    },
+    {
+     "rc": 0,
+     "stderr": "",
+     "stdout": "Removing project: p1\n  - will DELETE: <ROOT>/projects/p1\n  - will unregister from projects.cfg (INI: removes [project:p1] section)\n\n  + projects.cfg updated\n  + deleted: <ROOT>/projects/p1\n\nDone.\n"
+    },
+    {
+     "rc": 0,
+     "stderr": "",
+     "stdout": "Creating project: p3\n  Project root:   <ROOT>/projects/p3\n  Workflow:       release\n  Dev tree:       <empty \u2014 edit project.cfg after creation>\n  Git repo:       <empty \u2014 edit project.cfg after creation>\n  Git remote:     origin\n  max_patch:      21\n  max_minor:      13\n  max_major:      0\n  Priority:       <next available>\n  Color:          <next unused palette entry>\n  projects.cfg:   INI format\n\n  + created directory layout\n  + wrote project.cfg\n  + seeded 7 queue files\n  + seeded overwatch_backlog.md\n  + seeded 3 templates\n  + seeded 3 README.md files\n  + seeded INTENT.md\n  + seeded README.md from the project README template\n  + seeded release-state.md (includes Last Released field)\n  + registered in projects.cfg (priority=3, color=#378ADD)\n\nDone. Project 'p3' is ready (max_patch=21, max_minor=13, max_major=0).\n\nNext steps:\n  1. Edit project.cfg to set dev_tree_path and git_repo_url:\n     $EDITOR <ROOT>/projects/p3/project.cfg\n  2. Fill in the project README -- this project's test runners, lints, coding\n     standard and contracts, which every agent reads after its role file:\n     $EDITOR <ROOT>/projects/p3/README.md\n  3. Push the chain's base branches to origin (run once, before first release):\n     init-project-git-repo.sh --project p3\n  4. Drop requirements docs in: <ROOT>/projects/p3/requirements/\n  5. The chain runs immediately (ceilings are operator checkpoints).\n     To raise or lower a ceiling: set-version-ceiling.sh --project p3 --minor <N>\n"
+    }
+   ],
+   "tree": {
+    "projects.cfg": "blob:8ed280092317",
+    "projects/": null,
+    "projects/p2/": null,
+    "projects/p2/INTENT.md": null,
+    "projects/p2/README.md": null,
+    "projects/p2/artifacts/": null,
+    "projects/p2/bugs/": null,
+    "projects/p2/bugs/README.md": null,
+    "projects/p2/bugs/templates/": null,
+    "projects/p2/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/p2/logs/": null,
+    "projects/p2/metrics/": null,
+    "projects/p2/priority/": null,
+    "projects/p2/priority/README.md": null,
+    "projects/p2/priority/templates/": null,
+    "projects/p2/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/p2/project.cfg": "blob:e7f462a7a957",
+    "projects/p2/release-notes/": null,
+    "projects/p2/release-state.md": "blob:036e8eb8b576",
+    "projects/p2/requirements/": null,
+    "projects/p2/requirements/README.md": null,
+    "projects/p2/requirements/templates/": null,
+    "projects/p2/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/p2/tasks/": null,
+    "projects/p2/tasks/queues/": null,
+    "projects/p2/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/p2/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/p2/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/p2/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/p2/tasks/queues/plans/": null,
+    "projects/p2/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/p2/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/p2/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/p2/tasks/queues/writer_backlog.md": "blob:125bbfabdafb",
+    "projects/p3/": null,
+    "projects/p3/INTENT.md": null,
+    "projects/p3/README.md": null,
+    "projects/p3/artifacts/": null,
+    "projects/p3/bugs/": null,
+    "projects/p3/bugs/README.md": null,
+    "projects/p3/bugs/templates/": null,
+    "projects/p3/bugs/templates/BUG-TEMPLATE.md": null,
+    "projects/p3/logs/": null,
+    "projects/p3/metrics/": null,
+    "projects/p3/priority/": null,
+    "projects/p3/priority/README.md": null,
+    "projects/p3/priority/templates/": null,
+    "projects/p3/priority/templates/PRIORITY-TEMPLATE.md": null,
+    "projects/p3/project.cfg": "blob:2d78dcd62fe7",
+    "projects/p3/release-notes/": null,
+    "projects/p3/release-state.md": "blob:036e8eb8b576",
+    "projects/p3/requirements/": null,
+    "projects/p3/requirements/README.md": null,
+    "projects/p3/requirements/templates/": null,
+    "projects/p3/requirements/templates/REQUIREMENTS-TEMPLATE.md": null,
+    "projects/p3/tasks/": null,
+    "projects/p3/tasks/queues/": null,
+    "projects/p3/tasks/queues/bug_backlog.md": "blob:45195e97ccb6",
+    "projects/p3/tasks/queues/cm_backlog.md": "blob:125df430b76b",
+    "projects/p3/tasks/queues/coder_backlog.md": "blob:788d743e5016",
+    "projects/p3/tasks/queues/overwatch_backlog.md": "blob:599a11a5891c",
+    "projects/p3/tasks/queues/plans/": null,
+    "projects/p3/tasks/queues/pm_backlog.md": "blob:6757d0e21069",
+    "projects/p3/tasks/queues/priority_backlog.md": "blob:5b6ab90a2433",
+    "projects/p3/tasks/queues/tester_backlog.md": "blob:216618e8c691",
+    "projects/p3/tasks/queues/writer_backlog.md": "blob:125bbfabdafb"
+   }
+  },
+  "create-unknown-flag": {
+   "rc": 1,
+   "stderr": "create-project.sh: unknown argument: --bogus\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "create-unknown-wf": {
+   "rc": 1,
+   "stderr": "ERROR: unknown workflow type 'nope'; discovered ready types are: document release testing-only\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "remove-absent": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Removing project: nobody\n  - directory will be left in place: <ROOT>/projects/nobody\n  - to fully delete, re-run with --force\n  - already absent from projects.cfg\n\n  + projects.cfg updated\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:0aebb0caf063"
+   }
+  },
+  "remove-colon": {
+   "rc": 0,
+   "stderr": "WARNING: projects.cfg is in colon-legacy format.\nWARNING: Removal will delete the matching colon-format line for 'two'.\nWARNING: Consider migrating to INI format: scripts/migrate/projects-cfg.sh\n",
+   "stdout": "Removing project: two\n  - directory will be left in place: <ROOT>/projects/two\n  - to fully delete, re-run with --force\n  - will unregister from projects.cfg (colon-legacy: removes matching line)\n\n  + projects.cfg updated\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:3a2a9ac838b8",
+    "projects/": null,
+    "projects/two/": null,
+    "projects/two/x.md": null
+   }
+  },
+  "remove-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Removing project: old\n  - directory will be left in place: <ROOT>/projects/old\n  - to fully delete, re-run with --force\n  - will unregister from projects.cfg (INI: removes [project:old] section)\n\n[DRY-RUN] No changes will be made.\n",
+   "tree": {
+    "projects.cfg": "blob:0aebb0caf063",
+    "projects/": null,
+    "projects/old/": null,
+    "projects/old/x.md": null
+   }
+  },
+  "remove-force": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Removing project: old\n  - will DELETE: <ROOT>/projects/old\n  - will unregister from projects.cfg (INI: removes [project:old] section)\n\n  + projects.cfg updated\n  + deleted: <ROOT>/projects/old\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:894e75d4a1ac",
+    "projects/": null
+   }
+  },
+  "remove-force-dry": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Removing project: old\n  - will DELETE: <ROOT>/projects/old\n  - will unregister from projects.cfg (INI: removes [project:old] section)\n\n[DRY-RUN] No changes will be made.\n",
+   "tree": {
+    "projects.cfg": "blob:0aebb0caf063",
+    "projects/": null,
+    "projects/old/": null,
+    "projects/old/x.md": null
+   }
+  },
+  "remove-force-nodir": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Removing project: old\n  - directory absent: <ROOT>/projects/old (skipping delete)\n  - will unregister from projects.cfg (INI: removes [project:old] section)\n\n  + projects.cfg updated\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:894e75d4a1ac"
+   }
+  },
+  "remove-help": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Usage: remove-project.sh [OPTIONS]\n\nUnregister a project from projects.cfg; with --force also delete the directory.\n\nOptions:\n  --project NAME     Project name (default: $PGAI_PROJECT_NAME)\n  --force            Override safety guards\n  --dry-run          Report what would happen without making changes\n  --help, -h         Show this help and exit\n",
+   "tree": {}
+  },
+  "remove-last": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Removing project: two\n  - directory will be left in place: <ROOT>/projects/two\n  - to fully delete, re-run with --force\n  - will unregister from projects.cfg (INI: removes [project:two] section)\n\n  + projects.cfg updated\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:5574a53c2e15",
+    "projects/": null,
+    "projects/two/": null,
+    "projects/two/x.md": null
+   }
+  },
+  "remove-no-name": {
+   "rc": 1,
+   "stderr": "ERROR: project name is required (--project <name>)\nUsage: remove-project.sh --project <name> [--force] [--dry-run]\n",
+   "stdout": "",
+   "tree": {}
+  },
+  "remove-nocfg": {
+   "rc": 0,
+   "stderr": "WARNING: projects.cfg is in colon-legacy format.\nWARNING: Removal will delete the matching colon-format line for 'nobody'.\nWARNING: Consider migrating to INI format: scripts/migrate/projects-cfg.sh\n",
+   "stdout": "Removing project: nobody\n  - directory will be left in place: <ROOT>/projects/nobody\n  - to fully delete, re-run with --force\n  - already absent from projects.cfg\n\n  + projects.cfg updated\n\nDone.\n",
+   "tree": {}
+  },
+  "remove-plain": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Removing project: old\n  - directory will be left in place: <ROOT>/projects/old\n  - to fully delete, re-run with --force\n  - will unregister from projects.cfg (INI: removes [project:old] section)\n\n  + projects.cfg updated\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:894e75d4a1ac",
+    "projects/": null,
+    "projects/old/": null,
+    "projects/old/x.md": null
+   }
+  },
+  "remove-rc-none": {
+   "rc": 0,
+   "stderr": "",
+   "stdout": "Removing project: old\n  - directory will be left in place: <ROOT>/projects/old\n  - to fully delete, re-run with --force\n  - will unregister from projects.cfg (INI: removes [project:old] section)\n\n  + projects.cfg updated\n\nDone.\n",
+   "tree": {
+    "projects.cfg": "blob:894e75d4a1ac",
+    "projects/": null,
+    "projects/old/": null,
+    "projects/old/release-state.md": "blob:2e7bb14fbb39"
+   }
+  }
+ }
+}

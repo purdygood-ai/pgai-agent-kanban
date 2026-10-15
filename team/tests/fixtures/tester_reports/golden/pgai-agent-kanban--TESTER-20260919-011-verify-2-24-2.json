@@ -1,0 +1,255 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "v2.24.2 rebuilds the tmux dashboard's schedule window (window 4) as the\nthree bands BUG-0333 specified: a columnar roster band with live countdowns,\na per-agent status band, and a merged signal-only event band, replacing the\nfive raw cron tails. 23 files changed, +2,866 / -510. Both gated runners\nexited 0 (4,854 unit passed / 31 skipped; 518 integration passed / 1 skipped)\nwith zero lint findings in either suite, and all four doc-truth and cadence\nlints are clean. The structural, census, documentation and narrow-geometry\nwork is genuinely good: the census is updated to three panes, the prose in\n`docs/dashboard.md` and `docs/DASHBOARD-PANES.md` matches it and the lints\nprove it, the roster band packs all seven entries at default geometry with no\n`+N more` and falls back vertically with an honest `+6 more` at width 40, the\nshared `event_signal_patterns.sh` classifier correctly drops idle-cycle\nboilerplate and keeps dispatch lines in a chronologic agent-tagged merge, and\nthe empty-band case prints `no wake events yet today`.\n\nBehavioral verification against **production-shaped** inputs -- the operator's\nreal 810 MB cron logs rather than the unit fixtures -- found two of the three\nbands broken on the live install. `status-band.sh` exits 1 and silently drops\nthe CLEANUP and OVERWATCH rows because of a bash exit-status idiom that fires\nwhenever an agent's log exists without a distillable verdict line.\n`event-band.sh` scans every log from byte zero and does not produce output\nwithin 300 seconds against the real logs (~25 minutes per render,\nextrapolated). A third finding records that even once it renders, 96.7% of\nwhat it would show is one repeated housekeeping line -- the literal criterion\nmet, the design goal missed. All three are filed via Path C (autonomous\nfollow-up filing -- non-blocking) and verification ran to completion.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "`status-band.sh` exits 1 and drops roster rows when an agent log has no distillable verdict",
+      "heading": "Finding 1: `status-band.sh` exits 1 and drops roster rows when an agent log has no distillable verdict",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (a bash exit-status idiom that could recur in any\nsibling renderer using the same scan-and-break loop shape)\n**Regression:** yes\n**Integrity:** none\n**Filed As:** BUG-0336-status-band-drops-roster-rows (Path C-A -- filed as\nBUG: code defect / regression / test failure)\n\n`team/scripts/dashboard/status-band.sh` prints the header and five rows\n(PM, CM, TESTER, CODER, WRITER), omits `CLEANUP` and `OVERWATCH` entirely,\nand exits `1` with empty stderr, whenever a roster agent's\n`logs/cron-<agent>.log` exists but carries no line matching one of the four\nLAST RESULT verdict shapes within its last 5000 lines.\n\nThat is the live install's ordinary state. `logs/cron-cleanup.log` is five\nlines of `ERROR: no project specified; pass --project <name> ...`;\n`logs/cron-overwatch.log` carries no `done: completed=N ... reason=\"...\"` line.\n\nObserved, fixture built from the live logs:\n\n```\nAGENT      LAST FIRED          LAST RESULT        NEXT\nPM         2026-09-19 03:39:05 idle (no BACKLOG)  :40 (in 0:55)\nCM         2026-09-19 03:39:03 idle (no BACKLOG)  :39 (in 0:19)\nTESTER     2026-09-19 03:39:03 idle (no BACKLOG)  :39 (in 0:43)\nCODER      2026-09-19 03:39:03 idle (no BACKLOG)  :39 (in 0:07)\nWRITER     2026-09-19 03:39:03 idle (no BACKLOG)  :39 (in 0:31)\nexit=1\n```\n\nControl -- same fixture with `cron-cleanup.log` and `cron-overwatch.log`\ndeleted:\n\n```\n... same five rows ...\nCLEANUP    no log yet          no log yet         Sun 4am\nOVERWATCH  no log yet          no log yet         Sun 3am\nexit=0\n```\n\nExpected, per BUG-0333 Acceptance (\"all agents in the status band\") and per\nthe prose this RC itself shipped in `docs/DASHBOARD-PANES.md` (\"instead of\ndropping out of the band\").\n\nMechanism, reproduced standalone: `_status_band_distill()`'s last statement\nis a `while` loop whose body ends in\n`[[ ... ]] && [[ ... ]] && break`. A `while` loop's exit status is that of\nthe last command executed in its body, so reaching EOF without breaking\nreturns 1; the call site is an unguarded simple command under\n`set -euo pipefail`, which aborts the render loop mid-list.\n\n```bash\nbash -c 'set -euo pipefail\nf() { local line; while IFS= read -r line; do [[ \"$line\" == \"NEVERMATCH\" ]] && break; done < <(printf \"a\\nb\\n\"); }\nf\necho \"unreachable\"'\n# prints nothing; exit status 1\n```\n\nBlast radius is wider than the two weekly agents: any agent whose log is\nmid-firing, freshly created, or holding only stagger/timing lines triggers\nthe same abort, and every roster agent ordered after it is dropped as well.\n\n**Test fidelity.** `team/tests/unit/test_status_band_renderer.py` covers\n\"log absent\" (which returns early, before the loop) and four \"log present\nwith exactly one verdict-shaped line\" cases (which break out of the loop on\nthat line). The case between them -- log present, no verdict line -- is never\nwritten, which is exactly why a green suite coexists with this defect.",
+      "filed_as": "BUG-0336",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (a bash exit-status idiom that could recur in any",
+        "regression": "yes",
+        "integrity": "none",
+        "filed_as": "BUG-0336-status-band-drops-roster-rows (Path C-A -- filed as"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "`event-band.sh` scans entire cron logs and never renders on the live install",
+      "heading": "Finding 2: `event-band.sh` scans entire cron logs and never renders on the live install",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (same fixture-fidelity class as Finding 1; the\nbounded-read pattern the sibling band already uses was not carried over)\n**Regression:** yes\n**Integrity:** none\n**Filed As:** BUG-0337-event-band-scans-whole-log (Path C-A)\n\n`team/scripts/dashboard/event-band.sh` walks every agent's entire\n`logs/cron-<agent>.log` in a pure-bash `while read` loop, running the\nthirteen-pattern classifier on every line, and only afterwards discards\neverything not from today.\n\nLive log set: 810 MB, 8,037,431 lines.\n\n```\n133859585  cron-cm.log      139885019  cron-coder.log\n256819588  cron-pm.log      139354255  cron-tester.log\n138836297  cron-writer.log\n```\n\nRun against a fixture root symlinking those logs:\n`timeout 300 ... event-band.sh --kanban-root \"$S\" --no-color` -> **`exit=124`,\nzero lines of stdout, empty stderr.**\n\nBounded benchmark for the rate: 200,000 lines of the same data ->\n**37.7 s** (~5,300 lines/s), extrapolating to **~1,515 s (~25 min) per\nrender** for the full set.\n\nThe band is hosted as\n`cadence-loop.sh --interval ${REFRESH_INTERVAL} -- event-band.sh`, so the\npane is blank for the whole of each tick. Nothing bounds the growth:\n`scripts/cleanup/cleanup_logs.sh` (daily 04:30) prunes only files\n`-size -1024c -mtime +1`, so these logs are never rotated, and today alone\nadded ~28,000 lines across the five -- about +5 s of render time per day,\npermanently.\n\nThe sibling `status-band.sh` bounds its own read with\n`tail -n 5000 \"$log_file\" | tac`. The event band does not.\n\n**Test fidelity.** `team/tests/unit/test_event_band_renderer.py` fixtures are\na handful of lines each, so the unbounded read is invisible to the suite.",
+      "filed_as": "BUG-0337",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (same fixture-fidelity class as Finding 1; the",
+        "regression": "yes",
+        "integrity": "none",
+        "filed_as": "BUG-0337-event-band-scans-whole-log (Path C-A)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "the event band's signal set is 96.7% one repeated line",
+      "heading": "Finding 3: the event band's signal set is 96.7% one repeated line",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks, after BUG-0337)\n**Systemic Risk:** low (isolated to one renderer's presentation)\n**Filed As:** PRIORITY-0004-event-band-signal-dedup (Path C-B -- filed as\nPRIORITY: enhancement / design change)\n\nBUG-0333 names `sweep-census skips with reasons` as a signal class, and\n`lib/event_signal_patterns.sh` implements it as `sweep-census:.*skipped`.\nThe implementation is faithful. Measured against production data, the\nresulting band does not achieve the goal the brief opens with (\"all signal,\nno filler\").\n\nToday's lines (2026-09-19 through 03:40), across the five agent logs:\n\n| Agent | Signal-class lines | of which `sweep-census: skipped` |\n|---|---|---|\n| pm | 362 | 359 |\n| coder | 407 | 370 |\n| writer | 364 | 359 |\n| tester | 368 | 360 |\n| cm | 364 | 356 |\n| **total** | **1865** | **1804 (96.7%)** |\n\nAll 1,804 are byte-identical apart from timestamp and agent tag. The day's\ndistinct events -- six dispatches, six completions, eight promotions -- are 61\nlines, 3.3%.\n\nRecorded as `gap` rather than `bug` because the code does what the brief\nasked; what is missing is a design decision the brief did not make (how a\nlegitimately-repeating signal class should render). Path C-B per Step 10:\nthis asks for a structural improvement the code was never asked to provide.",
+      "filed_as": "PRIORITY-0004",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks, after BUG-0337)",
+        "systemic_risk": "low (isolated to one renderer's presentation)",
+        "filed_as": "PRIORITY-0004-event-band-signal-dedup (Path C-B -- filed as"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "bundle acceptance criteria -- all three met",
+      "heading": "Finding 4: bundle acceptance criteria -- all three met",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"Each bundled item is addressed in the implementation\" -- BUG-0333's three\n  bands all exist, are census citizens, and are wired into window 4.\n- \"All Python files compile cleanly\" -- `python3 -m py_compile` over all 10\n  changed `.py` files in `ai_main..ai_rc/v2.24.2`: 0 failures.\n- \"All bash files pass syntax check\" -- `bash -n` over all 10 changed `.sh`\n  files: 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0333 acceptance criteria, per bullet",
+      "heading": "Finding 5: BUG-0333 acceptance criteria, per bullet",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n| Criterion | Result |\n|---|---|\n| Default geometry: full roster visible | **pass** -- all 7 entries on one columnar line, no `+N more`, at width 200 |\n| Default geometry: all agents in the status band | **fail** -- see Finding 1 |\n| Event band shows only signal-class lines | **pass** -- fixture seeding an idle cycle (re-checking / no BACKLOG / sleeping / `completed=0` / timing) plus a dispatch cycle rendered only the dispatch, promotion, task-finished and `completed=1` lines, merged chronologically across agents with `[<agent> HH:MM:SS]` tags |\n| Empty event band states \"no wake events yet today\" | **pass** -- verified on an empty-signal fixture |\n| Narrow fixture: roster falls back vertical + honest \"+N\" | **pass** -- at pane width 40 / height 4: `PM :40 (in 0:07)` then `+6 more`; at width 200: full columnar band, no marker |\n| Doc-truth tour matches the three bands | **pass** -- `generate_window_docs.py --check` OK; `lint_doc_command_truth.py` 0 findings across 657 command citations / 168 key citations / 47 pane citations; `lint_pane_refresh_cadence.py` OK |\n\nThe `pass-with-caveat` category is for the set as a whole; the one failing\nbullet is carried as Finding 1, not double-counted here.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "implementation-note constraints from BUG-0333",
+      "heading": "Finding 6: implementation-note constraints from BUG-0333",
+      "level": 3,
+      "body": "**Category:** pass\n\n- \"Filter is a grep-list in one lib (`event_signal_patterns`), shared by the\n  band renderer and documented; adding a pattern is one line\" -- pass.\n  `event-band.sh` sources the library and carries no pattern list of its own;\n  the library header documents the one-line extension rule; the `docs/`\n  prose names the library.\n- \"Bands are census citizens (rows computed, doc-truth targets)\" -- pass.\n  `team/config/dashboard_windows.census` window 4 went from 6 panes to 3,\n  with standalone commands for each band, and both doc-truth lints verify the\n  generated blocks.\n- \"The countdown/roster renderer also serves window 0's tile\" -- pass.\n  `show-header.sh` sources `lib/roster_band.sh` and `lib/next_fire_viewport.sh`\n  and calls `roster_band_fetch_entries` / `roster_band_render` on the same\n  data path window 4 uses.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "pre-flight and RC integrity",
+      "heading": "Finding 7: pre-flight and RC integrity",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Step 2: every task folder whose `status.md` is `DONE` with a non-`none`\n  `## Feature Branch` has had that branch deleted post-merge; `git branch`\n  shows no `ai_feature/*` remaining, so both checks pass trivially. The\n  cycle's eight tickets appear as `--no-ff` merges on the RC.\n- Step 3: `git rev-parse HEAD` == `git rev-parse ai_rc/v2.24.2` ==\n  `eb4b2de`; `git status --porcelain` empty; `git stash list` empty.\n- Step 6.1: `release-state.md` holds the four-field schema;\n  `## Active RC` = `v2.24.2`, `## Last Released` = `v2.24.1` (well-formed);\n  `semver_gt v2.24.2 \"$(pp_last_released_version pgai-agent-kanban)\"` true.\n  No drift.\n- Step 6.13: `lint_skip_bug_gate.sh` exits 0 -- no placeholder skip IDs, 0\n  missing `BUG-NNNN` files among cited skip annotations.\n- Step 6.9: `set -euo pipefail` present in both new executable renderers;\n  `event-band.sh` traps and removes its merge scratch file; scratch goes\n  through `pgai_mktemp` under the framework temp root, never bare `/tmp`\n  (and the runners' `bare_tmp_cleanliness` check confirms it).\n- Step 6.14: coding-standards spot-check clean. Both new scripts answer\n  `--help` with exit 0 documenting `--kanban-root` and `--no-color`; no bug,\n  task, RC or version identifier appears in any new comment, docstring, help\n  line or log line; the `dashboard-<name>.sh` header self-naming and the\n  leading `!/usr/bin/env bash` in `--help` output are the established\n  convention across all 43 scripts in that directory, not new drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "gated suites",
+      "heading": "Finding 8: gated suites",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `bash team/scripts/run-unit-tests.sh --coverage` -> **exit 0**;\n  4,854 passed, 31 skipped in 1016 s; `bare_tmp_cleanliness: OK`;\n  `listener_cleanliness: OK`; findings file written with 0 findings.\n- `bash team/scripts/run-integration-tests.sh --coverage` -> **exit 0**;\n  518 passed, 1 skipped in 530 s; both cleanliness checks OK; 0 findings.\n\nOutput captured at `$PGAI_AGENT_KANBAN_TEMP_DIR/tester/unit.log` and\n`.../integration.log`. No direct-pytest result is quoted anywhere in this\nreport; PASS evidence for the suites is the two gated-runner exit codes.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "coverage (informational only, never enters the verdict)",
+      "heading": "Finding 9: coverage (informational only, never enters the verdict)",
+      "level": 3,
+      "body": "**Category:** pass\n\nRead from the `totals` object of each runner's JSON under\n`$PGAI_AGENT_KANBAN_TEMP_DIR/coverage/`; field names verified against the\ngenerated files before extraction.\n\n| Suite | line (statement) % | branch % | blended % |\n|---|---|---|---|\n| unit | 76% | 63% | 73% |\n| integration | 11% | 9% | 11% |",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Step 6.8 synthetic release simulation -- skipped with note",
+      "heading": "Finding 10: Step 6.8 synthetic release simulation -- skipped with note",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe diff touches no release-lifecycle file: the 23 changed paths are\nentirely `docs/`, `team/config/dashboard_windows.census`,\n`team/scripts/dashboard/**`, `team/scripts/lib/dashboard_constants.sh`,\n`team/pgai_agent_kanban/dashboard/roster_entries.py` and `team/tests/unit/**`.\nNo `cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`, or\n`team/scripts/lib/project_paths.sh`. Step 6.8 correctly skipped.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Step 6.10 prereq dependency graph",
+      "heading": "Finding 11: Step 6.10 prereq dependency graph",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe cycle's chain is acyclic and every referenced task ID resolves to an\nexisting folder: `CM-20260919-010-open-rc-2-24-2` (bookend) ->\n`CODER-...-002` / `-003` -> `-004` / `-005` -> `-006` ->\n`WRITER-...-007` -> `CODER-...-008` -> `CODER-...-009` ->\n`TESTER-20260919-011-verify-2-24-2` (this task) ->\n`CM-20260919-013-release-2-24-2` (bookend, currently `[W]`). Sequence numbers\n001-013 are non-colliding; 012 is absent, which is a gap in numbering, not a\ndangling reference -- no task cites it.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

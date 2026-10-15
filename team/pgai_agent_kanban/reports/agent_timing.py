@@ -36,6 +36,20 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
+# Run by file path (``python3 .../agent_timing.py``) or loaded from a file
+# outside its package, this module has no parent package and the interpreter
+# puts only its own directory on sys.path, so the package import below would
+# not resolve. Put this file's own package root -- the directory holding the
+# pgai_agent_kanban/ this file sits in -- at the front of sys.path so the
+# import resolves from the same tree, never another. Imported as a package
+# member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.lib.timeutil import try_parse_iso  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Log line pattern
@@ -66,19 +80,13 @@ class WakeEntry(NamedTuple):
 
 
 def _parse_timestamp(ts_str: str) -> datetime | None:
-    """Parse an ISO 8601 timestamp string into a timezone-aware datetime.
+    """Parse an ISO 8601 timestamp string (``Z`` or ``+HH:MM`` suffix) into
+    a timezone-aware datetime; a value with no offset stays naive.
 
-    Handles both '+00:00' and 'Z' suffix forms.  Returns None when the
-    string cannot be parsed so callers can skip malformed lines gracefully.
+    Returns None when the string cannot be parsed so callers can skip
+    malformed lines gracefully.
     """
-    ts_str = ts_str.strip()
-    # Normalise 'Z' -> '+00:00' for Python < 3.11 which lacks fromisoformat('...Z')
-    if ts_str.endswith("Z"):
-        ts_str = ts_str[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(ts_str)
-    except ValueError:
-        return None
+    return try_parse_iso(ts_str, naive_as_utc=False)
 
 
 def parse_log_file(path: pathlib.Path, cutoff: datetime | None) -> list[WakeEntry]:

@@ -7,7 +7,8 @@ files from the current task dict.
 This test exercises the recycling path in the real pipeline against a fixture
 tree that contains a pre-existing WONT-DO companion folder from a prior run.
 The prior-run folder carries stale contract bytes (source_branch="none" in its
-README, which is the pre-fix corpse shape).  After a fresh decompose via the
+README, the shape a recycled folder keeps when the materializer leaves
+its contract bytes untouched).  After a fresh decompose via the
 production pm_materialize.py entry point, the recycled folder's README.md must
 carry the CURRENT plan's source_branch (not the stale corpse value), and its
 status.md must be in the fresh-task shape (State=BACKLOG).
@@ -46,7 +47,7 @@ Design notes
 - "Dispatch" is simulated: after materialization both task status.md files are
   set to State=DONE without operator intervention.
 - All temp paths use pytest's tmp_path (never bare /tmp).
-- Test names describe behavior, never bug IDs or ticket IDs (SOP.md anti-pattern 6).
+- Test names describe behavior, never bug IDs or ticket IDs (roles/TESTER.md anti-pattern 6).
 """
 
 from __future__ import annotations
@@ -302,7 +303,7 @@ def _plant_wontdo_corpse(
         encoding="utf-8",
     )
 
-    # Stale README carrying the old (pre-fix) source_branch value.
+    # Stale README carrying a source_branch value from an earlier plan.
     stale_readme = (
         f"# Task: TESTER: verify and report\n\n"
         f"## Task ID\n{task_id}\n\n"

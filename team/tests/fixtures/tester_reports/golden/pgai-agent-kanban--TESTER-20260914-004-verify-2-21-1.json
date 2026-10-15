@@ -1,0 +1,193 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate v2.21.1 of `pgai-agent-kanban` against\n`projects/pgai-agent-kanban/requirements/v2.21.1-bugfix-bundle-20260914.md`, a\nsingle-item bug bundle carrying `BUG-0262-engine-baseline-golden-env-coupled`.\nWork happened in the isolated detached worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260914-004-verify-2-21-1`,\nHEAD `8f54cb130fbf271257ae67df0023ee1bbcd3a31f`, byte-identical to `ai_rc/v2.21.1`;\nclean worktree, no stashes, no pre-flight merge anomalies. The RC's whole diff is\n66 added lines in one file,\n`team/tests/integration/test_engine_behavior_baseline_harness.py` — no production\ncode changed. Both gated runners exited 0 (`run-unit-tests.sh`: 4390 passed, 31\nskipped; `run-integration-tests.sh`: 462 passed, 1 skipped), the latter with the\nverifying host's ambient `MAX_TASK_SECONDS=10800` exported — which is exactly the\ncondition that made BUG-0262's suite red, so the bundled item is demonstrably\nfixed rather than merely coded. The original failure mode was reproduced at the\nharness level and shown to be closed only by the pinned values the fix adds. Two\nfindings were filed forward: a residual coupling on the harness's *capture* path\nthat the chosen fix shape left behind, and the absence of any authoring-time\ndetector for the environment-coupled-fixture class that produced this RC in the\nfirst place.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight, structural checks, and state drift",
+      "heading": "Finding 1: Pre-flight, structural checks, and state drift",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Worktree HEAD `8f54cb1` == `ai_rc/v2.21.1`; `git status --short` empty;\n  `git stash list` empty.\n- Pre-flight merge verification: every DONE task with a live feature branch\n  scanned; no UNMERGED and no BUG-92 zero-commits anomalies. The cycle's one\n  feature branch (`ai_feature/CODER-20260914-002-baseline-harness-env-decouple`)\n  was merged `--no-ff` and deleted, the normal post-merge shape.\n- Release-state drift (Step 6.1): `pp_last_released_version` returns `v2.21.0`;\n  `semver_gt v2.21.1 v2.21.0` is true. `release-state.md` `## Last Released` reads\n  `v2.21.0`, a well-formed `vX.Y.Z` value. `## Active RC` is `v2.21.1` and the\n  `ai_rc/v2.21.1` branch exists — consistent, no drift.\n- Prereq dependency graph (Step 6.10): `CM-20260914-003` → `CODER-20260914-002` →\n  `TESTER-20260914-004` → `CM-20260914-006`. Acyclic, every referenced ID resolves\n  to a real task folder, lifecycle bookends correct, no sequence collisions. (The\n  unused `005` slot is a skipped optional HUMAN-APPROVE position —\n  `human_approval_required: auto` — not a dangling reference.)\n- Modified file and the golden it compares against both present:\n  `team/tests/integration/test_engine_behavior_baseline_harness.py`,\n  `team/tests/fixtures/engine-baseline/{board-render,wake-log,ship-summary}.txt`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Requirements acceptance criteria — compile and syntax gates",
+      "heading": "Finding 2: Requirements acceptance criteria — compile and syntax gates",
+      "level": 3,
+      "body": "**Category:** pass\n\nRequirements doc `## Acceptance Criteria`, items 2 and 3, run as commands:\n\n- \"All Python files compile cleanly\" — `python3 -m py_compile` over every `.py`\n  in the tree: 0 failures.\n- \"All bash files pass syntax check\" — `bash -n` over every `.sh` in the tree:\n  275 files, 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Requirements acceptance criterion 1 — the bundled item is addressed",
+      "heading": "Finding 3: Requirements acceptance criterion 1 — the bundled item is addressed",
+      "level": 3,
+      "body": "**Category:** pass\n\nBUG-0262's four `## Acceptance` assertions, each exercised:\n\n| BUG-0262 acceptance | Evidence | Result |\n|---|---|---|\n| `run-integration-tests.sh` exits 0 with `MAX_TASK_SECONDS` unset | targeted `env -u MAX_TASK_SECONDS -u KILL_GRACE_SECONDS python3 -m pytest tests/integration/test_engine_behavior_baseline_harness.py` → `3 passed in 20.76s` | pass (see Caveats on scope) |\n| exits 0 with `MAX_TASK_SECONDS=10800` exported | **full gated runner** `bash team/scripts/run-integration-tests.sh --coverage` under the host's ambient `MAX_TASK_SECONDS=10800` → exit 0, `462 passed, 1 skipped in 446.90s` | pass |\n| exits 0 with `MAX_TASK_SECONDS=5400` exported | targeted run under `MAX_TASK_SECONDS=5400 KILL_GRACE_SECONDS=30` → `3 passed in 19.23s` | pass (see Caveats on scope) |\n| a test asserts stability across ≥2 distinct `MAX_TASK_SECONDS` values | `test_compare_is_stable_across_invoking_shell_budget_values` exercises `10800/45` and `1/5`, both differing from the golden's own `5400/30` and from each other | pass |\n\n**Behavioral verification (Step 6.5) — the original failure mode was triggered,\nnot assumed.** The pre-fix `_run_harness` shape (inherit the ambient environment,\noverride only `PGAI_AGENT_KANBAN_TEMP_DIR`) was reconstructed and run directly\nagainst the RC's own harness, with no modification to the tree:\n\n```\n[unpinned-10800] MAX_TASK_SECONDS=10800 KILL_GRACE_SECONDS=30 returncode=1\n    FAIL: wake-log.txt differs from golden .../team/tests/fixtures/engine-baseline/wake-log.txt\n    @@ -2,7 +2,7 @@\n    -[<TIMESTAMP>] wake(tester): background-wait ceiling: derived BASH_MAX_TIMEOUT_MS=5430000 from MAX_TASK_SECONDS=5400s + KILL_GRACE_SECONDS=30s\n    +[<TIMESTAMP>] wake(tester): background-wait ceiling: derived BASH_MAX_TIMEOUT_MS=10830000 from MAX_TASK_SECONDS=10800s + KILL_GRACE_SECONDS=30s\n\n[pinned-5400]    MAX_TASK_SECONDS=5400  KILL_GRACE_SECONDS=30 returncode=0\n    [engine-behavior-baseline] compare OK — 3 surfaces match goldens ...\n```\n\nThe failure BUG-0262 describes reproduces byte-for-byte, and the only difference\nbetween the failing and passing invocation is the two variables the fix pins. That\nestablishes the pin is what closes the leak, and that the new coverage test would\ngenuinely fail if the pin were reverted.\n\n**Both sides of the fix checked, not just the new normal case** (anti-pattern 6):\n`test_compare_detects_a_seeded_one_character_change` — the harness's strictness\nproof — still passes in all three environments, so the comparison bought\nhost-independence without losing sensitivity to a real diff. The derived-ceiling\nline itself remains inside the byte-for-byte comparison, which is the property\nCODER's chosen shape (a) was selected to preserve over shape (b)'s redaction.\n\n**Test fidelity (TESTER.md Test Fidelity Verification):** the new test drives the\nreal harness through a real subprocess chain down to the real wake bootstrap — no\nseam mocked — and `monkeypatch.setenv` lands before `_run_harness` reads\n`os.environ`, so the ambient values it claims to exercise really are exercised. No\nstate-mutating script was pointed at the live kanban root by the RC's tests or by\nthis verification.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "test_fidelity_tester_md_test_fidelity_verification": "the new test drives the"
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "The golden-regeneration command the harness prints produces a golden the pinned test rejects",
+      "heading": "Finding 4: The golden-regeneration command the harness prints produces a golden the pinned test rejects",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (no current test failure; a latent trap on a path nothing in this release had cause to take)\n**Regression:** yes (this RC's change produced the asymmetry — before it, the capture and compare halves inherited the same ambient environment and therefore agreed on the capturing host; now the compare half is pinned and the capture half is not, so a regenerated golden is rejected on every host)\n**Integrity Damage:** no\n**Filed As:** BUG-0265-baseline-golden-capture-still-coupled (Path C-A — filed as BUG: code defect / regression / test failure)\n\nThe fix pins the two budget variables inside `_run_harness`, which covers every\npath the test suite takes. It does not cover `engine-behavior-baseline.sh\n--capture`, which is the command the tree instructs a reader to run when the\ngolden needs regenerating, in two places:\n`team/scripts/harness/engine-behavior-baseline.sh:587` and the\n`_require_golden_snapshots` fixture message at\n`team/tests/integration/test_engine_behavior_baseline_harness.py:128`. Both print\nthe bare command with no environment.\n\nDirectly observed on the verifying host (`kanban.cfg [wake] max_task_seconds = 10800`),\nrunning the capture exactly as instructed:\n\n```\ncapture returncode: 0\nregenerated golden wake-log.txt:5: ... derived BASH_MAX_TIMEOUT_MS=10830000 from MAX_TASK_SECONDS=10800s + KILL_GRACE_SECONDS=30s\ncommitted  golden wake-log.txt:5: ... derived BASH_MAX_TIMEOUT_MS=5430000  from MAX_TASK_SECONDS=5400s  + KILL_GRACE_SECONDS=30s\n```\n\nCommitting that regenerated file as the golden — which is what the instruction\nsays to do — would make the baseline tests fail on *every* host, because the\ncomparison side is now pinned at 5400/30 and no longer tracks the capture\nenvironment. The only in-tree record of the required values is a comment in the\ntest module, which a person following the harness's own instructions has no reason\nto open.\n\nThis does not fail any test in the tree as shipped, and it does not weaken what\nBUG-0262 asked for: the comparison verdict genuinely is host-independent now, which\nis what that bug's `## Expected` names. It is the adjacent half of the same\ncoupling, left behind by a deliberately narrow fix, and it is cheap to close\n(pin the two variables around the harness's own `wake-log` capture step, or name\nthe environment in both remedy messages).",
+      "filed_as": "BUG-0265",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (no current test failure; a latent trap on a path nothing in this release had cause to take)",
+        "regression": "yes (this RC's change produced the asymmetry — before it, the capture and compare halves inherited the same ambient environment and therefore agreed on the capturing host; now the compare half is pinned and the capture half is not, so a regenerated golden is rejected on every host)",
+        "filed_as": "BUG-0265-baseline-golden-capture-still-coupled (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "No authoring-time detector for the environment-coupled-fixture class",
+      "heading": "Finding 5: No authoring-time detector for the environment-coupled-fixture class",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** medium (3-5 CODER tasks)\n**Systemic Risk:** low (a detection gap and an exposure count, not a live defect — nothing is currently broken by it)\n**Regression:** no (the anti-pattern documentation and the lint set are untouched by this RC's diff; the absence of a detector predates this RC and predates BUG-0262)\n**Integrity Damage:** no\n**Filed As:** PRIORITY-0002-env-coupled-fixture-detector (Path C-B — filed as PRIORITY: enhancement / design change)\n\nFound by spot-check outside the spec (Step 6.11, \"regressions of prior gaps\").\n`docs/test-authoring-guidelines.md` names environment-coupled fixtures as\nanti-pattern 2, and the anti-pattern lint the gated runners run before pytest does\nnot detect them. The class has now produced two bug reports — BUG-0262, which this\nentire RC exists to fix, and BUG-0265 above — and the only reason the first was\ncaught at all is that a verifier happened to be running on a host with a raised\n`max_task_seconds`.\n\nThe fix ticket also required a read-only survey of the rest of the test tree for\nthe same shape. Re-counted independently during verification:\n\n```\ngrep -rnE 'dict\\(os\\.environ\\)|os\\.environ\\.copy\\(\\)' team/tests/ | wc -l   # 157\ngrep -rlE 'dict\\(os\\.environ\\)|os\\.environ\\.copy\\(\\)' team/tests/ | wc -l   # 107\n```\n\n157 call sites across 107 files. That is an exposure count, not a defect count —\nmost of those sites legitimately need a real `PATH` and `HOME`, and a blanket\nrewrite would be churn. The gap is that the survey currently lives only inside a\ncompleted task's `status.md`, which discovery never reads, so it would be lost; and\nthat the one correct shape already in the tree\n(`wake_entrypoint_acceptance_harness.py`'s `scrubbed_wake_env()`) is a local\nhelper nothing points an author at. The filed priority scopes the detector\nnarrowly to the mechanically-detectable pairing — a golden comparison *plus* an\ninherited environment — rather than to all 157 sites.",
+      "filed_as": "PRIORITY-0002",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "medium (3-5 CODER tasks)",
+        "systemic_risk": "low (a detection gap and an exposure count, not a live defect — nothing is currently broken by it)",
+        "regression": "no (the anti-pattern documentation and the lint set are untouched by this RC's diff; the absence of a detector predates this RC and predates BUG-0262)",
+        "filed_as": "PRIORITY-0002-env-coupled-fixture-detector (Path C-B — filed as PRIORITY: enhancement / design change)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Gated unit runner",
+      "heading": "Finding 6: Gated unit runner",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/run-unit-tests.sh --coverage` → **UNIT_EXIT = 0**.\n`4390 passed, 31 skipped in 639.56s (0:10:39)`. Lint pre-flight green\n(breakage class clean); quality-class findings recorded below and non-fatal by\ndesign. This exit code, not a direct pytest line, is the unit-suite PASS evidence.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Gated integration runner",
+      "heading": "Finding 7: Gated integration runner",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash team/scripts/run-integration-tests.sh --coverage` → **INTEGRATION_EXIT = 0**.\n`462 passed, 1 skipped in 446.90s (0:07:26)`, run with the host's ambient\n`MAX_TASK_SECONDS=10800` — the exact configuration under which BUG-0262 reported\n`1 failed, 460 passed, 1 skipped`. The two added tests account for the 460 → 462\ndelta. This exit code is the integration-suite PASS evidence.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Constraint and standards checks",
+      "heading": "Finding 8: Constraint and standards checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Step 6.9 negative checks: no secrets, tokens, or credentials introduced; the\n  diff adds no shell code, so `set -euo pipefail` / `cleanup_on_exit` preservation\n  is not in play.\n- Step 6.13 skip-cites-real-bug: no placeholder `BUG-SKIP*` skips. The only\n  `BUG-1234`/`1235`/`1237`/`1239` hits are synthetic fixture strings inside\n  `team/tests/unit/test_skip_bug_citation_scan.py` (the lint's own test corpus),\n  not live skips; `lint_skip_bug_gate.sh` ran green inside both gated runners.\n- Step 6.14 coding standards: the diff is test-only. Its added comments and\n  docstrings describe behavior and cite no bug ID, task ID, or version, which is\n  directive 8 honored. (The module docstring's pre-existing reference to \"the\n  v2.9.20 engine decomposition\" at line 5 is outside this RC's diff and is\n  untouched by it — recorded as an observation, not a finding.)\n- Step 6.8 synthetic release simulation: **skipped with note.** Trigger condition\n  not met — the RC's diff touches no release-lifecycle file\n  (`cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`, `project_paths.sh`, or\n  anything else in `team/scripts/`). The one changed file is a test module.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

@@ -1,26 +1,26 @@
 """
 test_coder_completion_merge_gate_bash.py
 =========================================
-Behavioral fixtures for BUG-0034: the wake reconciliation completion gate
-that verifies a CODER/WRITER DONE-claim mechanically instead of trusting the
+Behavioral fixtures for the wake reconciliation completion gate that
+verifies a CODER/WRITER DONE-claim mechanically instead of trusting the
 agent's own status.md write.
 
-Prior to this fix, a CODER (or WRITER) task could finish with status.md
+Without this gate, a CODER (or WRITER) task could finish with status.md
 State=DONE while its feature branch was never merged into the RC branch, or
 while the task's worktree still carried uncommitted changes. Nothing at the
 wake-reconciliation boundary detected the gap: the queue advanced, and the
 missing work surfaced later as a confusing "implemented but absent" TESTER
 finding requiring operator archaeology.
 
-This module exercises the fix directly against the real production function
-in wake_common.sh (coder_writer_completion_gate), extracted via the same awk
-brace-matching technique test_census_closure.py and
+This module exercises the gate directly against the real production function
+in wake_lifecycle.sh (coder_writer_completion_gate), extracted via the same
+awk brace-matching technique test_census_closure.py and
 test_transient_retry_record.py established — this avoids the heavy top-level
 bootstrap wake_common.sh performs when fully sourced (AGENT, TEAM_ROOT,
 SCRIPT_DIR, a real kanban.cfg, Python 3.12+ on PATH), while still exercising
 the genuine production function body against real git repositories.
 
-Fixtures exercised (mirrors the task's Acceptance Criteria):
+Fixtures exercised:
   (A) Unmerged feature branch -> DONE-claim REFUSED: task lands BLOCKED with
       a prescriptive reason naming both the feature branch and the target
       (source/RC) branch; Needs Human is escalated to yes.
@@ -44,27 +44,27 @@ Fixtures exercised (mirrors the task's Acceptance Criteria):
       an unmerged DONE-claim is observed to route to mark_backlog("B") —
       the queue does not advance past it — exactly as production wiring
       would behave.
-  (H) Retired diff-scope comment-provenance lint (BUG-0055): a done-claim
+  (H) Retired diff-scope comment-provenance lint: a done-claim
       whose diff plants a ledger-ID comment (e.g. "per BUG-0042") no longer
       refuses once merge-ancestry and cleanliness both pass — the gate
       accepts it as DONE with no block and no Needs-Human escalation. The
       same litter class is still caught, just not here: it is TESTER's job,
       via the tree-wide provenance lint the gated runners already run at
       verification time.
-  (I) BUG-0046 sibling-checkout accept path: the source/RC branch is held by
+  (I) Sibling-checkout accept path: the source/RC branch is held by
       a SIBLING worktree at merge time, so the --no-ff merge happens there
       instead of in the claiming task's own worktree; the task's worktree
       only detaches and deletes its now-merged branch. The gate must accept
       this as DONE via merge-evidence read from the source branch's own
       history, independent of the claiming worktree's HEAD state.
-  (J) BUG-0046 true-negative: the feature branch is force-deleted WITHOUT
-      ever being merged (no merge commit on the source branch, no ancestor
-      relationship) -> the gate must still REFUSE with the existing
-      reflog-inspection remedy text. The widened evidence base must not
-      silence a genuine no-merge failure.
+  (J) True-negative for the sibling-checkout accept path: the feature branch
+      is force-deleted WITHOUT ever being merged (no merge commit on the
+      source branch, no ancestor relationship) -> the gate must still
+      REFUSE with the existing reflog-inspection remedy text. The widened
+      evidence base must not silence a genuine no-merge failure.
 
 Naming: function names describe behavior under test, never bug IDs or task
-IDs (SOP.md "Test Authoring Guidelines", Anti-pattern 6).
+IDs (roles/TESTER.md "Test Authoring Guidelines", Anti-pattern 6).
 """
 
 from __future__ import annotations
@@ -77,13 +77,35 @@ import textwrap
 import pytest
 
 from tests.fixtures.log_stub import make_log_stub_fragment
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="coder-completion-merge-gate-bash")
 
 # ---------------------------------------------------------------------------
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
 
-_WAKE_COMMON_LIB = pathlib.Path("scripts/lib/wake_common.sh")
-_CLAUDE_SH = pathlib.Path("scripts/wake/claude.sh")
+# normalize_status_file / set_state / set_block live in this stage file
+# (v2.9.20-engine-decomposition); coder_writer_completion_gate lives in
+# wake_lifecycle.sh (same decomposition) but calls those three, so
+# extraction must span both.
+_WAKE_TASK_STATE_LIB = pathlib.Path("scripts/lib/wake_task_state.sh")
+_WAKE_LIFECYCLE_LIB = pathlib.Path("scripts/lib/wake_lifecycle.sh")
+# This gate call-site block now lives once in the shared wake driver's
+# finalize stage, sourced by both wake/claude.sh and wake/codex.sh --
+# process_one_task's inline body was lifted out of wake/claude.sh into this
+# shared driver, and wake/codex.sh sources the same driver instead of
+# carrying its own inline copy.
+_CLAUDE_SH = pathlib.Path("scripts/lib/wake_driver_finalize.sh")
 
 _GATE_CALL_ANCHOR = "# --- CODER/WRITER completion gate ---"
 
@@ -95,7 +117,7 @@ _REAL_REPO_TEAM_SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent.parent.par
 
 # ---------------------------------------------------------------------------
 # Function extraction (mirrors test_census_closure.py / test_transient_retry_record.py):
-# pull named top-level function bodies out of wake_common.sh via awk
+# pull named top-level function bodies out of their stage files via awk
 # brace-counting, so tests exercise the real production function bodies
 # without paying for wake_common.sh's full top-level bootstrap.
 # ---------------------------------------------------------------------------
@@ -103,7 +125,17 @@ _REAL_REPO_TEAM_SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent.parent.par
 
 def _extract_functions_snippet(func_names: list[str]) -> str:
     """Return a bash snippet that extracts and loads the named top-level
-    functions from wake_common.sh via awk brace-counting."""
+    functions via awk brace-counting.
+
+    Searches wake_task_state.sh and wake_lifecycle.sh (in that order) —
+    normalize_status_file/set_state/set_block live in the former,
+    coder_writer_completion_gate in the latter, after
+    v2.9.20-engine-decomposition split both out of wake_common.sh's former
+    inline body. awk's found/depth state is per-function and closes on the
+    function's own closing brace, so scanning multiple files in one
+    invocation is safe: a function fully defined in one file never leaks
+    state across the file boundary.
+    """
     alternation = "|".join(re.escape(name) for name in func_names)
     return textwrap.dedent(f"""\
         eval "$(awk '
@@ -119,7 +151,7 @@ def _extract_functions_snippet(func_names: list[str]) -> str:
                     }}
                 }}
             }}
-        ' '{_WAKE_COMMON_LIB}')"
+        ' '{_WAKE_TASK_STATE_LIB}' '{_WAKE_LIFECYCLE_LIB}')"
     """)
 
 
@@ -216,12 +248,12 @@ def _build_repo_with_sibling_worktree_merge(
     task_id: str,
     source_branch: str = "ai_rc/v9.9.9",
 ) -> tuple[pathlib.Path, str, pathlib.Path]:
-    """Reproduce the BUG-0046 production shape: the source/RC branch is held
-    by a SIBLING worktree at merge time, so the claiming task's own --no-ff
-    merge necessarily happens in that sibling worktree, never in the task's
-    own worktree.
+    """Reproduce the sibling-checkout production shape: the source/RC branch
+    is held by a SIBLING worktree at merge time, so the claiming task's own
+    --no-ff merge necessarily happens in that sibling worktree, never in the
+    task's own worktree.
 
-    Sequence (mirrors BUG-0046's Symptom section exactly):
+    Sequence:
       1. A sibling worktree (`worktree_rc`) legitimately holds source_branch
          checked out — standing in for another task's in-flight worktree.
       2. The claiming task's own worktree (`worktree_task`) is created on a
@@ -334,15 +366,28 @@ def _script_header(
     the real team/scripts/lib/error_contract.sh (the dual-channel emitter the
     gate's refusal narrations call to build their Blockers text — see
     team/scripts/lib/error_contract.sh for the house shape), and the real
-    normalize_status_file / set_state / set_block / coder_writer_completion_gate
-    extracted from wake_common.sh.
+    normalize_status_file / set_state / set_block (wake_task_state.sh) /
+    coder_writer_completion_gate (wake_lifecycle.sh) extracted from their
+    respective stage files.
 
     Sets REPO_TEAM_DIR to the real, checked-in team/scripts/ directory —
     the global wake_common.sh itself resolves at source time (one level
     above lib/) — so the extracted function bodies see the same value they
     would in production, even though the gate no longer consumes it (the
-    diff-scope lint check that once read it via REPO_TEAM_DIR is retired,
-    BUG-0055).
+    diff-scope lint check that once read it via REPO_TEAM_DIR is retired).
+
+    Also sources the real team/scripts/lib/lock_provenance.sh: the
+    `_extract_gate_call_block` extraction below (anchor through the first
+    top-level `esac`) now also carries the queue-write mutating-phase-
+    boundary reverification immediately above that `case` statement, which
+    calls the real pgai_lock_reverify_or_narrate — an unmerged prerequisite
+    left unsatisfied here would make every `gate_block` caller fail with
+    "command not found" regardless of what it is actually testing (see the
+    CODER role file's "sweep the dependent fixtures" guidance for a new
+    guard on shared infrastructure). The three `gate_block` callers below
+    each additionally seed a real, currently-held lock record so that
+    reverification passes silently, exactly like the golden single-chain
+    path it is standing in for.
     """
     funcs = ["normalize_status_file", "set_state", "set_block", "coder_writer_completion_gate"]
     if extra_functions:
@@ -353,7 +398,25 @@ def _script_header(
         {make_log_stub_fragment(log_file)}
         REPO_TEAM_DIR="{_REAL_REPO_TEAM_SCRIPTS_DIR}"
         source "{_REAL_REPO_TEAM_SCRIPTS_DIR}/lib/error_contract.sh"
+        source "{_REAL_REPO_TEAM_SCRIPTS_DIR}/lib/atomic_write.sh"
+        source "{_REAL_REPO_TEAM_SCRIPTS_DIR}/lib/lock_provenance.sh"
         {_extract_functions_snippet(funcs)}
+    """)
+
+
+def _held_lock_fragment(lock_file: pathlib.Path) -> str:
+    """Bash fragment seeding a real, currently-held lock record at
+    *lock_file* naming THIS script's own pid -- so a `pgai_lock_
+    reverify_or_narrate "{{lock_file}}" "$$" ...` call inside an extracted
+    `gate_block` (see `_script_header`'s own docstring) reads "still held"
+    and passes silently, matching the golden single-chain path every
+    `gate_block` caller below is actually testing. A plain provenance
+    write (not a real pgai_lock_acquire/flock) is enough: the
+    reverification is a cheap read of the file's content, never the flock
+    itself."""
+    return textwrap.dedent(f"""\
+        _project_lock_file="{lock_file}"
+        printf 'holder=test\\npid=%s\\nop=wake-chain:test-project\\ntask=none\\n' "$$" > "{lock_file}"
     """)
 
 
@@ -404,9 +467,9 @@ def test_unmerged_feature_branch_refuses_done_claim(tmp_path: pathlib.Path) -> N
     assert source_branch in blockers, f"remedy must name the target (source/RC) branch\n{blockers}"
     assert "not merged" in blockers, f"remedy must state the merge failure\n{blockers}"
     assert _field(status_text, "Needs Human").lower() == "yes", f"Needs Human must escalate\n{status_text}"
-    # Dual-channel error contract (requirements v2.3.5 Goal 4): a forced gate
-    # refusal must emit error/message/remedy in the house shape, with a
-    # stable, greppable machine key.
+    # Dual-channel error contract: a forced gate refusal must emit
+    # error/message/remedy in the house shape, with a stable, greppable
+    # machine key.
     assert "error:   wake.completion-gate.merge-not-found" in blockers, (
         f"Blockers must carry the house-shape error key\n{blockers}"
     )
@@ -427,7 +490,7 @@ def test_merge_performed_then_recompletion_is_accepted(tmp_path: pathlib.Path) -
     status_file = _build_status_file(tmp_path, task_id)
     log_file = tmp_path / "wake.log"
 
-    # First pass: unmerged -> refused (mirrors the task's fixture sequence).
+    # First pass: unmerged -> refused.
     script = _script_header(log_file) + textwrap.dedent(f"""\
         coder_writer_completion_gate \\
             "{task_id}" "{status_file}" "coder" \\
@@ -638,6 +701,7 @@ def test_real_wake_path_routes_unmerged_claim_to_blocked_marker(tmp_path: pathli
         }}
         AGENT="overwatch"    # bypass the on-BLOCK overwatch nudge in the extracted block
         KANBAN_ROOT="{tmp_path}"
+        {_held_lock_fragment(tmp_path / "repo.lock")}
         task_id="{task_id}"
         task_status="{status_file}"
         SUBAGENT="coder"
@@ -694,6 +758,7 @@ def test_real_wake_path_accepts_golden_path_claim(tmp_path: pathlib.Path) -> Non
         }}
         AGENT="overwatch"
         KANBAN_ROOT="{tmp_path}"
+        {_held_lock_fragment(tmp_path / "repo.lock")}
         task_id="{task_id}"
         task_status="{status_file}"
         SUBAGENT="coder"
@@ -721,13 +786,13 @@ def test_real_wake_path_accepts_golden_path_claim(tmp_path: pathlib.Path) -> Non
 
 
 # ---------------------------------------------------------------------------
-# (H) Retired diff-scope comment-provenance lint (BUG-0055). The gate ran a
-# third check here through v2.3.10 that refused a done-claim whose diff
+# (H) Retired diff-scope comment-provenance lint. The gate used to run a
+# third check here that refused a done-claim whose diff
 # planted a ledger-ID comment. It is retired: by gate time the merge has
 # usually already landed and the feature branch is already deleted, so a
 # wording-only finding at this point cost an operator a reword-and-reset for
 # litter the TESTER-time path already catches (the gated runners' own
-# tree-wide `lint_comment_provenance.py` run, no `--diff-scope`). These
+# tree-wide `lint_hygiene.py` provenance-class run, no diff-scope mode). These
 # fixtures prove the retirement: a planted ledger-ID comment no longer
 # refuses once merge-ancestry and cleanliness both pass, through both the
 # direct function call and the real wake/claude.sh call-site block.
@@ -779,8 +844,8 @@ def _build_repo_with_merged_feature_branch_file(
 
 
 def test_planted_ledger_id_comment_no_longer_refuses_done_claim(tmp_path: pathlib.Path) -> None:
-    """BUG-0055 acceptance #1: a done-claim whose feature-branch diff plants
-    a 'per BUG-0042'-style ledger-ID comment, with the feature branch merged
+    """A done-claim whose feature-branch diff plants a comment citing an
+    internal bug-ID-shaped reference, with the feature branch merged
     --no-ff into the source branch and the worktree clean, is ACCEPTED as
     DONE — no block, no Needs-Human. The retired diff-scope lint no longer
     runs here; only merge-ancestry and cleanliness gate this done-claim."""
@@ -845,6 +910,7 @@ def test_real_wake_path_accepts_planted_ledger_id_comment_claim(tmp_path: pathli
         }}
         AGENT="overwatch"
         KANBAN_ROOT="{tmp_path}"
+        {_held_lock_fragment(tmp_path / "repo.lock")}
         task_id="{task_id}"
         task_status="{status_file}"
         SUBAGENT="coder"
@@ -876,7 +942,7 @@ def test_real_wake_path_accepts_planted_ledger_id_comment_claim(tmp_path: pathli
 
 
 # ---------------------------------------------------------------------------
-# (I) BUG-0046: sibling-checkout accept path. The merge happens in a SIBLING
+# (I) Sibling-checkout accept path. The merge happens in a SIBLING
 # worktree that legitimately holds source_branch; the claiming task's own
 # worktree only detaches and deletes its branch. The gate must accept this
 # via merge-evidence read from source_branch's own history.
@@ -893,7 +959,8 @@ def test_sibling_worktree_merge_is_accepted_via_merge_evidence(tmp_path: pathlib
     log_file = tmp_path / "wake.log"
 
     # Sanity: the claiming task's own worktree is NOT on source_branch — the
-    # exact state the pre-fix fallback wrongly required. symbolic-ref exits
+    # exact state a fallback demanding source_branch in the claiming
+    # worktree would wrongly refuse. symbolic-ref exits
     # non-zero on a detached HEAD (git raises CalledProcessError), which
     # confirms the detached state directly rather than asserting on output.
     with pytest.raises(subprocess.CalledProcessError):
@@ -918,7 +985,7 @@ def test_sibling_worktree_merge_is_accepted_via_merge_evidence(tmp_path: pathlib
     assert len(log_lines) == 1, f"expected exactly one narration line\nlog:\n{log_lines}"
     assert "PASS" in log_lines[0], f"narration must report PASS\n{log_lines[0]}"
     assert "merge-evidence" in log_lines[0], (
-        f"narration must name the merge-evidence acceptance path (BUG-0046 acceptance #1)\n{log_lines[0]}"
+        f"narration must name the merge-evidence acceptance path\n{log_lines[0]}"
     )
     assert feature_branch in log_lines[0] and source_branch in log_lines[0], (
         f"narration must name both branches\n{log_lines[0]}"
@@ -926,7 +993,8 @@ def test_sibling_worktree_merge_is_accepted_via_merge_evidence(tmp_path: pathlib
 
 
 # ---------------------------------------------------------------------------
-# (J) BUG-0046: true-negative. The feature branch is force-deleted WITHOUT
+# (J) True-negative for the sibling-checkout accept path. The feature
+# branch is force-deleted WITHOUT
 # ever being merged -> no merge commit on the source, no ancestor evidence.
 # The widened fallback must still refuse with the existing remedy.
 # ---------------------------------------------------------------------------

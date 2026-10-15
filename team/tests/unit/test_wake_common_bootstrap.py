@@ -4,7 +4,7 @@ test_wake_common_bootstrap.py
 Live-shaped fixture verifying that wake-batch.sh's cron-style env resolution
 is unchanged after wake_common.sh delegates root absolutization to env_bootstrap.sh.
 
-Acceptance criterion (from CODER-20260712-062):
+Acceptance criterion:
   Live-shaped fixture: cron-style invocation of wake-batch.sh from env -i
   (plus PATH/HOME) resolves PGAI_AGENT_KANBAN_ROOT_PATH correctly.
 
@@ -39,6 +39,11 @@ from tests.unit.shell_harness import run_bash
 # Paths relative to team/ (pytest cwd when run via run-unit-tests.sh)
 _ENV_BOOTSTRAP_SH = pathlib.Path("scripts/lib/env_bootstrap.sh")
 _WAKE_COMMON_SH = pathlib.Path("scripts/lib/wake_common.sh")
+# The env_bootstrap.sh delegation site lives in wake_bootstrap.sh, not
+# wake_common.sh: the bootstrap code is its own dedicated stage file (sourced
+# by wake_common.sh as its first act). The structural tests below assert
+# against this file for that reason.
+_WAKE_BOOTSTRAP_SH = pathlib.Path("scripts/lib/wake_bootstrap.sh")
 _WAKE_BATCH_SH = pathlib.Path("scripts/wake-batch.sh")
 _CLAUDE_SH = pathlib.Path("scripts/wake/claude.sh")
 _CODEX_SH = pathlib.Path("scripts/wake/codex.sh")
@@ -314,37 +319,40 @@ def test_bootstrap_succeeds_without_shell_env(tmp_path: pathlib.Path) -> None:
 
 
 def test_wake_common_sources_env_bootstrap() -> None:
-    """Structural: wake_common.sh sources env_bootstrap.sh at its bootstrap site.
+    """Structural: the wake bootstrap stage sources env_bootstrap.sh.
 
     This is the delegation contract for Goal 3 of the v1.21.0 requirements.
     The presence of this source call (with the idempotency-safe pre-export)
-    is the machine-readable proof that wake_common.sh no longer carries an
-    independent bootstrap implementation.
+    is the machine-readable proof that the wake substrate no longer carries
+    an independent bootstrap implementation. This call lives in
+    wake_bootstrap.sh (sourced by wake_common.sh as its first act), not
+    inline in wake_common.sh itself.
     """
-    content = _WAKE_COMMON_SH.read_text(encoding="utf-8")
+    content = _WAKE_BOOTSTRAP_SH.read_text(encoding="utf-8")
     source_line = 'source "${SCRIPT_DIR}/../lib/env_bootstrap.sh"'
     assert source_line in content, (
-        f"{_WAKE_COMMON_SH} does not contain the expected source call to env_bootstrap.sh. "
-        "wake_common.sh must delegate root absolutization to env_bootstrap.sh "
+        f"{_WAKE_BOOTSTRAP_SH} does not contain the expected source call to env_bootstrap.sh. "
+        "The wake bootstrap stage must delegate root absolutization to env_bootstrap.sh "
         "(Goal 3 of v1.21.0-env-bootstrap-unification). "
         f"Expected line: {source_line!r}"
     )
 
 
 def test_wake_common_pre_exports_before_bootstrap() -> None:
-    """Structural: wake_common.sh pre-exports PGAI_AGENT_KANBAN_ROOT_PATH before
-    sourcing env_bootstrap.sh.
+    """Structural: the wake bootstrap stage pre-exports PGAI_AGENT_KANBAN_ROOT_PATH
+    before sourcing env_bootstrap.sh.
 
     The pre-export (export PGAI_AGENT_KANBAN_ROOT_PATH="${PGAI_AGENT_KANBAN_ROOT_PATH:-$TEAM_ROOT}")
     is required to trigger env_bootstrap.sh's idempotency guard from the lib context,
     where BASH_SOURCE[1] would point to the lib directory rather than the kanban root.
     Without this pre-export, env_bootstrap.sh would derive the wrong candidate root.
+    This lives in wake_bootstrap.sh.
     """
-    content = _WAKE_COMMON_SH.read_text(encoding="utf-8")
+    content = _WAKE_BOOTSTRAP_SH.read_text(encoding="utf-8")
     # Verify the pre-export pattern is present above the env_bootstrap.sh source call.
     pre_export_marker = "PGAI_AGENT_KANBAN_ROOT_PATH:-$TEAM_ROOT"
     assert pre_export_marker in content, (
-        f"{_WAKE_COMMON_SH} does not contain the pre-export pattern "
+        f"{_WAKE_BOOTSTRAP_SH} does not contain the pre-export pattern "
         f"'export PGAI_AGENT_KANBAN_ROOT_PATH=\"${{{pre_export_marker}}}\"'. "
         "This pre-export is required for safe delegation to env_bootstrap.sh "
         "from the lib sourcing context."
@@ -353,35 +361,37 @@ def test_wake_common_pre_exports_before_bootstrap() -> None:
     # Use the `source` line rather than a comment reference to env_bootstrap.sh.
     source_line = 'source "${SCRIPT_DIR}/../lib/env_bootstrap.sh"'
     assert source_line in content, (
-        f"{_WAKE_COMMON_SH} does not contain the expected source line: {source_line!r}"
+        f"{_WAKE_BOOTSTRAP_SH} does not contain the expected source line: {source_line!r}"
     )
     pre_export_pos = content.index(pre_export_marker)
     bootstrap_pos = content.index(source_line)
     assert pre_export_pos < bootstrap_pos, (
-        f"{_WAKE_COMMON_SH}: the pre-export of PGAI_AGENT_KANBAN_ROOT_PATH "
+        f"{_WAKE_BOOTSTRAP_SH}: the pre-export of PGAI_AGENT_KANBAN_ROOT_PATH "
         f"must appear before the source of env_bootstrap.sh. "
         f"Found pre-export at offset {pre_export_pos}, bootstrap source at {bootstrap_pos}."
     )
 
 
 def test_wake_common_still_sources_shell_env_after_bootstrap() -> None:
-    """Structural: wake_common.sh still sources shell-env after env_bootstrap.sh.
+    """Structural: the wake bootstrap stage still sources shell-env after
+    env_bootstrap.sh.
 
     Shell-env serves two purposes beyond root resolution: PATH adjustments and
     Python venv activation.  env_bootstrap.sh's idempotency guard returns
     immediately when the env var is already set, so shell-env must be sourced
     separately for these side effects to take effect in the cron environment.
+    Both source calls live in wake_bootstrap.sh.
     """
-    content = _WAKE_COMMON_SH.read_text(encoding="utf-8")
+    content = _WAKE_BOOTSTRAP_SH.read_text(encoding="utf-8")
 
     # Both the env_bootstrap.sh source call and the shell-env source must be present.
     source_bootstrap = 'source "${SCRIPT_DIR}/../lib/env_bootstrap.sh"'
     source_shell_env = 'source "$TEAM_ROOT/shell-env"'
     assert source_bootstrap in content, (
-        f"{_WAKE_COMMON_SH} does not contain the env_bootstrap.sh source call."
+        f"{_WAKE_BOOTSTRAP_SH} does not contain the env_bootstrap.sh source call."
     )
     assert source_shell_env in content, (
-        f"{_WAKE_COMMON_SH} does not source shell-env. "
+        f"{_WAKE_BOOTSTRAP_SH} does not source shell-env. "
         "Shell-env is still required for PATH and venv activation even after "
         "root resolution is delegated to env_bootstrap.sh. "
         f"Expected line: {source_shell_env!r}"
@@ -391,7 +401,7 @@ def test_wake_common_still_sources_shell_env_after_bootstrap() -> None:
     bootstrap_pos = content.index(source_bootstrap)
     shell_env_pos = content.index(source_shell_env)
     assert shell_env_pos > bootstrap_pos, (
-        f"{_WAKE_COMMON_SH}: shell-env sourcing must appear AFTER env_bootstrap.sh. "
+        f"{_WAKE_BOOTSTRAP_SH}: shell-env sourcing must appear AFTER env_bootstrap.sh. "
         f"env_bootstrap.sh source at offset {bootstrap_pos}, "
         f"shell-env source at {shell_env_pos}."
     )

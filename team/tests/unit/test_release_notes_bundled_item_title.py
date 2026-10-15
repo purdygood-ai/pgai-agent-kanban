@@ -1,11 +1,12 @@
 """
 test_release_notes_bundled_item_title.py
 =========================================
-Regression gate for BUG-0029: the release-notes bundled-item title helper
-(``get_item_title()``, embedded as a Python heredoc inside
-``team/scripts/cm/release.sh``) previously matched ANY '#'-prefixed line
-regardless of heading level. A bug file whose first heading was ``## Status``
-(no H1 above it) yielded the bogus title ``Status`` in shipped release notes.
+Regression gate: the release-notes bundled-item title helper
+(``get_item_title()`` in ``pgai_agent_kanban.cm.release_notes_generator``,
+the generator ``team/scripts/lib/cm/release_notes.sh`` runs at Step 11a)
+previously matched ANY '#'-prefixed line regardless of heading level. A bug
+file whose first heading was ``## Status`` (no H1 above it) yielded the
+bogus title ``Status`` in shipped release notes.
 
 The fix restricts the match to a true H1 (``^#\\s``, a single leading '#'
 followed by whitespace) and falls back to the bundle item's filename stem
@@ -13,18 +14,18 @@ when no H1 line is present -- preserving the pre-existing no-heading-at-all
 fallback behavior.
 
 Fidelity approach: rather than hand-copying the helper's logic into the test
-(which would drift silently from the production script), this module extracts
-the actual ``RELNOTES_PY`` heredoc body from ``team/scripts/cm/release.sh`` at
-test time and executes it as a real subprocess with the same argv contract
-cm-release.sh uses. This means a regression that reintroduces the loose
-'#'-prefix match in the shipped script fails these tests directly -- there is
-no parallel implementation to fall out of sync.
+(which would drift silently from the production module), this module imports
+the shipped generator and calls its CLI entry point, ``main()``, with the
+same argv contract cm_release_generate_notes passes. This means a
+regression that reintroduces the loose '#'-prefix match in the shipped
+generator fails these tests directly -- there is no parallel implementation
+to fall out of sync.
 
 Covers:
   1. A true H1 line (``# Title``) yields that title, stripped of the leading
      '#' and surrounding whitespace.
-  2. A file whose first '#'-prefixed line is ``## Status`` (the exact BUG-0029
-     shape: no H1, an H2 heading appears first) falls back to the file stem,
+  2. A file whose first '#'-prefixed line is ``## Status`` (the exact
+     no-H1-with-an-H2-first shape) falls back to the file stem,
      not to the H2's text.
   3. A file with no '#'-prefixed line at all falls back to the file stem
      (pre-existing fallback behavior, preserved by the fix).
@@ -39,71 +40,26 @@ temp root by conftest.py). No bare /tmp paths. No live kanban root is touched.
 from __future__ import annotations
 
 import pathlib
-import re
-import subprocess
-import sys
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Path constants
-# ---------------------------------------------------------------------------
-
-_THIS_FILE = pathlib.Path(__file__).resolve()
-# team/tests/unit/test_release_notes_bundled_item_title.py
-# three levels up: unit/ -> tests/ -> team/
-_TEAM_DIR = _THIS_FILE.parent.parent.parent
-_RELEASE_SH = _TEAM_DIR / "scripts" / "cm" / "release.sh"
-
-_HEREDOC_OPEN_RE = re.compile(r"<<'RELNOTES_PY'\s*$")
-_HEREDOC_CLOSE_RE = re.compile(r"^RELNOTES_PY\s*$")
+from pgai_agent_kanban.cm.release_notes_generator import main as release_notes_main
 
 
-def _extract_relnotes_py_source() -> str:
-    """Pull the literal RELNOTES_PY heredoc body out of release.sh.
-
-    Extracting at test time (rather than embedding a hand-copied duplicate)
-    ensures this test exercises the exact production code path -- a
-    regression in the real script fails this test without any separate
-    maintenance of a parallel copy.
-    """
-    lines = _RELEASE_SH.read_text(encoding="utf-8").splitlines()
-    body_lines = []
-    in_heredoc = False
-    for line in lines:
-        if not in_heredoc and _HEREDOC_OPEN_RE.search(line):
-            in_heredoc = True
-            continue
-        if in_heredoc and _HEREDOC_CLOSE_RE.match(line):
-            break
-        if in_heredoc:
-            body_lines.append(line)
-    assert body_lines, (
-        f"Could not locate RELNOTES_PY heredoc body in {_RELEASE_SH}. "
-        "The heredoc marker may have been renamed or removed."
-    )
-    return "\n".join(body_lines) + "\n"
-
-
-def _run_relnotes_py(
+def _generate_notes(
     tmp_path: pathlib.Path,
     *,
     bundle_file: str,
     active_rc: str = "v9.9.9",
 ) -> str:
-    """Execute the extracted RELNOTES_PY body with a minimal argv contract
-    matching what cm-release.sh passes, and return the generated release
-    notes file's text.
+    """Run the shipped generator's CLI entry point with a minimal argv
+    contract matching what cm_release_generate_notes passes, and return the
+    generated release notes file's text.
     """
-    script_path = tmp_path / "_extracted_relnotes.py"
-    script_path.write_text(_extract_relnotes_py_source(), encoding="utf-8")
-
     repo_root = tmp_path / "repo"
     repo_root.mkdir(exist_ok=True)
 
     argv = [
-        sys.executable,
-        str(script_path),
         bundle_file,             # bundle_file_arg
         str(repo_root),          # repo_root
         active_rc,               # active_rc
@@ -112,15 +68,10 @@ def _run_relnotes_py(
         "test-project",          # project_name
         "none",                  # merge_base
         "rc/" + active_rc,       # rc_branch
-        "unknown-tester-task",   # tester_task_id
+        "unknown-tester-task",   # known_issue_block (unused at FUNCTIONAL)
     ]
-    result = subprocess.run(
-        argv, capture_output=True, text=True, check=False, cwd=str(tmp_path)
-    )
-    assert result.returncode == 0, (
-        f"RELNOTES_PY extraction subprocess failed (rc={result.returncode}).\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    rc = release_notes_main(argv)
+    assert rc == 0, f"release-notes generator returned {rc}"
 
     out_file = repo_root / "release-notes" / f"{active_rc}.md"
     assert out_file.exists(), f"Expected release notes file not written: {out_file}"
@@ -145,7 +96,7 @@ class TestBundledItemTitleH1Restriction:
     line does (and does not) appear in the rendered release notes. Every
     original per-scenario test survives as one row in this table
     (survives-as-named-parameterization; no case dropped) — this whole file
-    is also the BUG-0029 regression lock (see the module docstring)."""
+    is also the title-fallback regression lock (see the module docstring)."""
 
     @pytest.mark.parametrize(
         "item_filename, item_content, expected_present, expected_absent",
@@ -192,7 +143,7 @@ class TestBundledItemTitleH1Restriction:
         item.write_text(item_content, encoding="utf-8")
         bundle = _make_bundle(tmp_path, [item])
 
-        notes = _run_relnotes_py(tmp_path, bundle_file=str(bundle))
+        notes = _generate_notes(tmp_path, bundle_file=str(bundle))
 
         # A None expected_present means the case documents the file-stem
         # fallback rather than a literal H1 title.

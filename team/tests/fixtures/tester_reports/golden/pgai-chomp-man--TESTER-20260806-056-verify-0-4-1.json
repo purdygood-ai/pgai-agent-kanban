@@ -1,0 +1,200 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `rc/v0.4.1` of pgai-chomp-man against its requirements\ndoc (`requirements/v0.4.1-bugfix-bundle-20260806.md`), a single-item bug bundle\ncontaining `BUG-0002-no-color-change-power-pellet`. The RC adds a powered-up color\ncue on the Chomp-Man sprite while the dragon-edible (power-pellet) timer is active.\nThe diff is small and self-contained: `player.py` (new `POWERED_UP_COLOR` constant\nand a `powered_up` flag on `ChompMan.draw()`), `pgai-chomp-man.py` (passes\n`powered_up=vulnerable_mode_remaining_ms > 0` -- the same accumulator that gates\ndragon edibility), and a new headless pixel-inspection test `tests/test_player_render.py`.\nChanged files compile, the full test suite passes (168 passed, including the 5 new\ntests), and all bug acceptance criteria are met, including the \"same timer, not a\nparallel one\" constraint. No bugs, gaps, or stale assertions found.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight -- worktree identity, cleanliness, stashes",
+      "heading": "Finding 1: Pre-flight -- worktree identity, cleanliness, stashes",
+      "level": 3,
+      "body": "**Category:** pass\nWorktree HEAD `481646b` matches `rc/v0.4.1`. `git status --short` clean. `git stash\nlist` empty. RC version `v0.4.1` is strictly greater than Last Released `v0.4.0`\n(git tags confirm v0.4.0 is the highest existing tag). CODER-20260806-054's fix\ncommit `0fde641` is an ancestor of the RC (merged via `--no-ff` merge `481646b`).\nFeature branch deleted post-merge (normal CODER cleanup). No merge anomalies.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Bundled item BUG-0002 addressed",
+      "heading": "Finding 2: Bundled item BUG-0002 addressed",
+      "level": 3,
+      "body": "**Category:** pass\n`ChompMan.draw()` now selects `POWERED_UP_COLOR (255,64,224)` over `COLOR\n(255,208,64)` when `powered_up` is true, and reverts to `COLOR` otherwise. The call\nsite in `pgai-chomp-man.py` passes `powered_up=vulnerable_mode_remaining_ms > 0`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0002 AC1/AC2 -- distinct color active, normal color inactive",
+      "heading": "Finding 3: BUG-0002 AC1/AC2 -- distinct color active, normal color inactive",
+      "level": 3,
+      "body": "**Category:** pass\nBehaviorally verified via `tests/test_player_render.py`, which opens a real\n`pygame.Surface` under the SDL dummy driver and samples the actual drawn body\npixel. `powered_up=True` renders `POWERED_UP_COLOR`; `powered_up=False` (and the\nomitted-argument default) renders `COLOR`. Reproduced both the original failure\nmode (normal case unchanged) and the new powered-up case per Step 6.5 -- both pass.\nColors confirmed distinct: `(255,208,64) != (255,64,224)`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0002 AC3 -- same timer, no parallel timer",
+      "heading": "Finding 4: BUG-0002 AC3 -- same timer, no parallel timer",
+      "level": 3,
+      "body": "**Category:** pass\n`vulnerable_mode_remaining_ms` is the single accumulator set to\n`VULNERABLE_MODE_DURATION_MS` at the same site that calls\n`set_dragons_vulnerable(dragons)` (pgai-chomp-man.py ~L456-457) and counted down by\n`update_vulnerable_timer(...)` (~L539-540), the dragons' own edible-state timer. The\nnew `powered_up` gate reads that identical value. No new/parallel timer introduced.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0002 AC4 -- Python compiles cleanly",
+      "heading": "Finding 5: BUG-0002 AC4 -- Python compiles cleanly",
+      "level": 3,
+      "body": "**Category:** pass\n`python3 -m py_compile player.py pgai-chomp-man.py tests/test_player_render.py` -> OK.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Bundle criterion -- bash syntax check",
+      "heading": "Finding 6: Bundle criterion -- bash syntax check",
+      "level": 3,
+      "body": "**Category:** pass (vacuous)\nNo bash/shell files are in the RC diff (only `.py`). Nothing to check.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass (vacuous)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "BUG-0002 AC5 -- no regression",
+      "heading": "Finding 7: BUG-0002 AC5 -- no regression",
+      "level": 3,
+      "body": "**Category:** pass\nFull suite `python3 -m pytest tests/` -> 168 passed, exit 0. Power-pellet timing,\ndragon edible appearance, dragon-eat scoring, and board-clear invariant tests all\npass. `powered_up` defaults to `False`, so any un-updated call site keeps prior\nbehavior (covered by `test_powered_up_defaults_to_false_when_not_specified`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Skip-cites-real-bug gate",
+      "heading": "Finding 8: Skip-cites-real-bug gate",
+      "level": 3,
+      "body": "**Category:** pass\nNo pytest skip/xfail annotations in the suite. The two grep hits for \"skip\" in\n`tests/test_power_pellets.py` are function/docstring names, not skip markers.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Test fidelity",
+      "heading": "Finding 9: Test fidelity",
+      "level": 3,
+      "body": "**Category:** pass\nThe new test exercises the real `pygame.draw` path and inspects actual surface\npixels rather than mocking the color choice -- high fidelity. Sampling point offset\nleft of center to avoid the mouth wedge, with a docstring explaining why.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

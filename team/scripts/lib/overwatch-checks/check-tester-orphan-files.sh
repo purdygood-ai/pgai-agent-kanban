@@ -468,6 +468,9 @@ overwatch_check_tester_orphan_files() {
             elif (( fix_exit == 4 )); then
                 echo "check-tester-orphan-files: per-repo flock contended; aborting" >&2
                 return 0
+            elif (( fix_exit == 5 )); then
+                echo "check-tester-orphan-files: fix deferred: HALT present; aborting" >&2
+                return 0
             elif (( fix_exit != 0 )); then
                 echo "check-tester-orphan-files: handle-bug-shaped failed for ${f} (exit ${fix_exit})" >&2
                 continue
@@ -488,6 +491,9 @@ overwatch_check_tester_orphan_files() {
                 return 0
             elif (( fix_exit == 4 )); then
                 echo "check-tester-orphan-files: per-repo flock contended; aborting" >&2
+                return 0
+            elif (( fix_exit == 5 )); then
+                echo "check-tester-orphan-files: fix deferred: HALT present; aborting" >&2
                 return 0
             elif (( fix_exit != 0 )); then
                 echo "check-tester-orphan-files: handle-not-bug-shaped failed for ${f} (exit ${fix_exit})" >&2

@@ -43,7 +43,7 @@ Design notes:
     temp-root resolution logic.
   - No bare /tmp paths — all scratch is under pytest's tmp_path.
   - Test names describe behaviour; no bug IDs, version numbers, or scaffolding
-    labels appear in function names (SOP.md Anti-pattern 6).
+    labels appear in function names (roles/TESTER.md Anti-pattern 6).
   - Each test is fully self-contained and isolated; no order dependence.
 """
 
@@ -69,6 +69,18 @@ from tests.integration.test_operator_commands import (
     _read_status_state,
     _run_operator,
 )
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="reset-force")
 
 # ---------------------------------------------------------------------------
 # Shared fixture-builder helpers

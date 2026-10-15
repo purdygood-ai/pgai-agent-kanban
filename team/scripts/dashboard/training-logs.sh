@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dashboard-training-logs.sh
+# training-logs.sh
 # Merged, color-coded training trace viewer for the dashboard training-logs window.
 #
 # When at least one project has [training] reasoning_trace=true in project.cfg,
@@ -15,7 +15,7 @@
 #
 # Designed to be run under watch -t -n 30 so the view refreshes automatically.
 #
-# Color scheme (same as dashboard-logs.sh — reused, not reinvented):
+# Color scheme (same as dashboard/logs.sh — reused, not reinvented):
 #   pm      = cyan
 #   coder   = green
 #   writer  = yellow
@@ -29,7 +29,7 @@
 # Missing training directories are handled gracefully (skipped silently).
 #
 # Usage:
-#   dashboard-training-logs.sh [--kanban-root <path>]
+#   training-logs.sh [--kanban-root <path>]
 #
 # Flags:
 #   --kanban-root <path>   Override the kanban root path
@@ -42,6 +42,10 @@
 set -uo pipefail
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+# Source shared ANSI color primitive (single home for the color-name ->
+# escape-code table -- see team/scripts/lib/script_common.sh).
+# shellcheck source=../lib/script_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
 
 MAX_LINES_PER_AGENT=80
 
@@ -56,7 +60,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//'
+      # Read the whole header via mapfile so grep/sed always finish writing
+      # before anything reads their output, then slice to the line limit
+      # locally -- head -N as a pipe stage can close its input early and
+      # SIGPIPE the writers under pipefail.
+      mapfile -t __help_lines < <(grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//')
+      printf '%s\n' "${__help_lines[@]:0:39}"
       exit 0
       ;;
     --*)
@@ -130,27 +139,16 @@ if [[ "${TERM:-}" == "dumb" ]] || [[ "${NO_COLOR:-}" == "1" ]]; then
   USE_COLOR=false
 fi
 
-if [[ "$USE_COLOR" == "true" ]]; then
-  C_CYAN=$'\033[0;36m'
-  C_GREEN=$'\033[0;32m'
-  C_YELLOW=$'\033[0;33m'
-  C_BLUE=$'\033[0;34m'
-  C_MAGENTA=$'\033[0;35m'
-  C_DIM=$'\033[2m'
-  C_BOLD=$'\033[1m'
-  C_RESET=$'\033[0m'
-else
-  C_CYAN=""
-  C_GREEN=""
-  C_YELLOW=""
-  C_BLUE=""
-  C_MAGENTA=""
-  C_DIM=""
-  C_BOLD=""
-  C_RESET=""
-fi
+C_CYAN="$(ansi_code cyan)"
+C_GREEN="$(ansi_code green)"
+C_YELLOW="$(ansi_code yellow)"
+C_BLUE="$(ansi_code blue)"
+C_MAGENTA="$(ansi_code magenta)"
+C_DIM="$(ansi_code dim)"
+C_BOLD="$(ansi_code bold)"
+C_RESET="$(ansi_code reset)"
 
-# Agent order and color mapping — same as dashboard-logs.sh
+# Agent order and color mapping — same as dashboard/logs.sh
 AGENT_ORDER=(pm coder writer tester cm overwatch)
 
 declare -A AGENT_COLOR

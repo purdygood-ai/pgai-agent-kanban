@@ -5,8 +5,23 @@
 # directory must already exist under $KANBAN_ROOT/projects/<name>/ (e.g. it
 # was migrated from another machine, or recreated by hand).
 #
-# This is the read-only counterpart of create-project.sh: it does not touch
-# the project directory contents — only updates the registry.
+# This is the registry-only counterpart of create-project.sh: it updates the
+# registry, and the only things it may write under the project directory are
+# two files, each only when absent:
+#   - projects/<name>/README.md — seeded from
+#     templates/project/README-TEMPLATE.md beside this script's scripts/
+#     directory, with a line telling the operator to fill it in;
+#   - projects/<name>/project.cfg — rendered from the project.cfg template
+#     (config/project.cfg_example, every key documented) with this project's
+#     name and the template's defaults, narrated in one line; set its
+#     dev_tree_path and git_repo_url afterwards. Not written when a legacy
+#     PROJECT.cfg is present.
+# An existing README.md, project.cfg or PROJECT.cfg is never touched.
+#
+# Thin adapter: parses the flags via operator_args.sh, then hands the values
+# to the Python add_project function in pgai_agent_kanban.ops.projects (the
+# same function POST /operations/add-project calls) through pp_run_ops,
+# which validates them, prints the plan and updates projects.cfg.
 #
 # projects.cfg format handling:
 #   When projects.cfg is in colon-legacy format, this script automatically
@@ -42,23 +57,17 @@ if [[ ! -d "$KANBAN_ROOT" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/projects.sh
-source "${SCRIPT_DIR}/lib/projects.sh"
 # shellcheck source=lib/operator_args.sh
 source "${SCRIPT_DIR}/lib/operator_args.sh"
-
-NAME=""
-PRIORITY=""
-COLOR=""
-DRY_RUN="false"
-NO_MIGRATE="false"
+# shellcheck source=lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/lib/pp_run_ops.sh"
 
 # Declared flag vocabulary for all flags this command accepts.
 OPERATOR_VALID_FLAGS=(project dry-run help priority color no-migrate h)
 
 # Value-taking flags: script-specific (project, priority, color).
 # Boolean flags: dry-run, no-migrate, help.
-argparse_parse --value-flags "project priority color" -- "$@"
+operator_args_argparse --value-flags "project priority color" -- "$@"
 
 # Emit clear errors for value-taking flags given with no value.
 if argparse_missing "priority"; then
@@ -92,95 +101,18 @@ fi
 # Reject any flag not in the declared vocabulary.
 operator_args_validate_known "add-project.sh" OPERATOR_VALID_FLAGS || exit 1
 
-# Extract boolean flags.
-if argparse_has "dry-run";    then DRY_RUN="true"; fi
-if argparse_has "no-migrate"; then NO_MIGRATE="true"; fi
+# --- Hand the values to add_project ---
+# Only flags the operator gave are passed (as --name=value). This script's own
+# scripts/ directory is passed so the project README template is read from
+# ../templates/project/ beside it.
+_ops_args=(--kanban-root="$KANBAN_ROOT" --scripts-dir="$SCRIPT_DIR" --project="$(operator_args_project)")
+if argparse_has "priority";   then _ops_args+=(--priority="${ARGPARSE_FLAGS[priority]}"); fi
+if argparse_has "color";      then _ops_args+=(--color="${ARGPARSE_FLAGS[color]}"); fi
+if argparse_has "no-migrate"; then _ops_args+=(--no-migrate); fi
+if argparse_has "dry-run";    then _ops_args+=(--dry-run); fi
 
-# Extract value flags.
-NAME="$(operator_args_project)"
-if argparse_has "priority"; then PRIORITY="${ARGPARSE_FLAGS[priority]}"; fi
-if argparse_has "color"; then
-    _validate_color_flag "--color" "${ARGPARSE_FLAGS[color]}"
-    COLOR="${ARGPARSE_FLAGS[color]}"
-fi
-
-if [[ -z "$NAME" ]]; then
-    echo "ERROR: project name is required (--project <name>)" >&2
-    echo "Usage: add-project.sh --project <name> [--priority <int>]" >&2
-    exit 1
-fi
-
-PROJECT_DIR="${KANBAN_ROOT}/projects/${NAME}"
-
-if [[ ! -d "$PROJECT_DIR" ]]; then
-    echo "ERROR: project directory does not exist: $PROJECT_DIR" >&2
-    echo "       To create a new project, use: create-project.sh ${NAME}" >&2
-    exit 2
-fi
-
-# --- Auto-assign color if not operator-supplied and this is a new registration ---
-# Priority is auto-assigned by projects_cfg_add when omitted; color uses the
-# next unused palette entry as a default.
-if [[ -z "$COLOR" ]] && ! projects_cfg_has "$NAME"; then
-    COLOR="$(projects_cfg_next_color)"
-fi
-
-# --- Detect projects.cfg format ---
-projects_cfg_ensure
-_cfg_file="$(projects_cfg_path)"
-_cfg_fmt="$(projects_cfg_format "$_cfg_file")"
-
-# --- Print plan ---
-echo "Registering project: $NAME"
-echo "  Project root: $PROJECT_DIR"
-
-if projects_cfg_has "$NAME"; then
-    current="$(projects_cfg_priority "$NAME")"
-    if [[ -n "$PRIORITY" && "$current" != "$PRIORITY" ]]; then
-        echo "  Already registered at priority=${current}; will update to ${PRIORITY}"
-    else
-        echo "  Already registered at priority=${current}; nothing to do."
-        exit 0
-    fi
-else
-    echo "  Will register at priority=${PRIORITY:-<next available>}, color=${COLOR:-<next available>}"
-    if [[ "$_cfg_fmt" == "colon-legacy" ]]; then
-        if [[ "$NO_MIGRATE" == "true" ]]; then
-            echo "  projects.cfg:   colon-legacy (--no-migrate: will append colon line; WARNING: mixed format)"
-        else
-            echo "  projects.cfg:   colon-legacy (will auto-migrate to INI before registering)"
-        fi
-    else
-        echo "  projects.cfg:   INI format"
-    fi
-fi
-echo ""
-
-if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[DRY-RUN] No changes will be made."
-    exit 0
-fi
-
-# --- Handle projects.cfg format: auto-migrate or warn ---
-if [[ "$_cfg_fmt" == "colon-legacy" ]]; then
-    if [[ "$NO_MIGRATE" == "true" ]]; then
-        echo "WARNING: projects.cfg is in colon-legacy format and --no-migrate was given." >&2
-        echo "WARNING: The new project will be appended as a colon-format line." >&2
-        echo "WARNING: This produces a mixed-format file that is not a supported stable state." >&2
-        echo "WARNING: Run 'scripts/migrate/projects-cfg.sh' (or re-run without --no-migrate)" >&2
-        echo "WARNING: to convert projects.cfg to INI format." >&2
-    else
-        # Auto-migrate: convert colon-legacy to INI before registering.
-        projects_cfg_colon_to_ini "$_cfg_file"
-    fi
-fi
-unset _cfg_file _cfg_fmt
-
-# --- Execute ---
-projects_cfg_add "$NAME" "${PRIORITY}" "${COLOR}"
-final_priority="$(projects_cfg_priority "$NAME")"
-final_color="$(projects_cfg_color "$NAME")"
-echo "  + registered (priority=${final_priority}, color=${final_color})"
-
-echo ""
-echo "Done."
+# Exit codes pass through: 1 for a usage or value error, 2 when the project
+# directory does not exist.
+_rc=0
+pp_run_ops pgai_agent_kanban.ops add_project "${_ops_args[@]}" || _rc=$?
+exit "$_rc"

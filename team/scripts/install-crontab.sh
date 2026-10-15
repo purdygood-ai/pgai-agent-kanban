@@ -23,9 +23,13 @@
 #   Without --wake-tier: if a PGAI crontab already exists the replacement prompt
 #   defaults to N (conservative).  The existing schedule is preserved unless
 #   the operator explicitly answers Y.
-#   With --wake-tier=<tier>: the named tier is applied unconditionally — any
-#   existing PGAI (or non-PGAI) crontab entries are replaced after a backup.
-#   Use --dry-run first if you want to preview the change.
+#   With --wake-tier=<tier>: the named tier is applied without a prompt, after
+#   a backup, by rewriting only the kanban-managed lines — a marked
+#   "# BEGIN/END pgai-agent-kanban managed block: <root>" block and any line
+#   naming this install root (see merge_kanban_crontab in
+#   lib/safe_overwrite.sh).  Every other line — the operator's own jobs,
+#   MAILTO/PATH settings, another install's block — is kept.
+#   Use --dry-run first if you want to preview the kanban block.
 #
 # Idempotency:
 #   Running this script twice with the same --wake-tier produces the same crontab
@@ -47,8 +51,9 @@
 #                          do not modify anything.
 #   --wake-tier small|medium|large
 #                          Skip the interactive tier prompt and apply the selected
-#                          tier unconditionally — existing PGAI (and non-PGAI)
-#                          crontab entries are replaced after a backup.
+#                          tier without prompting, after a backup — only the
+#                          kanban-managed lines are rewritten; every other
+#                          crontab line is kept.
 #                          Without this flag, the replacement prompt defaults to N
 #                          when a crontab already exists.
 #                          Also accepted as --wake-tier=small|medium|large.
@@ -63,6 +68,7 @@
 #                          defaulting to Y.  Required when calling from
 #                          automated scripts (e.g. install.sh, CI pipelines,
 #                          upgrade.sh --force, agent tasks).
+#   --non-interactive      Alias of --yes.
 #   --help                 Print this usage and exit 0.
 #
 # Deprecated flags (still accepted; emit a one-line deprecation notice to stderr):
@@ -95,6 +101,8 @@ fi
 # shellcheck source=team/scripts/lib/argparse.sh
 source "$_ARGPARSE_LIB"
 unset _ARGPARSE_LIB
+# shellcheck source=lib/script_common.sh
+source "${_SCRIPT_DIR}/lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Color helpers (only when stdout is a terminal)
@@ -130,8 +138,11 @@ NO_SYSTEM_CRON=false
 # and bypassing the pre-flight "Install crontab?" prompt.
 YES_FLAG=false
 
-_print_usage() {
-  cat >&2 <<USAGE
+# Usage text as data (per lib/script_common.sh's documented convention).
+# This script's usage intentionally prints to stderr on every path (--help's
+# exit 0 included), so the destination is pinned here rather than delegated
+# to print_usage_and_exit (which routes exit 0 to stdout).
+_USAGE_TEXT="$(cat <<USAGE
 Usage: $(basename "$0") [--dry-run] [--wake-tier small|medium|large] [--no-system-cron] [--yes] [--help]
 
 Install or update the crontab to a tier-appropriate wake-batch.sh schedule.
@@ -148,9 +159,11 @@ Options:
   --dry-run              Show the crontab that would be installed without modifying anything.
   --wake-tier small|medium|large
                          Skip the interactive tier prompt and apply the selected tier
-                         unconditionally. Existing PGAI (and non-PGAI) crontab entries
-                         are replaced after a backup. Without this flag, the replacement
-                         prompt defaults to N when a crontab already exists.
+                         without prompting, after a backup. Only kanban-managed lines
+                         (the marked pgai-agent-kanban block and lines naming this
+                         install root) are rewritten; every other line is kept.
+                         Without this flag, the replacement prompt defaults to N when
+                         a crontab already exists.
                          Also accepted as --wake-tier=small|medium|large.
   --no-system-cron       Skip crontab installation entirely — the OS crontab is left
                          exactly as-is (no writes, no probes).  For cron-less / Docker /
@@ -158,11 +171,13 @@ Options:
   --yes                  Explicit confirm — skip the "Install crontab?" prompt regardless
                          of TTY presence.  Without this flag, a no-TTY invocation declines
                          with exit 2.
+  --non-interactive      Alias of --yes.
   --help                 Print this usage and exit 0.
 
 Existing-crontab behavior:
   Without --wake-tier: if a PGAI crontab already exists the replacement prompt defaults to N.
-  With    --wake-tier:  the named tier is applied unconditionally (after backup).
+  With    --wake-tier:  the named tier replaces only the kanban-managed lines (after
+                        backup); the operator's own cron jobs are kept.
   With --no-system-cron: the crontab is left completely untouched regardless of existing state.
 
 Deprecated flags (still accepted; emit a deprecation notice to stderr):
@@ -172,10 +187,10 @@ Deprecated flags (still accepted; emit a deprecation notice to stderr):
   --tier=none                Replaced by --no-system-cron.
 
 Environment:
-  PGAI_AGENT_KANBAN_ROOT_PATH          Kanban root — canonical name (v0.36.0+)
+  PGAI_AGENT_KANBAN_ROOT_PATH          Kanban root — canonical name
                                         Default (fresh install): $HOME/pgai_agent_kanban
 USAGE
-}
+)"
 
 # ---------------------------------------------------------------------------
 # Parse arguments via the shared argparse library.
@@ -197,10 +212,10 @@ fi
 # Short flags (-h) arrive in ARGPARSE_POSITIONAL; handle them first.
 for _pos in "${ARGPARSE_POSITIONAL[@]+"${ARGPARSE_POSITIONAL[@]}"}"; do
   case "$_pos" in
-    -h) _print_usage; exit 0 ;;
+    -h) printf '%s\n' "$_USAGE_TEXT" >&2; exit 0 ;;
     *)
       err "Unknown argument: $_pos"
-      _print_usage
+      printf '%s\n' "$_USAGE_TEXT" >&2
       exit 1
       ;;
   esac
@@ -213,7 +228,7 @@ for _flag in "${!ARGPARSE_FLAGS[@]}"; do
     dry-run|wake-tier|no-system-cron|yes|non-interactive|help|tier) ;;
     *)
       err "Unknown argument: --${_flag}"
-      _print_usage
+      printf '%s\n' "$_USAGE_TEXT" >&2
       exit 1
       ;;
   esac
@@ -222,7 +237,8 @@ unset _flag
 
 # Handle --help.
 if argparse_has "help"; then
-  _print_usage; exit 0
+  printf '%s\n' "$_USAGE_TEXT" >&2
+  exit 0
 fi
 
 # Extract boolean flags.
@@ -457,14 +473,15 @@ fi
 # Hand off to safe_overwrite_crontab.
 # It handles:
 #   (a) No existing crontab  — install prompt, default Y
-#   (b) PGAI entries present — upgrade prompt, default N (or forced when --tier supplied)
-#   (c) Non-PGAI entries     — replace prompt, default N (or forced when --tier supplied)
+#   (b) PGAI entries present — upgrade prompt, default N
+#   (c) Non-PGAI entries     — replace prompt, default N
 # Returns 0 on success, 1 on backup failure, 2 on operator decline.
 #
-# When --tier was supplied on the CLI (TIER_ARG non-empty), pass force_overwrite=true
-# so that any existing crontab is replaced unconditionally (after backup).  This is
-# the correct behavior for an explicit tier selection: the operator said "I want tier X"
-# and the script must apply it, not silently preserve the old schedule.
+# When --wake-tier was supplied on the CLI (TIER_ARG non-empty), pass
+# force_overwrite=true with this install root and the shipped tier templates:
+# the named tier is applied without a prompt (after backup), but only the
+# kanban-managed lines are rewritten.  The operator said "I want tier X" for
+# the kanban's schedule, not "discard my other cron jobs".
 # ---------------------------------------------------------------------------
 info "Crontab tier: $SELECTED_TIER — reviewing current crontab state..."
 
@@ -478,7 +495,8 @@ else
 fi
 
 _overwrite_result=0
-safe_overwrite_crontab "$_RESOLVED_TEMPLATE" "$_FORCE_OVERWRITE" || _overwrite_result=$?
+safe_overwrite_crontab "$_RESOLVED_TEMPLATE" "$_FORCE_OVERWRITE" "$KANBAN_ROOT_ABS" \
+  "${_TEMPLATES_DIR}"/crontab-*.example || _overwrite_result=$?
 unset _FORCE_OVERWRITE
 
 case "$_overwrite_result" in

@@ -589,7 +589,7 @@ def test_absent_output_flag_dry_run_still_works(tmp_path: pathlib.Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fresh-shell bootstrap tests (BUG-0073 acceptance criteria #1)
+# Fresh-shell bootstrap tests
 # ---------------------------------------------------------------------------
 #
 # These tests verify that po-agent.sh bootstraps the environment correctly
@@ -637,7 +637,7 @@ def _make_install_tree(base: pathlib.Path, *, with_shell_env: bool = True) -> pa
 def test_fresh_shell_with_shell_env_runs_cleanly(tmp_path: pathlib.Path) -> None:
     """po-agent.sh runs cleanly from a fresh shell when shell-env exports the root.
 
-    BUG-0073 AC1 shape: env_bootstrap.sh self-locates from BASH_SOURCE, finds
+    Fresh-shell bootstrap shape: env_bootstrap.sh self-locates from BASH_SOURCE, finds
     shell-env, sources it, and the script proceeds to validate the brief and run.
 
     The test uses PGAI_AGENT_KANBAN_ROOT_PATH="" (cleared) to simulate a fresh
@@ -649,7 +649,7 @@ def test_fresh_shell_with_shell_env_runs_cleanly(tmp_path: pathlib.Path) -> None
 
     # Point the script at an install-shaped tree by placing shell-env at the
     # kanban root.  The test explicitly passes PGAI_AGENT_KANBAN_ROOT_PATH
-    # via the env so the pre-fix check does not mask the test: the bootstrap
+    # via the env so the script's root-path check cannot mask the test: the bootstrap
     # should pick it up from shell-env, not from the pre-exported var.
     # We set it explicitly so the dry-run path resolves pp_tasks_dir.
     result = run_bash(
@@ -675,7 +675,7 @@ def test_fresh_shell_without_env_var_env_bootstrap_fails_loud(
     """When PGAI_AGENT_KANBAN_ROOT_PATH is unset and no shell-env is findable,
     the script emits a fail-loud diagnostic naming the missing path.
 
-    BUG-0073 AC2 shape: shell-env moved aside → script exits non-zero and
+    Fresh-shell bootstrap shape: shell-env moved aside → script exits non-zero and
     names the expected shell-env path in its error message.
 
     This test clears PGAI_AGENT_KANBAN_ROOT_PATH so env_bootstrap.sh must

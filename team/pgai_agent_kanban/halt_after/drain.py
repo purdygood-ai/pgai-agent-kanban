@@ -11,12 +11,14 @@ Drain conditions:
                   If Active RC is not "none", rewrites the HALT-AFTER file to
                   ``rc:vX.Y.Z`` (the arm-time version) and returns False (not
                   yet drained).  If Active RC is "none" (no RC in flight),
-                  treats the drain condition as already satisfied and calls
-                  promote() immediately: creates HALT, removes
-                  HALT-AFTER, writes the audit entry, and returns True.  The
-                  operator intent for ``HALT-AFTER rc`` is "stop after the
-                  current RC finishes"; when there is no current RC, the stop
-                  takes effect immediately rather than spinning forever.
+                  treats the drain condition as already satisfied and returns
+                  True immediately -- it does NOT promote itself; promotion
+                  is the RC-close gate's job (see rc_gate.py), which is what
+                  actually creates HALT, removes HALT-AFTER, and writes the
+                  audit entry.  The operator intent for ``HALT-AFTER rc`` is
+                  "stop after the current RC finishes"; when there is no
+                  current RC, the stop takes effect immediately rather than
+                  spinning forever.
   rc:vX.Y.Z     : version-pinned token — drain is satisfied when
                   release-state.md "Last Released" is present and semver >=
                   the captured version (latching/monotonic).
@@ -39,60 +41,43 @@ Drain conditions:
   tester  : same broadened condition as pm, with the PM-pending guard.
   cm      : same broadened condition as pm, with the PM-pending guard.
 
+The bare ``rc`` capture rewrite appends a ``drain_capture`` record to
+``<kanban_root>/logs/sentinel-writes.log`` (see
+pgai_agent_kanban.lib.sentinel_provenance) whenever it changes the file; a
+record that cannot be appended is a stderr warning and changes nothing else.
+
 While the drain condition is NOT yet satisfied, the chain runs normally.
 HALT-AFTER does not gate wakes during drain — it only triggers promotion when
 drain completes.
+
+This module answers ONLY "is the underlying condition satisfied right now" —
+it never decides whether that satisfaction may act.  Whether a satisfied
+drain condition is allowed to promote is the RC-close gate's question
+(rc_gate.py): a drain satisfied while the project's Active RC is not "none"
+is latched and deferred rather than acted on, so a role-token drain caught
+mid-RC never halts the chain with a half-shipped release still on the
+branch.  See rc_gate.py's module docstring for the full RC-close invariant.
 """
 
-import importlib.util
 import logging
 import pathlib
-import re
+
+# Version ordering: ``ge`` compares two normalized X.Y.Z strings numerically.
+from pgai_agent_kanban.lib.semver import ge as _semver_ge
+# status.md sections are read through the one status.md reader.
+from pgai_agent_kanban.task_status import section_value
+# release-state.md fields are read through the one release-state reader. The
+# raw (non-validating) form is used: a missing file, heading or value reads as
+# "none", and an "rc/"-prefixed Active RC is accepted and normalised below.
+from pgai_agent_kanban.cm.read_state_field import read_state_field
+# The capture rewrite records who changed the sentinel, so a gated suite's
+# sentinel-leak check does not blame the suite for it.
+from pgai_agent_kanban.lib.sentinel_provenance import (
+    kanban_root_for_scope,
+    record_sentinel_write,
+)
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Semver helper — loaded from team/pm-agent/lib/semver.py via importlib so
-# that this sub-package does not require pm-agent on sys.path.  The file path
-# is resolved relative to this module's own location: drain.py lives at
-# team/pgai_agent_kanban/halt_after/drain.py, so three .parent steps reach
-# team/, then we descend into pm-agent/lib/semver.py.
-# ---------------------------------------------------------------------------
-
-def _load_semver_ge():
-    """Return the ``ge`` function from team/pm-agent/lib/semver.py.
-
-    Uses importlib to load semver.py from its known location relative to this
-    module.  Falls back to a minimal inline implementation if the file is
-    missing (defensive — the file should always be present in the dev tree).
-    """
-    _semver_path = (
-        pathlib.Path(__file__).parent.parent.parent  # → team/
-        / "pm-agent" / "lib" / "semver.py"
-    )
-    if _semver_path.exists():
-        spec = importlib.util.spec_from_file_location("semver", _semver_path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod.ge
-    # Inline fallback (should not be reached in normal operation).
-    logger.warning(
-        "drain: semver.py not found at %s — using inline fallback", _semver_path
-    )
-
-    def _ge_fallback(a, b):
-        """Minimal X.Y.Z semver >= that strips an optional leading 'v'."""
-        def _parse(v):
-            s = str(v).strip().lstrip("vV")
-            parts = s.split(".")
-            return tuple(int(p) for p in parts[:3])
-        return _parse(a) >= _parse(b)
-
-    return _ge_fallback
-
-
-# Module-level singleton — loaded once at import time.
-_semver_ge = _load_semver_ge()
 
 
 def _normalize_version(version_str: str) -> str:
@@ -118,67 +103,18 @@ def _normalize_version(version_str: str) -> str:
         s = s[1:]
     return s
 
-# Patterns for reading status.md fields.  Using loose \s+ to be resilient to
-# minor whitespace variation between task folder formats.
-_STATE_PATTERN = re.compile(r"^##\s+State\s*$", re.MULTILINE)
-_ROLE_PATTERN = re.compile(r"^##\s+Role\s*$", re.MULTILINE)
-
 _HALT_AFTER_FILENAME = "HALT-AFTER"
-
-
-def _read_state_field(path: pathlib.Path, heading: str) -> str:
-    """Read the first non-blank, non-comment value after *heading* in *path*.
-
-    Mirrors the behaviour of team.pgai_agent_kanban.cm.read_state_field but
-    is re-implemented here to keep the halt_after sub-package self-contained
-    (no import from cm, which avoids a circular-dep risk and keeps the public
-    surface small).
-
-    Returns the literal string ``"none"`` when the file is absent, the heading
-    is not found, or no qualifying value follows the heading.
-    """
-    if not path.exists():
-        return "none"
-    lines = path.read_text(encoding="utf-8").splitlines()
-    # Build the exact heading line to match, e.g. "## Active RC"
-    target = f"## {heading.strip()}"
-    in_section = False
-    for line in lines:
-        if in_section:
-            v = line.strip()
-            if v and not v.startswith("#"):
-                return v
-            # blank lines are skipped; another heading ends the section
-            if v.startswith("#"):
-                break
-        elif line.strip() == target:
-            in_section = True
-    return "none"
 
 
 def _parse_status_md(text: str) -> "dict[str, str]":
     """Extract State and Role from the text of a status.md file.
 
-    Returns a dict with keys 'State' and 'Role', each holding the first
-    non-blank, non-heading value after the respective ``## <key>`` heading.
+    Returns a dict with keys 'State' and 'Role', each holding the value of
+    the respective ``## <key>`` section as task_status reads it (first
+    non-blank line, HTML comments dropped, a bold wrapper removed).
     Missing fields return the empty string.
     """
-    result: dict[str, str] = {"State": "", "Role": ""}
-    lines = text.splitlines()
-    for key in ("State", "Role"):
-        target = f"## {key}"
-        in_section = False
-        for line in lines:
-            if in_section:
-                v = line.strip()
-                if v and not v.startswith("#"):
-                    result[key] = v
-                    break
-                if v.startswith("#"):
-                    break
-            elif line.strip() == target:
-                in_section = True
-    return result
+    return {key: section_value(text, key) for key in ("State", "Role")}
 
 
 def _has_working_role(project_root: pathlib.Path, role: str) -> bool:
@@ -379,7 +315,7 @@ def check_drain(
             # latching/monotonic).  Uses semver >= comparison against the Last
             # Released field written by release.sh.
             captured_version = event[3:]  # strip "rc:" prefix
-            last_released_raw = _read_state_field(release_state, "Last Released")
+            last_released_raw = read_state_field(str(release_state), "Last Released")
             # Normalize both sides: strip rc/ prefix and leading v/V.
             # _normalize_version returns "" for empty/none values.
             captured_norm = _normalize_version(captured_version)
@@ -412,23 +348,22 @@ def check_drain(
             return drained
 
         # Bare "rc" token — capture the arm-time version
-        active_rc = _read_state_field(release_state, "Active RC")
+        active_rc = read_state_field(str(release_state), "Active RC")
         if active_rc.lower() == "none":
-            # No RC in flight — the operator's intent for
-            # HALT-AFTER rc is "stop after the current RC finishes".  When
-            # there is no current RC, the drain condition is already satisfied
-            # and we must promote immediately rather than returning False
-            # forever.  Returning False here was the root cause: the token
-            # could never capture a version (no RC to capture) and could never
-            # progress, so it spun "drain not yet satisfied" on every wake
-            # while the chain continued to run — silently ignoring the
-            # operator's stop order.
+            # No RC in flight — the operator's intent for HALT-AFTER rc is
+            # "stop after the current RC finishes".  When there is no
+            # current RC, the drain condition is already satisfied.  This
+            # function only REPORTS that (returns True); it does not
+            # promote.  Promotion is the RC-close gate's job
+            # (rc_gate.evaluate, called from the wake loop or from CM at
+            # ship time) so there is exactly one call site that ever
+            # invokes promote() -- see rc_gate.py's module docstring for
+            # why a second, independent promote() call here would double
+            # up the audit-entry append once the gate also promotes.
             logger.info(
                 "drain.check_drain rc (bare): active_rc=none — "
-                "no RC in flight; promoting to HALT immediately"
+                "no RC in flight; drain condition satisfied"
             )
-            from pgai_agent_kanban.halt_after.promote import promote  # noqa: PLC0415
-            promote(project_root, "rc")
             return True
 
         # An RC is in flight — capture it by rewriting the HALT-AFTER file
@@ -439,6 +374,10 @@ def check_drain(
 
         halt_after_path = project_root / _HALT_AFTER_FILENAME
         new_content = f"rc:{version_tag}\n"
+        try:
+            old_content = halt_after_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            old_content = None
         try:
             halt_after_path.write_text(new_content, encoding="utf-8")
             logger.info(
@@ -453,6 +392,15 @@ def check_drain(
                 halt_after_path,
                 exc,
             )
+        else:
+            if old_content != new_content:
+                # Never raises: a record that cannot be appended is a
+                # stderr warning, and the capture above already stands.
+                record_sentinel_write(
+                    kanban_root_for_scope(project_root),
+                    halt_after_path,
+                    "drain_capture",
+                )
         # Not yet drained — we just armed it with the version
         return False
 

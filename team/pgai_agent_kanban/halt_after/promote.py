@@ -2,8 +2,12 @@
 """
 promote.py — HALT-AFTER sentinel promotion and audit-entry writer.
 
-When the drain condition for a given event is satisfied, the wake script calls
-``promote()`` to:
+Called only after the RC-close gate (``rc_gate.evaluate``) has confirmed a
+drain condition is both satisfied AND the project's Active RC reads "none"
+-- either from the wake loop (`team/scripts/lib/wake_project.sh`) or from
+CM spending a version-pinned sentinel synchronously at ship time
+(`team/scripts/lib/cm/release_finalize.sh`, Step 12). ``promote()`` itself
+does not evaluate drain or RC state; it performs the mechanical steps:
 
   1. Remove the ``HALT-AFTER`` file at the project scope.
   2. Create a ``HALT`` file at the same scope.
@@ -14,12 +18,21 @@ Audit-entry format:
     ## HALT Event
     - Timestamp: 2026-05-29T01:23:45+00:00
     - Trigger: HALT-AFTER rc auto-promotion
-    - Event drained: rc (Active RC cleared after v0.39.6 shipped)
+    - Event drained: rc (Active RC cleared)
     - Promoted: HALT-AFTER → HALT
 
-The Timestamp is always UTC ISO-8601.  The "Event drained" note for 'rc' reads
-"Active RC cleared" if release-state.md now shows Active RC = none; for
+The Timestamp is always UTC ISO-8601.  The "Event drained" note for 'rc'
+reads "Active RC cleared"; for the versioned 'rc:vX.Y.Z' family it reads
+"rc (until vX.Y.Z shipped)", composed via token.describe_token so the audit
+entry never drifts from what the status bar and arm confirmation say; for
 per-role events it reads "no WORKING <ROLE> tasks found".
+
+Each sentinel change -- HALT created, HALT-AFTER removed -- appends a
+``promote`` record to ``<kanban_root>/logs/sentinel-writes.log`` (see
+pgai_agent_kanban.lib.sentinel_provenance), so a gated suite's sentinel-leak
+check attributes a promotion that lands mid-run instead of blaming the
+suite. A record that cannot be appended is a stderr warning and changes
+nothing else.
 
 All filesystem operations are atomic where possible (rename for HALT creation,
 direct unlink for HALT-AFTER removal) so a crash mid-promotion leaves the
@@ -30,6 +43,13 @@ or manually clean up).
 import datetime
 import logging
 import pathlib
+
+from pgai_agent_kanban.lib.sentinel_provenance import (
+    kanban_root_for_scope,
+    record_sentinel_write,
+)
+
+from .token import describe_token
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +66,22 @@ def _utc_now_iso() -> str:
 
 
 def _event_drained_note(event: str) -> str:
-    """Return the human-readable note for the 'Event drained' audit field."""
+    """Return the human-readable note for the 'Event drained' audit field.
+
+    The versioned ``rc:vX.Y.Z`` family names its target through
+    :func:`describe_token` (``"until vX.Y.Z"``) rather than composing an
+    "arm-time version" phrase locally -- the target may have been named
+    directly by an operator's ``--until`` rather than captured from an
+    in-flight RC, and even a captured version may be several releases
+    behind the one that actually satisfied the latching ``>=`` comparison,
+    so "arm-time" would misdescribe it. This is the one shared phrase the
+    status bar, the arm confirmation, and this audit entry all read from
+    describe_token, per team/SOP.md ("Audit entry shape").
+    """
     if event == "rc":
         return "rc (Active RC cleared)"
     if event.startswith("rc:"):
-        ver = event[3:]  # strip "rc:" prefix to get the version tag
-        return f"rc (arm-time version {ver} shipped)"
+        return f"rc ({describe_token(event)} shipped)"
     return f"{event} (no WORKING {event.upper()} tasks found)"
 
 
@@ -85,6 +115,10 @@ def promote(project_root: "str | pathlib.Path", event: str) -> None:
       2. Remove the ``HALT-AFTER`` file from *project_root*.
       3. Append a ``## HALT Event`` block to *project_root*/release-state.md.
 
+    Steps 1 and 2 each append a ``promote`` provenance record when they
+    change the sentinel (a HALT already present is left as it was and not
+    recorded). Recording never raises.
+
     HALT is created before HALT-AFTER is removed so that if this process is
     interrupted mid-way the project is still in a stopped state (both HALT and
     HALT-AFTER present is safe — the wake script will halt on HALT).
@@ -104,16 +138,22 @@ def promote(project_root: "str | pathlib.Path", event: str) -> None:
     halt_path = project_root / _HALT_FILENAME
     release_state_path = project_root / _RELEASE_STATE_FILENAME
 
+    kanban_root = kanban_root_for_scope(project_root)
+
     timestamp = _utc_now_iso()
 
     # Step 1 — create HALT (empty sentinel)
+    halt_existed = halt_path.exists()
     halt_path.touch()
     logger.info("promote: created %s", halt_path)
+    if not halt_existed:
+        record_sentinel_write(kanban_root, halt_path, "promote")
 
     # Step 2 — remove HALT-AFTER
     if halt_after_path.exists():
         halt_after_path.unlink()
         logger.info("promote: removed %s", halt_after_path)
+        record_sentinel_write(kanban_root, halt_after_path, "promote")
     else:
         logger.warning(
             "promote: HALT-AFTER not found at %s; continuing with audit entry",

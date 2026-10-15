@@ -1,0 +1,185 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Fresh verification of release candidate `ai_rc/v2.24.5` for project `pgai-agent-kanban`\nagainst `requirements/v2.24.5-bugfix-bundle-20260919.md` — a four-item BUG bundle\n(BUG-0338 refusal-surface test pollution, BUG-0339 operator duplicate cmdline pane,\nBUG-0340 event-band render budget, BUG-0341 env-coupled debug-log routing test)\nimplemented by CODER tasks 030 through 034. Both gated runners exited 0\n(`run-unit-tests.sh`: 4899 passed / 31 skipped; `run-integration-tests.sh`: 519 passed /\n1 skipped), and the unit run was deliberately invoked with a `/projects/`-containing\n`PGAI_AGENT_KANBAN_TEMP_DIR` — the exact condition that turned it red on v2.24.3 — so\nBUG-0341's fix is verified by the runner itself rather than by inspection. Three of the four\nbundled items are fully met and were exercised behaviorally, including the live install's\nrefusal ledger surviving a 4899-test run byte-identical (BUG-0338's hardest criterion, which\nCODER could not verify directly), a live tmux session reporting exactly ten operator panes with\none shell, and a new census cross-check that fires and names `operator` when an extra pane is\nseeded. The fourth, BUG-0340, is not met: the event band still renders in 11.3-12.0 s against\nthe operator's real logs versus its 5 s pane-refresh bound, because the unit test meant to hold\nthat line feeds the renderer 7500 byte-identical lines (1.9 s) where production carries 150\ndistinct texts (11.5 s). That gap and a two-instance quality-class lint class are filed as\nfollow-ups; nothing found makes this release unusable.\n\n**Findings at a glance:** 1 gap (medium, filed BUG-0344), 6 pass, 1 pass-with-caveat, and one\nquality-class lint class filed as BUG-0345. Zero bugs, zero stale assertions, zero\ninfrastructure failures, zero manual interventions.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0340's render-budget criterion is still not met against production-shaped input",
+      "heading": "Finding 1: BUG-0340's render-budget criterion is still not met against production-shaped input",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** medium (3-5 CODER tasks — the remaining cost is bash per-line work spread across\nseveral stages; a real fix likely moves the surviving-line loop out of bash entirely)\n**Systemic Risk:** medium (second RC attacking the same criterion; the class of fix — tuning the\nbash loop — has now twice failed to reach the bound, which is a signal about the approach, not\njust this ticket)\n**Filed As:** BUG-0344 (Path C-A — autonomous follow-up filing, non-blocking; filed as BUG)\n\n**Criterion.** `CODER-20260919-033`'s first acceptance criterion, restating\n`BUG-0340-event-band-render-exceeds-refresh-budget.md`'s `## Expected`:\n\n> One render of `team/scripts/dashboard/event-band.sh` against a fixture root whose five per-agent\n> cron logs carry a production-shaped historical body and at least 7000 today-dated signal lines\n> completes in under 5 seconds, measured three consecutive times with every measurement under the bound.\n\n**Expected:** under 5.00 s (the pane's own `_DEFAULT_REFRESH`), three consecutive runs.\n\n**Actual:** **11.27 s / 11.29 s / 12.01 s** (and, in an earlier triple, 11.71 / 11.78 / 11.33 s).\nEvery measurement is more than twice the bound.\n\n**Method.** BUG-0340's own reproduction, unchanged: a throwaway kanban root whose five per-agent\ncron logs are symlinks to the operator's live logs\n(`$HOME/pgai_agent_kanban/logs/cron-{pm,coder,writer,tester,cm}.log`, 825.8 MB total),\nrun from the RC worktree at HEAD `7d4bade`, `PGAI_DASHBOARD_EVENT_BAND_READ_BOUND_LINES` at its\nshipped default of 20000. 7628 candidate lines survive the read-bound prefilter; 7622 reach the\nmerge file.\n\n**The RC did change the code, and the change is measurable but far too small.** Same fixture,\nsame host, back-to-back:\n\n| Version | Render time (3 runs) |\n|---|---|\n| `ai_main` (pre-fix) | 12.73 s / 12.40 s / 13.01 s |\n| `ai_rc/v2.24.5` | 12.01 s / 11.27 s / 11.29 s |\n\nAn ~8-12 % improvement against a criterion that needs a 2.4x one.\n\n**Where the time goes.** Instrumented copy of the RC script (run outside the worktree, the tree\nnever modified): the per-line loop is 10.5-10.9 s of the ~11.5 s total; the two post-loop\n`sort`/fold passes are 0.21 s and 0.19 s; the `tail -n 20000 | grep -E` prefilter across all five\n825 MB logs is 0.10 s. Replacing the loop body with `:` drops the loop to 0.25 s, so the entire\ncost is the per-line work — ~1.38 ms/line across 7622 lines. The three fixes this RC landed\n(pattern reordering, held merge fd, `mapfile` from a seekable file) each remove roughly 1 s\nwhen individually disabled; none of them addresses the bulk.\n\n**Why the green unit test does not hold this line — the fidelity defect behind the gap.**\n`team/tests/unit/test_event_band_renderer.py::test_large_pre_today_body_renders_correctly_within_time_bound`\nnow carries 7500 today-dated signal lines (up from 2), which satisfies the criterion's *count*.\nBut `_build_repetition_fixture(7500, distinct_event_count=2, stagger_seconds=1)` makes those lines\n**byte-identical sweep-census lines**, and that shape dodges both of the RC's own optimizations'\nfailure modes:\n\n- every line matches `EVENT_SIGNAL_PATTERNS[0]` (`sweep-census:.*skipped`), so the new inline\n  fast path hits on the *first* regex and the 13-pattern classifier never runs;\n- every line's `$rest` is identical, so `COLLAPSE_KEY_CACHE` hits after the first line and\n  `dashboard_event_signal_collapse_key` forks once instead of per distinct text.\n\nProduction is the opposite: of 7628 surviving lines there are **150 distinct `$rest` texts**, and\nthe three most frequent (`remedy: If the holder is still legitimately working...` x668,\n`error: lock.provenance.contended` x668, `wake(writer): ... per-project HALT present, skipping`\nx609) match **none** of the fast path.\n\nMeasured directly, RC code, same 7625-line volume, only the line *diversity* differing:\n\n| Fixture shape | Render |\n|---|---|\n| unit test's shape (byte-identical sweep-census lines) | **1.92 s / 2.15 s** |\n| production shape (live cron logs) | **11.27-12.01 s** |\n\nA 5-6x gap produced purely by fixture composition. This is the same failure BUG-0340 named against\nthe previous fixture (\"the production condition that actually costs the time is mocked away\"),\nreproduced one iteration later in a new form: the line *count* was fixed, the line *diversity*\nwas not. The filed follow-up asks for both the render fix and a fixture whose today-lines are\nproduction-diverse.",
+      "filed_as": "BUG-0344",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "medium",
+      "extra": {
+        "expected": "under 5.00 s (the pane's own `_DEFAULT_REFRESH`), three consecutive runs.",
+        "actual": "11.27 s / 11.29 s / 12.01 s** (and, in an earlier triple, 11.71 / 11.78 / 11.33 s)."
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "medium (3-5 CODER tasks — the remaining cost is bash per-line work spread across",
+        "systemic_risk": "medium (second RC attacking the same criterion; the class of fix — tuning the",
+        "filed_as": "BUG-0344 (Path C-A — autonomous follow-up filing, non-blocking; filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0338 — refusal-ledger context field, both bindings",
+      "heading": "Finding 2: BUG-0338 — refusal-ledger context field, both bindings",
+      "level": 3,
+      "body": "**Category:** pass\n\nEvery acceptance criterion of `CODER-20260919-030-refusal-ledger-context` was exercised\nbehaviorally in a throwaway sandbox root (never the live install):\n\n| Criterion | Result |\n|---|---|\n| A record carries a `context` field valued `install` or `test`, stamped by the writer, identical from both bindings | **pass** — `- Context: install` / `- Context: test` written by `record_refusal()` and, separately, by `refusal_ledger_record` (bash), which shells out to the same CLI |\n| A refusal raised during a pytest run records `test`; one from the install's own operation records `install` | **pass** — with `PYTEST_CURRENT_TEST` set, both bindings wrote `context=test`; with it unset (`env -u`), both wrote `context=install` |\n| A full unit-suite run leaves the live `projects/pgai-agent-kanban/refusal-ledger.md` byte-identical | **pass** — `sha256` `d51b9f10…cf626` before the 4899-test run and `d51b9f10…cf626` after; zero test-shaped tokens (`pytest`, `Context: test`, `/tmp/pgai_kanban_tmp`) in the file. This is the criterion CODER could not verify directly; it held cleanly here |\n| `read_latest` accepts a pre-context-field record without raising and reports `unknown` | **pass** — a hand-written record with no `- Context:` bullet returns `'unknown'` from Python and `context=unknown` from `refusal_ledger_read_latest` |\n| `python3 team/scripts/lint_api_parity.py` reports no findings | **pass** — `ok — 19 script/model pair(s) checked, 0 violation(s)` |\n| `bash -n team/scripts/lib/refusal_ledger.sh` and the refusal-ledger modules green | **pass** — `bash -n` OK; the module's tests are inside the green `UNIT_EXIT=0` run |\n\nThe parity design is worth recording because it is stronger than the criterion asked for:\n`refusal_ledger.sh` computes no context at all. It shells out to the Python module's own\n`record` CLI subcommand, which stamps from `PYTEST_CURRENT_TEST`, so the two bindings cannot\ndrift — there is one write path, not two implementations kept in sync by a lint.\n\nThe second half of the fix is `team/tests/conftest.py`'s autouse `_block_live_kanban_writes`\nnow also redirecting the legacy bash-only `KANBAN_ROOT` alias, which is the alias every\n`project_paths.sh` function actually reads. That is the mechanism the byte-identical result\nabove demonstrates.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0338 — why.sh refusal-surface filter",
+      "heading": "Finding 3: BUG-0338 — why.sh refusal-surface filter",
+      "level": 3,
+      "body": "**Category:** pass\n\n`_why_details_refusal_is_install_scoped` in `team/scripts/lib/why_details.sh` was exercised\ndirectly through `why_details_render_discovery_skip` against four seeded ledger records:\n\n| Case | Expected | Actual |\n|---|---|---|\n| `Context: install`, message names a path under the kanban root | render | rendered, all five fields |\n| `Context: test`, same in-root path | skip | `no discovery/gate refusal recorded for this project` |\n| no `Context:` bullet at all, message names `/tmp/pgai_kanban_tmp/tests/pytest-of-rocky/…lock` | skip | `no discovery/gate refusal recorded for this project` |\n| no `Context:` bullet, in-root path, remedy carrying an ordinary *relative* path (`create projects/demo/bugs/`) | render | rendered |\n\nThe third case is the load-bearing one: it proves the path check works independently of the\ncontext field, so a record predating the field is still caught. The fourth guards the\nfalse-positive the CODER's own status notes catching during implementation — the token must\nitself *start* with `/`, so an embedded slash in a relative-path remedy does not misfire.\nA skipped record's output names neither its timestamp nor its path, as the criterion requires.\n`bash -n team/scripts/lib/why_details.sh` passes.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0339 — operator window pane count and the census cross-check",
+      "heading": "Finding 4: BUG-0339 — operator window pane count and the census cross-check",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n| Criterion | Result |\n|---|---|\n| Fresh create: `tmux list-panes` for the operator window reports exactly 10 panes, exactly one an interactive shell | **pass** — `test_dashboard_operator_window.py::test_operator_window_has_ten_panes_in_session` asserts `len(pane_lines) == 10` against a live tmux session inside a built container, and the whole module (23 tests) ran and passed inside the green gated unit run; nothing was skipped |\n| A check compares create.sh's built pane count per window against the census, and refuses naming the window when an extra pane is seeded | **pass, triggered** — see below |\n| That check is wired into `run-unit-tests.sh` and passes on the unmodified tree | **pass** — it is a pytest module under `team/tests/unit/`, so the gated unit runner executes it; green |\n| The rows freed by the removed pane go to board and suggested-commands | **caveat** — see below |\n| `docs/DASHBOARD-PANES.md` regenerated, Window 1 lists one cmdline pane, `generate_window_docs.py --check` passes | **pass** — the Window 1 table lists 10 rows with exactly one `Bottom (~15% height) — interactive cmdline shell`; `generate_window_docs --check: OK -- all surfaces match the census` |\n| `bash -n team/scripts/dashboard/create.sh` | **pass** |\n\n**Guard triggered (Step 6.5).** The new check is static analysis over `create.sh`, so it was\nexercised by feeding its own resolver a mutated copy of the file with one extra\n`tmux split-window` seeded into the operator window's build span — the exact shape of BUG-0339.\nBaseline: no mismatches. Seeded:\n\n```\n\"'operator' (variant='-'): builds 11 pane(s) but the census declares 10\"\n```\n\nThe guard fires and names the offending window. The tree itself was never modified; the\nmutation was applied to an in-memory copy of the file's text.\n\n**The caveat.** `team/scripts/dashboard/create.sh` is *not in this RC's diff* — neither is\n`docs/DASHBOARD-PANES.md` nor the census. The operator window already built ten panes with one\nshell before this RC started, which CODER-032's status records honestly. So the fourth\ncriterion (\"the rows freed by the removed pane return to the board/suggested-commands split\")\ndescribes work that did not need doing: no pane was removed by this RC, and the three regions\nalready sit at their census proportions. The ticket's real deliverable — the cross-check that\nprevents the drift from recurring — landed and works. Recording this as `pass-with-caveat`\nrather than `gap` because the end state the criterion describes is factually true of the\nshipped tree; only the mechanism (this RC removing a pane) never applied.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0341 — env-coupled debug-log routing test",
+      "heading": "Finding 5: BUG-0341 — env-coupled debug-log routing test",
+      "level": 3,
+      "body": "**Category:** pass\n\n| Criterion | Result |\n|---|---|\n| The module produces the same result under a `/projects/`-containing `PGAI_AGENT_KANBAN_TEMP_DIR` and one without, both passing | **pass** |\n| The project-less case asserts a `kanban_root`-relative expectation, not an absolute-path substring | **pass** — `pathlib.Path(resolved_path).relative_to(kanban_root).parts` then `assert \"projects\" not in …` |\n| No case in the module asserts over an absolute path prefix the test does not control | **pass** — AP8 reports zero findings of that class across `team/tests/` |\n| `bash team/scripts/run-unit-tests.sh --coverage` exits 0 with `PGAI_AGENT_KANBAN_TEMP_DIR` under a `/projects/` directory | **pass** — this is exactly how this verification's own unit run was invoked: `PGAI_AGENT_KANBAN_TEMP_DIR=/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/tester-036`, `UNIT_EXIT=0`, `4899 passed, 31 skipped`. Under v2.24.3 the same invocation produced `1 failed, 4873 passed` |\n| `lint_test_anti_patterns.py` flags the shape, reports the pre-fix form when seeded, and reports zero of that class after the fix | **pass, both directions** — see below |\n| The routing code under `team/` is unchanged | **pass** — the diff touches only the test, the lint, the docs, and two fixtures |\n\n**Both directions of the new lint exercised (Step 6.5 / anti-pattern 6).** The shipped\npositive fixture (`tests/fixtures/fixture_abs_path_substring_assertion.py`, carrying the exact\npre-fix assertion) and the shipped negative control\n(`fixture_abs_path_prefix_controlled.py`) were copied into a throwaway tests directory and\nscanned: exactly **one** finding, on the seeded pre-fix line, naming file, line, literal,\nsubject, and a runnable remedy; **zero** on the control. Tree-wide, AP8 reports zero.\n\nThis is the new-normal-case *and* the original-failure-mode pair the methodology requires: the\nfixed test passes under both temp-dir shapes, and the pre-fix shape is still detectable.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "requirements-document acceptance criteria",
+      "heading": "Finding 6: requirements-document acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\n- *Each bundled item is addressed in the implementation* — **pass**. All four bundled bugs have\n  implementing work on the RC. BUG-0340's implementation is present but does not reach its own\n  bound; that shortfall is Finding 1, filed as BUG-0344, not a claim that the item was skipped.\n- *All Python files compile cleanly* — **pass**. `python3 -m py_compile` on all 12 changed\n  `.py` files: OK.\n- *All bash files pass syntax check* — **pass**. `bash -n` on all changed shell files\n  (`refusal_ledger.sh`, `why_details.sh`, `event-band.sh`, `event_signal_patterns.sh`, and\n  `create.sh` as the census check's subject): OK.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "constraint and standards checks (Steps 6.9, 6.10, 6.13, 6.14)",
+      "heading": "Finding 7: constraint and standards checks (Steps 6.9, 6.10, 6.13, 6.14)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Secrets / banned patterns** — no added line in the diff matches a credential assignment\n  shape; no hardcoded token, key, or password.\n- **Provenance in shipped artifacts** — zero added lines under `team/scripts/` or\n  `team/pgai_agent_kanban/` cite a `BUG-NNNN`, a task ID, or a framework version. Both CODERs\n  who initially landed such citations reworded them in follow-up commits (`022b37a`, `c1a73fc`)\n  before their merges; `lint_hygiene --classes provenance` is clean in the runner output.\n- **Skip-cites-a-real-bug (Step 6.13)** — `bash team/scripts/lint_skip_bug_gate.sh` →\n  `OK — all skip annotations are compliant`, `0 missing files`. No `BUG-SKIP` or\n  letter-suffixed placeholder shape anywhere in `team/tests/`.\n- **Prerequisite graph (Step 6.10)** — no cycles; every referenced task ID exists; the\n  lifecycle is correctly bookended: `CM-20260919-035-open-rc-2-24-5` → `CODER-…-030` through\n  `-034` → `TESTER-…-036` → `CM-20260919-038-release-2-24-5`, whose `## Prerequisites` names all\n  six predecessors. Sequence 037 is unused for this date, which is not a collision.\n- **Coding standards (Step 6.14)** — no new script was added under `team/scripts/`, so the\n  `--help` obligation does not arise. No new operational value was hardcoded where an operator\n  would want it configurable (the event-band read bound stays resolvable from\n  `PGAI_DASHBOARD_EVENT_BAND_READ_BOUND_LINES` / `kanban.cfg`; the unit test's time bound is now\n  *read from* `create.sh`'s `_DEFAULT_REFRESH` rather than duplicated as a literal, which is the\n  standard being followed rather than violated). No newly duplicated `lib/` implementation.\n- **Documentation discipline** — `docs/test-authoring-guidelines.md` gained the AP8 subsection\n  in the same branch as the lint change, with an accurate BAD/BETTER pair and the correct\n  statement that the check is quality-class and non-fatal. No tunable, env var, or config value\n  was added anywhere in this RC, so no `*_example` file update was owed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Step 6.8 — synthetic release simulation",
+      "heading": "Finding 8: Step 6.8 — synthetic release simulation",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe diff touches no release-lifecycle file (`cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`,\n`team/scripts/lib/project_paths.sh`, or anything else in the open/close cycle), so this step is\nskippable by its own condition. Recorded anyway because the evidence exists for free:\n`tests/integration/test_cm_release_synthetic.py` ran as part of the green integration suite —\n17 tests, all passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

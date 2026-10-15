@@ -1,0 +1,61 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "I verified RC v2.32.2 (ai_rc/v2.32.2 at 549a7cd1) against requirements/v2.32.2-bugfix-bundle-20261007.md. The bundle has one item, BUG-0602: the generated release notes' Bug Fixes bullets quoted each bug's proposed `## Fix` text, and `e.g.` truncated them. Two tasks addressed it. CODER-20261007-047 rewrote `get_bug_substance` in the RELNOTES_PY heredoc so bullets come from the bug's `## Symptom` lead sentence. WRITER-20261007-048 updated the release-notes and bug templates to match. All acceptance criteria (the requirements doc's 3, CODER-047's 5, WRITER-048's 4) are met. Both gated runners exited 0: unit 10486+5 passed, 41 skipped; integration 959 passed, 1 skipped. I exercised the behavior with the shipped generator from ai_main and from the RC against the real BUG-0597..0602 files, synthetic guard cases, and the full 441-file bug corpus. The old generator reproduces BUG-0602 exactly; the RC generator fixes it. Spot-checks outside the spec found one small regression and one pre-existing gap, both low severity. The new template's guidance comment shows up as a bug's summary in `project-summary.sh`. Existing projects' seeded bug template is never refreshed, so the new guidance doesn't reach this project's filers. I also filed two quality-class lint findings (non-blocking) for release_notes.sh growth. Recommendation: SHIP-WITH-CONCERNS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Project summary report shows the bug template's guidance comment as a bug's summary",
+      "heading": "Finding 1: Project summary report shows the bug template's guidance comment as a bug's summary",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one report's one-liner; cosmetic)\n**Filed As:** BUG-0603-project-summary-shows-template-comment (Path C-A, filed as BUG)\n**Filed By:** TESTER (autonomous Path C) — the project summary report shows a bug's template guidance comment as its one-line summary, because the new bug template puts an HTML comment first in the Symptom section and the report does not skip comments.\n\nThis RC's BUG-TEMPLATE.md opens `## Symptom` with a nine-line HTML guidance comment. `team/pgai_agent_kanban/reports/project_summary.py` `_extract_field` takes the first non-blank line after the heading without stripping comments. Reproduced through `team/scripts/project-summary.sh --project demo --all` in a sandbox kanban root. The same Symptom text written from the ai_main template lists as \"The dashboard froze after a resize.\", and from the RC template as \"<!-- The opening sentence of this section becomes this bug's bullet in the\". The other Symptom readers (release-notes generator, release_known_issue.sh, changelog_writer.py) strip comments, so release notes, Known Issues, and CHANGELOG are unaffected. Severity low (rubric: cosmetic). This RC introduced the exposure; the comment-blind reader predates it. Reach today is limited to new projects and filers copying the shipped template directly, because of Finding 2.",
+      "filed_as": "BUG-0603",
+      "filed_by": "TESTER (autonomous Path C) — the project summary report shows a bug's template guidance comment as its one-line summary, because the new bug template puts an HTML comment first in the Symptom section and the report does not skip comments.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one report's one-liner; cosmetic)",
+        "filed_as": "BUG-0603-project-summary-shows-template-comment (Path C-A, filed as BUG)",
+        "filed_by": "TESTER (autonomous Path C) — the project summary report shows a bug's template guidance comment as its one-line summary, because the new bug template puts an HTML comment first in the Symptom section and the report does not skip comments."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Existing projects' seeded bug template is never refreshed, so the new filer guidance does not reach them",
+      "heading": "Finding 2: Existing projects' seeded bug template is never refreshed, so the new filer guidance does not reach them",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (guidance-only; pre-existing design)\n**Filed As:** BUG-0604-seeded-bug-template-never-refreshed (Path C-A, filed as BUG)\n**Filed By:** TESTER (autonomous Path C) — an existing project's copy of the bug template is never updated after creation, so filers keep using an outdated template that lacks newer guidance and sections.\n\nBUG-0602's Files Involved names `bugs/templates/BUG-TEMPLATE.md`, and WRITER-048's Goal is that \"bug filers should know their Symptom's opening sentence is what the shipped release notes will say\". `_TEMPLATE_COPIES` in `team/pgai_agent_kanban/ops/projects.py` is written only by `create_project`, and install.sh refreshes only `$KANBAN_ROOT/templates/`. The live project's `bugs/templates/BUG-TEMPLATE.md` (dated Aug 30) already lacks the `## Acceptance` section ai_main's source carries, and will not receive this RC's Symptom guidance. TESTER's Path C filing reference points filers at that copy. Severity low. Pre-existing (not introduced by this RC). The WRITER ticket's scope was correctly limited to the source templates, so this is not a WRITER defect.",
+      "filed_as": "BUG-0604",
+      "filed_by": "TESTER (autonomous Path C) — an existing project's copy of the bug template is never updated after creation, so filers keep using an outdated template that lacks newer guidance and sections.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (guidance-only; pre-existing design)",
+        "filed_as": "BUG-0604-seeded-bug-template-never-refreshed (Path C-A, filed as BUG)",
+        "filed_by": "TESTER (autonomous Path C) — an existing project's copy of the bug template is never updated after creation, so filers keep using an outdated template that lacks newer guidance and sections."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

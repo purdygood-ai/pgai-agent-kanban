@@ -3,10 +3,8 @@
 cron_firings.py — CLI wrapper around cron_parser.next_firings() for the
 pgai kanban dashboard.
 
-This module replaces the inline Python heredoc blocks previously embedded in
-team/scripts/dashboard/show-header.sh and show-status-window.sh.  The output
-format and conversion logic are preserved exactly — do NOT change label
-thresholds (<=0 → "now", ==1 → "in 1 min", >1 → "in N min") without filing a
+The dashboard scripts read their next-firing labels from this module.  The output format and conversion logic are a contract
+— do NOT change label thresholds (<=0 → "now", ==1 → "in 1 min", >1 → "in N min") without filing a
 separate bug.
 
 Usage (CLI):
@@ -19,9 +17,16 @@ Usage (CLI):
                         "now" for all cron-firing computations; when omitted,
                         datetime.now() is used at call time.
 
+    python3 -m pgai_agent_kanban.dashboard.cron_firings --count \\
+        <crontab_text> <cron_parser_path>
+
 Output:
     JSON object mapping agent name to human-readable firing label.
     E.g.: {"pm": "in 6 min", "coder": "in 1 min", "cleanup": "Sun 4am"}
+
+    With --count: the number of agents the crontab resolves to (the size of
+    that mapping), the roster the dashboard sizes its schedule panes for;
+    0 when the crontab is empty or the parser fails or is missing.
 
 Exit codes:
     0 — always (errors in parsing produce an empty JSON object {})
@@ -31,8 +36,7 @@ Notes:
       sys.path; only the file path is required.
     - next_firings() returns int seconds until next firing for regular schedules
       and a str sentinel (e.g. "Sun 4am") for weekly schedules.
-    - The seconds-to-label conversion uses whole minutes (val // 60) matching
-      the original heredoc behaviour.
+    - The seconds-to-label conversion uses whole minutes (val // 60).
 """
 
 from __future__ import annotations
@@ -55,7 +59,7 @@ def _load_cron_parser(parser_path: pathlib.Path):
 def _seconds_to_label(val: int) -> str:
     """Convert seconds until next firing to a human-readable label.
 
-    Matches the conversion used in the original heredoc blocks:
+    Conversion:
       <= 0  → "now"
       == 1 min  → "in 1 min"
       > 1 min   → "in N min"
@@ -113,12 +117,16 @@ def cron_firings(
 
 
 def main() -> None:
-    """CLI entry point: read args, call cron_firings(), print JSON."""
+    """CLI entry point: read args, call cron_firings(), print JSON (or, with
+    a leading --count, the number of entries)."""
+    count_only = len(sys.argv) > 1 and sys.argv[1] == "--count"
+    if count_only:
+        del sys.argv[1]
     if len(sys.argv) < 3:
         sys.stderr.write(
             "Usage: cron_firings.py <crontab_text> <cron_parser_path> [<now_ts>]\n"
         )
-        print(json.dumps({}))
+        print(0 if count_only else json.dumps({}))
         return
 
     crontab_text = sys.argv[1]
@@ -135,7 +143,7 @@ def main() -> None:
     except Exception:  # noqa: BLE001 — must not raise; dashboard degrades gracefully
         result = {}
 
-    print(json.dumps(result))
+    print(len(result) if count_only else json.dumps(result))
 
 
 if __name__ == "__main__":

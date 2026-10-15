@@ -3,7 +3,19 @@ changelog_writer.py — CHANGELOG.md regeneration engine.
 
 Regenerates CHANGELOG.md in full from two sources of truth:
   - Per-release notes files under release-notes/vX.Y.Z.md
-  - The bug ledger under bugs_dir/
+  - The bug ledger under bugs_dir/, together with the bugs archived from it
+
+Archived bugs. When bugs_dir is a live project's ledger
+(<kanban_root>/projects/<project>/bugs), regenerate() also reads the bug
+files archived from it (<kanban_root>/archive/<project>/bugs) for every bug
+number that has no live file, so a bug referenced by a release-notes entry
+or carrying a Public ID renders the same whether it is live or archived,
+and a CHANGELOG regenerated after an archive run is byte-identical to one
+regenerated before. A live bug file always wins over an archived file with
+the same number. A Public ID assigned to an archived bug is written back to
+its file in place in the archive. Any other bugs_dir has no archive and is
+read alone. The other inputs (release notes, the PUBLISHED manifest and the
+published CHANGELOG.md) live in the repository and are never archived.
 
 Each CHANGELOG entry has exactly three content sections:
   ### Implemented   — features from the release notes
@@ -19,6 +31,18 @@ Public IDs use the format KI-<earliest-affected-PUBLISHED-version-no-v>.<counter
 (e.g. KI-1.0.0.1). Once assigned they are read from the bug file and never
 recomputed at regeneration.
 
+A Public ID that appears in the published CHANGELOG.md is spent. The
+per-version counter is seeded from the union of the IDs persisted in bug
+files and the IDs the published artifact already carries, so an ID whose
+bug file has since been closed, moved or re-anchored is never handed to
+another bug. A published KI line that no surviving bug file carries is kept
+verbatim, in the entry and section it was published under — it is history.
+A bug file that persists an ID the published artifact carries for a
+different title was handed a spent ID: the published line stays as it is
+and the bug receives a fresh ID, written back to its file, at the next
+regeneration. Which artifact counts as published is the ``published_changelog``
+argument of ``regenerate()``; by default it is CHANGELOG.md under repo_root.
+
 Public-ID assignment is gated on ## Affects parsing as a recognisable version
 string (e.g. 'v1.2.3', '1.2.3').  Prose values such as
 '(internal — plugin era; no KI)' are not version strings; they produce a
@@ -29,7 +53,8 @@ a prose placeholder.
 Internal BUG-NNNN identifiers never appear in generated CHANGELOG output.
 
 Entry point:
-    regenerate(repo_root, released_versions, published_manifest, bugs_dir) -> str
+    regenerate(repo_root, released_versions, published_manifest, bugs_dir,
+               extra_notes_dir=None, published_changelog=CHECKED_IN_CHANGELOG) -> str
 
 Cleanup entry point:
     remove_bogus_public_ids(bugs_dir, published_manifest) -> list[pathlib.Path]
@@ -41,7 +66,7 @@ Manifest loader:
     load_published_manifest(repo_root) -> list[str]
     Returns [] when release-notes/PUBLISHED is absent (empty-manifest semantics:
     no published releases, every bug entry is internal — the correct reading for
-    managed dev trees that predate the v1.17 disclosure architecture).
+    a managed dev tree that has never published a release).
     Returns [] when the file exists but is empty (same: pre-publication state).
 """
 
@@ -52,6 +77,76 @@ import re
 import sys
 from collections import defaultdict
 from typing import NamedTuple
+
+try:
+    from pgai_agent_kanban.lib.public_id import (
+        extract_ki_ids,
+        ki_line_title,
+        leading_ki_id,
+        same_ki_title,
+    )
+except ImportError:
+    # Loaded by file path rather than as a package member (an embedded
+    # interpreter can do this): put this module's own package root on
+    # sys.path so the sibling lib resolves from the same tree, never another.
+    _OWN_PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[2]
+    _PUBLIC_ID_PATH = _OWN_PACKAGE_ROOT / "pgai_agent_kanban" / "lib" / "public_id.py"
+    # A directory named pgai_agent_kanban with no __init__.py — the kanban
+    # root, when the working directory is its parent — imports first as an
+    # implicit namespace package and stays cached in sys.modules, shadowing
+    # the real package on every retry. Drop a cached namespace package (it
+    # has no __file__) so the retry can bind the real one; a cached regular
+    # package is left alone.
+    _cached_pkg = sys.modules.get("pgai_agent_kanban")
+    _shadow_dirs: list[str] = []
+    if _cached_pkg is not None and getattr(_cached_pkg, "__file__", None) is None:
+        _shadow_dirs = [str(p) for p in getattr(_cached_pkg, "__path__", [])]
+        for _mod_name in [
+            n for n in sys.modules
+            if n == "pgai_agent_kanban" or n.startswith("pgai_agent_kanban.")
+        ]:
+            del sys.modules[_mod_name]
+    sys.path.insert(0, str(_OWN_PACKAGE_ROOT))
+    try:
+        from pgai_agent_kanban.lib.public_id import (  # noqa: E402
+            extract_ki_ids,
+            ki_line_title,
+            leading_ki_id,
+            same_ki_title,
+        )
+    except ImportError as _exc:
+        if not _PUBLIC_ID_PATH.is_file():
+            # The tree this module runs from is incomplete; say which file
+            # is missing rather than leaving a bare module name to decode.
+            raise ImportError(
+                "changelog_writer needs its sibling shared reader at "
+                f"{_PUBLIC_ID_PATH} "
+                "— install the whole pgai_agent_kanban package, not cm/ alone"
+            ) from _exc
+        # The file is there, so the package name bound somewhere else.
+        _bound = sys.modules.get("pgai_agent_kanban")
+        _bound_where = (
+            getattr(_bound, "__file__", None)
+            or [str(p) for p in getattr(_bound, "__path__", [])]
+            or _shadow_dirs
+            or "an unknown location"
+        )
+        raise ImportError(
+            f"changelog_writer could not import its shared reader although "
+            f"{_PUBLIC_ID_PATH} is present: the name pgai_agent_kanban "
+            f"resolved to {_bound_where} instead of "
+            f"{_OWN_PACKAGE_ROOT / 'pgai_agent_kanban'}. A same-named "
+            f"directory (often one in the working directory) is shadowing "
+            f"the package — run from another directory, or set "
+            f"PYTHONPATH={_OWN_PACKAGE_ROOT}"
+        ) from _exc
+
+# Version sort key: a total order that never raises, so a malformed Affects
+# value or release-notes stem sorts low instead of failing the render. The
+# package root is on sys.path by this point (the block above guarantees it).
+from pgai_agent_kanban.archive.layout import CATEGORY_BUGS, archive_layout_for_category_dir  # noqa: E402
+from pgai_agent_kanban.lib.semver import version_sort_key as _parse_version  # noqa: E402
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -66,6 +161,18 @@ _HEADER = (
 
 # Pattern that matches internal bug identifiers — must never appear in output.
 _BUG_ID_PATTERN = re.compile(r"BUG-[0-9]")
+
+# The published artifact regenerate() reads by default, relative to repo_root.
+CHECKED_IN_CHANGELOG = pathlib.Path("CHANGELOG.md")
+
+# A Public ID split into its anchor version and counter.
+_PUBLIC_ID_PARTS_RE = re.compile(r"KI-(\d+\.\d+\.\d+)\.(\d+)$")
+
+# A CHANGELOG entry heading: "## vX.Y.Z — <date>".
+_ENTRY_HEADING_RE = re.compile(r"^##\s+(v\d+\.\d+\.\d+)(?:\s|$)")
+
+# A content section heading inside an entry: "### Fixed", "### Known Issues".
+_SECTION_HEADING_RE = re.compile(r"^###\s+(.+?)\s*$")
 
 # Sections in release notes that contain implemented (feature) content.
 _IMPLEMENTED_HEADINGS = frozenset(
@@ -126,28 +233,6 @@ class ReleaseEntry(NamedTuple):
 # ---------------------------------------------------------------------------
 # Semver comparison helper
 # ---------------------------------------------------------------------------
-
-
-def _parse_version(v: str) -> tuple:
-    """Parse a version string like 'v1.2.3' into a comparable tuple.
-
-    Returns (major, minor, patch) as integers. Strips leading 'v' or 'ai_v'.
-    Non-numeric trailing components are stripped.
-    """
-    clean = v.lstrip("v")
-    if clean.startswith("ai_"):
-        clean = clean[3:]
-    parts = clean.split(".")
-    result = []
-    for p in parts[:3]:
-        try:
-            result.append(int(p))
-        except ValueError:
-            break
-    # Pad to 3 components
-    while len(result) < 3:
-        result.append(0)
-    return tuple(result)
 
 
 def _version_gte(v1: str, v2: str) -> bool:
@@ -213,9 +298,9 @@ def load_published_manifest(repo_root: pathlib.Path) -> list[str]:
     Returns [] in two cases that share identical semantics — no published
     releases, every bug entry is internal:
       - The file exists but is empty (explicit pre-publication state).
-      - The file is absent (implicit pre-publication state: managed dev trees
-        that predate the v1.17 disclosure architecture have no PUBLISHED file,
-        and an absent manifest is the semantically correct reading for
+      - The file is absent (implicit pre-publication state: a managed dev
+        tree that has never published a release has no PUBLISHED file, and
+        an absent manifest is the semantically correct reading for
         local-only projects where nothing has ever been publicly released).
 
     Callers that want to distinguish "absent" from "empty" may check whether
@@ -238,23 +323,10 @@ def _parse_section_value(text: str, heading: str) -> str:
     """Extract the content under a ## <heading> section from markdown text.
 
     Returns the stripped content of the section body, or "" if the section
-    is absent or empty. Stops at the next ## heading or end of file.
+    is absent or empty. Stops at the next ## heading or end of file. The
+    body is read by task_status.read_section, the one ## section reader.
     """
-    pattern = re.compile(
-        r"^##\s+" + re.escape(heading) + r"\s*$",
-        re.IGNORECASE | re.MULTILINE,
-    )
-    match = pattern.search(text)
-    if not match:
-        return ""
-    start = match.end()
-    # Find next ## heading
-    next_heading = re.search(r"^##\s+", text[start:], re.MULTILINE)
-    if next_heading:
-        end = start + next_heading.start()
-    else:
-        end = len(text)
-    return text[start:end].strip()
+    return read_section(text, heading) or ""
 
 
 def _first_sentence(text: str) -> str:
@@ -427,15 +499,52 @@ def parse_bug_file(path: pathlib.Path) -> BugRecord:
     )
 
 
-def load_bugs(bugs_dir: pathlib.Path) -> list[BugRecord]:
+# A bug file name's number, e.g. 23 from "BUG-0023-tmux-split-flag.md".
+_BUG_FILE_NUMBER_RE = re.compile(r"BUG-(\d+)", re.IGNORECASE)
+
+
+def _bug_file_number(path: pathlib.Path) -> int | None:
+    """The bug number a BUG-*.md file name carries, or None."""
+    match = _BUG_FILE_NUMBER_RE.match(path.name)
+    return int(match.group(1)) if match else None
+
+
+def archived_bug_paths(bugs_dir: pathlib.Path) -> list[pathlib.Path]:
+    """The archived bug files of the live ledger *bugs_dir* that have no live file.
+
+    *bugs_dir* is read as ``<kanban_root>/projects/<project>/bugs``; the
+    files returned are ``BUG-*.md`` in that same kanban root's
+    ``archive/<project>/bugs`` whose bug number matches no live
+    ``BUG-*.md`` in *bugs_dir* (a live file always wins). Empty when
+    *bugs_dir* is not in that shape or the project has no archived bugs.
+    """
+    layout = archive_layout_for_category_dir(bugs_dir, CATEGORY_BUGS)
+    if layout is None or not layout.bugs.is_dir():
+        return []
+    live_numbers = {_bug_file_number(p) for p in bugs_dir.glob("BUG-*.md")}
+    return [
+        p for p in layout.bugs.glob("BUG-*.md")
+        if p.is_file() and _bug_file_number(p) not in live_numbers
+    ]
+
+
+def load_bugs(bugs_dir: pathlib.Path, include_archive: bool = False) -> list[BugRecord]:
     """Load all bug files from bugs_dir, sorted by bug_id ascending.
 
     Files that do not match the BUG-NNNN prefix are silently skipped.
+
+    With *include_archive*, the bugs archived from *bugs_dir* that have no
+    live file (:func:`archived_bug_paths`) are loaded too, in the same
+    file-name order, so the result is the one the ledger gave before
+    those bugs were archived.
     """
     if not bugs_dir.exists():
         return []
+    paths = list(bugs_dir.glob("BUG-*.md"))
+    if include_archive:
+        paths.extend(archived_bug_paths(bugs_dir))
     records = []
-    for path in sorted(bugs_dir.glob("BUG-*.md"), key=lambda p: p.name):
+    for path in sorted(paths, key=lambda p: p.name):
         try:
             records.append(parse_bug_file(path))
         except Exception as exc:  # noqa: BLE001
@@ -738,13 +847,14 @@ def _write_public_id_to_bug_file(file_path: pathlib.Path, public_id: str) -> Non
                     + text[comment_end:]
                 )
             else:
-                # No comment block — just append after heading
+                # No comment block — the value goes directly under the
+                # heading, with one blank line before whatever section
+                # follows, whether or not the heading match consumed its
+                # own trailing newline.
                 heading_end = match.start(2)
-                new_text = (
-                    text[: heading_end]
-                    + f"\n{public_id}\n"
-                    + text[heading_end:].lstrip("\n")
-                )
+                before = text[:heading_end].rstrip("\n") + "\n"
+                after = text[heading_end:].lstrip("\n")
+                new_text = before + f"{public_id}\n" + (f"\n{after}" if after else "")
             file_path.write_text(new_text, encoding="utf-8")
         # else: already has content (should not happen if we only write once)
     else:
@@ -952,16 +1062,6 @@ def _strip_internal_ids(text: str) -> str:
     return cleaned
 
 
-# Pattern that matches a public Known-Issue identifier on a bullet line.
-# Captures the KI-X.Y.Z.N token so the caller can look up the bug.
-# Matches at the start of a bullet line (after optional list marker / dash).
-_KI_ID_PATTERN = re.compile(
-    r"^[\s\-\*]*"         # optional leading whitespace / bullet marker
-    r"(KI-\d+\.\d+\.\d+\.\d+)"  # the KI identifier
-    r"(?:\s*[—\-]+\s*|\s+)"      # separator: em-dash, hyphen, or whitespace
-)
-
-
 def _extract_ki_id_from_line(line: str) -> str:
     """Extract the KI-X.Y.Z.N identifier from a Bugs-Resolved bullet line.
 
@@ -972,11 +1072,10 @@ def _extract_ki_id_from_line(line: str) -> str:
 
     Lines like '- KI-1.0.0.1 — resolved' or '- KI-1.0.0.2' match; prose
     lines that happen to mention a KI identifier mid-sentence do not.
+    The shared reader in pgai_agent_kanban.lib.public_id is the one
+    implementation; this name is kept for the writer's own call sites.
     """
-    m = _KI_ID_PATTERN.match(line.strip())
-    if m:
-        return m.group(1)
-    return ""
+    return leading_ki_id(line)
 
 
 def _render_fixed_items(
@@ -1037,6 +1136,115 @@ def _render_fixed_items(
 
 
 # ---------------------------------------------------------------------------
+# Published artifact: spent Public IDs and lines kept as history
+# ---------------------------------------------------------------------------
+
+
+class PublishedChangelog(NamedTuple):
+    """What the published CHANGELOG.md already carries.
+
+    ids:    every Public ID that appears anywhere in the artifact — spent,
+            whatever the bug files currently say.
+    lines:  {(entry_version, section_title): [(public_id, line), ...]} for
+            every line that starts with a Public ID, in artifact order, so a
+            line whose bug file is gone can be kept where it was published.
+    titles: {public_id: [title, ...]} for those same lines, used to tell a
+            bug that legitimately carries an ID from one that was handed an
+            ID the artifact already publishes for a different entry.
+    """
+    ids: set[str]
+    lines: dict[tuple[str, str], list[tuple[str, str]]]
+    titles: dict[str, list[str]]
+
+
+_NOTHING_PUBLISHED = PublishedChangelog(set(), {}, {})
+
+
+def read_published_changelog(path: pathlib.Path | None) -> PublishedChangelog:
+    """Read the published CHANGELOG.md at *path*.
+
+    ``None`` or an absent file reads as nothing published — no spent IDs and
+    no lines to keep — which is the state of a project that has never
+    regenerated its changelog.
+    """
+    if path is None or not pathlib.Path(path).is_file():
+        return _NOTHING_PUBLISHED
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    lines: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+    titles: dict[str, list[str]] = defaultdict(list)
+    entry = ""
+    section = ""
+    for line in text.splitlines():
+        heading = _ENTRY_HEADING_RE.match(line)
+        if heading:
+            entry, section = heading.group(1), ""
+            continue
+        sub_heading = _SECTION_HEADING_RE.match(line)
+        if sub_heading:
+            section = sub_heading.group(1)
+            continue
+        public_id = leading_ki_id(line)
+        if public_id and entry and section:
+            lines[(entry, section)].append((public_id, line))
+            titles[public_id].append(ki_line_title(line))
+    return PublishedChangelog(extract_ki_ids(text), dict(lines), dict(titles))
+
+
+def _reserve_public_id(counters: dict[str, int], public_id: str) -> None:
+    """Raise the anchor's counter to at least the counter *public_id* carries."""
+    parts = _PUBLIC_ID_PARTS_RE.match(public_id)
+    if parts:
+        anchor, n = parts.group(1), int(parts.group(2))
+        if counters[anchor] < n:
+            counters[anchor] = n
+
+
+def _next_public_id(counters: dict[str, int], anchor: str, spent: set[str]) -> str:
+    """Advance the anchor's counter past every spent ID and return the fresh ID."""
+    counters[anchor] += 1
+    while f"KI-{anchor}.{counters[anchor]}" in spent:
+        counters[anchor] += 1
+    return f"KI-{anchor}.{counters[anchor]}"
+
+
+def _holds_spent_id(bug: BugRecord, published: PublishedChangelog) -> bool:
+    """Return True when the bug's persisted ID is published for a different entry.
+
+    Every published line carrying the ID is compared by title with what the
+    writer would render for this bug.  A status clause that moved from open
+    to fixed is the same entry; a different title is not.
+    """
+    return any(
+        not same_ki_title(title, bug.symptom)
+        for title in published.titles.get(bug.public_id, [])
+    )
+
+
+def _kept_published_lines(
+    published: PublishedChangelog,
+    entry_version: str,
+    section: str,
+    rendered: list[str],
+    carried_ids: set[str],
+) -> list[str]:
+    """Return the published lines of one section that only the artifact still carries.
+
+    A line is kept when its Public ID is carried by no bug file (the file
+    was closed, moved or re-anchored) and the freshly rendered section does
+    not already carry that ID (a release-notes bullet may render it as-is).
+    Lines come back in published order.
+    """
+    rendered_ids = {leading_ki_id(line) for line in rendered}
+    kept: list[str] = []
+    for public_id, line in published.lines.get((entry_version, section), []):
+        if public_id in carried_ids or public_id in rendered_ids:
+            continue
+        rendered_ids.add(public_id)
+        kept.append(line)
+    return kept
+
+
+# ---------------------------------------------------------------------------
 # Main regeneration entry point
 # ---------------------------------------------------------------------------
 
@@ -1046,6 +1254,8 @@ def regenerate(
     released_versions: list[str],
     published_manifest: list[str],
     bugs_dir: pathlib.Path,
+    extra_notes_dir: pathlib.Path | None = None,
+    published_changelog: pathlib.Path | None = CHECKED_IN_CHANGELOG,
 ) -> str:
     """Regenerate the full CHANGELOG.md content as a string.
 
@@ -1058,7 +1268,24 @@ def regenerate(
         published_manifest: Versions publicly released, oldest first (e.g.
                             ['v1.0.0', 'v1.0.1']). May be empty (valid:
                             pre-publication state).
-        bugs_dir: Path to the directory containing BUG-*.md files.
+        bugs_dir: Path to the directory containing BUG-*.md files. When it is
+                  a live project's ledger, the bugs archived from it are
+                  read too (see the module docstring); a live file wins.
+        extra_notes_dir: Optional overlay directory consulted for a version's
+                         vX.Y.Z.md file when it is not found under
+                         repo_root/release-notes. Lets a caller (a test
+                         fixture, most commonly) inject a synthetic
+                         release-notes file for a version that does not
+                         exist on disk under repo_root, without writing into
+                         the real repository tree. Ignored entirely when
+                         None (default); production behavior is unchanged
+                         when this argument is omitted.
+        published_changelog: The already-published artifact whose Public IDs
+                         are spent and whose orphaned KI lines are kept as
+                         history. A relative path resolves under repo_root;
+                         the default is repo_root/CHANGELOG.md. None means
+                         nothing has been published: only the IDs persisted
+                         in bug files are reserved, and no line is kept.
 
     Returns:
         The full text of the regenerated CHANGELOG.md.
@@ -1066,16 +1293,25 @@ def regenerate(
     Notes:
         - When a disclosed bug lacks ## Public ID, this function assigns one
           and writes it back to the bug file (to ensure determinism on
-          subsequent calls).
+          subsequent calls). The ID is the anchor's next counter past every
+          ID persisted in a bug file or present in published_changelog.
+        - A bug whose persisted ## Public ID is published for a different
+          title is given a fresh ID the same way; the published line is
+          left as it is.
+        - A published KI line whose ID no bug file carries is emitted
+          verbatim in the entry and section it was published under.
         - BUG-NNNN identifiers never appear in the returned string.
         - The returned string is deterministic: given unchanged inputs and bug
           files, two consecutive calls return byte-identical strings.
     """
     repo_root = pathlib.Path(repo_root)
     bugs_dir = pathlib.Path(bugs_dir)
+    if published_changelog is not None:
+        published_changelog = repo_root / published_changelog
+    published_artifact = read_published_changelog(published_changelog)
 
     # --- Load and parse bugs ---
-    all_bugs = load_bugs(bugs_dir)
+    all_bugs = load_bugs(bugs_dir, include_archive=True)
     bugs_by_id: dict[str, BugRecord] = {b.bug_id: b for b in all_bugs}
 
     # --- Warn on non-empty Affects values that do not parse as a version ---
@@ -1096,26 +1332,33 @@ def regenerate(
     ]
 
     # --- Assign Public IDs (modifies bug files on first assignment) ---
-    # Sort disclosable bugs by (anchor_version, existing_id or file order)
-    # to ensure consistent assignment order.
-    # First pass: read existing IDs from ALL bugs (not just disclosable) and
-    # build counter state.  A bug may carry a stamped KI Public ID even if it
-    # is currently non-disclosable (e.g. its Fixed In is an unparseable prose
-    # placeholder).  Reserving its slot here prevents ID collisions when a new
-    # disclosable bug is assigned the same anchor.
+    # First pass: reserve every ID already spent.  That is every ID persisted
+    # in ANY bug file (not just disclosable ones — a bug may carry a stamped
+    # KI Public ID while currently non-disclosable, e.g. its Fixed In is an
+    # unparseable prose placeholder) and every ID the published artifact
+    # carries, whether or not a bug file still exists for it.  Reserving both
+    # is what keeps a new bug from being handed an identifier a reader has
+    # already seen mean something else.
     counters: dict[str, int] = defaultdict(int)
+    spent_ids: set[str] = set(published_artifact.ids)
     for bug in all_bugs:
         if bug.public_id:
-            id_match = re.match(r"KI-(\d+\.\d+\.\d+)\.(\d+)$", bug.public_id)
-            if id_match:
-                anchor = id_match.group(1)
-                n = int(id_match.group(2))
-                if counters[anchor] < n:
-                    counters[anchor] = n
+            spent_ids.add(bug.public_id)
+            _reserve_public_id(counters, bug.public_id)
+    for public_id in published_artifact.ids:
+        _reserve_public_id(counters, public_id)
+
+    # A bug persisting an ID the artifact publishes for a different title was
+    # handed a spent ID.  The published line is history and stays; the bug is
+    # queued for a fresh ID exactly like one that never had an ID.
+    reissue = [
+        b for b in disclosable
+        if b.public_id and _holds_spent_id(b, published_artifact)
+    ]
 
     # Second pass: assign IDs to bugs that lack one, in a stable order
     # (sort by affects version ascending, then by bug_id ascending to break ties).
-    needs_id = [b for b in disclosable if not b.public_id]
+    needs_id = [b for b in disclosable if not b.public_id] + reissue
     needs_id.sort(key=lambda b: (_parse_version(b.affects), b.bug_id))
 
     # Rebuild disclosable with updated public_ids (we re-parse after writing).
@@ -1125,14 +1368,16 @@ def regenerate(
         if not anchor_with_v:
             continue
         anchor = anchor_with_v.lstrip("v")
-        counters[anchor] += 1
-        new_id = f"KI-{anchor}.{counters[anchor]}"
+        new_id = _next_public_id(counters, anchor, spent_ids)
+        spent_ids.add(new_id)
+        if bug.public_id:
+            _remove_public_id_from_bug_file(bug.file_path)
         _write_public_id_to_bug_file(bug.file_path, new_id)
         new_ids[bug.bug_id] = new_id
 
     # Reload bugs to pick up newly written Public IDs
     if new_ids:
-        all_bugs = load_bugs(bugs_dir)
+        all_bugs = load_bugs(bugs_dir, include_archive=True)
         bugs_by_id = {b.bug_id: b for b in all_bugs}
         disclosable = [
             b for b in all_bugs
@@ -1145,12 +1390,17 @@ def regenerate(
     public_id_to_bug: dict[str, BugRecord] = {
         b.public_id: b for b in all_bugs if b.public_id
     }
+    carried_ids: set[str] = set(public_id_to_bug)
 
     # --- Parse release notes ---
     notes_dir = repo_root / "release-notes"
     entries: list[ReleaseEntry] = []
     for version in released_versions:
         notes_path = notes_dir / f"{version}.md"
+        if not notes_path.exists() and extra_notes_dir is not None:
+            # Fall back to the injected overlay directory (test fixtures only
+            # in practice); see the extra_notes_dir docstring above.
+            notes_path = extra_notes_dir / f"{version}.md"
         if not notes_path.exists():
             # Skip versions with no notes file (should not happen in practice)
             continue
@@ -1177,6 +1427,12 @@ def regenerate(
         fixed_items = _render_fixed_items(
             entry, bugs_by_id, published_manifest, public_id_to_bug
         )
+        # A published Fixed line whose bug file is gone is history: keep it.
+        fixed_items.extend(
+            _kept_published_lines(
+                published_artifact, entry.version, "Fixed", fixed_items, carried_ids
+            )
+        )
         if not fixed_items and entry.fixed_bug_ids:
             # Should never happen: BUG items in release notes but no rendered output.
             # This indicates a bug file lookup failure — emit a placeholder.
@@ -1193,6 +1449,16 @@ def regenerate(
                 if anchor == entry.version:
                     ki_line = _render_known_issue(bug, bug.public_id, published_manifest)
                     ki_lines_for_entry.append(ki_line)
+        # A published Known Issue whose bug file is gone is history: keep it.
+        ki_lines_for_entry.extend(
+            _kept_published_lines(
+                published_artifact,
+                entry.version,
+                "Known Issues",
+                ki_lines_for_entry,
+                carried_ids,
+            )
+        )
         # Sort by public_id for determinism
         ki_lines_for_entry.sort()
         ki_text = _render_section("Known Issues", ki_lines_for_entry)
@@ -1251,6 +1517,9 @@ def _main() -> None:
     Usage: python -m pgai_agent_kanban.cm.changelog_writer <repo_root> <bugs_dir> \\
                [version1 version2 ...]
 
+    A live project's bugs_dir brings its archived bugs with it (see the
+    module docstring).
+
     Versions are newest-first. If none are provided, they are discovered by
     scanning release-notes/vX.Y.Z.md files in the repo.
     """
@@ -1260,7 +1529,12 @@ def _main() -> None:
         description="Regenerate CHANGELOG.md from release-notes and bug ledger."
     )
     parser.add_argument("repo_root", help="Root of the git repository.")
-    parser.add_argument("bugs_dir", help="Directory containing BUG-*.md files.")
+    parser.add_argument(
+        "bugs_dir",
+        help="Directory containing BUG-*.md files. For a live project's ledger "
+             "(<kanban_root>/projects/<project>/bugs) the bugs archived from it "
+             "are read too; a live file wins.",
+    )
     parser.add_argument(
         "versions",
         nargs="*",

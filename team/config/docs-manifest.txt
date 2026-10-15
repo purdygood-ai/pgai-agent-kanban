@@ -1,0 +1,108 @@
+# team/config/docs-manifest.txt
+#
+# Single source of truth for the docs/ reference documents this kanban
+# delivers into an installed or upgraded root. Both install.sh and
+# team/scripts/upgrade.sh read this file and copy each named path from
+# <repo>/docs/<path> to <kanban-root>/docs/<path>. Neither script keeps its
+# own copy of the list — that is the drift this manifest exists to prevent.
+#
+# Rule for what belongs here: this file is the transitive closure of every
+# docs/<path> reference cited from the governance files this kanban installs
+# (team/roles/*.md, team/README.md, team/SOP-core.md), plus any transitive
+# edge inside that closure — a document listed here that itself cites
+# another docs/ path pulls that path in too. It deliberately excludes the
+# rest of docs/ (API baselines, HTML quickref material, operator
+# checkpoints, and anything else no installed governance path names) — that
+# material is repo-checkout-only by design, not an oversight.
+#
+# Whoever adds a new docs/ citation to a role file must add its path here in
+# the same change, or the citation dangles on an installed or upgraded root.
+# A document listed here must never cite a docs/ path this file omits —
+# that would just move the dangling pointer one hop deeper.
+#
+# To add a document: put its path (relative to docs/) on its own line
+# below. To remove one: delete the line. Both install.sh and upgrade.sh
+# pick up the change with no other edit.
+#
+# Check this file is complete before committing a new citation — no
+# install required, seconds-fast, against the source tree as checked out:
+#
+#   python3 team/scripts/check_docs_citations.py
+#
+# It walks the same seed set and the same transitive closure this header
+# states, and reports every reachable docs/<path> citation this file does
+# not name, naming the citing file, its line number, and the exact line
+# to add here as the remedy. It never edits this file itself — adding a
+# line is always an authoring decision, not something a check should do
+# quietly on your behalf.
+#
+# Recorded exclusions — documents someone will eventually ask about, with
+# the reason they are not on the list. A recorded exclusion is a decision,
+# not a backlog item.
+#
+#   docker.md — the container workspace runbook. Every step it owns that
+#   happens before an install exists (clone, build an image from docker/,
+#   run install.sh) can only be performed from a repository checkout, so a
+#   reader following it necessarily has one. Nothing this kanban installs
+#   cites it: its citers are README.md and HOW_TO.md at the repository
+#   root, neither of which install.sh copies into a kanban root, so it
+#   falls outside the closure rule above. It also cites pseudocron.md and
+#   operator-troubleshooting.md, which are checkout-only for the same
+#   reason — adding docker.md alone would move two dangling pointers onto
+#   installed roots.
+#
+#   operator-troubleshooting.md — the stuck-state walkthrough. Delivering
+#   it was weighed and declined, and the reason is a coupling rather than
+#   a doctrine: every path added here joins the doc-truth lint's scan set
+#   (lint_doc_command_truth.py unions this list with
+#   doc-truth-extra-scan-docs.txt), and a unit test holds that lint at
+#   zero HELP FAILS findings against the real tree. Its closure —
+#   DASHBOARD-PANES.md, disk-hygiene.md, quarantine-recovery.md — cites
+#   dashboard pane scripts that carry no --help, which those scripts owe
+#   under coding-standards directive 6 rather than being exemptible here.
+#   So the page joins the delivery list once those scripts answer --help,
+#   and until then no delivered document points at it: OPERATIONS.md's
+#   version-ceiling material and operator-commands.md's "See also" both
+#   carry the guidance inline or route to a delivered page instead.
+#
+# check_docs_citations.py matches a docs/ citation however it is spelled —
+# the literal "docs/<path>.md" prefix, a bare sibling filename, or a
+# relative markdown link — when the citing document already lives inside
+# docs/ itself (resolved against that document's own directory; a bare
+# markdown filename mentioned from outside docs/, e.g. a role file or a
+# task README, is never treated as a documentation citation). Widening the
+# scan makes it newly able to see dashboard.md's own pre-existing "Where
+# to go next" mentions of DASHBOARD-PANES.md, pseudocron.md and docker.md —
+# each written with the "Repository checkout only" caveat the reader
+# needs, naming a recorded exclusion above rather than assuming an
+# installed root carries it. The line below is the allowance that keeps
+# those specific, already-caveated mentions from becoming new findings,
+# and it covers the relaxed spellings only — a bare sibling filename or a
+# relative markdown link inside docs/. A "docs/<name>" prefixed citation
+# of a name on it is a finding unless <name> is itself listed here: that
+# is the spelling the installed-root citation test resolves, and an
+# installed root does not carry the page. It is NOT a blanket exemption
+# for every recorded exclusion — a document added here in the future
+# must still not cite one uncaveated, and
+# operator-troubleshooting.md is deliberately absent from this list: the
+# two delivered documents that used to cite it were rewritten to stop
+# (see the note above), and a citation reappearing here is meant to be
+# caught, not excused. Read by check_docs_citations.py alone (install.sh
+# and upgrade.sh never see it; it is inside a comment).
+#
+# EXCLUDED-CITATION-TARGETS: docker.md, pseudocron.md, DASHBOARD-PANES.md, quarantine-recovery.md
+
+cm-release-reference.md
+tester-verification-reference.md
+test-authoring-guidelines.md
+coding-standards.md
+OPERATIONS.md
+dashboard.md
+operator-commands.md
+operator-api.md
+promotion-playbook.md
+blocking-site-census.md
+read-order-manifests.md
+inherited-environment-exposure-survey.md
+api/ICD_CHANGELOG.md
+overwatch.md

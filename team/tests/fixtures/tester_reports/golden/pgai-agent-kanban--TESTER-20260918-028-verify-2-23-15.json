@@ -1,0 +1,122 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified release candidate `ai_rc/v2.23.15` (commit `29680e2`) of pgai-agent-kanban\nagainst `requirements/v2.23.15-bugfix-bundle-20260918.md`, a two-item BUG bundle:\n`BUG-0326` (`refusal_ledger_record_best_effort` aborts its `set -e` caller when the\nledger write fails) and `BUG-0327` (the gated runners' `Replay this exact run:` line\ncarries only the pytest argv, so a paste replays under the operator's ambient\nenvironment). Verification ran in the detached read-only worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260918-028-verify-2-23-15`,\nHEAD verified equal to `ai_rc/v2.23.15`. Both fixes were exercised behaviorally in\nboth directions — the original failure mode reproduced against `ai_main` code and\nshown healed on the RC. Both gated runners were run with `--coverage`.\n\n(Report written incrementally; sections below are appended as evidence accumulates.)",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "replay-line environment parity misses attributed exports",
+      "heading": "Finding 1: replay-line environment parity misses attributed exports",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one helper function; no shipped runner triggers it today)\n**Filed As:** BUG-0329 (Path C-A — filed as BUG)\n\n`gated_runner_replay_command` in `team/scripts/lib/gated_runner_lint.sh` classifies\neach family variable as exported-or-not by matching `declare -p`'s output against the\nanchored literal `^declare -x `. Bash prints every attribute a variable carries in\nthat line, so an exported variable that is also read-only, integer, array, or\ncase-mapped prints `declare -rx` / `declare -ix` / `declare -ax` / `declare -lx` —\nnone of which match. The helper then classifies it as not-exported and emits\n`env -u NAME`, telling the pasting shell to **unset** a variable the runner had\nexported and pytest actually saw. That is the same class of environment-parity break\nBUG-0327 was filed to close.\n\nObserved directly on the RC:\n\n```\n$ bash -c 'source team/scripts/lib/gated_runner_lint.sh\n           declare -rx PYTEST_ADDOPTS=--basetemp=/x\n           gated_runner_replay_command \"PYTEST_HERE\"'\nenv -u PYTEST_ADDOPTS -u PYTHONHASHSEED ... PYTEST_HERE\n      ^^^^^^^^^^^^^^^ exported by the caller, forced absent in the replay\n```\n\nSwapping `declare -rx` for a plain `export` produces the correct\n`PYTEST_ADDOPTS=--basetemp=/x` assignment, isolating the attribute as the entire\ncause. Bash's own output confirms the shapes the pattern misses:\n`declare -rx A=\"1\"`, `declare -ix B=\"2\"`, against the single matching\n`declare -x C=\"3\"`.\n\n**Not currently exercised.** Neither shipped runner declares any of the nine family\nnames with an extra attribute, so every replay line either runner prints today is\ncorrect — verified end to end by pasting the unit runner's own line into a sabotaged\nshell (see the Step 6.5 evidence below). It is rated `medium` in the filing under\n`SOP-core.md`'s calibration for a real but unexercised defect in a shipped artefact:\nnothing is failing today and not using it is itself the workaround. What makes it\nworth filing rather than noting is that the RC documents this helper as the single\nplace a *new* runner variable gets registered (\"add its name here once -- both\nrunners call `gated_runner_replay_command`, so one edit covers both\"), so the next\nvariable added as `declare -ix`, or the next runner written against the helper,\nsilently reintroduces the defect the RC just closed.\n\nThis finding did not exist before this RC: the helper is new in v2.23.15.",
+      "filed_as": "BUG-0329",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one helper function; no shipped runner triggers it today)",
+        "filed_as": "BUG-0329 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "shared `--help` idiom exits 141 intermittently under `pipefail`",
+      "heading": "Finding 2: shared `--help` idiom exits 141 intermittently under `pipefail`",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** medium (3-5 CODER tasks — eighteen call sites, or one convention plus a lint)\n**Systemic Risk:** medium (demonstrably recurs: three closed bugs in this family already, one script each)\n**Filed As:** BUG-0330 (Path C-A — filed as BUG)\n\nThe `doc_command_truth` quality lint fired two findings in the unit runner's\npre-flight, both against `team/scripts/dashboard/metrics.sh --help` exiting **141**\n(128+13, SIGPIPE) while printing its help text completely and correctly.\n\nRoot cause, confirmed by direct exercise rather than inference:\n\n```bash\n# team/scripts/dashboard/metrics.sh:62, under set -euo pipefail (line 36)\ngrep '^#' \"$0\" | sed 's/^# \\{0,1\\}//' | head -40\n```\n\n`metrics.sh` has 100 lines beginning with `#`. `head -40` closes the pipe after 40\nlines, `grep` and `sed` take SIGPIPE mid-write, `pipefail` promotes 141 to the\npipeline's status, and `set -e` terminates the script before the `exit 0` on the\nnext line. Whether it fires is a scheduling race, which is why it reads as\n\"not reproducible\" when checked once:\n\n```\n$ for i in $(seq 1 200); do bash team/scripts/dashboard/metrics.sh --help >/dev/null 2>&1; echo $?; done | sort | uniq -c\n    198 0\n      2 141\n```\n\n**Eighteen shipped scripts carry the idiom in its failing configuration** — `head -N`\nbelow the file's own `^#` line count, with `pipefail` set. The filing tabulates all\neighteen with both numbers. Two further scripts carry the idiom without `pipefail`\nand are not currently at risk.\n\nThis is a Step 6.11 spot-check finding in the \"regressions of prior gaps\" category,\nnot merely a lint complaint: `BUG-0270` (`pseudocron --help` never returns),\n`BUG-0272` (`dashboard-create --help` SIGPIPE) and `BUG-0325` (this same lint\nreported flaky against `dashboard/metadata.sh`) are all closed `done`, each having\nrepaired exactly one script while leaving the idiom in place. The correct reading is\nthat the check is honest and the scripts are wrong — `BUG-0325` closed on the\nhypothesis that the *check* was flaky, which is why the family keeps returning.\n\nIt predates this RC — `metrics.sh:62` is untouched by the v2.23.15 diff — and the\nhelp text is always printed correctly, so only the exit status is wrong and only\nabout 1 % of the time. Nothing functional depends on it; the cost is process noise\nthat has now consumed three bugfix cycles.",
+      "filed_as": "BUG-0330",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "medium (3-5 CODER tasks — eighteen call sites, or one convention plus a lint)",
+        "systemic_risk": "medium (demonstrably recurs: three closed bugs in this family already, one script each)",
+        "filed_as": "BUG-0330 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0326 fixed and behaviorally verified",
+      "heading": "Finding 3: BUG-0326 fixed and behaviorally verified",
+      "level": 3,
+      "body": "**Category:** pass\n\n`refusal_ledger_record_best_effort` is now status-neutral under a `set -e` caller.\nEvidence in the Step 6.5 section below: the original failure mode reproduces against\n`ai_main`'s helper (exit 1, caller dead before its markers) and is healed on the RC\n(`HELPER_RC=0`, caller continues, exit 0), end to end through the real caller\n`pgai_emit_error_contract` both with and without `KANBAN_ROOT`. Mutation testing in\nan isolated clone confirms the new regression test actually guards the fix.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0327 fixed and behaviorally verified",
+      "heading": "Finding 4: BUG-0327 fixed and behaviorally verified",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth runners now build their `Replay this exact run:` line through\n`gated_runner_replay_command`. The unit runner's own printed line, pasted into a\nshell exporting four sabotage values, reproduced the runner's environment exactly —\n`KANBAN_ROOT` and `PYTHONHASHSEED` forced absent, `PYTEST_ADDOPTS` and\n`PGAI_AGENT_KANBAN_ROOT_PATH` pinned to the runner's values, no sabotage value\nreaching the child. The integration runner prints the same shape. Values containing\nspaces and `$(...)` round-trip through `printf %q` without executing on paste.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "requirements-doc acceptance criteria",
+      "heading": "Finding 5: requirements-doc acceptance criteria",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll three criteria met — see the acceptance-criteria table in the evidence log\nbelow. 496 Python files compile clean; 281 bash files pass `bash -n`; both bundled\nitems are addressed and behaviorally verified.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

@@ -1,11 +1,12 @@
 """
 test_committed_version_fixtures.py
 ====================================
-Gated fixtures for the committed-VERSION contract (PRIORITY-0003).
+Gated fixtures for the committed-VERSION contract.
 
 WHAT IS TESTED
 --------------
-This file covers the four acceptance criteria from PRIORITY-0003:
+This file covers the four acceptance criteria for the committed-VERSION
+contract:
 
 1. **Ship-write fixture** — a simulated cm-release run produces a commit
    containing VERSION == the new tag, and ``git show <tag>:VERSION``
@@ -53,6 +54,18 @@ import subprocess
 import pytest
 
 from tests.unit.shell_harness import run_bash
+from tests.fixtures.binary_guard import require_binary
+
+
+@pytest.fixture(autouse=True)
+def _require_git() -> None:
+    """Skip every test in this module when git is not on PATH.
+
+    Every test here builds, inspects, or drives a real git repository; a
+    module-wide autouse guard keeps that requirement in one place instead
+    of repeating a per-test check at each git-dependent call site.
+    """
+    require_binary("git", label="committed-version-fixtures")
 
 # ---------------------------------------------------------------------------
 # Paths to the real scripts under test
@@ -63,7 +76,11 @@ _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _LIB_DIR = _SCRIPTS_DIR / "lib"
 
 _VERSION_STAMP_SH = _LIB_DIR / "version_stamp.sh"
-_CM_RELEASE_SH = _SCRIPTS_DIR / "cm" / "release.sh"
+# The Step 13 pre-tag VERSION gate this class's remedy-text anti-drift check
+# guards lives in release_finalize.sh, not release.sh itself, since the
+# v2.9.20 engine-decomposition moved Step 13 into that lib stage (release.sh
+# now only calls cm_release_finalize; see that file's own module doc).
+_CM_RELEASE_FINALIZE_SH = _LIB_DIR / "cm" / "release_finalize.sh"
 _STATUS_RIGHT_SH = _SCRIPTS_DIR / "dashboard" / "status-right.sh"
 
 
@@ -374,9 +391,8 @@ git -C "$repo" tag "$release_tag"
 
 
 # ---------------------------------------------------------------------------
-# Class 2b: Retrofit (CODER-20260727-019) — full remedy block on the pre-tag
-# VERSION gate.  Classified full-remedy in
-# docs/audits/v1.27.2-gate-remedy-census.md (row 25): the fix is fully
+# Class 2b: Retrofit — full remedy block on the pre-tag
+# VERSION gate.  A full remedy: the fix is fully
 # computable at detection time (write the expected value, commit, re-run),
 # per docs/coding-standards.md "Gates prescribe, not just diagnose".
 # ---------------------------------------------------------------------------
@@ -422,7 +438,7 @@ if [[ "$_pretag_version_trimmed" != "$_pretag_expected" ]]; then
   echo "To fix:" >&2
   echo "  1. printf '%s\\n' '${{_pretag_expected}}' > '${{REPO_ROOT}}/VERSION'" >&2
   echo "  2. git -C '${{REPO_ROOT}}' add VERSION && git -C '${{REPO_ROOT}}' commit -m 'Fix VERSION for ${{_pretag_expected}}'" >&2
-  echo "  3. Re-run cm-release.sh." >&2
+  echo "  3. Re-run scripts/cm/release.sh." >&2
   echo "" >&2
   echo "Rule: the committed VERSION file must equal the release tag being cut, or the shipped tag would misreport the version." >&2
   exit 1
@@ -504,12 +520,15 @@ fi
         assert created_tag == tag
 
     def test_release_sh_source_matches_remedy_text(self) -> None:
-        """Anti-drift guard: the live release.sh must still contain the exact
+        """Anti-drift guard: the live release_finalize.sh (Step 13's home
+        since the v2.9.20 engine-decomposition) must still contain the exact
         remedy strings this class exercises, so a future edit to Step 13 that
         changes the wording is caught here rather than only via silent
         fixture drift between this replica and the real script."""
-        assert _CM_RELEASE_SH.exists(), f"release.sh not found at {_CM_RELEASE_SH}"
-        src = _CM_RELEASE_SH.read_text(encoding="utf-8")
+        assert _CM_RELEASE_FINALIZE_SH.exists(), (
+            f"release_finalize.sh not found at {_CM_RELEASE_FINALIZE_SH}"
+        )
+        src = _CM_RELEASE_FINALIZE_SH.read_text(encoding="utf-8")
         assert "[Pre-tag VERSION gate] FAIL" in src
         assert "Cause(s):" in src
         assert "To fix:" in src
@@ -548,7 +567,7 @@ class TestZipShapeInstallFixture:
         (the function install.sh delegates to for this step).  Confirms that
         VERSION content appears verbatim in the live install root.
 
-        This is the "friend's download" scenario from PRIORITY-0003: because
+        This is the "friend's download" scenario: because
         there is no .git directory, the committed VERSION file is the only
         source of the version.  stamp_version_files copies it directly.
 

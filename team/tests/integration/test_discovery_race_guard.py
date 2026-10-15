@@ -2,21 +2,21 @@
 test_discovery_race_guard.py
 ============================
 Integration tests for the cancel→reset→re-tick race guard in the discovery
-pipeline, plus the BUG-0092 drill fixture and category-order fixture.
+pipeline, plus a post-cancel drill fixture and a category-order fixture.
 
 Coverage:
-  Race guard (defect 3 of BUG-0092):
+  Race guard:
     - Reset + immediate discovery tick does NOT double-handle the intake item.
     - After the settle window expires, the item IS picked up on the next tick.
 
-  Drill fixture (BUG-0092 acceptance criterion 1 and 4):
+  Drill fixture (the post-cancel reset shape):
     - Active RC exists, a hardcoded-Target requirement is in 'open' state
       (simulating post-cancel), and a bug file exists.
     - First discovery tick produces the bug bundle (Step 1 fires, Step 3 skipped).
     - Second discovery tick picks up the requirement for PM (Step 3 fires).
     - Zero collisions, zero operator edits to the requirement file.
 
-  Category-order fixture (BUG-0092 acceptance criterion 2):
+  Category-order fixture (selection-order regression):
     - A bug bundle numbered ABOVE a pending requirement is still selected first.
     - Bugs → priorities → requirements ordering holds regardless of version numbers.
 
@@ -422,21 +422,21 @@ class TestSettleGuardPreventsDoubleHandling:
 
 
 # ---------------------------------------------------------------------------
-# Drill fixture (BUG-0092 acceptance criterion 1: the 2026-07-20 shape)
+# Drill fixture (the cancel/reset/reselect shape)
 # ---------------------------------------------------------------------------
 
 
 class TestDrillFixtureCancelResetReselect:
-    """Drill fixture verifying the 2026-07-20 cancel/reset/reselect shape.
+    """Drill fixture verifying the cancel/reset/reselect shape.
 
-    Acceptance criterion 1 of BUG-0092:
+    Cancel/reset/reselect ordering:
       Active RC with a hardcoded-Target requirement is cancelled; the
       requirement is reset to open; a bug exists.  Next discovery ticks
       produce: the bug bundle FIRST (next open slot), the requirement
       SECOND (reusing its freed hardcoded number), zero collisions, zero
       operator edits to the requirement file.
 
-    Acceptance criterion 4 of BUG-0092:
+    Double-handling guard:
       Reset + immediate discovery tick does NOT double-handle the intake item.
     """
 
@@ -522,8 +522,6 @@ class TestDrillFixtureCancelResetReselect:
         Simulates the race condition: cancel-rc clears the Active RC, the
         requirement file is reset to 'open', and discovery fires within the
         same tick window.  The settle guard must prevent double-handling.
-
-        This is acceptance criterion 4 of BUG-0092.
         """
         project_name = "race_guard_drill"
         root = _build_single_project_root(tmp_path, project_name, last_released="v0.0.9")
@@ -632,26 +630,27 @@ class TestDrillFixtureCancelResetReselect:
 
 
 # ---------------------------------------------------------------------------
-# Category-order fixture (BUG-0092 acceptance criterion 2)
+# Category-order fixture (selection-order regression)
 # ---------------------------------------------------------------------------
 
 
 class TestCategoryFirstOrderingFixture:
     """Category-order fixture: bug category takes precedence over requirements.
 
-    BUG-0092 defect 2: selection order contradicted bundling policy.  Discovery
-    would process requirements files ahead of pending bugs when the bug bundle's
-    version number was higher than the requirement's hardcoded Target Version.
+    Selection order must not contradict bundling policy: discovery must not
+    process requirements files ahead of pending bugs just because the bug
+    bundle's version number happens to be higher than the requirement's
+    hardcoded Target Version.
 
-    After CODER-20260721-008 (category-first selection), bugs → priorities →
-    requirements holds at eligibility time, not merely at bundle-authoring time.
-    Steps 1 and 2 return immediately when they produce work; Step 3 (requirements)
-    only runs when Steps 1 and 2 both find nothing.
+    Category-first selection holds at eligibility time, not merely at
+    bundle-authoring time: bugs → priorities → requirements. Steps 1 and 2
+    return immediately when they produce work; Step 3 (requirements) only
+    runs when Steps 1 and 2 both find nothing.
 
-    This fixture verifies that CODER-008's fix is in place end-to-end: an
-    unhandled bug file is bundled (Step 1) BEFORE a lower-version requirements
-    file is queued for PM (Step 3), and also BEFORE a requirements file whose
-    version is LOWER than what the bug bundle will claim.
+    This fixture verifies that ordering end-to-end: an unhandled bug file
+    is bundled (Step 1) BEFORE a lower-version requirements file is queued
+    for PM (Step 3), and also BEFORE a requirements file whose version is
+    LOWER than what the bug bundle will claim.
     """
 
     def test_bug_file_bundled_before_lower_version_requirement_queued(
@@ -663,8 +662,6 @@ class TestCategoryFirstOrderingFixture:
         The bug bundle will claim v0.0.1 (next patch after v0.0.0).
         Despite v0.0.1 < v0.0.2, the bug CATEGORY wins — Step 1 fires, Step 3 is
         deferred to the next iteration.
-
-        This is the core BUG-0092 defect 2 scenario.
         """
         root = two_project_root
 

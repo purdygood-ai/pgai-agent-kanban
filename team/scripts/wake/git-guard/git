@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# team/scripts/wake/git-guard/git
+#
+# Drop-in `git` shim that enforces the "CM is the ONLY toucher of any
+# remote" boundary (team/SOP-core.md, "Git Repositories: Roles and
+# Boundaries"). A non-CM task's environment puts this file's directory
+# ahead of the real git's directory on PATH; every git invocation then
+# runs through here first, and this shim passes its full argument vector
+# to git_boundary_guard_enforce untouched -- the guard itself, not this
+# shim, is what walks past any leading global options (-C, -c,
+# --git-dir, --no-pager, ...) to find the subcommand, so a call shaped
+# like `git -C <path> fetch` is covered exactly like a bare `git fetch`.
+#
+# Behavior contract:
+#   - fetch/pull/push under a non-CM, determinable role: refused, however
+#     many git global options precede the verb. The refusal prints the
+#     dual-channel error/message/remedy block (see
+#     team/scripts/lib/git_boundary_guard.sh) and this process exits 1
+#     without ever invoking the real git binary. Refusing here stops one
+#     git command, not the agent's session -- the agent keeps running and
+#     sees a failed subprocess, exactly as it would for any other command
+#     that returned non-zero.
+#   - Every other invocation -- every other subcommand, fetch/pull/push
+#     under role cm, or fetch/pull/push when the role or the evidence sink
+#     is not configured -- execs the real git binary with the exact
+#     argument vector this process received, so its exit status, stdout,
+#     and stderr are the real git's, byte-identical.
+#   - A git invocation made through this shim completes or dies with the
+#     process that made it: the hand-off to the real git binary
+#     is armed with `setpriv --pdeathsig KILL` (see the "Parent-death
+#     guard" comment ahead of _gbg_exec_real_git below) when setpriv is
+#     available, so a caller killed mid-flight can never leave this
+#     invocation reparented to init, running or blocking indefinitely.
+#     Purely additive to the exit-status/stdout/stderr contract above --
+#     it changes nothing about a call whose caller survives.
+#
+# Deliberately NO --help handling of its own (a documented deviation from
+# docs/coding-standards.md directive 6, which the ticket authorizing this
+# file accepts explicitly): the behavior contract above requires "git
+# --help" and every other non-remote invocation to reach the real git
+# binary unchanged, and a shim-local --help branch would break that for
+# the one subcommand it intercepted. Run the real `git --help` for git's
+# own usage; this file has no usage surface of its own to document.
+#
+# Tunables (both environment-only -- set per-invocation by the wake layer
+# or by an operator's shell, never tuned via a config file):
+#   GIT_GUARD_REAL_GIT     Absolute path to the real git binary. This shim
+#                          file never sets or exports it itself; it is set
+#                          externally, either by an operator's own shell or
+#                          by team/scripts/lib/wake_guard_wiring.sh, which
+#                          pins it once per task dispatch (before this
+#                          directory is added to PATH) so every downstream
+#                          git call -- including one routed through a test
+#                          fixture's own PATH-shadowing "git" stand-in --
+#                          resolves the same real binary instead of each
+#                          one re-walking a PATH that may no longer carry
+#                          an unshimmed "git" at all by then. When set
+#                          (either way), it is the ONLY resolution step run
+#                          -- no PATH walk, no /usr/bin/git fallback.
+#                          When unset, resolution falls back to a PATH
+#                          lookup with THIS invocation's own directory (and
+#                          any other PATH entry that resolves to it)
+#                          removed, and finally to /usr/bin/git. Resolved
+#                          independently on every invocation -- including a
+#                          sentinel-triggered re-entry, below -- rather than
+#                          cached and handed down: a value this shim
+#                          resolved for itself is only ever trustworthy
+#                          relative to ITS OWN directory, so a nested
+#                          invocation re-deriving it from ITS OWN directory
+#                          is what makes an unexpected extra hop (a rogue
+#                          PATH entry that itself looks like a guard) self-
+#                          correct within one more hop instead of latching
+#                          onto a wrong value forever.
+#   PGAI_GIT_GUARD_DEPTH   Recursion sentinel. Unset on a normal, top-level
+#                          invocation; this shim sets it to 1 and exports
+#                          it before running policy. If a shim process
+#                          finds it ALREADY set on entry, that means some
+#                          earlier frame in this same invocation chain
+#                          already ran policy once -- for instance a future
+#                          edit that reintroduces a bare, unqualified `git`
+#                          call inside this file or the library it sources,
+#                          which would otherwise resolve back through this
+#                          same shim on PATH. On that path this process
+#                          skips policy (and every probe it would have run)
+#                          and hands off to the real binary it resolves for
+#                          itself, which bounds POLICY evaluation to once
+#                          per call no matter what a later change
+#                          reintroduces -- termination itself is the PATH-
+#                          walk's job (above), not this variable's.
+#
+# Configuration for the boundary decision itself (role, evidence sink) is
+# entirely environment-driven too (see team/scripts/lib/git_boundary_guard.sh's
+# header for those two variables); same rationale as above.
+
+set -u
+
+_gbg_shim_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+if [[ -z "$_gbg_shim_dir" ]]; then
+    echo "git-guard: could not resolve this shim's own directory from BASH_SOURCE" >&2
+    exit 127
+fi
+
+# --- Resolve the real git binary for THIS invocation ---------------------
+# Precedence: GIT_GUARD_REAL_GIT (operator/wake override, trusted verbatim)
+# -> a PATH lookup with this invocation's own directory removed ->
+# /usr/bin/git. Run fresh on every invocation (see the "Tunables" header
+# comment on GIT_GUARD_REAL_GIT for why this is never cached/exported). The
+# literal command name "git" never appears as a command anywhere in this
+# file's body -- every internal use below is $_gbg_real_git, which is what
+# keeps this resolution safe to grep for and keeps a later probe or the
+# final hand-off from ever resolving back into this same shim.
+_gbg_real_git="${GIT_GUARD_REAL_GIT:-}"
+
+if [[ -z "$_gbg_real_git" ]]; then
+    # A bare `command -v git` (or exec'ing "git" by bare name) could
+    # resolve right back to this file if this shim's directory is still
+    # ahead of the real git's directory on PATH -- self-recursion, not a
+    # passthrough. Build a PATH with every entry that resolves (by
+    # realpath) to this shim's own directory removed, and look up "git" on
+    # that filtered PATH instead.
+    _gbg_filtered_path=""
+    if [[ -n "${PATH:-}" ]]; then
+        IFS=':' read -ra _gbg_path_dirs <<< "$PATH"
+        for _gbg_dir in "${_gbg_path_dirs[@]}"; do
+            [[ -z "$_gbg_dir" ]] && _gbg_dir="."
+            _gbg_resolved="$(cd "$_gbg_dir" 2>/dev/null && pwd -P)" || continue
+            [[ "$_gbg_resolved" == "$_gbg_shim_dir" ]] && continue
+            _gbg_filtered_path="${_gbg_filtered_path:+${_gbg_filtered_path}:}${_gbg_resolved}"
+        done
+    fi
+    if [[ -n "$_gbg_filtered_path" ]]; then
+        _gbg_real_git="$(PATH="$_gbg_filtered_path" command -v git 2>/dev/null || true)"
+    fi
+fi
+
+if [[ -z "$_gbg_real_git" && -x /usr/bin/git ]]; then
+    _gbg_real_git="/usr/bin/git"
+fi
+
+if [[ -z "$_gbg_real_git" ]]; then
+    echo "git-guard: no real git executable found (GIT_GUARD_REAL_GIT unset, none on PATH outside ${_gbg_shim_dir}, and /usr/bin/git missing) -- refusing to recurse into this shim" >&2
+    exit 127
+fi
+
+# --- Parent-death guard: the hand-off dies with the process that made it
+# ---------------------------------------------------------------------------
+# A caller's own timeout handling (Python's subprocess.run(timeout=...),
+# among others) SIGKILLs only the direct child it spawned; this shim is
+# routinely a GRANDCHILD of that caller (a wrapper script runs "git ..." as
+# an ordinary foreground command, which forks this process), so that
+# SIGKILL never reaches here, and without a defense of its own the process
+# this file hands off to would be silently reparented to init and keep
+# running -- or blocking -- indefinitely instead of completing or dying
+# with the work that spawned it. `setpriv --pdeathsig KILL` (util-linux)
+# arms the kernel's PR_SET_PDEATHSIG on THIS process before the exec
+# below, so the kernel itself delivers SIGKILL to it the moment its OWN
+# parent terminates, by any means -- no cooperation from that parent
+# required, and no process-group or session plumbing either. The
+# attribute survives this process's own subsequent exec (same real and
+# effective UID on both sides of it), so arming it once, here, covers the
+# real git process's entire remaining lifetime. Purely additive: when the
+# caller survives (the overwhelming common case), this never fires and
+# the hand-off below is byte-identical to a plain exec. When setpriv is
+# not installed, resolution below yields an empty string and the hand-off
+# falls back to a plain exec -- fail clean, not fail closed, since the
+# boundary decision this file exists to enforce lives in
+# git_boundary_guard_enforce, not here.
+_gbg_pdeathsig_bin="$(command -v setpriv 2>/dev/null || true)"
+
+# ---------------------------------------------------------------------------
+# _gbg_exec_real_git [args...]
+# Internal: hands off to $_gbg_real_git with [args...] -- wrapped in
+# `setpriv --pdeathsig KILL --` when available (see the parent-death guard
+# comment above), falling back to a plain exec otherwise. Never returns.
+# Both call sites below (the recursion sentinel's early hand-off and the
+# main hand-off after policy) go through this one function so the guard
+# applies identically either way.
+# ---------------------------------------------------------------------------
+_gbg_exec_real_git() {
+    if [[ -n "$_gbg_pdeathsig_bin" ]]; then
+        exec "$_gbg_pdeathsig_bin" --pdeathsig KILL -- "$_gbg_real_git" "$@"
+    fi
+    exec "$_gbg_real_git" "$@"
+}
+
+# --- Recursion sentinel: belt-and-braces, independent of the PATH-walk
+# resolution above --------------------------------------------------------
+# If this process's own environment already carries PGAI_GIT_GUARD_DEPTH,
+# some earlier frame in THIS SAME invocation chain already ran policy
+# once; hand off to the real binary THIS invocation resolved for itself
+# (immediately above) with no further policy or probes. See the
+# "Tunables" header comment above for the full rationale.
+if [[ -n "${PGAI_GIT_GUARD_DEPTH:-}" ]]; then
+    _gbg_exec_real_git "$@"
+fi
+export PGAI_GIT_GUARD_DEPTH=1
+
+# shellcheck source=../../lib/git_boundary_guard.sh
+source "${_gbg_shim_dir}/../../lib/git_boundary_guard.sh"
+
+# Refuses and exits 1 in-place for a refused remote verb under a non-CM
+# role; returns 0 (falls through to the exec below) for everything else.
+# Any probe git_boundary_guard_enforce itself needs to make MUST use
+# $_gbg_real_git (or re-derive its own via the same precedence above),
+# never a bare "git" command.
+git_boundary_guard_enforce "$@"
+
+_gbg_exec_real_git "$@"

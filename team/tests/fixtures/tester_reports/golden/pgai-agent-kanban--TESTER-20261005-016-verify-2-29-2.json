@@ -1,0 +1,176 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "high",
+  "summary": "Fresh verification of RC `ai_rc/v2.29.2` (commit `9b55d285`) against `requirements/v2.29.2-bugfix-bundle-20261005.md`. The bundle contains BUG-0552 (status-line comment reddens the unit suite), BUG-0553 (reason-code governance docs still missing) and BUG-0554 (defer-column renderer SIGPIPE). The RC carries two CODER merges: CODER-20261005-013 (BUG-0552) and CODER-20261005-014 (BUG-0554). Both fixes are verified behaviourally: the original failure was reproduced on `ai_main` and confirmed gone on the RC, and the guard still fires. PM deliberately left BUG-0553 unticketed under the operator's hand-patch policy. Nothing changed for it, and every one of its acceptance checks fails on the RC. This is the second consecutive RC that bundled this fix without delivering it.\n\nGated suites (`run-gated-suites.sh --coverage`): **UNIT_EXIT=1**, **INTEGRATION_EXIT=0**. The single unit failure is a pre-existing, load-dependent race in a dashboard test that this RC does not touch (filed BUG-0557). Investigating whether Step 16b would close BUG-0553 at ship time turned up two pre-existing release-mechanics defects: an unfixed bundled item can be falsely closed (BUG-0555, the cause of BUG-0550's false close) or stranded at `running` (BUG-0556, which will strand BUG-0553). None of this makes v2.29.2 unusable. The RC's own changes are correct.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0552 fixed — sweep test green, guard still fires",
+      "heading": "Finding 1: BUG-0552 fixed — sweep test green, guard still fires",
+      "level": 3,
+      "body": "**Category:** pass\n\n- AC \"`grep -n 'python3 -m pgai_agent_kanban' team/scripts/dashboard/status-bottom.sh` finds nothing\": exit 1, no output. Pass.\n- AC \"`test_pp_run_ops_sweep.py` passes in full\": in a local clone at `9b55d285`, `4 passed`. On `ai_main` (`b2e9ffc1`) the same test fails on `status-bottom.sh:153` (original failure reproduced). Not deselected or skipped. It also ran inside the certification unit run with no failure.\n- `_EXEMPT_SUFFIXES` unchanged (the diff of `tests/unit/test_pp_run_ops_sweep.py` against `ai_main` is empty), as the bug required.\n- Guard behaviour (Step 6.5): with a real `python3 -m pgai_agent_kanban.dashboard.foo` line appended to `status-bottom.sh` in the clone, the sweep fails naming `status-bottom.sh:615`. Rewording the comment did not weaken the sweep.\n- AC \"`run-unit-tests.sh` exits 0 on the fixing RC\": not met in the certification run, but **not because of BUG-0552**. See Finding 5.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0554 fixed — defer-column renderer survives output past the pipe buffer",
+      "heading": "Finding 2: BUG-0554 fixed — defer-column renderer survives output past the pipe buffer",
+      "level": 3,
+      "body": "**Category:** pass\n\n- AC1 `grep -n \"| head\" team/scripts/lib/dashboard/column_render_defer.sh`: exit 1, no output. Parsing unchanged: for off / malformed+path / empty fixtures, `column_render_defer_multi_line` output is byte-identical (`cmp`) between the `ai_main` lib and the RC lib, and `gather_input` sets identical `DEFER_MODE` / `DEFER_ERROR_FILE` / IDs.\n- AC2: `tests/unit/test_defer_card_first_line_pipe_safety.py` (new; read in full) feeds about 1.3 MB through both entry points under `set -euo pipefail`. It includes a control asserting the old `printf | head -n1` shape dies with 141 on the same input. It passed in the certification unit run.\n- AC3: the `serial` marker is removed (`grep -n serial` returns nothing), and the test passed in the **parallel lane** of a standalone `run-integration-tests.sh` (3 workers, exit 0). The certification run's integration lane was single-process because of the shared worker budget, which is why the separate run was needed.\n- Original failure mode (Step 6.5 / anti-pattern 6): sourcing the `ai_main` lib with a 190 KB defer-card output under `set -euo pipefail`, both `column_render_defer_gather_input` and `column_render_defer_multi_line` exit **141**. The RC lib exits 0 with mode `on`, 20000 IDs, last ID correct.\n- Production shape (anti-pattern 3): the real `column-render.sh input <bugs> none 10 40 --label BUGS --kanban-root <root>` was run against a sandbox root built with `tests/fixtures/two_project.py` and 8000 deferred low bugs. With the `ai_main` export it exits **141**, printing only the header (both colour modes). With the RC it exits 0 and renders cards.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Requirements AC — compile and bash syntax",
+      "heading": "Finding 3: Requirements AC — compile and bash syntax",
+      "level": 3,
+      "body": "**Category:** pass\n\n`py_compile` over all 713 tracked `*.py` files (cache redirected outside the tree): 0 failures. `bash -n` over all 321 tracked `*.sh` files: 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0553 not addressed — reason-code governance docs still missing (second consecutive RC)",
+      "heading": "Finding 4: BUG-0553 not addressed — reason-code governance docs still missing (second consecutive RC)",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 tasks — a governance hand-patch by the operator under the standing policy, not a CODER ticket)\n**Systemic Risk:** high (the same fix bundled into two consecutive RCs — BUG-0550 in v2.29.1, BUG-0553 in v2.29.2 — with no progress, and the release mechanics lose the item instead of carrying it; see Findings 6 and 7)\n**Regression:** no\n**Integrity:** none\n**Filed As:** BUG-0553 (existing filing for this exact gap; cited, not duplicated). The reason it will drop out of the queue is filed as BUG-0556 (Path C-A).\n**Filed By:** TESTER (autonomous Path C) — the bundle required the status tool's block reason codes to be taught to agents, but no governance text changed, so agent self-blocks still cannot request the operator-data triage action.\n\nRequirement: \"Each bundled item is addressed in the implementation.\" BUG-0553 acceptance, checked on the RC:\n- `grep -n \"four fields and no others\" team/SOP-core.md` matches line 61. Not met.\n- `grep -rln -- \"--reason-code\" team/roles team/SOP-core.md`: exit 1, no files. Not met.\n- `grep -rln -- \"--reason-code\\|agent_operator_data_action\" team/roles team/SOP-core.md subagents team/read-order`: exit 1. Not met.\n- `git diff --stat ai_main..ai_rc/v2.29.2 -- team/SOP-core.md team/roles team/read-order subagents`: empty.\n- Behavioural (sandbox root): `task-status.sh --state BLOCKED` on a CODER task writes a fifth section `## Block Record` with `reason_code: agent_unclassified`, which contradicts SOP-core's \"four fields and no others\". The tool's `--help` documents `--reason-code` and `--action-args`; governance does not. The live install's `SOP-core.md:61` is identical, so it has not been hand-patched either.\n\nPM-20261005-002 predicted this (\"TESTER may report it as unaddressed\"). PM's further prediction that Step 16b \"will still flip it to done\" is **wrong for this release**. A simulation of `promote_bundle()` on scratch copies of this bundle, against the live tasks directory, prints `carried (no DONE task references it): BUG-0553-…`. The item will be left at `running`, which discovery never re-bundles (Finding 7). Net effect: BUG-0553 survives as a file but leaves the loop. The fix needs an operator hand-patch to SOP-core \"Writing task state\" plus a pointer reachable from each self-blocking role's read-order manifest.",
+      "filed_as": "BUG-0553",
+      "filed_by": "TESTER (autonomous Path C) — the bundle required the status tool's block reason codes to be taught to agents, but no governance text changed, so agent self-blocks still cannot request the operator-data triage action.",
+      "severity": null,
+      "category": "gap",
+      "regression": "no",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "high",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 tasks — a governance hand-patch by the operator under the standing policy, not a CODER ticket)",
+        "systemic_risk": "high (the same fix bundled into two consecutive RCs — BUG-0550 in v2.29.1, BUG-0553 in v2.29.2 — with no progress, and the release mechanics lose the item instead of carrying it; see Findings 6 and 7)",
+        "regression": "no",
+        "integrity": "none",
+        "filed_as": "BUG-0553 (existing filing for this exact gap; cited, not duplicated). The reason it will drop out of the queue is filed as BUG-0556 (Path C-A).",
+        "filed_by": "TESTER (autonomous Path C) — the bundle required the status tool's block reason codes to be taught to agents, but no governance text changed, so agent self-blocks still cannot request the operator-data triage action."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Gated unit runner exited 1 — pre-existing race in the stream-pane dashboard test",
+      "heading": "Finding 5: Gated unit runner exited 1 — pre-existing race in the stream-pane dashboard test",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing; not introduced by this RC)\n**Fix Effort:** small (1 CODER task, test-only)\n**Systemic Risk:** medium (a load-dependent flake that can redden any RC's certification run)\n**Filed As:** BUG-0557 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — a dashboard unit test finds the paused stream by a command-line substring that the loop's own short-lived subshells also carry, so it sometimes watches an already-exited process and fails after 60 seconds.\n\n`FAILED tests/unit/test_dashboard_pane_visibility.py::test_stream_pane_is_stopped_while_hidden_and_continued_when_visible`: \"waiting for the hidden stream to be stopped: nothing happened within 60s\". Evidence that it is pre-existing:\n- The RC diff does not touch the test, `cadence-loop.sh` or `lib/cadence.sh`; all were last changed in v2.28.1.\n- Through the gated runner (`--files`), it passes 3 of 3 times on the RC.\n- Mechanism proven: the test picks the first `pgrep -P <loop>` child whose cmdline contains `while :`. The loop's own argv contains that text, so its `$(…)` subshells match too. Sampling loop start-up showed matching non-stream children in 33 of 40 trials.\n\nClassification against the precondition: the suite did not pass (UNIT_EXIT=1), so PASS is not available. This is recorded as a `bug` with Regression: no rather than a stale-assertion, because no literal changed. My own verification probes were running concurrently with the certification run, which adds load and widens this race's window. That changes the likelihood, not the defect.",
+      "filed_as": "BUG-0557",
+      "filed_by": "TESTER (autonomous Path C) — a dashboard unit test finds the paused stream by a command-line substring that the loop's own short-lived subshells also carry, so it sometimes watches an already-exited process and fails after 60 seconds.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing; not introduced by this RC)",
+        "fix_effort": "small (1 CODER task, test-only)",
+        "systemic_risk": "medium (a load-dependent flake that can redden any RC's certification run)",
+        "filed_as": "BUG-0557 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — a dashboard unit test finds the paused stream by a command-line substring that the loop's own short-lived subshells also carry, so it sometimes watches an already-exited process and fails after 60 seconds."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Step 16b counts a negative README mention as proof a bundled item was fixed",
+      "heading": "Finding 6: Step 16b counts a negative README mention as proof a bundled item was fixed",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing; Step 6.11 spot-check — regression of the prior gap BUG-0385)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (recurs whenever PM explains an unticketed bundle item in a sibling ticket's README)\n**Filed As:** BUG-0555 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the release step that closes bundled bugs treats any DONE task README mentioning a bug's ID as proof of a fix, so a sentence saying the bug was not ticketed closes it as done.\n\n`promote_bundled_items.py` `derive_shipped_item_ids_from_tasks()` regex-matches IDs anywhere in DONE READMEs. BUG-0550 (the predecessor of BUG-0553) was closed at the v2.29.1 ship only because CODER-20261005-005's README line 74 says \"Bundle item 3, BUG-0550, is not ticketed in this plan\". Reproduced in a sandbox: a DONE README reading \"Fix BUG-9001. Bundle item BUG-9002 is not ticketed in this plan.\" promotes **both** items to `done`, with `0 carried`.",
+      "filed_as": "BUG-0555",
+      "filed_by": "TESTER (autonomous Path C) — the release step that closes bundled bugs treats any DONE task README mentioning a bug's ID as proof of a fix, so a sentence saying the bug was not ticketed closes it as done.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing; Step 6.11 spot-check — regression of the prior gap BUG-0385)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (recurs whenever PM explains an unticketed bundle item in a sibling ticket's README)",
+        "filed_as": "BUG-0555 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the release step that closes bundled bugs treats any DONE task README mentioning a bug's ID as proof of a fix, so a sentence saying the bug was not ticketed closes it as done."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Carried bundle items stay `running` and are never re-bundled",
+      "heading": "Finding 7: Carried bundle items stay `running` and are never re-bundled",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing; Step 6.11 spot-check — untested mechanism)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (affects every bundled item that ships unfixed; BUG-0553 is the first production instance at this ship)\n**Filed As:** BUG-0556 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — a bundled bug that ships unfixed is left marked in progress, and the bug scanner never picks up in-progress bugs, so it is stranded rather than carried into the next bundle as the release step claims.\n\n`promote_bundle()` leaves a carried item at its prior status (`running`) and reports it as \"carried into the next bundle\". `bug_scanner.get_unbundled_bugs()` returns only `open` items. Reproduced: with BUG-9001/9003 `open` and BUG-9002 `running`, it returns `['BUG-9001-x', 'BUG-9003-x']` and caches BUG-9002 as `[x]`. Nothing in release or discovery resets a carried item to `open`. No existing test follows a carried item into the next discovery pass.",
+      "filed_as": "BUG-0556",
+      "filed_by": "TESTER (autonomous Path C) — a bundled bug that ships unfixed is left marked in progress, and the bug scanner never picks up in-progress bugs, so it is stranded rather than carried into the next bundle as the release step claims.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing; Step 6.11 spot-check — untested mechanism)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (affects every bundled item that ships unfixed; BUG-0553 is the first production instance at this ship)",
+        "filed_as": "BUG-0556 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — a bundled bug that ships unfixed is left marked in progress, and the bug scanner never picks up in-progress bugs, so it is stranded rather than carried into the next bundle as the release step claims."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "high"
+  }
+}

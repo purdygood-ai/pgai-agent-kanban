@@ -46,9 +46,22 @@ from __future__ import annotations
 import argparse
 import os
 import pathlib
-import re
 import sys
 import time
+
+# Run by file path (``python3 .../scan_human_approvals.py``) or loaded from a
+# file outside its package, this module has no parent package and the
+# interpreter puts only its own directory on sys.path, so the package import
+# below would not resolve. Put this file's own package root -- the directory
+# holding the pgai_agent_kanban/ this file sits in -- at the front of sys.path
+# so the import resolves from the same tree, never another. Imported as a
+# package member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.task_status import section_lines, section_value  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -56,38 +69,8 @@ import time
 # ---------------------------------------------------------------------------
 
 def _read_field(text: str, heading: str) -> str:
-    """Return first non-blank content line after '## heading'."""
-    pat = re.compile(r'^\s*##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return ""
-    rest = text[m.end():]
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            return stripped
-    return ""
-
-
-def _read_section(text: str, heading: str, max_lines: int = 5) -> list[str]:
-    """Return up to max_lines non-blank content lines from a ## section."""
-    pat = re.compile(r'^\s*##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return []
-    rest = text[m.end():]
-    lines = []
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            lines.append(stripped)
-            if len(lines) >= max_lines:
-                break
-    return lines
+    """Return the value of the '## heading' section (task_status.section_value)."""
+    return section_value(text, heading)
 
 
 def _format_age(secs: int) -> str:
@@ -202,7 +185,7 @@ def _collect_pending_approvals(kanban_root: pathlib.Path) -> list[dict]:
                     rv = _read_field(readme_text, "Release Version")
                     if rv:
                         release_ver = rv
-                    goal_lines = _read_section(readme_text, "Goal", max_lines=4)
+                    goal_lines = section_lines(readme_text, "Goal", max_lines=4)
                 except OSError:
                     pass
 

@@ -1,0 +1,111 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verification of RC `ai_rc/v2.28.1` (HEAD 32657d23) against\n`requirements/v2.28.1-bugfix-bundle-20261004.md` (10 bundled bugs: BUG-0533,\nBUG-0534 headline; BUG-0527..0532, 0535, 0536 hygiene ride-alongs).\nBoth gated runners exited 0 (unit 7777 passed / 43 skipped; integration 646\npassed / 1 skipped), with zero quality-class lint findings. Each of the ten\nbundled items was checked against its own bug file's Acceptance section. For\nevery behavioural fix, the original failure was first reproduced on an\n`ai_main` (v2.28.0) export and then shown fixed on the RC. That covers by-path\n`--help`, the show-queues refusal on CLI / REST / show-multi, and the\ndashboard idle CPU, measured at 67.99% of one core on the baseline and 0.55%\non the RC. Every headline acceptance criterion is met. Four follow-ups were\nfiled via Path C (autonomous follow-up filing — non-blocking). One is a\npre-existing medium bug: seven other package-module CLIs still crash when run\nby path, the remainder of BUG-0533's root cause. Two are low documentation\ngaps (the published ICD text for GET /show-queues; the dashboard docs still\ndescribing a 10x hidden-pane slowdown). One is a low priority: the REST\ndeep-verify / cold-build-now routes cannot select images. None makes the\nrelease unusable.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Seven package-module CLIs still crash when run by path",
+      "heading": "Finding 1: Seven package-module CLIs still crash when run by path",
+      "level": 3,
+      "body": "**Category:** bug (pre-existing — introduced by v2.28.0, not by this RC)\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the same by-path import breakage BUG-0533 fixed for three modules; a fix scoped to doc-cited modules left the rest)\n**Filed As:** BUG-0537 (Path C-A — filed as BUG: code defect / regression / test failure)\n**Filed By:** TESTER (autonomous Path C) — seven package modules whose own help text says to run them as `python3 <file>.py ...` crash with \"module not found\" when run that way.\n\n`deep_verify/ledger.py`, `lib/refusal_ledger.py`, `metrics/blocked_ledger.py`,\n`overwatch/ledger.py`, `overwatch/resolution_matrix.py`,\n`reports/agent_timing.py` and `dashboard/queue_details.py` each have a\n`__main__` CLI, and six document `python3 <file>.py ...` usage in their\ndocstring. Run by path from `/` with `PYTHONPATH` unset, each exits 1 with\n`ModuleNotFoundError` on both the RC and `ai_main`; each exits 0 on\n`ai_v2.27.3`. The `-m` form works, and no script calls them by path\n(workaround exists, nothing depends on it → severity medium). This traces\nto BUG-0533's Fix clause (\"check any other module this release converted\nthat a document cites by path\"). These are cited only by their own\ndocstrings, which the doc lint does not scan.",
+      "filed_as": "BUG-0537",
+      "filed_by": "TESTER (autonomous Path C) — seven package modules whose own help text says to run them as `python3 <file>.py ...` crash with \"module not found\" when run that way.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug (pre-existing — introduced by v2.28.0, not by this RC)",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the same by-path import breakage BUG-0533 fixed for three modules; a fix scoped to doc-cited modules left the rest)",
+        "filed_as": "BUG-0537 (Path C-A — filed as BUG: code defect / regression / test failure)",
+        "filed_by": "TESTER (autonomous Path C) — seven package modules whose own help text says to run them as `python3 <file>.py ...` crash with \"module not found\" when run that way."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Published ICD still describes GET /show-queues as \"else read 0/0\"",
+      "heading": "Finding 2: Published ICD still describes GET /show-queues as \"else read 0/0\"",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one route's contract text)\n**Filed As:** BUG-0538 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the published API contract still tells clients the queue board with no project answers \"0/0\", but it now refuses that request.\n\n`team/pgai_agent_kanban/api/reads.py:1774` and `docs/api/icd.json` (GET\n/show-queues description) say the counters come \"from the server's\n`PGAI_PROJECT_NAME` project, else read 0/0\". The HTTP-status paragraph\n(`reads.py:1809-1812`) omits `show_queues.no_project`. CODER-003 deferred the\nfix to \"the release's ICD bump step\". `docs/operator-api.md` says the bump\nbelongs in the API-changing RC itself, and no CM step runs `generate-icd.sh`.\nThis traces to BUG-0534's Files Involved / acceptance (\"update together with\nthe fix\") and to the SOP-core Documentation Discipline Rule. The\n`docs/operator-api.md` route row itself is correct.",
+      "filed_as": "BUG-0538",
+      "filed_by": "TESTER (autonomous Path C) — the published API contract still tells clients the queue board with no project answers \"0/0\", but it now refuses that request.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one route's contract text)",
+        "filed_as": "BUG-0538 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the published API contract still tells clients the queue board with no project answers \"0/0\", but it now refuses that request."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Dashboard docs still describe hidden panes as refreshing 10x slower",
+      "heading": "Finding 3: Dashboard docs still describe hidden panes as refreshing 10x slower",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 WRITER tasks)\n**Systemic Risk:** low (isolated documentation; the decomposition omitted a doc update the CODER flagged)\n**Filed As:** BUG-0539 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the dashboard guides still say hidden-window panes keep refreshing ten times slower, but they now stop rendering entirely.\n\n`docs/dashboard.md:114,118,190` and `docs/OPERATIONS.md:1489,1510` describe\nthe pre-RC behaviour. The shipped behaviour: no render while hidden; a\ndetached session counts as hidden; `PGAI_DASHBOARD_HIDDEN_MULTIPLIER` is only\nthe re-check interval. This traces to BUG-0532 and the SOP-core\nDocumentation Discipline Rule (\"TESTER records a missing ... update as a gap\").",
+      "filed_as": "BUG-0539",
+      "filed_by": "TESTER (autonomous Path C) — the dashboard guides still say hidden-window panes keep refreshing ten times slower, but they now stop rendering entirely.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 WRITER tasks)",
+        "systemic_risk": "low (isolated documentation; the decomposition omitted a doc update the CODER flagged)",
+        "filed_as": "BUG-0539 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the dashboard guides still say hidden-window panes keep refreshing ten times slower, but they now stop rendering entirely."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "REST deep-verify / cold-build-now cannot select container images",
+      "heading": "Finding 4: REST deep-verify / cold-build-now cannot select container images",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** medium (3-5 tasks: request model, census and generated docs, ICD minor bump, tests)\n**Systemic Risk:** low (isolated to two REST routes; documented accurately)\n**Filed As:** PRIORITY-0007 (Path C-B — filed as PRIORITY: enhancement / design change)\n**Filed By:** TESTER (autonomous Path C) — the operator can now pick which images a deep-verify run builds from the command line, but the REST calls have no way to say which images, so by default they build nothing.\n\nBUG-0531 item 2 says \"the operator chooses the image\". On the CLI that\nholds. The REST request model (`project`, `scheduled`, `dry_run`) has no\nimage field. With the shipped `container_images =` default empty, a REST run\nreturns 200, builds nothing and writes no record. That outcome is documented\nin `docs/operator-api.md` and `kanban.cfg_example`. CODER-004 named the\nfollow-up and nobody filed it. This is an enhancement, not incorrect\nbehaviour, so it is filed as Path C-B.",
+      "filed_as": "PRIORITY-0007",
+      "filed_by": "TESTER (autonomous Path C) — the operator can now pick which images a deep-verify run builds from the command line, but the REST calls have no way to say which images, so by default they build nothing.",
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "medium (3-5 tasks: request model, census and generated docs, ICD minor bump, tests)",
+        "systemic_risk": "low (isolated to two REST routes; documented accurately)",
+        "filed_as": "PRIORITY-0007 (Path C-B — filed as PRIORITY: enhancement / design change)",
+        "filed_by": "TESTER (autonomous Path C) — the operator can now pick which images a deep-verify run builds from the command line, but the REST calls have no way to say which images, so by default they build nothing."
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

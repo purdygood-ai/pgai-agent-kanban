@@ -1,14 +1,14 @@
 """
 dashboard_render_fixture.py
 ============================
-Single-project kanban-root builder for BUG-0112 dashboard render-path
+Single-project kanban-root builder for dashboard render-path
 fixtures (the network-stub fixture and the missing-tree fixture).
 
 WHY THIS EXISTS
 ---------------
 ``tests/fixtures/two_project.py`` builds a full multi-project kanban root but
 always points ``dev_tree_path`` at ``/dev/null`` — adequate for cross-project
-isolation tests, but useless for BUG-0112's fixtures, which need to
+isolation tests, but useless for these fixtures, which need to
 distinguish four concrete dev-tree states:
 
   - a REAL local git repository with at least one tag (the happy path a
@@ -51,9 +51,12 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 from dataclasses import dataclass
 from typing import Optional
+
+from tests.fixtures.binary_guard import require_binary
 
 # Environment variables that leak project/dev-tree identity from the CALLING
 # agent's own ambient shell (e.g. a CODER task's wake-script environment,
@@ -63,7 +66,8 @@ from typing import Optional
 # as ambient defaults when no explicit --project/--kanban-root flag is
 # given, so leaving them set would silently point a fixture-driven test at
 # the real live project/dev-tree instead of the synthetic fixture — a
-# false-positive risk that has nothing to do with BUG-0112 correctness.
+# false-positive risk that has nothing to do with the render-path behavior
+# under test.
 # Callers building a subprocess environment for a dashboard fixture test
 # should start from AMBIENT_LEAK_ENV_VARS_TO_CLEAR and delete each key.
 AMBIENT_LEAK_ENV_VARS_TO_CLEAR: tuple[str, ...] = (
@@ -106,6 +110,59 @@ def clean_subprocess_env(*, kanban_root: pathlib.Path) -> dict[str, str]:
     env["TERM"] = "dumb"
     return env
 
+
+def run_dashboard_script(
+    argv: list[str],
+    *,
+    env: dict[str, str],
+    timeout: float,
+    input_text: Optional[str] = None,
+) -> subprocess.CompletedProcess:
+    """Run *argv* (a dashboard script invocation) with a bounded timeout that
+    can never orphan a grandchild.
+
+    A plain ``subprocess.run(..., timeout=timeout)`` SIGKILLs only its
+    direct child when the timeout fires; any process THAT child spawned
+    (a git-guard shim invocation among them) is a grandchild from this
+    caller's own point of view and is silently reparented to init instead
+    of being terminated with it. This helper closes that window by giving
+    *argv* its own process group (``start_new_session=True``, so its pid
+    is also its pgid) and, on timeout, killing the WHOLE GROUP
+    (``os.killpg``) rather than just the top pid -- every descendant, at
+    any depth, dies together with the process that spawned it, exactly
+    the guarantee team/scripts/wake/git-guard/git's own parent-death guard
+    gives a single shim invocation, extended here to the fixture's own
+    subprocess boundary.
+
+    A genuine hang still fails the test: this re-raises
+    ``subprocess.TimeoutExpired`` after cleanup rather than swallowing it,
+    so a real hang is reported as a test failure instead of leaving the
+    test suite itself hanging (or leaving a leak behind either way).
+    """
+    proc = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(input=input_text, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        # Drain whatever output already exists and reap the process so it
+        # does not become a zombie; the caller still sees the original
+        # TimeoutExpired below.
+        proc.communicate()
+        raise
+    return subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
+
+
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 _REAL_WORKFLOWS_DIR = _TEAM_DIR / "workflows"
 _REAL_PGAI_AGENT_KANBAN_PKG = _TEAM_DIR / "pgai_agent_kanban"
@@ -143,7 +200,13 @@ def _git(repo: pathlib.Path, *args: str) -> None:
 
 
 def _make_valid_dev_tree(dev_tree: pathlib.Path) -> None:
-    """Create a real, minimal git repo with one commit and one tag."""
+    """Create a real, minimal git repo with one commit and one tag.
+
+    Requires git: a "valid" dev tree, by definition, means a real git
+    repository, so callers requesting this dev_tree_mode skip (via the
+    shared availability guard) rather than error when git is absent.
+    """
+    require_binary("git", label="dashboard-render-fixture")
     dev_tree.mkdir(parents=True, exist_ok=True)
     _git(dev_tree, "init", "--initial-branch=main")
     _git(dev_tree, "config", "user.email", "fixture@example.com")
@@ -215,7 +278,7 @@ def build_dashboard_project_root(
 
     # --- kanban.cfg ---
     (root / "kanban.cfg").write_text(
-        "# kanban.cfg — BUG-0112 dashboard render-path fixture\n"
+        "# kanban.cfg — dashboard render-path fixture\n"
         "\n"
         "[paths]\n"
         "\n"
@@ -226,11 +289,11 @@ def build_dashboard_project_root(
 
     # --- projects.cfg: register the single project ---
     (root / "projects.cfg").write_text(
-        "# projects.cfg — BUG-0112 dashboard render-path fixture\n"
+        "# projects.cfg — dashboard render-path fixture\n"
         "\n"
         f"[project:{project_name}]\n"
         "priority=1\n"
-        "description=BUG-0112 dashboard render-path fixture project\n"
+        "description=dashboard render-path fixture project\n"
         "enabled=true\n",
         encoding="utf-8",
     )
@@ -260,7 +323,7 @@ def build_dashboard_project_root(
     # install.sh copies team/pgai_agent_kanban/ there on a real install; this
     # fixture mirrors that so dashboard scripts resolve their helpers without
     # depending on PGAI_DEV_TREE_PATH (a global framework dev-tree pointer
-    # unrelated to BUG-0112's per-project dev_tree_path).
+    # unrelated to this fixture's own per-project dev_tree_path).
     if _REAL_PGAI_AGENT_KANBAN_PKG.is_dir():
         dest_pkg = root / "pgai_agent_kanban"
         if dest_pkg.exists():
@@ -275,7 +338,7 @@ def build_dashboard_project_root(
         f"dev_tree_path = {dev_tree_path}\n" if dev_tree_path is not None else ""
     )
     (proj / "project.cfg").write_text(
-        "# project.cfg — BUG-0112 dashboard render-path fixture\n"
+        "# project.cfg — dashboard render-path fixture\n"
         "\n"
         "[project]\n"
         f"project_name = {project_name}\n"

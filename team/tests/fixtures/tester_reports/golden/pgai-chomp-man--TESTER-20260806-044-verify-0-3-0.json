@@ -1,0 +1,179 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified RC v0.3.0 of pgai-chomp-man against `requirements/v0.3.0-dragons.md`. The RC\nadds dragon enemy entities, autonomous wall-respecting movement, dragon↔Chomp Man\ncollision, lives tracking (start 3), life-loss reset, a GAME OVER state, and a HUD lives\nreadout. The worktree HEAD matches `rc/v0.3.0` (0f7b79e), the tree is clean, and no\nstashes are present. All three prerequisite CODER task branches are merged into the RC\n(commits confirmed on the RC log; feature branches cleaned post-merge, which is normal).\nThe full test suite passes (107 passed, exit 0). All seven acceptance criteria are met,\nconfirmed by a combination of code inspection, executable checks, and live behavioral\nexercise (collision→life-loss→reset→game-over cycle, distinct-dragon placement, and a\n300-tick no-wall-crossing movement run, all run headless). No bugs, no gaps, no stale\nassertions. Clean release.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "AC1 — all changed/added .py compile",
+      "heading": "Finding 1: AC1 — all changed/added .py compile",
+      "level": 3,
+      "body": "**Category:** pass\n`python3 -m py_compile` succeeds for every changed and project `.py` file\n(dragons.py, lives.py, pgai-chomp-man.py, scoring.py, plus the rest of the tree and all\ntest files). Main module `pgai-chomp-man.py` also imports cleanly and exposes a callable\n`run()`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "AC2 — multiple distinct dragons render in the maze",
+      "heading": "Finding 2: AC2 — multiple distinct dragons render in the maze",
+      "level": 3,
+      "body": "**Category:** pass\n`DRAGON_ROSTER` defines 4 dragons (Ember/Frost/Nightshade/Viper), each with a distinct\nRGB color (matches requirements' suggested 3–4). `create_dragons()` places each on its\nown distinct open cell, excluding Chomp Man's start. Behaviorally confirmed: 4 dragons,\n4 distinct colors, 4 distinct cells, none on the player start. `Dragon.draw()` uses a\nrounded-rect body + horn polygons + eyes — a deliberately different silhouette from\n`ChompMan.draw()`'s circle-with-mouth-wedge, so dragons are distinguishable from the\nplayer as well as from each other. `draw_dragons()` renders without error headlessly.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "AC3 — autonomous movement respecting walls",
+      "heading": "Finding 3: AC3 — autonomous movement respecting walls",
+      "level": 3,
+      "body": "**Category:** pass\nDragon placement and movement both reuse `Maze.is_wall()` / `Maze.in_bounds()` via\n`open_cells()` and `open_directions()` — the exact predicates `ChompMan.move()` checks\nin player.py. No duplicate wall-collision implementation exists in dragons.py (grep\nconfirms it references `maze.is_wall`, never re-derives wall-ness from layout chars or\n`CellType`). `choose_dragon_direction()` continues straight through corridors and picks\namong open, non-reversing directions at junctions. Behaviorally confirmed: over 300\nmovement ticks with 4 dragons, no dragon ever landed on a wall cell; a T-junction test\nconfirms direction actually varies (not deterministic straight-only).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "AC4 — dragon↔Chomp Man collision costs a life",
+      "heading": "Finding 4: AC4 — dragon↔Chomp Man collision costs a life",
+      "level": 3,
+      "body": "**Category:** pass\n`check_dragon_collision()` is a cell-occupancy equality test, checked in the main loop\nafter every player movement step AND after every dragon movement step (both ways a catch\ncan occur). A collision calls `apply_life_loss()`, which decrements the counter.\nBehaviorally confirmed via forced collisions.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "AC5 — lives start at 3, HUD display, decrement, GAME OVER at 0",
+      "heading": "Finding 5: AC5 — lives start at 3, HUD display, decrement, GAME OVER at 0",
+      "level": 3,
+      "body": "**Category:** pass\n`LIVES_START = 3`; `Lives()` defaults to it. `render_score_hud()` was extended to render\n`SCORE: n   LIVES: n` on the single existing HUD line (reusing the existing HUD approach\nper the requirements). `lose_life()` decrements floored at 0; `is_game_over()` fires at\n0; the main loop sets `game_over` and gates all movement (player and dragon) on it, then\ndraws `render_game_over_message()`. Behaviorally confirmed: life cycle 3→2→1→0 with\ngame-over True exactly on the final loss; GAME OVER overlay renders headlessly.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "AC6 — non-final life loss resets positions and continues",
+      "heading": "Finding 6: AC6 — non-final life loss resets positions and continues",
+      "level": 3,
+      "body": "**Category:** pass\n`apply_life_loss()` resets Chomp Man and every dragon to captured start positions (and\nclears each dragon's `direction` to None) on a non-final loss, and deliberately does NOT\nreset on the final loss (freeze-on-game-over, matching board-clear freeze-on-win).\nBehaviorally confirmed: after each non-final loss the player and all dragons returned to\ntheir recorded start cells and play continued.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "AC7 — dragon state structured for a future \"vulnerable\" mode",
+      "heading": "Finding 7: AC7 — dragon state structured for a future \"vulnerable\" mode",
+      "level": 3,
+      "body": "**Category:** pass\n`DragonState` is an `enum.Enum` with `NORMAL` today; each `Dragon` carries a plain\nmutable `state` attribute (not behavior hardcoded into the class or `draw()`), and\nmovement never reads/branches on `state`. Adding a `VULNERABLE/FLEEING` member in v0.4.0\nrequires no restructuring of `Dragon` or `create_dragons()`. The structure is ready for\nthe v0.4.0 extension. `Dragon.direction` follows the same extensible plain-field shape.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Constraint — reuse wall-collision, do not duplicate",
+      "heading": "Finding 8: Constraint — reuse wall-collision, do not duplicate",
+      "level": 3,
+      "body": "**Category:** pass\nConfirmed shared: both `player.ChompMan.move()` and dragon movement/placement route\nthrough `maze.is_wall()` + `maze.in_bounds()`. No second wall implementation.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

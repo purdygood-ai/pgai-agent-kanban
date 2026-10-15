@@ -36,9 +36,10 @@ Response shape:
   }
 
 Classification contract:
-  Status classification is delegated entirely to board_classifier.py, which
-  mirrors the classification logic of the tmux dashboard renderer:
-    team/scripts/dashboard/column-render.sh
+  Status classification is delegated entirely to pgai_agent_kanban.board,
+  which mirrors the classification logic of the tmux dashboard renderer
+  (team/scripts/dashboard/column-render.sh) and records where the board
+  deliberately differs: a WONT-DO task is "wont-do", never "done".
 
   This is the house-sibling rule: /board and the tmux renderer must produce
   the same status for any given item.  The parity-pin test in test_board.py
@@ -47,11 +48,16 @@ Classification contract:
 Constraints:
   - GET only; no mutations.
   - ?project=<name> returns 422 (unfiltered aggregation; the UI filters client-side).
-  - Per-project item caps mirror the tmux renderer's dashboard_max_rows setting
-    (from projects.cfg; default 20).  Items beyond the cap are counted in
-    `truncated`, not returned.
-  - Quarantined files (in bugs/.rejected/ and priority/.rejected/) surface as
-    kind=quarantine items with status=blocked.
+  - Per-project item caps mirror the tmux renderer's dashboard_max_rows setting:
+    the projects.cfg value clamped to 5-100, else DASHBOARD_MAX_ROWS from the
+    server's environment, else kanban.cfg [dashboard] max_rows, else 20.
+    Items beyond the cap are counted in `truncated`, not returned.
+  - Quarantined files (in the project's rejected/ directory, and in the legacy
+    bugs/.rejected/, priority/.rejected/ and requirements/.rejected/) surface
+    as kind=quarantine items with status=blocked, in the column of the intake
+    directory they came from (the .reason sidecar's original_dir /
+    original_type, else the BUG-/PRIORITY- name prefix). A file whose origin
+    cannot be told belongs to no column and is not shown.
   - `color` is the registry's hex color string verbatim (#RRGGBB); the server
     never emits CSS.
   - Loopback trust boundary: dev_tree_path and git_repo fields are not redacted.
@@ -59,7 +65,7 @@ Constraints:
 
 from __future__ import annotations
 
-import configparser
+import os
 import pathlib
 import re
 from datetime import datetime, timezone
@@ -68,10 +74,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from pgai_agent_kanban.dashboard._rejected import quarantined_files
+from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.palette import load_default_palette
-from ..adapter import HTTP_UNPROCESSABLE_ENTITY
-from ..dependencies import warn_unknown_query_params
-from ..board_classifier import (
+from pgai_agent_kanban.board import (
     COLUMN_ORDER,
     COLUMN_KINDS,
     classify_input_item,
@@ -83,6 +89,9 @@ from ..board_classifier import (
     parse_queue_line,
     read_task_state_from_status_md,
 )
+from ...ops.context import OpsContext
+from ..adapter import HTTP_UNPROCESSABLE_ENTITY
+from ..dependencies import warn_unknown_query_params
 
 __all__ = ["router"]
 
@@ -93,6 +102,10 @@ router = APIRouter(tags=["board"])
 # (Source: column-render.sh DASHBOARD_MAX_ROWS default ~line 179)
 # ---------------------------------------------------------------------------
 _DEFAULT_MAX_ROWS = 20
+#: The clamp the tmux renderer applies to a per-project dashboard_max_rows
+#: (scripts/lib/projects.sh projects_cfg_max_rows).
+_MIN_PROJECT_ROWS = 5
+_MAX_PROJECT_ROWS = 100
 
 # ---------------------------------------------------------------------------
 # projects.cfg helpers
@@ -108,42 +121,62 @@ def _read_projects_registry(
       - name: str
       - priority: int
       - color: str        (hex color string, palette fallback when absent)
-      - max_rows: int     (dashboard_max_rows, default 20)
+      - max_rows: int     (dashboard_max_rows clamped to 5-100, else the
+                           fallback :func:`_fallback_max_rows` gives)
 
-    Projects are sorted by (priority, registration_index) ascending.
+    Projects are sorted by (priority, registration_index) ascending, as
+    ``pgai_agent_kanban.lib.ini.projects_registry`` returns them.
     """
-    cfg_path = kanban_root / "projects.cfg"
-    if not cfg_path.is_file():
-        return []
+    fallback = _fallback_max_rows(kanban_root)
+    return [
+        {
+            "name": entry.name,
+            "priority": entry.priority,
+            # dashboard_color from registry; empty → palette fallback at render time.
+            "color": entry.color,
+            "max_rows": _max_rows(entry.options.get("dashboard_max_rows"), fallback),
+        }
+        for entry in ini.projects_registry(kanban_root)
+    ]
 
-    parser = configparser.RawConfigParser()
-    parser.read(str(cfg_path), encoding="utf-8")
 
-    entries: list[tuple[int, int, dict]] = []
-    for idx, section in enumerate(parser.sections()):
-        if not section.startswith("project:"):
-            continue
-        name = section[len("project:"):]
-        try:
-            priority = parser.getint(section, "priority")
-        except (configparser.NoOptionError, ValueError):
-            priority = 999
+def _positive_int(raw: Optional[str]) -> Optional[int]:
+    """*raw* as a positive int (digits only, surrounding spaces ignored), else None."""
+    text = (raw or "").strip()
+    if not text.isdigit():
+        return None
+    value = int(text)
+    return value if value >= 1 else None
 
-        # dashboard_color from registry; empty → palette fallback at render time.
-        color = parser.get(section, "dashboard_color", fallback="").strip()
 
-        try:
-            max_rows = parser.getint(section, "dashboard_max_rows")
-            if max_rows < 1:
-                max_rows = _DEFAULT_MAX_ROWS
-        except (configparser.NoOptionError, ValueError):
-            max_rows = _DEFAULT_MAX_ROWS
+def _fallback_max_rows(kanban_root: pathlib.Path) -> int:
+    """The row cap for a project with no usable dashboard_max_rows.
 
-        entries.append((priority, idx, {"name": name, "priority": priority,
-                                        "color": color, "max_rows": max_rows}))
+    The tmux renderer's chain (scripts/lib/dashboard/column_render_config.sh):
+    DASHBOARD_MAX_ROWS from the environment, else kanban.cfg [dashboard]
+    max_rows, else 20.
+    """
+    env_value = _positive_int(os.environ.get("DASHBOARD_MAX_ROWS"))
+    if env_value is not None:
+        return env_value
+    cfg = pathlib.Path(kanban_root) / "kanban.cfg"
+    if cfg.is_file():
+        cfg_value = _positive_int(ini.read_line_value(cfg, "dashboard", "max_rows"))
+        if cfg_value is not None:
+            return cfg_value
+    return _DEFAULT_MAX_ROWS
 
-    entries.sort(key=lambda e: (e[0], e[1]))
-    return [entry for _, _, entry in entries]
+
+def _max_rows(raw: Optional[str], fallback: int = _DEFAULT_MAX_ROWS) -> int:
+    """Return the project's row cap, as the tmux renderer computes it.
+
+    ``dashboard_max_rows`` clamped to 5-100 when it is a whole number;
+    *fallback* when it is absent or not a whole number.
+    """
+    text = (raw or "").strip()
+    if not text.isdigit():
+        return fallback
+    return min(max(int(text), _MIN_PROJECT_ROWS), _MAX_PROJECT_ROWS)
 
 
 def _assign_palette_colors(projects: list[dict]) -> None:
@@ -215,6 +248,7 @@ def _read_input_column(
     project_name: str,
     project_color: str,
     project_dir: pathlib.Path,
+    rejected_dir: pathlib.Path,
     column: str,
     active_rc: str,
     last_released: str,
@@ -224,6 +258,11 @@ def _read_input_column(
 
     Returns ``(items, truncated)`` where items is capped at max_rows and
     truncated is the count of items beyond that cap.
+
+    The column's quarantined ``.md`` files -- those
+    ``dashboard._rejected.quarantined_files`` finds in *rejected_dir* or the
+    legacy ``.rejected/`` directories whose origin is this column's intake
+    directory -- come first, as kind=quarantine items.
 
     Items are sorted newest-first by mtime (matching the tmux renderer's
     default sort for non-requirements columns).  Requirements items are also
@@ -254,28 +293,27 @@ def _read_input_column(
     # Sort newest-first by mtime (mirrors renderer default).
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
-    # Also collect quarantined files from the .rejected/ subdirectory.
-    rejected_dir = input_dir / ".rejected"
+    # Also collect the files quarantined from this column's intake directory.
     quarantine_items = []
-    if rejected_dir.is_dir():
-        for entry in rejected_dir.iterdir():
-            if not entry.is_file():
-                continue
-            if not entry.name.endswith(".md"):
-                continue
-            stem = entry.stem
-            key = _compact_id_for_input(stem, column)
-            quarantine_items.append({
-                "id": f"{project_name}/quarantine/{key}",
-                "project": project_name,
-                "kind": "quarantine",
-                "key": key,
-                "title": stem,
-                "status": "blocked",
-                "version_label": "",
-                "active_rc": False,
-                "color": project_color,
-            })
+    for quarantined in quarantined_files(project_dir, rejected_dir):
+        entry = quarantined.path
+        if quarantined.origin != input_dir.name:
+            continue
+        if not entry.name.endswith(".md"):
+            continue
+        stem = entry.stem
+        key = _compact_id_for_input(stem, column)
+        quarantine_items.append({
+            "id": f"{project_name}/quarantine/{key}",
+            "project": project_name,
+            "kind": "quarantine",
+            "key": key,
+            "title": stem,
+            "status": "blocked",
+            "version_label": "",
+            "active_rc": False,
+            "color": project_color,
+        })
 
     all_items = []
     for path in candidates:
@@ -401,7 +439,7 @@ def get_board(
 
     Returns all registered projects and all eight columns with structured items.
     Status classification mirrors the tmux dashboard renderer exactly — see
-    board_classifier.py for the shared logic.
+    pgai_agent_kanban.board for the shared logic.
 
     Column order (fixed): BUGS, PRIORITIES, REQUIREMENTS, PM, CODER, WRITER, TESTER, CM.
 
@@ -419,8 +457,10 @@ def get_board(
     ``dashboard_max_rows`` setting (from projects.cfg; default 20).
     Items beyond the cap are counted in ``truncated``, not returned.
 
-    Quarantined files (in ``bugs/.rejected/`` and ``priority/.rejected/``)
-    surface as kind=quarantine items with status=blocked.
+    Quarantined files (in the project's ``rejected/`` directory, and in the
+    legacy ``bugs/.rejected/``, ``priority/.rejected/`` and
+    ``requirements/.rejected/``) surface as kind=quarantine items with
+    status=blocked, in the column of the intake directory they came from.
 
     Query parameters:
 
@@ -446,6 +486,7 @@ def get_board(
         )
 
     kanban_root: pathlib.Path = request.app.state.api_cfg.kanban_root
+    ops_ctx = OpsContext(kanban_root=kanban_root)
 
     # Read all registered projects.
     projects_meta = _read_projects_registry(kanban_root)
@@ -489,6 +530,7 @@ def get_board(
                     project_name=proj["name"],
                     project_color=proj["color"],
                     project_dir=project_dir,
+                    rejected_dir=ops_ctx.rejected_dir(proj["name"]),
                     column=col_name,
                     active_rc=active_rc,
                     last_released=last_released,

@@ -19,7 +19,7 @@ Tests cover the acceptance criteria from the task README:
   8. Internal-ID leak gate — grep for BUG-[0-9] in generated output returns zero
      hits.
 
-Test naming describes behavior, not bug IDs or scaffolding labels (SOP.md Anti-pattern 6).
+Test naming describes behavior, not bug IDs or scaffolding labels (roles/TESTER.md Anti-pattern 6).
 All temp paths use pytest's tmp_path fixture (redirected to the framework temp root).
 No bare /tmp paths in this file.
 """
@@ -1112,10 +1112,10 @@ class TestPublicIdStickiness:
         bug1_rec = parse_bug_file(bugs_dir / "BUG-0001-alpha-crash.md")
         bug2_rec = parse_bug_file(bugs_dir / "BUG-0002-beta-crash.md")
         assert bug1_rec.public_id == "KI-1.0.0.1", (
-            f"KI-1.0.0.1 not persisted to BUG-0001; got '{bug1_rec.public_id}'"
+            f"KI-1.0.0.1 not persisted to the first bug file; got '{bug1_rec.public_id}'"
         )
         assert bug2_rec.public_id == "KI-1.0.0.2", (
-            f"KI-1.0.0.2 not persisted to BUG-0002; got '{bug2_rec.public_id}'"
+            f"KI-1.0.0.2 not persisted to the second bug file; got '{bug2_rec.public_id}'"
         )
 
         # Add a third bug (no Public ID yet).
@@ -1213,7 +1213,7 @@ class TestContentQualityFixed:
       (c) A bug whose ## Symptom begins with a triple-backtick code fence does
           not emit a stray fence string into the rendered Fixed line.
 
-    All three tests fail against the pre-fix writer and pass with the fix.
+    Each test fails against a writer that shows the regression it names.
     """
 
     def test_multi_line_bullet_produces_single_fixed_item(
@@ -1221,9 +1221,9 @@ class TestContentQualityFixed:
     ) -> None:
         """A multi-line bullet in ## Bug Fixes yields exactly one Fixed line.
 
-        The pre-fix parser iterated every line individually, so continuation
-        lines would each become separate candidate items.  The fixed parser
-        joins them before extraction, producing a single Fixed entry.
+        A parser that iterates every line individually turns each continuation
+        line into a separate candidate item.  The parser joins them before
+        extraction, producing a single Fixed entry.
         """
         # Write release notes directly to avoid textwrap.dedent interaction with
         # multi-line bug_fixes content that has less indentation than the template.
@@ -1338,11 +1338,11 @@ class TestContentQualityFixed:
     ) -> None:
         """A short BUG-ID token embedded in prose does not surface a placeholder.
 
-        The pre-fix extractor matched any BUG-\\d+ token, so 'BUG-92' inside a
-        prose comment would be extracted as a bug ID.  With no matching bug file,
-        the renderer emitted '(internal fix — bug file not found)'.  The fixed
-        extractor requires 4+ digits at a canonical position, so 'BUG-92' in
-        the middle of prose is ignored.
+        An extractor that matches any BUG-\\d+ token pulls a short ID like
+        e.g. 'BUG-92' inside a prose comment out as a bug ID, and with no
+        matching bug file the renderer then emits '(internal fix — bug
+        file not found)'.  The extractor requires 4+ digits at a
+        canonical position, so a short ID in the middle of prose is ignored.
         """
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -1351,7 +1351,8 @@ class TestContentQualityFixed:
             bugs=[],
             release_kwargs={
                 "v1.1.0": {
-                    # A prose bullet where "BUG-92" appears inside a parenthetical.
+                    # A prose bullet where a short bug-ID token, e.g. "BUG-92",
+                    # appears inside a parenthetical.
                     # No matching bug file exists for any ID in this note.
                     "bug_fixes": (
                         "- Running pre-flight check during v1.0.0 RC "
@@ -1364,7 +1365,8 @@ class TestContentQualityFixed:
 
         # The placeholder must not appear anywhere in the output.
         assert "internal fix — bug file not found" not in content, (
-            "Phantom BUG-92 token caused a 'bug file not found' placeholder in output"
+            "A bug-shaped token embedded in changelog prose caused a "
+            "'bug file not found' placeholder in output"
         )
         assert "bug file not found" not in content, (
             "Unexpected 'bug file not found' text found in output"
@@ -1376,12 +1378,12 @@ class TestContentQualityFixed:
         """A bug whose ## Symptom starts with a lone code-fence line does not
         produce a bare '```' as the only content of the Fixed line.
 
-        The pre-fix parser used the first non-empty line of ## Symptom as the
-        symptom string.  When the symptom section opened with a lone '```'
-        fence line (as in the v1.10.0 regression from an earlier defect), the rendered
-        Fixed section contained only '```' — a meaningless, unclosed fence.
+        A parser that uses the first non-empty line of ## Symptom as the
+        symptom string renders only '```' — a meaningless, unclosed fence —
+        in the Fixed section when the symptom section opens with a lone '```'
+        fence line (as in the v1.10.0 regression from an earlier defect).
 
-        The fixed parser uses _first_sentence() which collapses the entire
+        The parser uses _first_sentence() which collapses the entire
         symptom block into a single flat string before extracting a sentence,
         so the rendered Fixed line contains the actual prose description rather
         than the bare opening fence.
@@ -1463,9 +1465,9 @@ class TestContentQualityFixed:
         fixed_body = fixed_match.group(1).strip()
 
         # The Fixed body must contain the bug's prose description.
-        # Before the fix, the Fixed body was just '```' (a lone stray fence);
-        # after the fix it contains the joined symptom text including the
-        # prose sentence that follows the code block.
+        # The defect shape this guards: a Fixed body reduced to just '```'
+        # (a lone stray fence). The correct body carries the joined symptom
+        # text, including the prose sentence that follows the code block.
         assert "fence" in fixed_body.lower() or "changelog" in fixed_body.lower(), (
             f"Fixed line does not contain the prose symptom description: {fixed_body!r}"
         )

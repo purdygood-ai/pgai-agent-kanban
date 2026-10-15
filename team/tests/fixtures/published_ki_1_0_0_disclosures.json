@@ -1,0 +1,7 @@
+{
+  "KI-1.0.0.1": "`scripts/dashboard/create.sh` fails on Ubuntu 24.04 with `size missing` emitted by tmux, leaving the dashboard partially constructed (window 0 never splits past one pane).",
+  "KI-1.0.0.2": "`shell-env_example` line 34 references a misspelled variable in the commented-out convenience export: `$PGA_AGENT_KANBAN_ROOT_PATH` (missing the `I`) instead of `$PGAI_AGENT_KANBAN_ROOT_PATH` (the correct variable, defined one line above on line 33).",
+  "KI-1.0.0.3": "Discovery/PM re-activates a requirements bundle that the operator has terminally closed, overwriting its terminal state.",
+  "KI-1.0.0.4": "`delete.sh` refuses to delete an intake item that IS in a terminal state, and its refusal message contradicts itself: The item's state is `wont-do`; the guard says that is \"not a terminal state\"; the remedy text says to move it to \"DONE or WONT-DO first\" — i.e.",
+  "KI-1.0.0.5": "The tmux dashboard's per-project agent columns sort task rows by ID descending (`column-render.sh` ~line 914/963: `reverse=True`) and truncate to `max_rows_per_project` (default 8)."
+}

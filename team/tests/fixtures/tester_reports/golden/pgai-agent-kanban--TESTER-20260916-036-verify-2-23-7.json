@@ -1,0 +1,326 @@
+{
+  "recommendation": "pass",
+  "systemic_risk": "low",
+  "summary": "Verified release candidate `ai_rc/v2.23.7` (HEAD `37544e9`) against\n`requirements/v2.23.7-bugfix-bundle-20260916.md`, a single-item BUG bundle\ncarrying `BUG-0303-wake-flag-scrub-has-no-guard`. The RC diff against `ai_main`\nis two test files (+154/-10) and no production code: unit coverage for\n`scrub_agent_scoped_env` and `AGENT_SCOPED_ENV_NAMES` in\n`team/tests/unit/test_scrubbed_subprocess_env.py` (CODER-20260916-033), and a\ncall-site guard in `team/tests/integration/test_cm_release_synthetic.py` that\nfactors `_run_cm_script`'s environment construction into `_build_cm_script_env`\nand asserts the scrub guarantee directly (CODER-20260916-034). Both gated\nrunners exited 0. The fix was verified behaviourally, not structurally: five\nindependent mutations of the guarded surface were injected into a throwaway\nclone and every one turned a new test red — including the exact failure mode\nBUG-0303 described, where deleting the scrub call was previously undetectable\non a host without `PGAI_AGENT_WAKE_ACTIVE` in the ambient shell. The build ran\nwithout manual intervention.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Pre-flight — RC intact, worktree matches the RC commit",
+      "heading": "Finding 1: Pre-flight — RC intact, worktree matches the RC commit",
+      "level": 3,
+      "body": "**Category:** pass\n\n`git rev-parse HEAD` = `git rev-parse ai_rc/v2.23.7` =\n`37544e9862daf178b25a90009d913c89f0098075`. `git status --porcelain` empty,\n`git stash list` empty. Scanned every task folder under\n`$PGAI_PROJECT_ROOT/tasks/`; every `DONE` task naming a `## Feature Branch`\nother than `none` has had that branch deleted post-merge (the normal shape),\nso Checks 1 and 2 pass trivially with zero anomalies. The two contributing\ntasks' merges are both present on the RC:\n\n```\n37544e9 Merge ai_feature/CODER-20260916-034-cm-fixture-env-scrub-guard into ai_rc/v2.23.7\n93cae7f Expose and guard the environment _run_cm_script builds for its child\ndf7a8e5 Merge ai_feature/CODER-20260916-033-scrub-helper-unit-guard into ai_rc/v2.23.7\nc6ea2b8 Add unit coverage for scrub_agent_scoped_env and AGENT_SCOPED_ENV_NAMES\n```\n\nBoth merges are `--no-ff` merge commits, as the branch-and-merge law requires.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "`release-state.md` schema and version ordering (Step 6.1)",
+      "heading": "Finding 2: `release-state.md` schema and version ordering (Step 6.1)",
+      "level": 3,
+      "body": "**Category:** pass\n\nAll four fields present and well-formed: `## Active RC` = `v2.23.7`,\n`## RC Opened At` = `2026-09-16T15:39:16+00:00`, `## RC Opened By Task` =\n`CM-20260916-035-open-rc-2-23-7`, `## Last Released` = `v2.23.6`.\n`pp_last_released_version \"pgai-agent-kanban\"` returns `v2.23.6`; `semver_gt\n\"v2.23.7\" \"v2.23.6\"` returns true. Version comparison was made with the shared\nhelper (`team/scripts/lib/semver.sh`), never inline. The Active RC value is\nconsistent with the actual branch state — `ai_rc/v2.23.7` exists locally and is\nwhat the worktree is detached at. No drift.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Gated unit suite (Step 5a / 6.6)",
+      "heading": "Finding 3: Gated unit suite (Step 5a / 6.6)",
+      "level": 3,
+      "body": "**Category:** pass\n\n```\nbash team/scripts/run-unit-tests.sh --coverage\nUNIT_EXIT=0\n4644 passed, 31 skipped in 843.59s (0:14:03)\nUnit tests PASSED\n[gated-runner] bare_tmp_cleanliness: OK\n[gated-runner] listener_cleanliness: OK\n[gated-runner] findings file written: /tmp/pgai_kanban_tmp/lint/findings-unit.json (0 finding(s))\n```\n\nOutput captured at `/tmp/pgai_kanban_tmp/tester/unit.log`. The lint pre-flight\npassed as part of the runner, including `lint_skip_bug_gate: OK — all skip\nannotations are compliant.`",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Gated integration suite (Step 5a / 6.7)",
+      "heading": "Finding 4: Gated integration suite (Step 5a / 6.7)",
+      "level": 3,
+      "body": "**Category:** pass\n\n```\nbash team/scripts/run-integration-tests.sh --coverage\nINTEGRATION_EXIT=0\n515 passed, 1 skipped in 553.92s (0:09:13)\nIntegration tests PASSED\n[gated-runner] bare_tmp_cleanliness: OK\n[gated-runner] listener_cleanliness: OK\n[gated-runner] findings file written: /tmp/pgai_kanban_tmp/lint/findings-integration.json (0 finding(s))\n```\n\nOutput captured at `/tmp/pgai_kanban_tmp/tester/integration.log`. The PASS\nevidence for this report is these two runner exit codes, not any direct pytest\nline.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "RC acceptance criterion — \"All Python files compile cleanly\"",
+      "heading": "Finding 5: RC acceptance criterion — \"All Python files compile cleanly\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n`python3 -m compileall -q team/` → exit 0, no output. The two changed files\nalso pass individually: `python3 -m compileall -q\ntests/integration/test_cm_release_synthetic.py` and\n`... tests/unit/test_scrubbed_subprocess_env.py` both report no errors (this is\nCODER-20260916-034's acceptance criterion 6 verbatim).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "RC acceptance criterion — \"All bash files pass syntax check\"",
+      "heading": "Finding 6: RC acceptance criterion — \"All bash files pass syntax check\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n`bash -n` over every `*.sh` under `team/`: 278 files checked, 0 failures.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "RC acceptance criterion — \"Each bundled item is addressed\"",
+      "heading": "Finding 7: RC acceptance criterion — \"Each bundled item is addressed\"",
+      "level": 3,
+      "body": "**Category:** pass\n\n`BUG-0303-wake-flag-scrub-has-no-guard` asked for four specific things under\nits `## Expected` and `## Files Involved`. Each is delivered:\n\n1. *A unit test asserting a base dict carrying every name in\n   `AGENT_SCOPED_ENV_NAMES` comes back without them* —\n   `test_scrub_agent_scoped_env_removes_every_agent_scoped_name`, driven by a\n   comprehension over the tuple itself rather than a transcribed literal.\n2. *That unrelated names survive untouched* —\n   `test_scrub_agent_scoped_env_leaves_unrelated_names_untouched`.\n3. *That the dict is mutated in place and also returned* —\n   `test_scrub_agent_scoped_env_mutates_in_place_and_returns_same_object`\n   (`assert result is env`).\n4. *That the tuple is non-empty* — `test_agent_scoped_env_names_is_non_empty`.\n\nThe bug's stronger ask — \"an assertion that the environment this helper hands\nto a child never contains an agent-scoped name unless the caller passed one\nthrough `extra_env`\" — is delivered by `TestRunCmScriptEnvironmentScrub` in\n`test_cm_release_synthetic.py`, built on the new `_build_cm_script_env()`\nfactoring. The bug explicitly permitted \"factoring the env construction into a\nsmall named function the test can call directly\"; that is the route taken, and\n`_run_cm_script`'s signature and return type are unchanged, so the two\nship-policy tests at `test_ship_policy_acceptance.py:759` and `:866` are\nuntouched — the bug asked for \"a guard beside them, not a replacement\", and\nthat is what landed.\n\nThe fixture module `team/tests/fixtures/scrubbed_subprocess_env.py` is\nbyte-for-byte unchanged in this RC (confirmed against\n`git diff ai_main..ai_rc/v2.23.7`), so CODER-20260916-033's \"no production\nbehaviour change\" constraint holds.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Behavioral verification — the guard fires (Step 6.5, Principle 4)",
+      "heading": "Finding 8: Behavioral verification — the guard fires (Step 6.5, Principle 4)",
+      "level": 3,
+      "body": "**Category:** pass\n\nThis is the substance of the RC: BUG-0303 is a bug about a test that cannot\ndetect its own regression, so structural confirmation that tests exist proves\nnothing. Five mutations were injected into a **throwaway `git clone`** of the\nworktree (never a `cp -r`, never the live tree) at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/guard-probe-274548`, each\nreverted with `git checkout --` before the next. All runs used a sandboxed\nroot per the live-install safety rule.\n\n**Mutation 1 — delete `scrub_agent_scoped_env(base_env)` (the exact revert\nBUG-0303 says was invisible), run under `env -u PGAI_AGENT_WAKE_ACTIVE`:**\n\n```\nFAILED tests/integration/test_cm_release_synthetic.py::TestRunCmScriptEnvironmentScrub::test_ambient_agent_scoped_signal_is_absent_from_built_env\nE  AssertionError: PGAI_AGENT_WAKE_ACTIVE was present in the current process and must be\n   scrubbed from the environment _run_cm_script builds, but was found in the result: '1'\n1 failed, 1 passed in 0.29s\n```\n\nIn the same mutated clone and the same environment, the old indirect coverage\nstayed green — `tests/integration/test_ship_policy_acceptance.py::TestOperatorForceShipsOverriddenTrigger`\n→ `1 passed in 3.81s`. That contrast is the fix: the pre-RC estate could not\nsee the deletion on this host; the new guard does.\n\n**Mutation 2 — `AGENT_SCOPED_ENV_NAMES = ()`:**\n`FAILED ...::test_agent_scoped_env_names_is_non_empty` → `1 failed, 11 passed`.\n(This is exactly why criterion 4 exists: with an empty tuple the removal test\nwould otherwise pass vacuously — and it did pass, while test 4 caught it.)\n\n**Mutation 3 — `scrub_agent_scoped_env` body reduced to `return env`:**\n`FAILED ...::test_scrub_agent_scoped_env_removes_every_agent_scoped_name` →\n`1 failed, 11 passed`.\n\n**Mutation 4 — a second name added to the tuple but only the first wired into\nthe removal loop (`AGENT_SCOPED_ENV_NAMES[:1]`), i.e. BUG-0303's \"a future edit\nthat ... adds a name without wiring it in is equally invisible\":**\n`FAILED ...::test_scrub_agent_scoped_env_removes_every_agent_scoped_name` →\n`1 failed, 11 passed`.\n\n**Mutation 5 — scrub moved to *after* the `extra_env` merge, breaking the\nexplicit opt-in path:**\n`FAILED ...::TestRunCmScriptEnvironmentScrub::test_extra_env_still_delivers_agent_scoped_signal_explicitly`\n→ `1 failed, 1 passed`.\n\nPer Anti-pattern 6 (verify the original failure mode *and* the new normal\ncase), both directions were exercised: the original failure mode is Mutation 1,\nand the new normal case is the unmutated tree passing under both ambient\nconditions (Finding 9). After every mutation the clone was restored and\n`git status --porcelain` confirmed clean.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Host-independence — the verdict is a property of the tree, not the shell",
+      "heading": "Finding 9: Host-independence — the verdict is a property of the tree, not the shell",
+      "level": 3,
+      "body": "**Category:** pass\n\nThis is BUG-0303's central complaint, and the per-ticket acceptance criteria\nfor both CODER tasks state it as a runnable command. Both run from `team/`:\n\n```\nenv -u PGAI_AGENT_WAKE_ACTIVE python3 -m pytest tests/unit/test_scrubbed_subprocess_env.py -q\n  → 12 passed in 0.12s\nPGAI_AGENT_WAKE_ACTIVE=1  python3 -m pytest tests/unit/test_scrubbed_subprocess_env.py -q\n  → 12 passed in 0.14s\n\nenv -u PGAI_AGENT_WAKE_ACTIVE python3 -m pytest tests/integration/test_cm_release_synthetic.py \\\n    \"tests/integration/test_ship_policy_acceptance.py::TestOperatorForceShipsOverriddenTrigger\" -q\n  → 18 passed in 40.01s\nPGAI_AGENT_WAKE_ACTIVE=1  python3 -m pytest tests/integration/test_cm_release_synthetic.py \\\n    \"tests/integration/test_ship_policy_acceptance.py::TestOperatorForceShipsOverriddenTrigger\" -q\n  → 18 passed in 38.73s\n```\n\nIdentical counts under both ambient conditions, in both suites. The count moved\nfrom the 16 recorded in BUG-0303 to 18 — the two new guard tests. These were\nrun as acceptance-criteria checks, not as PASS evidence; PASS evidence is\nFindings 3 and 4.\n\nThe mechanism is right, not just the outcome: the unit tests build their own\ndict and never read `os.environ`, and the integration guard uses\n`monkeypatch.setenv` / `monkeypatch.delenv` to *establish* the condition it\nneeds rather than inheriting it. That is the structural fix for anti-pattern 2,\nnot a workaround for it.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Constraint — no provenance tokens in shipped test code (Step 6.9)",
+      "heading": "Finding 10: Constraint — no provenance tokens in shipped test code (Step 6.9)",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth CODER tasks forbid a bug identifier, task ID, or RC version in the shipped\ntest code, docstrings, or comments; `SOP-core.md` (\"Naming\") binds this\ntree-wide. Grepped the added regions for `BUG-\\d`, `CODER-\\d`, `TESTER-\\d`,\n`PM-\\d`, `CM-\\d`, `v2.N.N`, `rc/v`: **zero hits in any line this RC added**.\nThe pre-existing matches in `test_cm_release_synthetic.py` (lines 2084-2753 —\n`v2.3.5`, `CODER-20260101-042`, `BUG-0001-...`) are all synthetic fixture data\nand usage examples in cases (j) and (k), a sanctioned exception, and all\npredate this RC. The gated runners' `provenance` hygiene class also passed with\nzero findings.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Skip-cites-real-bug gate (Step 6.13)",
+      "heading": "Finding 11: Skip-cites-real-bug gate (Step 6.13)",
+      "level": 3,
+      "body": "**Category:** pass\n\nBoth runners report `lint_skip_bug_gate: checking for placeholder skip IDs ...`\n/ `BUG-NNNN file-existence check: 0 missing files` / `OK — all skip annotations\nare compliant.` Confirmed by hand: no `BUG-SKIP` or `BUG-<letters>` placeholder\nshape appears in a skip annotation in `team/tests/unit` or\n`team/tests/integration`. The `BUG-NNNN` strings that do appear in those\ndirectories (`BUG-0404`, `BUG-0405`, `BUG-0503`, `BUG-1234`–`BUG-1237`) are\nsynthetic fixture values constructed inside tests of the bug-filing machinery,\nnot citations in skip annotations. This RC adds no skipped test.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Synthetic release simulation (Step 6.8)",
+      "heading": "Finding 12: Synthetic release simulation (Step 6.8)",
+      "level": 3,
+      "body": "**Category:** pass\n\nStrictly, the trigger condition is not met — the RC diff touches no\nrelease-lifecycle production file (`cm-release.sh`, `cm-open-rc.sh`,\n`cm-cancel-rc.sh`, `team/scripts/lib/project_paths.sh`, nothing under\n`team/scripts/` at all). It was run anyway, because the RC modifies the\nsynthetic-release test file itself:\n`team/tests/integration/test_cm_release_synthetic.py` ran clean in full (18\npassed with the ship-policy class, under both ambient conditions), inside the\ngated integration suite and again standalone against an isolated temp root. No\nreal branch was touched.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "Prerequisite dependency graph (Step 6.10)",
+      "heading": "Finding 13: Prerequisite dependency graph (Step 6.10)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`CM-20260916-035-open-rc-2-23-7` → {`CODER-20260916-033`,\n`CODER-20260916-034`} → `TESTER-20260916-036` → `CM-20260916-038-release-2-23-7`.\nAcyclic; every referenced task ID resolves to a real task folder; the\nlifecycle bookends are correctly linked (CM-open at the start, TESTER plus\nCM-release at the end). Sequence numbers are non-colliding; the gap at 037 is\nthe unused optional-approval slot, not a dangling reference. Queue markers\nmatch task state in every case: CM-035 `[x]`/DONE, CODER-033 `[x]`/DONE,\nCODER-034 `[x]`/DONE, TESTER-036 `[A]`/WORKING (this run), CM-038 `[W]`/WAITING.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "Coding-standards spot-check (Step 6.14)",
+      "heading": "Finding 14: Coding-standards spot-check (Step 6.14)",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo new script under `team/scripts/`, so the `--help` requirement is not\nengaged. No new operational value hardcoded where an operator would want it\nconfigurable (the added literals are test fixtures). `_build_cm_script_env()`\nis a factoring of existing inline construction, not a newly duplicated\nimplementation of anything in `lib/`. The citation\n`docs/test-authoring-guidelines.md` resolves: \"Anti-pattern 2 —\nEnvironment-coupled fixtures\" is at line 49 of that file, so the citation is\naccurate rather than merely plausible.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Rationale is co-located as a comment rather than a docstring",
+      "heading": "Finding 15: Rationale is co-located as a comment rather than a docstring",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nCODER-20260916-033's last acceptance criterion reads: \"The new tests name the\nenvironment-coupled-fixtures anti-pattern from docs/test-authoring-guidelines.md\nin a **docstring** so the next author sees why the guard exists.\" The citation\nlanded in a module-level `#` comment block immediately above the four new tests\n(`test_scrubbed_subprocess_env.py:145-151`) rather than inside a docstring; the\nindividual test docstrings explain each test's own contract but do not name the\nanti-pattern.\n\nRecorded as `pass-with-caveat`, not a gap: the criterion's stated purpose —\n\"so the next author sees why the guard exists\" — is fully met, and a block\ncomment introducing all four tests arguably serves it better than repeating the\ncitation in four separate docstrings. The distinction is\ncomment-versus-docstring placement of prose that is present, correct, and\ncorrectly located. No follow-up is filed and the recommendation is unaffected.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "PASS",
+    "systemic_risk": "low"
+  }
+}

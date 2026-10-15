@@ -2,10 +2,10 @@
 test_cert_branch_normalization_guard.py
 ========================================
 Certification fixture: pm_materialize.py computes the canonical RC/mainline
-branch and normalizes-or-fails plan-supplied branch strings (BUG-0037:
-materializer trusts model-authored branch names).
+branch and normalizes-or-fails plan-supplied branch strings, rather than
+trusting a model-authored branch name verbatim.
 
-This test exercises the fix through the real production entry point —
+This test exercises branch normalization through the real production entry point —
 pm_materialize.py invoked as a subprocess, exactly as pm-agent.sh invokes
 it — proving the following acceptance criteria end to end:
 
@@ -33,8 +33,8 @@ Design notes
 - Each fixture uses its own fresh tmp_path-derived kanban root so task-ID
   sequence numbers are deterministic and comparable across spellings.
 - All temp paths use pytest's tmp_path (never bare /tmp).
-- Test names describe behavior, never bug IDs or ticket IDs (SOP.md
-  anti-pattern 6); the BUG-0037 reference above is doc-only context.
+- Test names describe behavior, never bug IDs or ticket IDs (roles/TESTER.md
+  anti-pattern 6).
 """
 
 from __future__ import annotations

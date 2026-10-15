@@ -1,0 +1,284 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "I verified RC `ai_rc/v2.31.0` (HEAD `ae488ce2`, seven task merges on top of `ai_main` `b081aa0e`) against `requirements/v2.31.0-ship-posture-always.md`, which adds the per-project ship posture (`matrix|always`), the remote-lane guard, the Auto-Ship Event record, `cm/release.sh --decide-only`, and posture visibility in `kanban-status.sh` and `GET /status`.\n\nThe feature works as specified. I tested it end to end on sandbox kanban roots with the real v2.29.0 and v2.30.0 TESTER reports, as the requirements' \"Notes for TESTER\" ask:\n- Under `matrix` and with the key absent, the release script's output is identical to `ai_main` on every fixture.\n- Under `always`, triggers 2 and 8 ship and leave the specified records. Trigger 3 is covered by the RC's own integration tests, which passed.\n- Triggers 1 and the unrecognized-state row still HALT.\n- `--decide-only` writes nothing, and its exit code matches the full run every time.\n- The integration runner is green.\n\n**The unit runner is red** (`UNIT_EXIT=1`, 6 failed / 9908 passed). All six failures are regressions from this RC, from three defects in new code; the same test files pass on `ai_main`. I found one more low-severity defect by hand. All four are filed via Path C (autonomous follow-up filing — non-blocking), and none of them affects the live release path. The recommendation is SHIP-WITH-CONCERNS.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "New auto-ship notes module crashes when run by file path (2 unit failures)",
+      "heading": "Finding 1: New auto-ship notes module crashes when run by file path (2 unit failures)",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task: add the `if not __package__:` self-location guard)\n**Systemic Risk:** medium (a recurrence of the BUG-0533 / BUG-0561 class; the contract test caught it, but CODER `--files` runs do not include that test)\n**Filed As:** BUG-0575 (Path C-A, filed as BUG — code defect / regression / test failure)\n**Filed By:** TESTER (autonomous Path C) — the new release-notes helper that writes the auto-ship line crashes with \"module not found\" when started by its file path, so two unit tests fail and the gated unit runner is red.\n\n`team/pgai_agent_kanban/cm/auto_ship_notes.py` (new, CODER-027) has a `__main__` block and a module-level `from pgai_agent_kanban.lib.atomic_write import atomic_write` (line 58), and no self-location guard. `env -u PYTHONPATH python3 .../auto_ship_notes.py --help` fails with `ModuleNotFoundError: No module named 'pgai_agent_kanban'`. Failing in the gated unit run:\n- `tests/unit/test_package_modules_run_by_path.py::test_help_by_file_path_runs_without_pythonpath[pgai_agent_kanban.cm.auto_ship_notes]`\n- `tests/unit/test_package_modules_run_by_path.py::test_file_load_binds_the_package_of_its_own_tree[pgai_agent_kanban.cm.auto_ship_notes]`\n\nThe file passes in full on `ai_main`. The release path is unaffected, because it reaches the module through `pp_run_ops` (`python3 -m`). The sibling new module `cm/stop_bug_files.py` runs by path fine.",
+      "filed_as": "BUG-0575",
+      "filed_by": "TESTER (autonomous Path C) — the new release-notes helper that writes the auto-ship line crashes with \"module not found\" when started by its file path, so two unit tests fail and the gated unit runner is red.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task: add the `if not __package__:` self-location guard)",
+        "systemic_risk": "medium (a recurrence of the BUG-0533 / BUG-0561 class; the contract test caught it, but CODER `--files` runs do not include that test)",
+        "filed_as": "BUG-0575 (Path C-A, filed as BUG — code defect / regression / test failure)",
+        "filed_by": "TESTER (autonomous Path C) — the new release-notes helper that writes the auto-ship line crashes with \"module not found\" when started by its file path, so two unit tests fail and the gated unit runner is red."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Ship-posture remedy text contains a bare `python3 -m pgai_agent_kanban` (1 unit failure)",
+      "heading": "Finding 2: Ship-posture remedy text contains a bare `python3 -m pgai_agent_kanban` (1 unit failure)",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (one remedy string)\n**Filed As:** BUG-0576 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the ship-posture stage's hand-recovery message spells out a bare \"python3 -m pgai_agent_kanban\" command, which the repository-wide rule against bare package invocations forbids, so a unit test fails.\n\n`team/scripts/lib/cm/release_ship_posture.sh:312` (the WARNING remedy in `cm_ship_posture_stamp_notes`) trips `tests/unit/test_pp_run_ops_sweep.py::test_no_bare_python3_module_invocations_outside_exemptions`. The test passes on `ai_main`.",
+      "filed_as": "BUG-0576",
+      "filed_by": "TESTER (autonomous Path C) — the ship-posture stage's hand-recovery message spells out a bare \"python3 -m pgai_agent_kanban\" command, which the repository-wide rule against bare package invocations forbids, so a unit test fails.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (one remedy string)",
+        "filed_as": "BUG-0576 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the ship-posture stage's hand-recovery message spells out a bare \"python3 -m pgai_agent_kanban\" command, which the repository-wide rule against bare package invocations forbids, so a unit test fails."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "release_finalize.sh calls a ship-posture function it does not declare (3 unit failures)",
+      "heading": "Finding 3: release_finalize.sh calls a ship-posture function it does not declare (3 unit failures)",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks: the Dependencies header plus the standalone harnesses, or a tolerant call)\n**Systemic Risk:** low (the production `cm/release.sh` sources the posture stage; only standalone drivers of the stage break)\n**Filed As:** BUG-0577 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the release finalization stage now calls a ship-posture function it does not list as a dependency, so any caller that loads the stage as documented dies with \"command not found\" after the tag has already been made, and three unit tests fail.\n\n`release_finalize.sh:498` calls `cm_release_append_auto_ship_events`, which `release_ship_posture.sh` defines (CODER-026). The stage's Dependencies header (lines 72-92) does not list it. `tests/unit/test_release_summary_origin_actions.py` drives the stage on its own, as the header documents, and dies at Step 12 with exit 127 (`command not found`) after tagging. All three of its tests fail:\n- `TestLocalOnlyReleaseSummary::test_summary_claims_no_origin_push_or_delete_and_says_local_only`\n- `TestLocalOnlyReleaseSummary::test_origin_is_untouched_by_a_local_only_release`\n- `TestRemoteBackedReleaseSummary::test_summary_reports_tag_pushed_and_rc_deleted_from_origin`\n\nThe file passes on `ai_main`. This is not a stale-assertion: no literal changed. The production stage acquired an undeclared dependency.",
+      "filed_as": "BUG-0577",
+      "filed_by": "TESTER (autonomous Path C) — the release finalization stage now calls a ship-posture function it does not list as a dependency, so any caller that loads the stage as documented dies with \"command not found\" after the tag has already been made, and three unit tests fail.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks: the Dependencies header plus the standalone harnesses, or a tolerant call)",
+        "systemic_risk": "low (the production `cm/release.sh` sources the posture stage; only standalone drivers of the stage break)",
+        "filed_as": "BUG-0577 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the release finalization stage now calls a ship-posture function it does not list as a dependency, so any caller that loads the stage as documented dies with \"command not found\" after the tag has already been made, and three unit tests fail."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "--decide-only override refusal's remedy hardcodes the project name",
+      "heading": "Finding 4: --decide-only override refusal's remedy hardcodes the project name",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1 CODER task)\n**Systemic Risk:** low (one remedy string; the refusal itself is correct and writes nothing)\n**Filed As:** BUG-0578 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — when the release decider refuses an override flag, its suggested fix always names the kanban's own project instead of the project the operator asked about, so following it checks the wrong project.\n\n`team/scripts/cm/release.sh:281`. Reproduced: `release.sh --project other-proj --decide-only --force --reason x` prints the remedy `Run the decider alone: release.sh --project pgai-agent-kanban --decide-only` and exits 1 with nothing written. WRITER-030 flagged this in its status; I confirmed it by running it.",
+      "filed_as": "BUG-0578",
+      "filed_by": "TESTER (autonomous Path C) — when the release decider refuses an override flag, its suggested fix always names the kanban's own project instead of the project the operator asked about, so following it checks the wrong project.",
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1 CODER task)",
+        "systemic_risk": "low (one remedy string; the refusal itself is correct and writes nothing)",
+        "filed_as": "BUG-0578 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — when the release decider refuses an override flag, its suggested fix always names the kanban's own project instead of the project the operator asked about, so following it checks the wrong project."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Config key, resolvers and remote-lane guard (Deliverables 1-2)",
+      "heading": "Finding 5: Config key, resolvers and remote-lane guard (Deliverables 1-2)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `kanban.cfg_example` ships `ship_posture = matrix` and a commented `ship_posture_confirm_remote`, with documentation. `project.cfg_example` carries the per-project override.\n- Both keys are registered in `config_loader.sh` `_CONFIG_LOADER_KNOWN_KEYS`.\n- The bash resolver `pp_ship_posture` (project_paths.sh) and the Python resolver `resolve_ship_posture` (resolution_matrix.py, beside `resolve_max_rc_retries`) gave identical answers and identical warning text on 9 sandbox cases plus kanban.cfg inheritance:\n  - Unrecognized values (`alwasy`, `Always`) resolve to matrix with one warning line naming the file and the raw value.\n  - `push_to_remote = true` plus `always` without confirm resolves to matrix with one warning. Confirm `false` does the same. Confirm `true` gives `always`.\n  - Absent or `matrix` gives matrix with no warning.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Posture in the release script (Deliverable 3) — matrix unchanged; always ships 2/3/8 only",
+      "heading": "Finding 6: Posture in the release script (Deliverable 3) — matrix unchanged; always ships 2/3/8 only",
+      "level": 3,
+      "body": "**Category:** pass\n\nI drove the real `cm/open-rc.sh` and `cm/release.sh` from the `ai_main` clone and from the RC, on sandbox lanes (push_to_remote=false). The fixtures were the real v2.29.0 and v2.30.0 TESTER reports (with their real filed-bug files copied), PASS, trigger 8 (three NON-FUNCTIONAL notes), TESTER BLOCKED and TESTER WORKING.\n\n- **matrix / absent:** RC equals ai_main on exit code, HALT key and decision. Normalized stdout and stderr show 0 differing lines on all 12 fixture × posture runs; the raw diffs are only sandbox paths and SHAs.\n- **always, v2.29.0 and v2.30.0 reports (trigger 2):**\n  - exit 0, `SHIP-NON-FUNCTIONAL`, no HALT file;\n  - one `## Auto-Ship Event` with Timestamp, Version, `Trigger: 2`, `Error Key: cm-release.trigger-2.systemic-risk-high`, `Ship Posture: always` and the TESTER task;\n  - the release notes' `## Known Issues` opens with `Auto-shipped under ship_posture=always (would have halted: trigger 2 — cm-release.trigger-2.systemic-risk-high)`, then the non-functional warning naming the high-risk finding's bug by substance.\n- **always, trigger 8:** exactly one pattern bug filed (in the sandbox), the event carries `Filed Bug`, ships FUNCTIONAL with the trigger-8 line.\n- **always, trigger 8 + trigger 2 together (6.11 spot-check):** two events in firing order, two notes lines, decide-only `trigger=8,2`.\n- **always, trigger 1 and the unrecognized state:** HALT with the same keys as matrix, and no event.\n- Trigger 3, the mechanical triggers 4/5/9/10/11 and the no-row-matched row under always are covered by `tests/integration/test_cm_release_ship_posture.py` and `test_cm_release_decide_only.py` (48 collected). Both are inside the green integration run.\n- `read_state_field.py --validate` exits 0 on release-state.md files carrying one and two Auto-Ship Event blocks.\n- The `write_rc_state.py auto-ship-event` guards fire (exit 2, nothing written) for trigger 0, a multi-line value, and a missing file.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "matrix_absent": "RC equals ai_main on exit code, HALT key and decision. Normalized stdout and stderr show 0 differing lines on all 12 fixture × posture runs; the raw diffs are only sandbox paths and SHAs.",
+        "always_trigger_8": "exactly one pattern bug filed (in the sandbox), the event carries `Filed Bug`, ships FUNCTIONAL with the trigger-8 line.",
+        "always_trigger_8_trigger_2_together_6_11_spot_check": "two events in firing order, two notes lines, decide-only `trigger=8,2`.",
+        "always_trigger_1_and_the_unrecognized_state": "HALT with the same keys as matrix, and no event."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "--decide-only (Deliverable 4)",
+      "heading": "Finding 7: --decide-only (Deliverable 4)",
+      "level": 3,
+      "body": "**Category:** pass\n\nOn 18 sandbox lanes (6 fixtures × 3 postures), `--decide-only` left the kanban-root file hashes, git refs, HEAD and tree, symbolic ref and `git status` byte-identical. It printed exactly the `ship-policy: decision=… posture=… trigger=… notes_status=…` line, followed on HALT by `error:` (the HALT key), `message:` and `remedy:`. It exited 3 on every lane where the full run HALTed and 0 on every lane where it shipped, with the same decision and notes status. The override flags are refused (see Finding 4 for the remedy text). Census anchors `release-decide-only-override-refused-01` and `release-decide-only-halt-01` are in the Locator Index as BLOCK-WORTHY.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Visibility (Deliverable 5)",
+      "heading": "Finding 8: Visibility (Deliverable 5)",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `kanban-status.sh --project <p>` prints `Ship posture: always|matrix`.\n- `GET /status` (FastAPI TestClient on the sandbox root) returns `ship_posture` with the same value for the local-always, remote-unconfirmed and absent projects. The guard warning appears on stderr in both surfaces for remote-unconfirmed.\n- Both read `ops.read.get_status` → `resolve_ship_posture`, so they share one function.\n- The ICD moved to 1.16.0 with a frozen baseline.\n- The release-notes line is verified in Finding 6.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "OVERWATCH (Deliverable 6)",
+      "heading": "Finding 9: OVERWATCH (Deliverable 6)",
+      "level": 3,
+      "body": "**Category:** pass\n\n`resolution-matrix.yaml` is unchanged (no new rows). `tests/unit/test_ship_policy_halt_row_on_always_lane.py` asserts that an always lane leaves no HALT file for the `ship-policy-halt` row on triggers 2/3/8, and that the yaml declares exactly one row. It passed in the gated unit run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Out-of-Scope constraint",
+      "heading": "Finding 10: Out-of-Scope constraint",
+      "level": 3,
+      "body": "**Category:** pass\n\nNo `roles/`, `SOP-core.md`, `DIRECTIVES.md`, `OVERVIEW.md` or subagent prompt file is in the diff.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Gated suites (acceptance: \"TESTER certifies the full suites once, through the parallel unit lane\")",
+      "heading": "Finding 11: Gated suites (acceptance: \"TESTER certifies the full suites once, through the parallel unit lane\")",
+      "level": 3,
+      "body": "**Category:** bug (Findings 1-3 carry the filings)\n\n- `UNIT_EXIT=1`: 6 failed, 9908 passed, 41 skipped. The parallel lane collected (gw0/gw1), so the BUG-0558 collection abort is gone.\n- `INTEGRATION_EXIT=0`: 901 passed, 1 skipped.\n- The six unit failures are exactly Findings 1 (2), 2 (1) and 3 (3). Direct pytest (a debugging aid, not PASS evidence) of the same three files on the `ai_main` clone gives 138 passed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "bug (Findings 1-3 carry the filings)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Documentation sufficiency",
+      "heading": "Finding 12: Documentation sufficiency",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\nThe ship-posture keys are documented in `kanban.cfg_example`, `project.cfg_example`, `docs/OPERATIONS.md`, `docs/operator-commands.md`, `docs/cm-release-reference.md`, `release.sh --help` and the census rows. That satisfies the Documentation Discipline rule's matching artifacts. Two caveats, neither filed:\n1. `HOW_TO.md` §1.9 \"Keys in kanban.cfg that the loader's registry does not declare\" lists `max_rc_retries` and `deep_verify_offhours_window` but not `ship_posture` / `ship_posture_confirm_remote`, which have the same shape.\n2. `docs/README.md:31` still calls `cm-release-reference.md` \"nine passages\". It was already stale before this RC and now has eleven.\n\nBoth were noted by WRITER-030.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

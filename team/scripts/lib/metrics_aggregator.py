@@ -17,6 +17,7 @@ Per-RC rollup (projects/<name>/metrics/rc/<v>.json):
     "opened_at": null,
     "closed_at": null,
     "wall_time_minutes": null,
+    "blocked_minutes": null,
     "outcome": "UNKNOWN",
     "tasks": {
       "total": <int>,
@@ -42,6 +43,19 @@ Per-RC rollup (projects/<name>/metrics/rc/<v>.json):
           "input": <int>, "output": <int>,
           "cache_read": <int>, "cache_write": <int>,
           "invocations": <int>
+        }, ...
+      }
+    },
+    "wall": {
+      "by_agent": {
+        "coder": {
+          "seconds": <number>,   -- sum of elapsed_seconds across this
+                                  -- agent's tasks in this RC
+          "task_count": <int>    -- count of that agent's tasks that had a
+                                  -- usable elapsed_seconds (the averaging
+                                  -- denominator; not the same as
+                                  -- tasks.by_agent, which counts every
+                                  -- task regardless of timing data)
         }, ...
       }
     },
@@ -76,6 +90,17 @@ read time to canonical model IDs.  Existing tokens.json files are NOT modified.
 Any model string not in the shortname map and not starting with "claude-" or a
 known provider prefix is left unchanged (and a single warning is emitted).
 
+ARCHIVED TASKS
+==============
+
+Every scan reads the project's live task folders and its archived ones
+(archive/<project>/tasks/<ID>/, written by the archive run after a release
+ships), merged in task-ID order. A task folder keeps its README.md,
+status.md and artifacts/tokens.json when it is archived, so a rollup
+rebuilt after an archive run -- --all, a missing --rc/--day file built on
+demand, or the late-landing refresh -- is byte-identical to one built
+before. A task that is live is read from its live folder only.
+
 RC ATTRIBUTION
 ==============
 
@@ -87,13 +112,131 @@ Fallback: if README.md is absent or the field is missing, the task is attributed
 to the version "unknown" for RC roll-ups and is included in per-day roll-ups
 based on its tokens.json timestamp.
 
+PER-AGENT WALL TIME
+====================
+
+The RC-level "wall_time_minutes" field is the elapsed time of the whole RC --
+every agent that touched the RC shares that one number, so it cannot answer
+"how long does coder's own work typically take." The "wall"."by_agent" block
+answers that: it sums each task's own tokens.json "elapsed_seconds" per
+agent, alongside a "task_count" of how many of that agent's tasks actually
+carried a usable value. A task whose tokens.json has no "elapsed_seconds", or
+a non-numeric one, is left out of both the sum and the count -- it is never
+folded in as a zero, which would silently drag the agent's average down.
+Downstream averaging (e.g. the per-agent metrics window) divides
+"seconds" by "task_count" itself; this rollup only carries the raw sums.
+
+BLOCKED MINUTES
+===============
+
+"wall_time_minutes" is honest open-to-ship elapsed time and is never
+touched by this field. "blocked_minutes" is the second number: how many
+of those minutes the RC spent unable to proceed at all, read exclusively
+through team/pgai_agent_kanban/metrics/blocked_ledger.py's blocked_minutes()
+-- the single reader for that ledger, never re-derived here from HALT
+files, logs, or task-folder scans. It is computed only when the RC has
+both opened_at and closed_at (the same window wall_time_minutes uses);
+without a window there is nothing to clamp against and the field is left
+None, exactly like wall_time_minutes itself. Given a window: an RC with
+no ledger, or no boundaries recorded for its own version, reads back as
+the real number 0 (never an empty value) -- absence of blocking is a
+measured zero, not missing data. A ledger that fails to parse degrades
+the field to None with a stderr warning instead of failing this
+aggregator or any of its callers -- CENSUS CLASS CONVERT
+(docs/blocking-site-census.md): a malformed ledger must never gate a
+release rollup. Whole-minute totals are recorded as plain integers
+(e.g. 50, not 50.0); a boundary landing off the minute keeps two decimal
+places, matching wall_time_minutes' own rounding.
+
+ONE-RELEASE LAG BETWEEN A FIELD MERGING HERE AND IT APPEARING IN ROLLUPS
+==========================================================================
+
+This aggregator is invoked at release-finalize time from the LIVE INSTALL
+copy of this file (the finalize steps in
+team/scripts/lib/cm/release_finalize.sh and team/scripts/cm/finalize.sh both
+shell out to "$KANBAN_ROOT/scripts/lib/metrics_aggregator.py", never to the
+dev-tree copy), so a field added or changed here does not take effect the
+moment the change merges to an RC branch. It takes effect once the LIVE
+INSTALL is refreshed to a version carrying the change -- which normally
+happens as part of shipping that very release, and the refresh happens
+AFTER that release's own RC rollup has already been produced by the OLD
+(pre-change) aggregator. Concretely: the release whose merge adds a new
+output field (as "wall" was added) ships an RC rollup written by the
+pre-change aggregator and therefore WITHOUT that field; only RCs finalized
+in a later release, once the live install has been refreshed past the
+merging one, carry it. The lag is invisible from the dev tree -- the new
+code reads as present and correct there the whole time -- and is purely a
+live-install-refresh timing effect, not a code defect; do not mistake a
+field's absence from the RC that introduced it for a bug in the write path.
+
+A TOKENS.JSON THAT LANDS AFTER ITS RC'S ROLLUP
+===============================================
+
+aggregate_rc() counts only the tasks that have a tokens.json when it runs,
+and it runs from release finalize while the CM release task driving that
+finalize is still in its agent session. The wake driver writes a task's
+tokens.json only after the session ends, so the release task's own usage
+lands minutes after the rollup it caused to be written -- left alone, every
+shipped RC's rollup omits the task that shipped it, along with that task's
+tokens and elapsed_seconds. The wake driver closes the gap at its finalize
+stage: once a task's tokens.json is final, metrics_rollup_refresh.sh's
+metrics_rollup_refresh_for_task reads the task's "## Release Version" and,
+when a rollup for that version already exists, re-runs this CLI for that
+one version (passing the rollup's own workflow_type back through
+--workflow-type) so the rollup is recomputed from every tokens.json now on
+disk. The refresh is the same deterministic recompute as the original
+write, so the result is exactly what finalize would have produced had the
+task's tokens.json existed then. It runs from the live-install copy of the
+wake driver, so it carries the same one-release lag described above: the
+RC whose release first ships the refresh is finalized by the pre-refresh
+driver and its own rollup is not refreshed; the next RC's is.
+
+The history.csv row appended at finalize is not revisited by the refresh --
+that file is append-only and its writer skips an RC that already has a
+row, so the row keeps the finalize-time figures.
+
+BACKFILL DECISION FOR A NEWLY ADDED FIELD
+===========================================
+
+Historical per-RC rollups are NOT backfilled when a new field is added to
+this schema (this was the explicit decision for "wall"."by_agent" and is
+the standing policy for any future field), and they are likewise NOT
+backfilled by the late-landing tokens.json refresh described in the
+section above: that refresh fires only for a tokens.json written while the
+refresh is live, and never scans for rollups older than their tasks'
+tokens.json files. Every rollup written before the refresh existed keeps
+the task count and token totals it was written with. An operator who wants
+one specific historical rollup corrected re-runs this CLI for that version
+by hand (--rc), which is the supported regeneration path. Two reasons
+converge on not backfilling automatically:
+
+  1. aggregate_rc() always recomputes a rollup from scratch from its source
+     tokens.json files (see IDEMPOTENCY below) and never reads or merges
+     into a prior rollup -- there is no code path that could patch a field
+     into an existing file even if backfilling were wanted.
+  2. projects/<name>/metrics/rc/*.json is the only per-RC, per-agent
+     source that exists. The other persisted metrics record,
+     metrics/history.csv, carries only an RC-level figure with no
+     per-agent breakdown. For a rollup written before a field existed,
+     nothing else on disk carries the missing data to backfill FROM.
+
+The consequence a caller must expect: a reader averaging over a window that
+spans both pre-field and post-field rollups (e.g. compute_agent_averages()
+in team/pgai_agent_kanban/lib/agent_metrics.py) simply excludes the
+field-less RCs from that one average rather than erroring or treating the
+absence as zero -- see that module's docstring for the full reader-side
+contract. The window self-heals with no further action, one RC at a time,
+as wall-bearing rollups enter the window and pre-field ones age out the
+tail. No manual backfill step exists or is planned.
+
 IDEMPOTENCY
 ===========
 
 The rollup is fully recomputed from source tokens.json files on each call.
 Writing is done atomically: the payload is serialised with deterministic key
-ordering (sort_keys=True) and written to the output path via a temp file and
-os.replace(), so concurrent writers can't corrupt the file.  Because the input
+ordering (sort_keys=True) and written through the shared atomic writer
+(pgai_agent_kanban.lib.atomic_write: a same-directory temp file, fsync, then
+os.replace()), so concurrent writers can't corrupt the file.  Because the input
 is stable (existing tokens.json files are not modified) and the output is
 deterministic JSON (sort_keys=True, fixed indent), running aggregate_rc() twice
 on the same input produces byte-identical output.
@@ -122,9 +265,29 @@ import os
 import pathlib
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
 from typing import Any
+
+# Import the blocked-interval ledger reader from the pgai_agent_kanban
+# package -- the ONE place blocked_minutes() is defined
+# (team/pgai_agent_kanban/metrics/blocked_ledger.py). This module runs from
+# within the full kanban tree (dev tree or live install), where
+# team/pgai_agent_kanban/ is always a sibling of team/scripts/, so reaching
+# INTO the package from here is the same safe self-location direction
+# team/scripts/lib/agent_metrics.py already uses for its own package import.
+_THIS_FILE = pathlib.Path(__file__).resolve()
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # lib/ -> scripts/ -> team/
+_team_dir_str = str(_TEAM_DIR)
+if _team_dir_str not in sys.path:
+    sys.path.insert(0, _team_dir_str)
+from pgai_agent_kanban.metrics.blocked_ledger import (  # noqa: E402
+    LedgerError,
+    blocked_minutes as read_blocked_minutes,
+    ledger_path_for_project,
+)
+from pgai_agent_kanban.task_status import section_value  # noqa: E402
+from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
+from pgai_agent_kanban.archive.lookup import task_dirs_with_archived  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Canonical model ID map (shortname -> canonical)
@@ -229,20 +392,15 @@ def canonicalize_model(model: str) -> str:
 
 
 def read_field_from_markdown(text: str, heading: str) -> str | None:
-    """Return the first non-blank, non-comment line after '## <heading>'.
+    """Return the value of the '## <heading>' section, or None.
+
+    The value is read by task_status.section_value -- the first non-blank
+    line of the section, HTML comments dropped and a bold wrapper removed.
+    An empty section reads as None rather than as the next section's text.
 
     Returns None if the heading or a value line is not found.
     """
-    lines = text.splitlines()
-    target = f"## {heading}"
-    for i, line in enumerate(lines):
-        if line.strip() == target:
-            for follow in lines[i + 1:]:
-                v = follow.strip()
-                if v and not v.startswith("#"):
-                    return v
-            return None
-    return None
+    return section_value(text, heading) or None
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +635,21 @@ def _extract_model_usage_entries(
         )]
 
 
+def _extract_elapsed_seconds(tok: dict[str, Any]) -> float | None:
+    """Return a task's tokens.json 'elapsed_seconds' as a number, or None.
+
+    None is returned -- with no exception raised -- when the field is
+    absent, is a bool (which json.loads would otherwise happily hand back
+    as an int subclass), or is any other non-numeric value (string, list,
+    dict, null). Callers treat None as "this task contributes nothing to
+    per-agent wall aggregation," never as zero.
+    """
+    val = tok.get("elapsed_seconds")
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
+        return None
+    return val
+
+
 # ---------------------------------------------------------------------------
 # Task scanner
 # ---------------------------------------------------------------------------
@@ -484,6 +657,13 @@ def _extract_model_usage_entries(
 
 def scan_tasks(tasks_dir: pathlib.Path) -> list[dict[str, Any]]:
     """Walk tasks_dir and collect metadata for every task that has a tokens.json.
+
+    The walk covers the project's archived task folders too
+    (archive/<project>/tasks/<ID>/, for IDs with no live folder), merged
+    with the live ones in task-ID order -- see
+    pgai_agent_kanban.archive.lookup.task_dirs_with_archived -- so a rollup
+    rebuilt after an archive run counts exactly the tasks, tokens and wall
+    time it counted before the run.
 
     Returns a list of records:
       {
@@ -497,16 +677,7 @@ def scan_tasks(tasks_dir: pathlib.Path) -> list[dict[str, Any]]:
     """
     records: list[dict[str, Any]] = []
 
-    if not tasks_dir.is_dir():
-        return records
-
-    for entry in sorted(tasks_dir.iterdir()):
-        if not entry.is_dir():
-            continue
-        # Skip queue subdirectory and similar non-task dirs
-        if entry.name in ("queues", "queue"):
-            continue
-
+    for entry in task_dirs_with_archived(tasks_dir):
         tokens = load_tokens_json(entry)
         if tokens is None:
             continue  # No tokens.json or malformed (warning already emitted)
@@ -532,30 +703,19 @@ def scan_tasks(tasks_dir: pathlib.Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def _atomic_write_json(path: pathlib.Path, payload: dict[str, Any]) -> None:
-    """Write payload as deterministic JSON to path atomically.
+def _write_rollup_json(path: pathlib.Path, payload: dict[str, Any]) -> None:
+    """Write payload as deterministic JSON to path through the shared writer.
 
-    Uses a temp file in the same directory and os.replace() so concurrent
-    writers cannot corrupt the output file.  sort_keys=True ensures the
-    output is byte-identical for identical inputs (idempotency guarantee).
+    The parent directory is created first. ``atomic_write`` writes a scratch
+    file in the same directory, fsyncs it, and renames it over *path*, so a
+    reader sees the previous rollup or the new one, never a partial file,
+    and a failed write leaves the previous rollup in place with no scratch
+    file behind. sort_keys=True, indent=2 and the trailing newline make the
+    output byte-identical for identical inputs (idempotency guarantee).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-
-    # Write to a temp file in the same directory so os.replace() is atomic
-    # on POSIX (same filesystem, no cross-device move).
-    fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=".tmp-metrics-")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-        os.replace(tmp_path, path)
-    except Exception:
-        # Clean up temp file on failure
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    atomic_write(path, content, prefix=".tmp-metrics-")
 
 
 # ---------------------------------------------------------------------------
@@ -622,7 +782,8 @@ def aggregate_rc(
 ) -> pathlib.Path:
     """Produce a per-RC JSON rollup at projects/<project>/metrics/rc/<version>.json.
 
-    Reads all tasks under projects/<project>/tasks/ that have a tokens.json
+    Reads all tasks under projects/<project>/tasks/ and
+    archive/<project>/tasks/ (see scan_tasks) that have a tokens.json
     file and whose README.md ## Release Version matches `version`.
 
     Applies read-time canonicalization to model shortnames so legacy
@@ -664,6 +825,7 @@ def aggregate_rc(
     total_tok = _zero_token_entry()
     by_model: dict[str, dict[str, Any]] = {}
     by_agent: dict[str, dict[str, Any]] = {}
+    wall_by_agent: dict[str, dict[str, Any]] = {}
 
     for r in matching:
         tok = r["tokens"]
@@ -672,6 +834,18 @@ def aggregate_rc(
 
         # Accumulate task count by agent
         tasks_by_agent[agent] = tasks_by_agent.get(agent, 0) + 1
+
+        # Accumulate per-agent wall-clock seconds from this task's own
+        # elapsed_seconds. A task with no usable value (absent or
+        # non-numeric) contributes nothing -- it is never counted as a
+        # zero-second task, since that would silently pull an agent's
+        # average down.
+        elapsed = _extract_elapsed_seconds(tok)
+        if elapsed is not None:
+            if agent not in wall_by_agent:
+                wall_by_agent[agent] = {"seconds": 0, "task_count": 0}
+            wall_by_agent[agent]["seconds"] += elapsed
+            wall_by_agent[agent]["task_count"] += 1
 
         # Extract token counts (with canonicalization)
         _, inp, out, cr, cw, inv = _extract_token_counts(tok)
@@ -728,6 +902,30 @@ def aggregate_rc(
     # Detect outcome: git tag takes priority, then state JSON, then 'unknown'.
     outcome = _detect_outcome(rc_version, project_dir)
 
+    # --- Blocked minutes from the per-project blocked-interval ledger ---
+    # See the module docstring's "BLOCKED MINUTES" section for the full
+    # contract. Read exclusively through blocked_ledger.blocked_minutes()
+    # -- never re-derived here -- and only when a window (opened_at AND
+    # closed_at) exists to clamp against; without one the field stays
+    # None, exactly like wall_time_minutes does in the same situation.
+    blocked_minutes_value: float | int | None = None
+    if opened_at and closed_at:
+        ledger_path = ledger_path_for_project(str(root), project)
+        try:
+            raw_blocked = read_blocked_minutes(ledger_path, rc_version, opened_at, closed_at)
+            blocked_minutes_value = (
+                int(raw_blocked) if raw_blocked == int(raw_blocked) else round(raw_blocked, 2)
+            )
+        except LedgerError as exc:
+            # CENSUS CLASS: CONVERT (docs/blocking-site-census.md) -- a
+            # malformed ledger degrades this one field to an absent value;
+            # it never fails the aggregator or any of its callers.
+            print(
+                f"WARNING: could not read blocked-interval ledger for {rc_version}: {exc}",
+                file=sys.stderr,
+            )
+            blocked_minutes_value = None
+
     payload: dict[str, Any] = {
         "rc":                rc_version,
         "project":           project,
@@ -735,6 +933,7 @@ def aggregate_rc(
         "opened_at":         opened_at,
         "closed_at":         closed_at,
         "wall_time_minutes": wall_time_minutes,
+        "blocked_minutes":   blocked_minutes_value,
         "outcome":           outcome,
         "tasks": {
             "total":    tasks_total,
@@ -745,13 +944,16 @@ def aggregate_rc(
             "by_model": by_model,
             "by_agent": by_agent,
         },
+        "wall": {
+            "by_agent": wall_by_agent,
+        },
         "bugs_filed_during_verification": [],
         "operator_interventions":         [],
         "input_files":                    {},
     }
 
     out_path = out_dir / f"{rc_version}.json"
-    _atomic_write_json(out_path, payload)
+    _write_rollup_json(out_path, payload)
     print(f"[metrics_aggregator] RC rollup written: {out_path}", file=sys.stderr)
     return out_path
 
@@ -857,7 +1059,7 @@ def aggregate_day(
     }
 
     out_path = out_dir / f"{day}.json"
-    _atomic_write_json(out_path, payload)
+    _write_rollup_json(out_path, payload)
     print(f"[metrics_aggregator] Day rollup written: {out_path}", file=sys.stderr)
     return out_path
 
@@ -900,6 +1102,14 @@ def all_days(records: list[dict[str, Any]]) -> list[str]:
 
 
 def main() -> None:
+    """Run the metrics aggregator CLI: build per-RC and per-day metrics roll-ups.
+
+    ``--project NAME`` with at least one of ``--rc VERSION``, ``--day DATE`` or
+    ``--all`` (``--kanban-root`` and ``--workflow-type`` optional). Exit codes:
+    0 success, warnings possibly on stderr; 1 the kanban root or project
+    directory is missing, or ``--day`` is not YYYY-MM-DD; 2 usage error
+    (argparse, including none of --rc/--day/--all).
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Aggregate per-task token usage into per-RC and per-day metrics rollups.\n"

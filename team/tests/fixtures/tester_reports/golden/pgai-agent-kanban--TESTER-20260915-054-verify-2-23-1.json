@@ -1,0 +1,206 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "low",
+  "summary": "v2.23.1 is a six-item bug bundle (BUG-0283, BUG-0285, BUG-0286, BUG-0287,\nBUG-0288, BUG-0289). Every bundled item was traced into the diff and exercised\nagainst its own `## Acceptance` section. The four behavioural fixes were\nre-verified by hand in throwaway sandboxes — not only the new normal case but\nthe original failure mode and the decoy/negative cases each fix must not\nweaken. Both gated runners exit 0: 4612 passed / 31 skipped (unit), 510 passed\n/ 1 skipped (integration). No test failures of any category — no bugs, no\nstale assertions, no pre-existing failures.\n\nTwo things are not clean, and neither is in the code the bundle set out to fix.\nFirst, the BUG-0286 fix changed Lane A's shipped behaviour from \"assume step\n(a) ran\" to \"decline until step (a) ran\" and introduced a new operator-run verb\nto perform step (a) — but `team/roles/OVERWATCH.md` still tells its reader the\ndrill \"assumes (a) already ran\", and `docs/operator-commands.md`, which calls\nitself \"the command surface in one place\", never names the verb. That is a\ndocumentation-truth gap against behaviour this RC shipped, and it is the same\nshape as BUG-0287, which this very RC is fixing. Second, the release that swept\neleven provenance citations clean introduced seven new ones, six of them in\nfiles its own tickets created or modified; the `provenance` hygiene class is\nred again at the moment of ship. That second one is quality-class and\nnon-blocking by design, but it has now happened on nine consecutive releases,\nso the loop meant to heal it is not converging.\n\nBoth are filed. Nothing found here makes the release unusable: the RC's four\nfunctional fixes work, the suites are green, and the refusal introduced by\nBUG-0286 carries a runnable remedy that recovers an operator who meets it.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "BUG-0283 — cleanup.sh export-reconciliation accepts a trailing slash, and its message now describes the test it performs",
+      "heading": "Finding 1: BUG-0283 — cleanup.sh export-reconciliation accepts a trailing slash, and its message now describes the test it performs",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe fix takes options 1 and 3 from the bug's `## Expected` together: both\ncomparisons strip a single trailing slash (`${PGAI_PROJECT_ROOT%/}`,\n`${PGAI_TASKS_DIR%/}`) and both messages now read \"does not match the\nreconciled root\" instead of \"does not sit underneath\". The variables are\nnormalised after the check so the rest of the script sees one spelling.\n\nVerified behaviourally in a throwaway root under\n`$PGAI_AGENT_KANBAN_TEMP_DIR` (never the live install), all four cases:\n\n| Case | Result |\n|---|---|\n| `PGAI_TASKS_DIR` = reconciled tasks dir **with trailing slash** | exit 0, Step 2 header names the sandbox — the bug's exact repro, now passing |\n| `PGAI_PROJECT_ROOT` = reconciled project root **with trailing slash** | exit 0, same |\n| Decoy `PGAI_TASKS_DIR` pointing outside the sandbox | exit 1, `cleanup.tasks_dir_export_mismatch`, remedy quotes the correct value — BUG-0281's guard intact |\n| `PGAI_TASKS_DIR` naming a **sub-path** of the reconciled dir | exit 1 — containment deliberately still not implemented, per the bug's own note that option 2 is a wider change |\n\nRegression coverage was added rather than promised: `test_cleanup_root_override.py`\ngains four scenarios (`..._with_trailing_slash_matches_reconciled_directory` and\n`..._naming_a_subdirectory_still_refuses`, for both variables), and the BUG-0281\ndecoy scenarios are unmodified and still pass.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "BUG-0285 — the single provenance instance it named is clean",
+      "heading": "Finding 2: BUG-0285 — the single provenance instance it named is clean",
+      "level": 3,
+      "body": "**Category:** pass\n\n`team/tests/unit/test_worktree_copy_git_isolation.py:101` carries no\n`BUG-0284` citation. The file is byte-identical between `ai_main` and the RC,\nso the site was already clean before this RC opened — the bug was fixed\nupstream and rides this bundle only to have its status closed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "BUG-0286 — Lane A's Fix-rewrite step is wired, via the precondition design the bug's acceptance allows",
+      "heading": "Finding 3: BUG-0286 — Lane A's Fix-rewrite step is wired, via the precondition design the bug's acceptance allows",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe bug's `## Acceptance` offered two designs. The RC takes the second: the\ndeterministic drill never performs the judgment call itself, it *declines*\nsteps (b)-(e) until an attributed rewrite is already on the blamed bug.\n\n- `_run_lane_a()` now resolves the blamed bug file and calls\n  `has_attributed_rewrite()`; on a miss it writes an OVERWATCH Decision event,\n  logs, and returns `DECLINED` with the dual-channel text built by\n  `_format_lane_a_rewrite_missing()` (`overwatch.lane-a-rewrite-missing`).\n  No ledger entry is written, so the decline does not consume the\n  single-attempt guard — a correct and non-obvious detail.\n- The refusal carries an inline `BLOCK-WORTHY` class comment, a\n  `# CENSUS-ANCHOR: lane-a-rewrite-precondition-01` marker, and a matching\n  `CENSUS-LOCATOR-INDEX` entry with the same class. The census lint reported\n  no findings this run.\n- The shipped non-test call site is real: `fix_rewrite.py` gains a CLI and\n  `team/scripts/overwatch-attach-fix-rewrite.sh` wraps it through `pp_run_ops`.\n  Exercised end-to-end in a sandbox: the append lands with the `FORBIDDEN`\n  wording, the original `## Fix` preserved, a dated backup written; an\n  unresolvable `--bug-id` exits 1 with a message naming the directory\n  searched; omitting `--ground-truth-ref` exits 1 on the fail-loud\n  precondition.\n- The acceptance's test constraint is honoured. `TestLaneARewritePrecondition`\n  supplies no rewrite and asserts the whole negative surface: RC branch still\n  present, `Active RC` untouched, bundle doc present, HALT still set, bug file\n  byte-identical, no Lane A ledger entry, Decision event still written. Run\n  directly: 1 passed. `TestLaneAFullPlaybookWithFixRewriteAndRedecompose`\n  performs step (a) by invoking the real wrapper script as a subprocess — not\n  by calling `rewrite_bug_fix_section()` from the test body, which is exactly\n  what the bug forbade — then drives (b)-(e) through `run_resolution_stage()`\n  alone and (f) through a real PM wake.\n\nThe unit-tier fixture in `test_overwatch_lane_classification.py` writes the\nrewrite block directly rather than through the CLI; its docstring says so and\nnames the integration test that covers the real call path. That is a\nreasonable tier split, not a fidelity dodge.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "BUG-0287 — the migration runner is wired into the upgrade path and the README no longer contradicts it",
+      "heading": "Finding 4: BUG-0287 — the migration runner is wired into the upgrade path and the README no longer contradicts it",
+      "level": 3,
+      "body": "**Category:** pass\n\n- `team/scripts/migrations/run-migrations.sh` is new: destination-keyed\n  selection over `(--from, --to]`, ascending, reusing `semver.sh`,\n  `argparse.sh` and `operator_args.sh` rather than re-implementing them.\n- `upgrade.sh` phase 2 captures the pre-stamp VERSION, reads the post-stamp\n  VERSION, and invokes the runner between them. The three pass-over cases\n  (nothing selected, `X == X`, non-semver stamped identity) are handled\n  explicitly and narrated.\n- Verified behaviourally: `(v2.22.5, v2.23.0]` selects the one migration;\n  `(v2.23.0, v2.23.1]` selects nothing and exits 0; `--from 2.22` and a\n  missing `--to` both refuse with a usage error and exit 1. In a sandbox\n  containing two synthetic migrations where the first fails, the runner\n  reports the failing script, exits 2, and **does not run the second** — the\n  abort-on-first-failure contract holds.\n- Doc acceptance met: `grep` for \"no migrations exist\", \"there are no\n  scripts\", \"not implemented in this release\", \"Auto-runner — deferred\"\n  returns nothing in `team/scripts/migrations/README.md`. The README now\n  documents the runner, its exit codes, and the by-hand procedure.\n  `docs/OPERATIONS.md` names the runnable command for seeding an install\n  without upgrading it.\n- Test acceptance met: `test_migration_runner_upgrade_wiring.py` (new, 462\n  lines) covers first-application seeding, byte-identical second application,\n  operator-set-value preservation, the selection rule, fan-out scope, usage\n  errors, and four cases driving `upgrade.sh --phase2` itself against a\n  sandboxed root.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "BUG-0288 — the Lane B remedy now states the rule the check implements",
+      "heading": "Finding 5: BUG-0288 — the Lane B remedy now states the rule the check implements",
+      "level": 3,
+      "body": "**Category:** pass\n\nThe remedy is reworded to \"whose declaration text is byte-for-byte identical\nto `--reason` — not merely containing it as a substring alongside other\nwords\". The check (`_cm_release_lane_b_intent_verified`) is unchanged, which\nis correct: the bug offered either half and relaxing an approval-by-design\ninvariant is the wider change.\n\nThe new `test_cm_release_lane_b_intent_remedy_agreement.py` is the strongest\ntest in this RC. It extracts both the check function and the remedy string\n**verbatim from the live `release.sh` source** and exercises them together in\none test: the remedy must state the exact rule, a containment-only entry must\nstill be refused, and a byte-equal entry must be admitted. Editing either half\nalone fails the suite, which is precisely the drift the bug described.\n\n`docs/OPERATIONS.md` now separates the classifier's identifier-containment\ntest from the release engine's whole-string equality test and explains why\nthey never disagree on the automated path — the \"should be stated so an\noperator can tell them apart\" note in the bug's Files Involved.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "BUG-0289 — all ten provenance instances it named are clean",
+      "heading": "Finding 6: BUG-0289 — all ten provenance instances it named are clean",
+      "level": 3,
+      "body": "**Category:** pass\n\n`verdict.sh:284,409`, `scan_attention.py:830,1018`, `fix_rewrite.py:53`,\n`resolution_stage.py:471,473,649`, `test_overwatch_lane_a_drill.py:81`,\n`test_overwatch_lane_b_ship.py:10` — every one reworded to describe behaviour.\n`release-notes/v2.23.0.md` also drops the task-ID attribution in its Known\nIssues line. The lint reports none of the ten. (Seven *new* instances appeared\nelsewhere in the same RC — see Finding 7 and Lint Findings.)",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "Lane A's new decline behaviour is absent from OVERWATCH.md and operator-commands.md",
+      "heading": "Finding 7: Lane A's new decline behaviour is absent from OVERWATCH.md and operator-commands.md",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER/WRITER tasks)\n**Systemic Risk:** low (documentation truth on an opt-in autonomous path; no runtime behaviour is wrong)\n**Regression:** yes (this RC changed the behaviour and left both documents describing the old one)\n**Integrity Damage:** no\n**Filed As:** BUG-0290-lane-a-rewrite-docs-untruth (Path C-A — filed as BUG: code defect / regression / test failure)\n\n`git diff --stat ai_main..ai_rc/v2.23.1 -- team/roles/OVERWATCH.md` is empty.\nLine 45 still reads, of steps (b)-(e): \"it assumes (a) already ran against the\nsame bug.\" After this RC the drill does not assume — it checks and declines.\nThe role file never mentions the precondition, the error key, or the verb that\nclears it, so the agent whose own role file this is cannot learn from it that a\nLane A block will now sit HALTed until step (a) is attached out-of-band.\n\n`grep -n \"overwatch-attach-fix-rewrite\" docs/operator-commands.md` returns\nnothing. That document opens by declaring itself \"the command surface in one\nplace… the page a stranger uses to operate the system\". Tree-wide, the verb is\nnamed only in code comments, `docs/blocking-site-census.md`, the refusal's own\nremedy string, and two test files.\n\nThis is the same shape as BUG-0287 — a script something now depends on that no\noperator-facing document names — reintroduced in the RC that fixes BUG-0287.\n\nBounded consequence: the refusal's remedy is genuinely runnable and substitutes\n`--project`, `--kanban-root` and `--bug-id` for the caller, so an operator who\n*reaches* the refusal recovers from it. What is lost is upstream discovery — a\nLane A halt can sit with nobody aware an action is owed. Rated `low` systemic\nrisk on that basis, and because `overwatch_resolve` defaults to `false`, so\nmost installs never reach Lane A at all.",
+      "filed_as": "BUG-0290",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": "yes",
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "integrity_damage": "no"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER/WRITER tasks)",
+        "systemic_risk": "low (documentation truth on an opt-in autonomous path; no runtime behaviour is wrong)",
+        "regression": "yes (this RC changed the behaviour and left both documents describing the old one)",
+        "filed_as": "BUG-0290-lane-a-rewrite-docs-untruth (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "the migration runner's failure path and the upgrade's abort path have no suite coverage",
+      "heading": "Finding 8: the migration runner's failure path and the upgrade's abort path have no suite coverage",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n\n`run-migrations.sh`'s exit-2 abort and `upgrade.sh`'s \"migration runner failed\"\nbranch are both classified BLOCK-WORTHY in prose and neither is exercised by\nany test — `grep -rn \"migration runner failed\" team/tests/` returns nothing,\nand no test asserts a runner return code of 2. BUG-0287's acceptance asked only\nfor the apply-and-no-op path, which is covered thoroughly, so this is not a gap\nagainst the criterion.\n\nIt is recorded as a caveat rather than a finding because TESTER exercised both\nbehaviours by hand this run: a sandbox with a deliberately failing migration\nproduced the named error, exit 2, and correctly skipped the later script. The\nmechanism works; only the regression coverage for it is missing. Worth folding\ninto a future test-hardening pass, not worth a bug on its own.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "pre-flight, structural and constraint checks",
+      "heading": "Finding 9: pre-flight, structural and constraint checks",
+      "level": 3,
+      "body": "**Category:** pass\n\n- Worktree HEAD `c99b620` equals `ai_rc/v2.23.1`; `git status --short` empty;\n  `git stash list` empty.\n- Pre-flight merge verification: every DONE task's feature branch is either\n  already deleted post-merge (the normal shape) or an ancestor of the RC with\n  unique commits. Zero anomalies; no BUG-92 pattern.\n- `release-state.md`: `Active RC` = `v2.23.1` matches the branch under test;\n  `RC Opened By Task` = `CM-20260915-053-open-rc-2-23-1`, which exists and is\n  DONE; `## Last Released` = `v2.23.0`, well-formed. `pp_last_released_version`\n  independently returns `v2.23.0`, and `v2.23.1 > v2.23.0` by semver. No drift.\n- Prerequisite graph for the cycle is acyclic, every referenced task ID exists,\n  and the CM-open bookend is a prerequisite of all six work tickets.\n- Constraint negatives: no hardcoded secret-shaped assignment anywhere in the\n  diff; no bare `/tmp/` literal added; `set -euo pipefail` present in both new\n  scripts.\n- Skip-cites-real-bug gate: `lint_skip_bug_gate.sh` exits 0. The four\n  `BUG-123x` IDs a raw grep surfaces are synthetic fixture literals inside\n  `test_skip_bug_citation_scan.py`, the lint's own test — confirmed by reading\n  the file, not assumed.\n- Coding-standards spot-check: both new scripts ship a `--help` naming every\n  flag; both reuse `lib/` primitives rather than duplicating them; no new\n  hardcoded operational value. The one directive-8 miss is the provenance\n  class below. (Cosmetic: `overwatch-attach-fix-rewrite.sh --help` renders its\n  usage line as `usage: fix_rewrite.py` because it delegates straight to\n  argparse. Noted, not filed.)\n- Synthetic release simulation (Step 6.8, triggered because `cm/release.sh` is\n  in the diff): `test_cm_release_synthetic.py` is present with 13 tests and\n  passed inside the green integration run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "low"
+  }
+}

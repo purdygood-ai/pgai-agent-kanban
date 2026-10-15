@@ -18,19 +18,37 @@
 #   Progress: ▓▓▓▓▓▓▓░░░░░░░░ 45%  (5/11 done, 1 working)
 #
 # Usage:
-#   show-progress.sh [--kanban-root <path>] [--compact]
+#   show-progress.sh [--kanban-root <path>] [--compact] [-h|--help]
 #
 # Flags:
 #   --compact   One-line summary format (used by show-status-window.sh)
+#   -h, --help  Print this usage and exit 0
 #
-# Configuration (via config.cfg):
-#   PGAI_DASHBOARD_COLOR_DONE     — done bar color (default: green)
-#   PGAI_DASHBOARD_COLOR_WORKING  — working count color (default: yellow)
-#   PGAI_DASHBOARD_COLOR_BLOCKED  — blocked count color (default: red)
+# Configuration (kanban.cfg [dashboard], overridden by the environment):
+#   color_done    / PGAI_DASHBOARD_COLOR_DONE     — done bar color (default: green)
+#   color_working / PGAI_DASHBOARD_COLOR_WORKING  — working count color (default: yellow)
+#   color_blocked / PGAI_DASHBOARD_COLOR_BLOCKED  — blocked count color (default: red)
 #
 # Environment:
 #   TERM=dumb  — disables ANSI codes and uses ASCII progress bar (# and .)
 #   NO_COLOR=1 — disables ANSI codes
+
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+
+# -h/--help prints the header comment above and exits 0. It is handled before
+# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
+# data, or starts the script's own work.
+for __help_arg in "$@"; do
+  case "$__help_arg" in
+    -h|--help)
+      # The header block up to its first non-comment line, however long it
+      # grows; awk writes it straight to stdout, so no pipe stage can race.
+      header_help_print "${BASH_SOURCE[0]}"
+      exit 0
+      ;;
+  esac
+done
 
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
@@ -43,11 +61,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/project_paths.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
+# shellcheck source=lib/script_common.sh
+source "${SCRIPT_DIR}/../lib/script_common.sh"
+# Source the per-tick snapshot cache: show-progress.sh's data.sh scan is a
+# twin of the same --project scan run by an overview pane (show-multi.sh
+# --mode progress) and/or a drill-N pane for the same project -- see
+# snapshot.sh's dashboard_data_snapshot_get for the sharing contract.
+# shellcheck source=lib/snapshot.sh
+source "${SCRIPT_DIR}/lib/snapshot.sh"
 
 # --- Parse args ---
 COMPACT_MODE=false
 PROJECT_NAME=""
-DATA_ARGS=()
 _args=("$@")
 _i=0
 while [[ $_i -lt ${#_args[@]} ]]; do
@@ -57,10 +82,7 @@ while [[ $_i -lt ${#_args[@]} ]]; do
   elif [[ "$arg" == "--project" ]]; then
     _next=$(( _i + 1 ))
     PROJECT_NAME="${_args[$_next]:-}"
-    DATA_ARGS+=("--project" "$PROJECT_NAME")
     _i=$_next
-  else
-    DATA_ARGS+=("$arg")
   fi
   _i=$(( _i + 1 ))
 done
@@ -102,25 +124,7 @@ COLOR_WORKING="${PGAI_DASHBOARD_COLOR_WORKING:-yellow}"
 COLOR_BLOCKED="${PGAI_DASHBOARD_COLOR_BLOCKED:-red}"
 COLOR_LABEL="${PGAI_DASHBOARD_COLOR_LABEL:-cyan}"
 
-ansi_code() {
-  local color="$1"
-  if [[ "$USE_COLOR" != "true" ]]; then echo ""; return; fi
-  case "$color" in
-    black)   echo $'\033[0;30m' ;;
-    red)     echo $'\033[0;31m' ;;
-    green)   echo $'\033[0;32m' ;;
-    yellow)  echo $'\033[0;33m' ;;
-    blue)    echo $'\033[0;34m' ;;
-    magenta) echo $'\033[0;35m' ;;
-    cyan)    echo $'\033[0;36m' ;;
-    white)   echo $'\033[0;37m' ;;
-    bold)    echo $'\033[1m' ;;
-    dim)     echo $'\033[2m' ;;
-    reset)   echo $'\033[0m' ;;
-    *)       echo "" ;;
-  esac
-}
-
+# ansi_code() is defined in lib/script_common.sh (sourced above).
 RESET="$(ansi_code reset)"
 C_DONE="$(ansi_code "$COLOR_DONE")"
 C_WORK="$(ansi_code "$COLOR_WORKING")"
@@ -129,13 +133,23 @@ C_LABL="$(ansi_code "$COLOR_LABEL")"
 C_DIM="$(ansi_code dim)"
 
 # --- Collect data ---
-DATA="$("$SCRIPT_DIR/data.sh" "${DATA_ARGS[@]}")"
+# Snapshot-cached: shares one per-tick data.sh scan with any twin pane
+# invoking data.sh for the same project (see lib/snapshot.sh). Built from
+# the already-resolved KANBAN_ROOT/PROJECT_NAME in a FIXED flag order
+# (--kanban-root then --project) rather than the caller's own raw CLI argv
+# order -- two callers that agree on kanban root and project must resolve to
+# the identical cache key regardless of what order their own flags arrived
+# in (an overview pane's show-multi.sh-constructed argv orders these flags
+# differently than a drill-N pane's own argv). Falls back to a direct
+# data.sh call (with a stderr-only narration) when no fresh snapshot exists
+# -- never blanks this pane.
+_CANON_DATA_ARGS=(--kanban-root "$KANBAN_ROOT")
+[[ -n "$PROJECT_NAME" ]] && _CANON_DATA_ARGS+=(--project "$PROJECT_NAME")
+DATA="$(dashboard_data_snapshot_get "$SCRIPT_DIR/data.sh" "${_CANON_DATA_ARGS[@]}")"
 
-get_val() {
-  local key="$1"
-  local default="${2:-0}"
-  echo "$DATA" | awk -F= -v k="$key" 'NR==1{OFS="="} $1 == k { $1=""; sub(/^=/, ""); print; found=1 } END { if (!found) print "'"$default"'" }'
-}
+# get_val reads one KEY=VALUE pair from DATA (lib/dashboard_common.sh).
+# shellcheck source=../lib/dashboard_common.sh
+source "${SCRIPT_DIR}/../lib/dashboard_common.sh"
 
 TOTAL="$(get_val TOTAL_TICKETS 0)"
 DONE="$(get_val DONE_COUNT 0)"

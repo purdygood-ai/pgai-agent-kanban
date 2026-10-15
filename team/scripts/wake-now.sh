@@ -29,6 +29,10 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 # shellcheck source=lib/operator_args.sh
 source "${SCRIPT_DIR}/lib/operator_args.sh"
 
+# Source the dual-channel error-contract emitter.
+# shellcheck source=lib/error_contract.sh
+source "${SCRIPT_DIR}/lib/error_contract.sh"
+
 VALID_AGENTS=(pm coder cm writer tester overwatch)
 PIPELINE_AGENTS=(pm coder cm writer tester)
 
@@ -38,18 +42,32 @@ PIPELINE_AGENTS=(pm coder cm writer tester)
 # sibling dispatch flags.  All must be declared before rejection is enabled.
 OPERATOR_VALID_FLAGS=(agent all bg help)
 
+# --all and --bg are outside the canonical vocabulary, so their help lines are
+# given here (the header's Options block describes them the same way).
+declare -A OPERATOR_FLAG_HELP=(
+    [all]="  --all              Fire all pipeline agents backgrounded (pm coder cm writer tester)"
+    [bg]="  --bg               Background the agent process instead of running in foreground"
+)
+
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
 # Value-taking: agent (dispatch flag).
 # Boolean: all, bg, help.
-argparse_parse \
+operator_args_argparse \
     --value-flags "agent" \
     -- "$@"
 
 # Emit error for value-taking flags given with no value.
 if argparse_missing "agent"; then
-    echo "wake-now.sh: error: --agent requires a value" >&2
+    # BLOCK-WORTHY (docs/blocking-site-census.md): a bare --agent with no
+    # value names no role to wake -- there is nothing this verb could fire
+    # against, so it refuses rather than guessing a default agent.
+    pgai_emit_error_contract \
+        "wake_now.agent_value_required" \
+        "wake-now.sh: --agent requires a value." \
+        "Run team/scripts/wake-now.sh --agent pm (or coder, cm, writer, tester, overwatch)."
+    # CENSUS-ANCHOR: wake-now-agent-value-required-01
     exit 1
 fi
 
@@ -63,7 +81,16 @@ fi
 
 # Reject unexpected positional arguments (hard-cut: no positional agent name).
 if [[ "${#ARGPARSE_POSITIONAL[@]}" -gt 0 ]]; then
-    echo "wake-now.sh: error: unexpected positional argument: ${ARGPARSE_POSITIONAL[0]}" >&2
+    # BLOCK-WORTHY (docs/blocking-site-census.md): this verb takes no
+    # positional arguments -- a stray one is ambiguous input (a typo'd
+    # flag, or a misremembered agent-as-positional form), and guessing its
+    # intent risks firing the wrong agent or none at all.
+    pgai_emit_error_contract \
+        "wake_now.unexpected_positional_argument" \
+        "wake-now.sh: unexpected positional argument: ${ARGPARSE_POSITIONAL[0]}." \
+        "Run team/scripts/wake-now.sh --agent pm, or team/scripts/wake-now.sh --all, with no positional arguments."
+    # CENSUS-ANCHOR: wake-now-unexpected-positional-01
+    echo "" >&2
     echo "Usage: wake-now.sh --agent <role> [--bg]  OR  wake-now.sh --all" >&2
     exit 1
 fi
@@ -91,12 +118,29 @@ fi
 # Validate mutual exclusivity and required args
 # ---------------------------------------------------------------------------
 if [[ "$FIRE_ALL" == "true" && -n "$AGENT" ]]; then
-    echo "wake-now.sh: error: --all and --agent are mutually exclusive" >&2
+    # BLOCK-WORTHY (docs/blocking-site-census.md): --all fires every
+    # pipeline agent and --agent fires exactly one -- both at once is a
+    # contradiction the caller must resolve, not a shape this verb can
+    # satisfy by picking one silently.
+    pgai_emit_error_contract \
+        "wake_now.agent_all_mutually_exclusive" \
+        "wake-now.sh: --all and --agent are mutually exclusive." \
+        "Run team/scripts/wake-now.sh --agent pm OR team/scripts/wake-now.sh --all, not both."
+    # CENSUS-ANCHOR: wake-now-agent-all-mutually-exclusive-01
     exit 1
 fi
 
 if [[ "$FIRE_ALL" == "false" && -z "$AGENT" ]]; then
-    echo "wake-now.sh: error: --agent is required (or use --all to fire all pipeline agents)" >&2
+    # BLOCK-WORTHY (docs/blocking-site-census.md): with neither --agent nor
+    # --all supplied, this verb has no agent to fire -- there is nothing
+    # to dispatch, so it refuses rather than defaulting to a guessed agent
+    # or a silent no-op.
+    pgai_emit_error_contract \
+        "wake_now.agent_required" \
+        "wake-now.sh: --agent is required (or use --all to fire all pipeline agents)." \
+        "Run team/scripts/wake-now.sh --agent pm, or team/scripts/wake-now.sh --all to fire every pipeline agent."
+    # CENSUS-ANCHOR: wake-now-agent-required-01
+    echo "" >&2
     echo "Usage: wake-now.sh --agent <role> [--bg]  OR  wake-now.sh --all" >&2
     exit 1
 fi
@@ -130,8 +174,15 @@ if [[ "$FIRE_ALL" == "true" ]]; then
     echo "Done. ${#PIPELINE_AGENTS[@]} agents started."
 else
     if ! is_valid_agent "$AGENT"; then
-        echo "wake-now.sh: ERROR: unknown agent '${AGENT}'" >&2
-        echo "  Valid agents: ${VALID_AGENTS[*]}" >&2
+        # BLOCK-WORTHY (docs/blocking-site-census.md): an agent name outside
+        # the declared vocabulary has no wake-batch.sh dispatch target --
+        # firing it would either error one level down with a less specific
+        # message or silently do nothing, so this refuses here instead.
+        pgai_emit_error_contract \
+            "wake_now.unknown_agent" \
+            "wake-now.sh: unknown agent '${AGENT}'." \
+            "Run team/scripts/wake-now.sh --agent pm (valid agents: ${VALID_AGENTS[*]})."
+        # CENSUS-ANCHOR: wake-now-unknown-agent-01
         exit 1
     fi
     if [[ "$BG" == "true" ]]; then

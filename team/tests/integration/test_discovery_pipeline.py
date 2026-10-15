@@ -24,7 +24,7 @@ Design notes:
     No bare /tmp paths appear in this file.
   - Each test is self-contained and produces no state visible to other tests.
   - Test names describe the behavior under test, not the gate or ticket that
-    motivated them (SOP.md Anti-pattern 6).
+    motivated them (roles/TESTER.md Anti-pattern 6).
   - Discovery is invoked via _run_discovery(), a thin subprocess wrapper that
     sources the discovery library against the caller's temp tree and calls
     discovery_run_pipeline, then echoes DISCOVERY_LAST_STATUS on stdout.
@@ -32,12 +32,16 @@ Design notes:
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
+import re
 import subprocess
 import textwrap
 from typing import Optional
 
 import pytest
+
+from pgai_agent_kanban.cm.bundle_family import parse_bundled_item_basenames
 
 # ---------------------------------------------------------------------------
 # Path to the dev tree (resolves from this file's own location: the dev tree
@@ -62,6 +66,7 @@ def _run_discovery(
     *,
     extra_env: Optional[dict] = None,
     threshold: int = 3,
+    entry: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
     """Run discovery_run_pipeline against a temporary kanban tree.
 
@@ -80,10 +85,14 @@ def _run_discovery(
         threshold:    PGAI_DISCOVERY_REJECT_THRESHOLD for quarantine tests
                       (default 3; set lower to trigger quarantine in fewer
                       pipeline runs).
+        entry:        Shell command run in place of the pipeline call (for
+                      driving one step function directly); default
+                      ``discovery_run_pipeline "<project_name>"``.
 
     Returns:
         subprocess.CompletedProcess with returncode, stdout, and stderr.
     """
+    entry_cmd = entry or f'discovery_run_pipeline "{project_name}"'
     script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
@@ -95,7 +104,7 @@ def _run_discovery(
         source "{_SCRIPTS_LIB}/discovery.sh"
         # discovery_run_pipeline also needs pp_project_halted, pp_max_* helpers.
         # Those are all in project_paths.sh already sourced above.
-        discovery_run_pipeline "{project_name}"
+        {entry_cmd}
         echo "DISCOVERY_STATUS=${{DISCOVERY_LAST_STATUS}}"
     """)
 
@@ -437,6 +446,185 @@ class TestPriorityIntakeToBundleFlow:
         )
 
 
+class TestMintGovernorLeavesASingleBugAcrossPasses:
+    """Acceptance criterion: three consecutive discovery passes with
+    exactly one eligible bug leave exactly one pending bundle file in the
+    project's requirements directory.
+
+    Under ordinary operation the bug's own header is marked 'running' by
+    Step 1's first pass, which already keeps _disc_find_unhandled_items
+    from re-selecting it -- this test proves the mint governor's new check
+    does not disturb that path (no extra bundle, no error) across repeated
+    passes.
+    """
+
+    def test_three_passes_leave_exactly_one_bugfix_bundle(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        root = two_project_root
+        _add_bug_file(root, "project_a", bug_id="BUG-0601", slug="single-eligible-bug")
+
+        for i in range(3):
+            result = _run_discovery(root, "project_a")
+            assert result.returncode == 0, (
+                f"discovery_run_pipeline exited non-zero on pass {i + 1}.\n"
+                f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            )
+
+        req_dir = _requirements_dir(root, "project_a")
+        bugfix_bundles = list(req_dir.glob("*-bugfix-bundle-*.md"))
+        assert len(bugfix_bundles) == 1, (
+            f"Expected exactly one pending bugfix bundle after three passes.\n"
+            f"Found: {bugfix_bundles}"
+        )
+
+
+class TestMintGovernorDeclinesForPendingBundleOfSameType:
+    """The mint governor refuses to mint a new bug/priority bundle while a
+    bundle of the same type is already pending (## Status != done) in
+    requirements/ -- the belt-and-braces check that closes the
+    "minting storm" gap: a genuinely new, unhandled item arriving while an
+    earlier bundle of the same category is still unprocessed must wait for
+    that bundle to drain rather than claim its own patch slot immediately.
+
+    Payload validation (discovery-state-write-bundle-no-valid-items-01,
+    covered by test_bundle_write_refuses_without_valid_items.py) stops a
+    bundle without cargo; these tests cover the governor that stops a
+    second bundle while the first is still unprocessed.
+    """
+
+    def test_declines_to_mint_a_second_bug_bundle_while_one_is_pending(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        root = two_project_root
+        # Simulates the slot already being held: a bug-type bundle sitting
+        # in requirements/ with ## Status: open (not yet queued for PM).
+        pending = _add_requirements_file(
+            root,
+            "project_a",
+            version="v0.0.1",
+            slug="bugfix-bundle-20260901",
+            status="open",
+        )
+        # A genuinely new, unhandled bug arrives while the pending bundle
+        # above is still unprocessed.
+        new_bug = _add_bug_file(root, "project_a", bug_id="BUG-0501", slug="second-bug")
+
+        result = _run_discovery(root, "project_a")
+
+        assert result.returncode == 0, (
+            "A pass finding the slot already taken has behaved correctly "
+            f"and must exit zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        req_dir = _requirements_dir(root, "project_a")
+        bugfix_bundles = sorted(req_dir.glob("*-bugfix-bundle-*.md"))
+        assert bugfix_bundles == [pending], (
+            "Expected the pre-existing pending bundle to remain the only "
+            f"bug-type bundle in requirements/ after the governor declines "
+            f"a second mint.\nFound: {bugfix_bundles}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        assert str(pending) in result.stderr, (
+            "Expected the mint governor's narration to name the pending "
+            f"bundle's path.\nstderr: {result.stderr}"
+        )
+
+        # Task state, queue files, and the pending bundle itself are left
+        # untouched: the new bug's own header never got marked, since the
+        # governor declines before any item-level mutation runs.
+        bug_text = new_bug.read_text(encoding="utf-8")
+        assert "## Status\nopen" in bug_text, (
+            f"Expected the new bug's ## Status to remain 'open' (untouched "
+            f"by the declined mint).\nActual:\n{bug_text}"
+        )
+        pending_text = pending.read_text(encoding="utf-8")
+        assert "## Status\nopen" in pending_text, (
+            f"Expected the pending bundle itself to be left untouched.\n"
+            f"Actual:\n{pending_text}"
+        )
+
+        from pgai_agent_kanban.lib.refusal_ledger import (
+            ledger_path_for_project,
+            read_latest,
+        )
+
+        record = read_latest(ledger_path_for_project(str(root), "project_a"))
+        assert record is not None, "The decline must leave a refusal-ledger record"
+        assert record["error"] == "discovery.bug-bundle-already-pending"
+        assert str(pending) in record["message"]
+
+    def test_declines_again_on_a_repeated_pass(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """Unit coverage for the repeated-pass case: the governor keeps
+        declining, and no second bundle ever appears, across consecutive
+        passes with the same new bug still unhandled.
+        """
+        root = two_project_root
+        pending = _add_requirements_file(
+            root,
+            "project_a",
+            version="v0.0.1",
+            slug="bugfix-bundle-20260901",
+            status="open",
+        )
+        _add_bug_file(root, "project_a", bug_id="BUG-0502", slug="repeated-pass-bug")
+
+        req_dir = _requirements_dir(root, "project_a")
+        for i in range(2):
+            result = _run_discovery(root, "project_a")
+            assert result.returncode == 0, (
+                f"Pass {i + 1} exited non-zero.\nstdout: {result.stdout}\n"
+                f"stderr: {result.stderr}"
+            )
+            bugfix_bundles = sorted(req_dir.glob("*-bugfix-bundle-*.md"))
+            assert bugfix_bundles == [pending], (
+                f"Pass {i + 1}: expected the pending bundle to remain the "
+                f"only bug-type bundle.\nFound: {bugfix_bundles}"
+            )
+
+    def test_declines_to_mint_a_second_priority_bundle_while_one_is_pending(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """Same governor, applied to discovery_step_priority's own category."""
+        root = two_project_root
+        pending = _add_requirements_file(
+            root,
+            "project_a",
+            version="v0.0.1",
+            slug="priority-bundle-20260901",
+            status="open",
+        )
+        new_priority = _add_priority_file(
+            root, "project_a", priority_id="PRIORITY-0501", slug="second-priority"
+        )
+
+        result = _run_discovery(root, "project_a")
+
+        assert result.returncode == 0, (
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        req_dir = _requirements_dir(root, "project_a")
+        priority_bundles = sorted(req_dir.glob("*-priority-bundle-*.md"))
+        assert priority_bundles == [pending], (
+            f"Expected the pre-existing pending bundle to remain the only "
+            f"priority-type bundle.\nFound: {priority_bundles}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert str(pending) in result.stderr, (
+            "Expected the mint governor's narration to name the pending "
+            f"bundle's path.\nstderr: {result.stderr}"
+        )
+        priority_text = new_priority.read_text(encoding="utf-8")
+        assert "## Status\nopen" in priority_text, (
+            f"Expected the new priority item's ## Status to remain 'open'.\n"
+            f"Actual:\n{priority_text}"
+        )
+
+
 class TestRequirementsBundleQueuedForPM:
     """Requirements bundle → PM queue entry when the chain is idle."""
 
@@ -709,6 +897,43 @@ class TestActiveRCGate:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
+    def test_active_rc_deferral_leaves_a_refusal_ledger_record(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """discovery_step_bugs's Active-RC-in-flight skip is recorded to the
+        refusal ledger, and the step still declines to bundle.
+
+        Same fixture setup as test_active_rc_defers_bug_bundling above, but
+        driving the step directly: through the pipeline an Active RC makes
+        the chain busy, so discovery idle-exits before Step 1 ever scans
+        (that test covers the pipeline's outcome). The step's own guard is
+        what protects a direct caller, and it is the one that writes the
+        ledger record.
+        """
+        from pgai_agent_kanban.lib.refusal_ledger import (
+            ledger_path_for_project,
+            read_latest,
+        )
+
+        root = two_project_root
+        _add_bug_file(root, "project_a", bug_id="BUG-0032", slug="active-rc-ledger")
+        _set_active_rc(root, "project_a", "v0.1.0")
+
+        result = _run_discovery(
+            root, "project_a", entry='discovery_step_bugs "project_a" || true'
+        )
+
+        # Same control-flow assertion as the pipeline-level test above.
+        assert result.returncode == 0
+        req_dir = _requirements_dir(root, "project_a")
+        bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
+        assert not bundle_files, "Active-RC deferral must still skip bundling after conversion"
+
+        record = read_latest(ledger_path_for_project(str(root), "project_a"))
+        assert record is not None, "Active-RC deferral must leave a refusal-ledger record"
+        assert record["error"] == "discovery.active-rc-in-flight"
+        assert "v0.1.0" in record["message"]
+
 
 class TestVersionCeilingGate:
     """Version ceiling gate prevents bundles whose version exceeds the configured ceiling."""
@@ -764,6 +989,40 @@ class TestVersionCeilingGate:
             f"Expected a bundle within max_patch ceiling, but none found.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+    def test_ceiling_gate_rejection_leaves_a_refusal_ledger_record(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """The ceiling gate's rejection is recorded to the refusal ledger,
+        and the pipeline's control flow (same bundle decision as the
+        pre-ledger behavior) is unchanged by the conversion.
+
+        Reuses the exact fixture setup as
+        test_ceiling_gate_blocks_bundle_above_max_patch above — this test
+        adds the ledger assertion on top of the same scenario, proving the
+        conversion did not change what that test already asserts.
+        """
+        from pgai_agent_kanban.lib.refusal_ledger import (
+            ledger_path_for_project,
+            read_latest,
+        )
+
+        root = two_project_root
+        _set_max_patch_ceiling(root, "project_a", max_patch=0)
+        _add_bug_file(root, "project_a", bug_id="BUG-0042", slug="ceiling-ledger-test")
+
+        result = _run_discovery(root, "project_a")
+
+        # Same control-flow assertion as the unconverted-behavior test above.
+        assert result.returncode == 0
+        req_dir = _requirements_dir(root, "project_a")
+        bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
+        assert not bundle_files, "ceiling rejection must still skip bundling after conversion"
+
+        record = read_latest(ledger_path_for_project(str(root), "project_a"))
+        assert record is not None, "ceiling rejection must leave a refusal-ledger record"
+        assert record["error"] == "discovery.ceiling-patch-exceeded"
+        assert "project_a" in record["message"]
 
 
 class TestPerProjectIsolation:
@@ -838,7 +1097,7 @@ class TestRejectionQuarantine:
         bugs_dir.mkdir(parents=True, exist_ok=True)
 
         # A file whose name does not match the canonical BUG-NNNN-<slug>.md pattern.
-        # The pattern requires at least 4 digits; "BUG-1-bad" has only 1 digit.
+        # The pattern requires at least 4 digits; this filename has only one.
         malformed_file = bugs_dir / "BUG-1-bad.md"
         malformed_file.write_text(
             "# Malformed bug file\n\n## Status\nopen\n\n## Summary\nBad name.\n",
@@ -1162,10 +1421,10 @@ class TestTerminalStateBundleFilter:
         # The bundle must reference only the open bug, not the closed one.
         bundle_text = bundles[0].read_text(encoding="utf-8")
         assert "BUG-0101" in bundle_text, (
-            "Expected the open bug (BUG-0101) to appear in the bundle."
+            "Expected the open bug to appear in the bundle."
         )
         assert "BUG-0100" not in bundle_text, (
-            "Closed bug (BUG-0100) must not appear in the bundle."
+            "Closed bug must not appear in the bundle."
         )
 
 
@@ -1178,7 +1437,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
          discovery scan must re-select the bundle (i.e., retry is live).
       2. Success path regression: a succeeding pm-agent flips ## Status to 'running',
          writes the task ID into ## PM Task, and writes a pm_backlog entry —
-         byte-identical semantics to the pre-fix behavior.
+         byte-identical semantics to a run with no failure guard in play.
       3. Stuck-state reconciliation: a hand-crafted stuck bundle (## Status: running,
          ## PM Task: none, no pm_backlog entry) triggers the guard's stuck-state
          diagnosis line naming the reset recovery, not the generic 'PM in flight'
@@ -1292,10 +1551,10 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
     ) -> None:
         """Successful pm-agent flips ## Status to 'running' and writes ## PM Task.
 
-        This is the success path regression: the fix must not alter the outcome
+        This is the success path regression: failure handling must not alter the outcome
         when pm-agent succeeds.  On exit 0 with a valid Folder line and a
         pm_backlog entry, the bundle's ## Status becomes 'running' and ## PM Task
-        is written — exactly as before the fix.
+        is written — the success path is unchanged.
         """
         root = two_project_root
 
@@ -1443,7 +1702,7 @@ class TestCategoryFirstOrdering:
         returns produced_work immediately, and the requirements file is NOT queued
         for PM in the same iteration.
 
-        This is acceptance criterion 1 from BUG-0092 defect 2.
+        This is the category-first-selection acceptance shape.
         """
         root = two_project_root
 
@@ -1508,8 +1767,8 @@ class TestCategoryFirstOrdering:
         Fixture shape: last released = v0.0.2; requirements file exists at v0.0.3
         (hardcoded Target Version = v0.0.3); an unhandled bug file is also present.
         The bug bundle will land at v0.0.3+1 = v0.0.4 (next open slot after v0.0.3).
-        Despite the bug bundle's version (v0.0.4) being ABOVE the requirement's
-        version (v0.0.3), the bug CATEGORY always wins selection — the requirement
+        Despite the bug bundle's version, v0.0.4, being ABOVE the requirement's
+        version, v0.0.3, the bug CATEGORY always wins selection — the requirement
         file must not be queued for PM in the same iteration the bug is bundled.
         """
         root = two_project_root
@@ -1614,3 +1873,307 @@ class TestCategoryFirstOrdering:
             "Expected Step 3 log output when no bugs or priorities are pending.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Known-issue marker ordering: end-to-end coverage of the rendered
+# ## Bundled Items list through the real bugs/ -> requirements/ pipeline.
+# ---------------------------------------------------------------------------
+
+
+def _add_bug_file_with_known_issue_marker(
+    kanban_root: pathlib.Path,
+    project_name: str,
+    bug_id: str,
+    slug: str,
+    version: str = "v0.0.1",
+) -> pathlib.Path:
+    """Create an open bug file carrying a non-empty "## Known Issue Carry
+    Forward" value -- the marker discovery_step_bugs's bundle writer honors
+    to place the item first. Mirrors the exact field shape
+    team/scripts/lib/cm/release_known_issue.sh stamps at ship time.
+    """
+    bugs_dir = kanban_root / "projects" / project_name / "bugs"
+    bugs_dir.mkdir(parents=True, exist_ok=True)
+    bug_file = bugs_dir / f"{bug_id}-{slug}.md"
+    bug_file.write_text(
+        f"# {bug_id}: {slug}\n\n"
+        "## Status\nopen\n\n"
+        "## Summary\nTest bug file.\n\n"
+        f"## Known Issue Carry Forward\n{version}\n",
+        encoding="utf-8",
+    )
+    return bug_file
+
+
+def _bundled_item_order(bundle_path: pathlib.Path) -> list[str]:
+    """Return the ## Bundled Items entries of *bundle_path*, in file order."""
+    return parse_bundled_item_basenames(str(bundle_path))
+
+
+def _set_max_priorities_per_run(
+    kanban_root: pathlib.Path,
+    project_name: str,
+    cap: int,
+) -> None:
+    """Append [versioning] max_priorities_per_run to a project's project.cfg.
+
+    Used only by the priority-ordering test below, which needs more than the
+    default cap of 1 item bundled per run to observe ordering across several
+    priority files at once.
+    """
+    cfg_path = kanban_root / "projects" / project_name / "project.cfg"
+    text = cfg_path.read_text(encoding="utf-8")
+    if not text.endswith("\n"):
+        text += "\n"
+    cfg_path.write_text(text + f"max_priorities_per_run = {cap}\n", encoding="utf-8")
+
+
+def _add_priority_file_with_known_issue_marker(
+    kanban_root: pathlib.Path,
+    project_name: str,
+    priority_id: str,
+    slug: str,
+    version: str = "v0.0.1",
+) -> pathlib.Path:
+    """Create an open priority file carrying a non-empty "## Known Issue
+    Carry Forward" value. The marker convention is bug-file-only today (see
+    _disc_order_bundle_items's header in discovery_state.sh), but the
+    bundle writer applies the identical ordering pass to both bugs and
+    priorities since both funnel through _disc_write_bundle -- this test
+    proves that shared treatment rather than assuming it.
+    """
+    priority_dir = kanban_root / "projects" / project_name / "priority"
+    priority_dir.mkdir(parents=True, exist_ok=True)
+    priority_file = priority_dir / f"{priority_id}-{slug}.md"
+    priority_file.write_text(
+        f"# {priority_id}: {slug}\n\n"
+        "## Status\nopen\n\n"
+        "## Summary\nTest priority item.\n\n"
+        f"## Known Issue Carry Forward\n{version}\n",
+        encoding="utf-8",
+    )
+    return priority_file
+
+
+def _replace_status_field(text: str, new_status: str) -> str:
+    """Return *text* with its ## Status field value replaced by *new_status*.
+
+    Mirrors the exact substitution _disc_set_status_field performs in
+    team/scripts/lib/discovery_state.sh, so a caller can compute the one
+    change the pipeline is allowed to make to a bug file and diff the rest
+    byte-for-byte.
+    """
+    pattern = re.compile(
+        r"(^##[^\S\n]+Status[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)",
+        flags=re.M | re.IGNORECASE,
+    )
+    return pattern.sub(
+        lambda m: m.group(1) + "\n" + new_status + (m.group(3) or "\n"),
+        text,
+        count=1,
+    )
+
+
+class TestKnownIssueMarkerBundleOrdering:
+    """The rendered ## Bundled Items list leads with marker-carrying items.
+
+    Exercises the real bugs/ -> requirements/ path (discovery_step_bugs ->
+    _disc_write_bundle -> _disc_order_bundle_items), not the ordering
+    function in isolation -- unit-level coverage of the partition itself
+    (including the malformed/unreadable-marker dispositions) lives in
+    team/tests/unit/test_discovery_bundle_marker_ordering.py.
+    """
+
+    def test_single_marked_bug_leads_the_rendered_bundle(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """One marked bug among several unmarked ones renders first."""
+        root = two_project_root
+        _add_bug_file(root, "project_a", bug_id="BUG-0200", slug="alpha")
+        _add_bug_file_with_known_issue_marker(
+            root, "project_a", bug_id="BUG-0201", slug="bravo-marked"
+        )
+        _add_bug_file(root, "project_a", bug_id="BUG-0202", slug="charlie")
+
+        result = _run_discovery(root, "project_a")
+        assert result.returncode == 0, (
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        bundle_files = list(
+            _requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md")
+        )
+        assert bundle_files, f"No bundle produced.\nstdout: {result.stdout}"
+        order = _bundled_item_order(bundle_files[0])
+
+        assert order[0] == "BUG-0201-bravo-marked.md", (
+            f"Expected the marked bug first in the rendered bundle; got {order}"
+        )
+        assert order == [
+            "BUG-0201-bravo-marked.md",
+            "BUG-0200-alpha.md",
+            "BUG-0202-charlie.md",
+        ], f"Unexpected rendered order: {order}"
+
+    def test_several_marked_bugs_lead_in_original_relative_order(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """Three of five bugs carry the marker; they lead in their scan order,
+        the remaining two follow in theirs."""
+        root = two_project_root
+        # Scan order is filename-lexical ascending.
+        _add_bug_file(root, "project_a", bug_id="BUG-0210", slug="unmarked-one")
+        _add_bug_file_with_known_issue_marker(
+            root, "project_a", bug_id="BUG-0211", slug="marked-one"
+        )
+        _add_bug_file(root, "project_a", bug_id="BUG-0212", slug="unmarked-two")
+        _add_bug_file_with_known_issue_marker(
+            root, "project_a", bug_id="BUG-0213", slug="marked-two"
+        )
+        _add_bug_file_with_known_issue_marker(
+            root, "project_a", bug_id="BUG-0214", slug="marked-three"
+        )
+
+        result = _run_discovery(root, "project_a")
+        assert result.returncode == 0, (
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        bundle_files = list(
+            _requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md")
+        )
+        assert bundle_files, f"No bundle produced.\nstdout: {result.stdout}"
+        order = _bundled_item_order(bundle_files[0])
+
+        assert order == [
+            "BUG-0211-marked-one.md",
+            "BUG-0213-marked-two.md",
+            "BUG-0214-marked-three.md",
+            "BUG-0210-unmarked-one.md",
+            "BUG-0212-unmarked-two.md",
+        ], f"Unexpected rendered order: {order}"
+
+    def test_no_marked_bugs_renders_scan_order_unchanged(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """With no marker present anywhere, the rendered order is exactly the
+        scan order -- ordinary bundling is provably unchanged."""
+        root = two_project_root
+        _add_bug_file(root, "project_a", bug_id="BUG-0220", slug="alpha")
+        _add_bug_file(root, "project_a", bug_id="BUG-0221", slug="bravo")
+        _add_bug_file(root, "project_a", bug_id="BUG-0222", slug="charlie")
+
+        result = _run_discovery(root, "project_a")
+        assert result.returncode == 0, (
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        bundle_files = list(
+            _requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md")
+        )
+        assert bundle_files, f"No bundle produced.\nstdout: {result.stdout}"
+        order = _bundled_item_order(bundle_files[0])
+
+        assert order == [
+            "BUG-0220-alpha.md",
+            "BUG-0221-bravo.md",
+            "BUG-0222-charlie.md",
+        ], f"Unexpected rendered order: {order}"
+
+    def test_rendered_bundle_still_parses_with_the_bundle_items_parser(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """A reordered bundle is still readable by the existing ## Bundled
+        Items parser (team/pgai_agent_kanban/cm/bundle_family.py) -- the
+        rendered section's line shape is unchanged; only the item order is."""
+        root = two_project_root
+        _add_bug_file(root, "project_a", bug_id="BUG-0230", slug="alpha")
+        _add_bug_file_with_known_issue_marker(
+            root, "project_a", bug_id="BUG-0231", slug="bravo-marked"
+        )
+        _add_bug_file(root, "project_a", bug_id="BUG-0232", slug="charlie")
+
+        result = _run_discovery(root, "project_a")
+        assert result.returncode == 0, (
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        bundle_files = list(
+            _requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md")
+        )
+        assert bundle_files, f"No bundle produced.\nstdout: {result.stdout}"
+        order = _bundled_item_order(bundle_files[0])
+
+        assert set(order) == {
+            "BUG-0230-alpha.md",
+            "BUG-0231-bravo-marked.md",
+            "BUG-0232-charlie.md",
+        }, f"Parser did not recover every bundled item: {order}"
+
+    def test_bundling_run_changes_no_bug_file_beyond_its_own_status_field(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """Every bug file's content is unchanged after bundling except for
+        the ## Status flip the pipeline already performs -- the marker
+        itself, and every other field, survives byte-for-byte. Checked by
+        checksum, across both a marked and an unmarked bug file."""
+        root = two_project_root
+        unmarked = _add_bug_file(root, "project_a", bug_id="BUG-0240", slug="alpha")
+        marked = _add_bug_file_with_known_issue_marker(
+            root, "project_a", bug_id="BUG-0241", slug="bravo-marked"
+        )
+
+        before = {
+            unmarked: unmarked.read_text(encoding="utf-8"),
+            marked: marked.read_text(encoding="utf-8"),
+        }
+
+        result = _run_discovery(root, "project_a")
+        assert result.returncode == 0, (
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        for path, before_text in before.items():
+            expected_after = _replace_status_field(before_text, "running")
+            actual_after = path.read_text(encoding="utf-8")
+            expected_sha = hashlib.sha256(expected_after.encode("utf-8")).hexdigest()
+            actual_sha = hashlib.sha256(actual_after.encode("utf-8")).hexdigest()
+            assert actual_sha == expected_sha, (
+                f"{path.name}: expected only the ## Status field to flip to "
+                f"'running', with everything else (including any marker) "
+                f"byte-for-byte unchanged.\nExpected:\n{expected_after}\n"
+                f"Actual:\n{actual_after}"
+            )
+
+    def test_priority_bundle_writer_honors_the_marker_identically_to_bugs(
+        self, two_project_root: pathlib.Path
+    ) -> None:
+        """discovery_step_priority shares _disc_write_bundle with
+        discovery_step_bugs, so a marked priority item leads the rendered
+        bundle exactly as a marked bug does -- there is one ordering
+        decision, not two that could diverge."""
+        root = two_project_root
+        _set_max_priorities_per_run(root, "project_a", cap=3)
+        _add_priority_file(root, "project_a", priority_id="PRIORITY-0300", slug="unmarked-one")
+        _add_priority_file_with_known_issue_marker(
+            root, "project_a", priority_id="PRIORITY-0301", slug="marked"
+        )
+        _add_priority_file(root, "project_a", priority_id="PRIORITY-0302", slug="unmarked-two")
+
+        result = _run_discovery(root, "project_a")
+        assert result.returncode == 0, (
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        bundle_files = list(
+            _requirements_dir(root, "project_a").glob("*-priority-bundle-*.md")
+        )
+        assert bundle_files, f"No priority bundle produced.\nstdout: {result.stdout}"
+        order = _bundled_item_order(bundle_files[0])
+
+        assert order == [
+            "PRIORITY-0301-marked.md",
+            "PRIORITY-0300-20260601-unmarked-one.md",
+            "PRIORITY-0302-20260601-unmarked-two.md",
+        ], f"Unexpected rendered order: {order}"

@@ -1,0 +1,198 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verified RC v2.28.0 (\"shared modules, no inline Python\") against its requirements document. In scope: all 9 deliverables, the convergence criterion, the 7 acceptance bullets, and the \"Notes for TESTER\" behaviour-preservation checks. I ran both gated runners, exercised every new lint's guard with fixture trees, compared converted call sites with the `ai_main` code on status-file variants, and ran CLI-vs-REST golden pairs for the ten class-ii action verbs and for `/show` / `/show-queues` (against an `ai_main` export and a copy of the live board). The release delivers its foundation. Three shared lints are wired, quality-class, and fire correctly. The shell-row baseline fell 30 → 18 (≥12 required). The inline-Python allowlist fell 172/8605 → 145/7744. Every deny-listed duplicate family is at 0. `wake_task_state.sh` carries no heredoc. The ten class-ii routes call `ops.write` in process with byte-identical output, and the ICD was bumped exactly once.\n\n**The unit runner is red** (1 failure, from this RC). Three findings were filed. Recommendation: ship with concerns.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Gated unit runner red — two package modules crash when run by file path",
+      "heading": "Finding 1: Gated unit runner red — two package modules crash when run by file path",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (the same by-path-vs-package-import trap hit CODER-044 on `agent-timing.sh` in this very RC, and v2.30.0 continues the same kind of conversion; implementing tasks certified with targeted `--files` runs, which skip this whole-tree test)\n**Severity:** medium\n**Regression:** yes\n**Integrity:** none\n**Filed As:** BUG-0533 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — two Python files the docs name now crash with \"module not found\" when started directly, because this release made them import the shared package; the dashboard still works, but the whole-tree doc check and its unit test now fail, so the unit suite is red.\n\n`team/pgai_agent_kanban/dashboard/scan_human_approvals.py` (line 52) and `team/pgai_agent_kanban/lib/agent_metrics.py` (line 178) now import `pgai_agent_kanban.*` (deliverables 2–3). Run as `python3 <path> --help` with no `PYTHONPATH`, each raises `ModuleNotFoundError: No module named 'pgai_agent_kanban'`; on `ai_main` both exit 0. `lint_doc_command_truth.py` runs every `.py` path a document mentions, so it reports 2 HELP FAILS. Its real-tree unit test then fails, so UNIT_EXIT=1. The actual runtime callers are fine: `human-review.sh` (sets `PYTHONPATH`) and `agent-metrics.sh` (goes through `scripts/lib/agent_metrics.py`) both produced output identical to `ai_main` in a sandbox. The doc citations (operator-api.md 611/670/1024, DASHBOARD-PANES.md 161) name the files as where the logic lives, not as commands to run. That is why I rate this medium rather than high: no operator command that worked last release fails now, but the certification suite is red and has a clear fix.",
+      "filed_as": "BUG-0533",
+      "filed_by": "TESTER (autonomous Path C) — two Python files the docs name now crash with \"module not found\" when started directly, because this release made them import the shared package; the dashboard still works, but the whole-tree doc check and its unit test now fail, so the unit suite is red.",
+      "severity": "medium",
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (the same by-path-vs-package-import trap hit CODER-044 on `agent-timing.sh` in this very RC, and v2.30.0 continues the same kind of conversion; implementing tasks certified with targeted `--files` runs, which skip this whole-tree test)",
+        "severity": "medium",
+        "regression": "yes",
+        "integrity": "none",
+        "filed_as": "BUG-0533 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — two Python files the docs name now crash with \"module not found\" when started directly, because this release made them import the shared package; the dashboard still works, but the whole-tree doc check and its unit test now fail, so the unit suite is red."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "show-queues with no project prints all-zero counts instead of refusing",
+      "heading": "Finding 2: show-queues with no project prints all-zero counts instead of refusing",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to the queue pane's project resolution)\n**Severity:** medium\n**Regression:** yes\n**Integrity:** none\n**Filed As:** BUG-0534 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — the queue pane, asked for no particular project, now prints \"0/0\" for every agent as if the queues were empty, where it used to refuse and say a project is required.\n\nTraces to deliverable 7 and the Enforcement Class (\"behaviour of every converted call site is unchanged\"). With no `--project` and no `PGAI_PROJECT_NAME`, `ai_main`'s `show-queues.sh` exits 1 (\"no project specified\"). The RC exits 0 printing `0/0` for every agent, and `GET /show-queues` returns the same text at 200. On a legacy single-project root whose `tasks/queues/coder_backlog.md` holds two entries, the pane still says `coder: 0/0`. That legacy layout is the one `show-multi.sh` falls back to with no `--project`. CODER-053 recorded this as deliberate design choice (4). It is filed anyway because it replaces a refusal with counts the code never read. All in-tree multi-project callers pass `--project`, so the blast radius is small.",
+      "filed_as": "BUG-0534",
+      "filed_by": "TESTER (autonomous Path C) — the queue pane, asked for no particular project, now prints \"0/0\" for every agent as if the queues were empty, where it used to refuse and say a project is required.",
+      "severity": "medium",
+      "category": "bug",
+      "regression": "yes",
+      "integrity": "none",
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to the queue pane's project resolution)",
+        "severity": "medium",
+        "regression": "yes",
+        "integrity": "none",
+        "filed_as": "BUG-0534 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — the queue pane, asked for no particular project, now prints \"0/0\" for every agent as if the queues were empty, where it used to refuse and say a project is required."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "metrics_aggregator's private atomic writer was not replaced",
+      "heading": "Finding 3: metrics_aggregator's private atomic writer was not replaced",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one module; the duplicates lint's exact-name deny-list is the reason it went unseen)\n**Severity:** low\n**Filed As:** BUG-0535 (Path C-A)\n**Filed By:** TESTER (autonomous Path C) — one of the private \"write a file safely\" helpers this release set out to replace with the shared one was missed, and it skips the flush-to-disk step the shared writer performs.\n\nDeliverable 2 says every copy in the Intent inventory is replaced by an import (\"`_atomic_write` in 8 modules\"). `ai_main` has exactly eight `def _atomic_write*` helpers. Seven were replaced. `team/scripts/lib/metrics_aggregator.py::_atomic_write_json` (temp + `os.replace`, no fsync) remains. CODER-044 counted the eight differently, treating resolution_stage's inline blocks as the eighth. Per the conflict policy I applied the more conservative reading. `lint_python_duplicates.py` matches the exact name, so it reports `atomic-write=0`.",
+      "filed_as": "BUG-0535",
+      "filed_by": "TESTER (autonomous Path C) — one of the private \"write a file safely\" helpers this release set out to replace with the shared one was missed, and it skips the flush-to-disk step the shared writer performs.",
+      "severity": "low",
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {},
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one module; the duplicates lint's exact-name deny-list is the reason it went unseen)",
+        "severity": "low",
+        "filed_as": "BUG-0535 (Path C-A)",
+        "filed_by": "TESTER (autonomous Path C) — one of the private \"write a file safely\" helpers this release set out to replace with the shared one was missed, and it skips the flush-to-disk step the shared writer performs."
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Lint ratchets and convergence criterion",
+      "heading": "Finding 4: Lint ratchets and convergence criterion",
+      "level": 3,
+      "body": "**Category:** pass\n- `lint_inline_python.py`: no file above its allowlist; allowlist 172 blocks/8605 lines at the lint's introduction → 145/7744 at RC head (spec's v2.26.12 measure: 131 heredocs/8,514 lines; RC measures 103 heredocs + 42 `-c`). Fixture probe: unlisted file, above-count, below-count, unquoted `<<PY`, `python3 - \\` continuation and `python3 -c` all detected; `tests/` excluded.\n- `lint_python_duplicates.py`: atomic-write, traversal, version-parse, iso-parse, read-section, ini-instantiation, state-regex all 0; 0 ratchet findings. Fixture probe fires all seven families plus duplicate-body.\n- `lint_api_route_impl.py`: 0 findings; 14 module / 18 shell rows. Shell rows 30 → 18 across the RC (−12, criterion ≥12 met). Fixture-manifest probes fire route-not-calling, route-shells-out, cli-not-reaching, shell-rows-above-baseline, and baseline-tighten.\n- `grep -cE 'python3?\\b[^#]*<<' team/scripts/lib/wake_task_state.sh` → 0.\n- All three are quality class (exit 0 always) and are wired in both runners, the census, and `docs/coding-standards.md`, as the requirement's Enforcement Class says.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Class-ii action routes call ops.write in process; CLI/REST golden pair",
+      "heading": "Finding 5: Class-ii action routes call ops.write in process; CLI/REST golden pair",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\nThe route-to-function and no-subprocess test covers all ten verbs (`test_operations_ops_calls.py`, with process starters patched to fail). My independent golden pair ran 12 cases (halt ×2 incl. idempotent repeat, unhalt with nothing to unhalt, halt of an unknown project, close of an unknown and a BACKLOG key, wontdo on DONE and BACKLOG, reset of WORKING, delete without/with force, halt-after with a malformed `until`), each on three identical sandbox boards: REST, RC CLI, and `ai_main` CLI. Exit code, stdout, and stderr were identical in all 12; file effects were identical in 11. Caveat: after `delete --force`, `ai_main` also removed the blank line under the queue header (its regex `^\\s*-` spanned newlines); the RC keeps it. The new result is the correct layout but was not declared by CODER-048. ICD 1.12.0 → 1.13.0, one bump, changelog entry present.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Converted heredoc families preserve behaviour",
+      "heading": "Finding 6: Converted heredoc families preserve behaviour",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\nEvery function in the three parity reference fixtures (`wake_task_state_heredoc_reference.sh`, `discovery_finalize_heredoc_reference.sh`, `overwatch_harness_heredoc_reference.sh`) is verbatim `ai_main` code, or the verbatim `ai_main` inline heredoc body lifted into a function. So the parity tests compare against real previous behaviour. My own old-vs-new run of `get_state` / `set_state` / `stamp_model_field` on 7 status variants (lowercase, blank lines, bold, inline `## State: X`, trailing text, wrong heading, trailing whitespace) was identical except the declared deliberate difference: inline `## State: DONE` now reads and rewrites instead of failing. The heredocs left in the deliverable-5 files (discovery bundle ordering, dispatch ledger, README field extractors, provider read, Model-dominance) fall outside the parenthetical scope the requirement names.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "/show and /show-queues route through ops.read",
+      "heading": "Finding 7: /show and /show-queues route through ops.read",
+      "level": 3,
+      "body": "**Category:** pass\n`show.sh`: 16 cases on a copy of the live board (tasks across roles and months, `--file readme`, three bugs, an unknown key) — `ai_main` CLI, RC CLI, and REST byte-identical. `show-queues --project`: identical except the wall-clock `elapsed:` line. The 101-line heredoc is gone. The no-project behaviour is Finding 2.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Shared library, status and marker APIs, bash helpers, coding standard",
+      "heading": "Finding 8: Shared library, status and marker APIs, bash helpers, coding standard",
+      "level": 3,
+      "body": "**Category:** pass\nSee the verification log below: D2 modules and `projects_registry` order; `md_fields` variants; D3 CLI and read-mode guards; D4 marker verbs; D8 helper copies collapsed to one each, with `_active_rc` reading through `read_state_field`; D9 directives 12–14.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

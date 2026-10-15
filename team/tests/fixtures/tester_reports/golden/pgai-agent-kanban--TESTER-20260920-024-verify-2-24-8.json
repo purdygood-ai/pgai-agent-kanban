@@ -1,0 +1,389 @@
+{
+  "recommendation": "ship-with-concerns",
+  "systemic_risk": "medium",
+  "summary": "Verification of release candidate `ai_rc/v2.24.8` (commit `e13cdbd`) for project\npgai-agent-kanban against\n`requirements/v2.24.8-bugfix-bundle-20260920.md` — a discovery-pipeline bug\nbundle carrying twelve bundled items (BUG-0344 through BUG-0355, including three\nhygiene ride-alongs). Pre-flight, structural, content, behavioral and\nconstraint checks were run inside the detached read-only worktree at\n`/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/TESTER-20260920-024-verify-2-24-8`.\nBoth gated runners were executed with `--coverage` and both exited 0.\n\nVerdict: every one of the twelve bundled items is addressed in the implementation, both\ngated runners exit 0, and every Python and bash file in the diff compiles and parses —\nthe requirements doc's three acceptance criteria are met. Sixteen findings: eleven `pass`,\none `pass-with-caveat`, three `gap`, one `bug`. Five follow-ups filed via Path C\n(autonomous follow-up filing — non-blocking) as BUG-0357 through BUG-0361; none is severe\nenough to make the release unusable, so the recommendation is `SHIP-WITH-CONCERNS`. The\nrelease pipeline works, no data is at risk, no security defect was found, and the build\nran unattended from PM materialization to this verification with zero manual\ninterventions.",
+  "findings": [
+    {
+      "number": 1,
+      "label": "1",
+      "title": "Event band still exceeds the 5 s pane-refresh budget at the shipped read bound against the operator's live logs",
+      "heading": "Finding 1: Event band still exceeds the 5 s pane-refresh budget at the shipped read bound against the operator's live logs",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** medium (3-5 CODER tasks)\n**Systemic Risk:** low (isolated to one dashboard renderer)\n**Filed As:** BUG-0357 (Path C-A — filed as BUG)\n**Traces to:** bundled item BUG-0344-event-band-render-budget-unmet, \"Expected: one render\ncompletes inside the pane's own refresh interval (5 s by default) against production-shaped\ninput\".\n\nReproduced the bug's own harness: a throwaway kanban root whose five per-agent logs are\nsymlinks to the operator's live `logs/cron-*.log` (818 MB total), rendering with\n`--no-color` from the RC worktree.\n\n| tree | read bound | surviving signal lines | wall clock |\n|---|---|---|---|\n| `ai_main` (v2.24.7) | 20000 (shipped default) | 29309 | 147.84 s / 141.61 s |\n| `ai_rc/v2.24.8` | 20000 (shipped default) | 29309 | 23.04 / 21.68 / 21.33 / 21.17 / 21.37 / 21.26 s |\n| `ai_rc/v2.24.8` | 5200 (~7.6k surviving, the volume BUG-0344 measured) | 5575 rows out | **4.03 s** |\n\nThe fix is real and large — roughly a 6.8x speedup over `ai_main` on identical input, and it\nmeets the 5 s budget at the workload the bug measured (7,628 surviving lines → 4.03 s). It does\nnot meet the budget at today's production volume: the operator's logs have grown since the bug\nwas filed, 20,000-line tail now yields 29,309 surviving signal lines instead of 7,628, and the\nrender takes ~21 s against a 5 s pane refresh.\n\nNot a regression — `ai_main` takes ~145 s on the same input. Rated `medium` per\n`SOP-core.md` (\"Rating a Finding\"): the band still renders correctly and the pane simply\nrefreshes behind itself, so a workaround exists (lower\n`PGAI_DASHBOARD_EVENT_BAND_READ_BOUND_LINES`; 5200 measured green).",
+      "filed_as": "BUG-0357",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "medium",
+      "systemic_risk": "low",
+      "extra": {
+        "traces_to": "bundled item BUG-0344-event-band-render-budget-unmet, \"Expected: one render"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "medium (3-5 CODER tasks)",
+        "systemic_risk": "low (isolated to one dashboard renderer)",
+        "filed_as": "BUG-0357 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 2,
+      "label": "2",
+      "title": "Event band continuation lines inherit their parent's timestamp; render is deterministic — pass",
+      "heading": "Finding 2: Event band continuation lines inherit their parent's timestamp; render is deterministic — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** bundled item BUG-0347-event-band-stamps-untimed-lines-now.\n\nFixture: one agent log with a timestamped parent (`08:15:42`), two bare\n`error:` / `message:` continuation lines, and a second timestamped parent (`09:30:11`).\n\n- RC render: all three rows of the first block carry `[pm 08:15:42]`, adjacent, in source\n  order; the second parent follows at `[pm 09:30:11]`. No row carries a timestamp absent\n  from the input.\n- Two consecutive RC renders one second apart are **byte-identical** (`cmp` on full stdout).\n- Original failure mode synthesized against `ai_main`: the two continuation lines are stamped\n  with the render clock (`[pm 21:15:32]`), sort to the bottom away from their parent, and the\n  two renders **differ** (`21:15:32` vs `21:15:34`). Both halves of Step 6.5 confirmed.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0347-event-band-stamps-untimed-lines-now."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 3,
+      "label": "3",
+      "title": "Git boundary guard refuses remote verbs behind leading global options — pass",
+      "heading": "Finding 3: Git boundary guard refuses remote verbs behind leading global options — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** bundled item BUG-0349-git-guard-bypassed-by-global-opts.\n\nExercised the shim on PATH in a throwaway root with an isolated repo and evidence sink:\n\n- Under `PGAI_AGENT_ROLE=coder`: `git -C <dir> fetch`, `git -c a.b=c push`,\n  `git --no-pager pull`, and `git --git-dir=<d> fetch` each exit 1 with the dual-channel\n  block (`error: git-boundary-guard.non-cm-remote-verb` / `message: role 'coder' invoked\n  'git <verb>' …` / `remedy: ask CM to run …`).\n- The evidence file gained exactly four JSON-Lines records, one per refusal, each `argv`\n  preserving the full invocation including the global options.\n- Under `PGAI_AGENT_ROLE=cm` the same four pass through to the real git with its own exit\n  status preserved (0 for the two that had a repo, 128 with git's own\n  `fatal: not a git repository` for the two that did not) and the evidence file stayed at\n  four records.\n- `git -C <dir> status --short` under role `coder` passes through untouched (exit 0).\n- Original failure mode on `ai_main`: `git -C <dir> fetch` under role `coder` exits **0**\n  (bypassed) while bare `git fetch` is refused — the exact bypass the bug describes.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0349-git-guard-bypassed-by-global-opts."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 4,
+      "label": "4",
+      "title": "Terminal-task worktrees are reclaimed by the reconciliation sweep — pass",
+      "heading": "Finding 4: Terminal-task worktrees are reclaimed by the reconciliation sweep — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** bundled item BUG-0353-completed-task-worktrees-not-torn-down.\n\n`reconcile_terminal_worktrees` (new in `team/scripts/lib/wake_task_state.sh`) is wired at\nthree call sites in `team/scripts/lib/wake_driver.sh` (lines 503, 640, 728). Exercised in a\nthrowaway git repo with four registered worktrees under an isolated worktree base and four\nsynthetic task folders:\n\n| task state | worktree after sweep |\n|---|---|\n| DONE | removed |\n| WONT-DO | removed |\n| WORKING | retained |\n| BLOCKED | retained (documented conservative choice — preserves evidence) |\n\nA second invocation is a clean no-op returning 0 (idempotency criterion). The sweep is\nscoped by `case \"$wt_path\" in \"${wt_base}\"/*)`, so a sibling project's worktrees and the\ncanonical dev tree are structurally out of reach; this was confirmed inadvertently when a\nleaked `PP_dev_tree_path` pointed the first run at the real dev tree and the base filter\nexcluded every real worktree.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0353-completed-task-worktrees-not-torn-down."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 5,
+      "label": "5",
+      "title": "Post-suite scratch sweep survives read-only leftovers and cannot set the runner verdict — pass",
+      "heading": "Finding 5: Post-suite scratch sweep survives read-only leftovers and cannot set the runner verdict — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** bundled item BUG-0354-integration-runner-red-on-clean-suite.\n\n- With `0555` directories seeded under `${TEMP}/tests/`, RC `pgai_temp_cleanup_tests`\n  removes the `tests/` subtree completely and returns 0 under `set -euo pipefail`.\n- Original failure mode on `ai_main`: the same fixture aborts the calling script\n  (`rm: cannot remove …: Permission denied`, outer exit 1, the script never reaches its\n  final line).\n- The runner now calls the sweep through `gated_runner_run_quality_lint \"scratch_sweep\"`.\n  Injecting a sweep that fails for a reason `chmod` cannot fix prints\n  `[gated-runner] scratch_sweep: quality-class finding(s) (exit 1) — non-blocking,\n  continuing.` and the wrapper returns 0, so the verdict stays pytest's.\n- Both gated runners' live output confirms the ordering change: `scratch_sweep: OK` is\n  printed before the findings file is written, on both suites.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0354-integration-runner-red-on-clean-suite."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 6,
+      "label": "6",
+      "title": "Hygiene bug filer's tree-cleanliness gate suppresses dirty-site findings and still files committed ones — pass",
+      "heading": "Finding 6: Hygiene bug filer's tree-cleanliness gate suppresses dirty-site findings and still files committed ones — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** bundled item BUG-0346-hygiene-lint-files-phantom-bugs.\n\nDrove `file_or_cite_hygiene_bugs` against two throwaway git repositories with an identical\nsynthetic `provenance` finding:\n\n| repo | finding's file state | result | `bugs/` contents |\n|---|---|---|---|\n| committed-site | committed at HEAD | `[('provenance','filed','BUG-0001',1)]` | `BUG-0001-hygiene-lint-provenance.md` |\n| dirty-site | violation only in an uncommitted edit | `[]` | empty |\n\nBoth halves of the acceptance criterion confirmed in one run: the real case still files\n(no regression), the transient case files nothing. The filed bug carries the new\n`## Observed At Commit` section with the repository's real HEAD hash.\n`python3 team/scripts/lint_hygiene.py --classes provenance` against the RC reports\n`OK — 0 findings across 8 scan director(y/ies)`, confirming the scanner itself is unchanged,\nand no `hygiene` entry appears in either runner's findings file this run.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0346-hygiene-lint-files-phantom-bugs."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 7,
+      "label": "7",
+      "title": "OVERWATCH backlog is scaffolded on fresh create, upgraded installs, and self-healed at wake — pass",
+      "heading": "Finding 7: OVERWATCH backlog is scaffolded on fresh create, upgraded installs, and self-healed at wake — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** bundled item BUG-0355-overwatch-backlog-not-scaffolded.\n\n- `team/scripts/lib/overwatch_backlog_seed.sh` is the single source of the seeded text, sourced\n  by all three call sites (`create-project.sh:102`, `wake_bootstrap.sh:145`,\n  `migrate_v2.24.7_to_v2.24.8.sh:64`).\n- `team/scripts/lib/wake_driver.sh:428` recreates a missing `overwatch_backlog.md` and continues\n  into the resolution stage rather than taking the \"backlog not found, skipping\" exit — the\n  branch that would have swallowed a HALT the overwatch carve-out let through.\n- Upgrade migration exercised in an isolated two-project registry:\n  `--dry-run` reports `[would-seed] demo` / `[skip] alpha` and writes nothing; the real run\n  creates `demo`'s file with the shared header text and leaves `alpha`'s pre-existing content\n  byte-for-byte; a third run reports `[skip]` for both (idempotent).\n- The auto-runner selects it correctly: `run-migrations.sh --from v2.24.7 --to v2.24.8 --dry-run`\n  reports `applying 1 migration(s) selected for (v2.24.7, v2.24.8]`.\n- `migrate_v2.24.7_to_v2.24.8.sh --help` names every argument.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0355-overwatch-backlog-not-scaffolded."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 8,
+      "label": "8",
+      "title": "Deferred-bug glyph renders as a suffix and the deferral posture reaches the status bar — pass",
+      "heading": "Finding 8: Deferred-bug glyph renders as a suffix and the deferral posture reaches the status bar — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** bundled item BUG-0348-defer-glyph-placement.\n\n`defer_card_glyph_prefix` is renamed to `defer_card_glyph_suffix` at the single shared glyph\nsite and returns `\" <glyph>\"` instead of `\"<glyph> \"`; all three consumers\n(`column_render_cells.sh`, `column_render_data_multi.sh`, `column_render_frame.sh`) append it\nafter the id, and `column_render_frame.sh` no longer folds the glyph width into `tag_vis`, so\nevery card's id starts at the same column. `docs/OPERATIONS.md` was updated in the same change\nand now describes the suffix placement with an example.\n\nStatus-bar half, rendered live against the operator's install (which has\n`projects/pgai-agent-kanban/DEFER-LOW-BUGS` armed with `until=v2.27.0`):\n\n```\nglobal:       v2.24.6 | PM:auto | BUGS DEFERRED 1 (<=low) until v2.27.0 | Sun 2026-09-20T21:21:32\nper-project:  v2.24.6 | pgai-agent-kanban:v2.24.7 | workflow:release | PM:auto | BUGS DEFERRED 1 (<=low) until v2.27.0 | ...\nstatus-right: v2.24.6  PM:auto  HALT:off  BUGS DEFERRED 1 (<=low) until v2.27.0  ...\n```\n\nThe segment is present on all three bars, in the same shape as the neighbouring segments, and\ncovers none of them.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0348-defer-glyph-placement."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 9,
+      "label": "9",
+      "title": "Hardcoded scratch-root literals removed from the why-details test module — pass",
+      "heading": "Finding 9: Hardcoded scratch-root literals removed from the why-details test module — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** bundled item BUG-0345-test-anti-pattern-hardcoded-temp-literal.\n\nBoth literals in `team/tests/unit/test_why_details_pane.py` are now built from the\n`pgai_tests_temp_dir` fixture rather than spelled out, with a comment explaining the path is\ninert message text. `python3 team/scripts/lint_test_anti_patterns.py` reports\n`OK — 0 findings across 554 file(s) (342 test, 212 runtime)` and exits 0. `lint_test_anti_patterns.py`\nitself is unchanged in the diff, as the ticket's constraint required.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0345-test-anti-pattern-hardcoded-temp-literal."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 10,
+      "label": "10",
+      "title": "Engine-size ceiling cleared for the named file, but a different engine file crossed it in the same RC",
+      "heading": "Finding 10: Engine-size ceiling cleared for the named file, but a different engine file crossed it in the same RC",
+      "level": 3,
+      "body": "**Category:** pass-with-caveat\n**Traces to:** bundled item BUG-0350-wake-driver-invoke-over-engine-ceiling.\n\nMet: `team/scripts/lib/wake_driver_invoke.sh` is 798 lines on the RC (845 on `ai_main`), the\nguard wiring having been extracted into the new single-concern stage\n`team/scripts/lib/wake_guard_wiring.sh` (77 lines) — the first and highest-fidelity of the\nthree directions the bug offered, not the allow-list shortcut it warned against.\n`run-unit-tests.sh` exits 0. Both exported variables are documented in full in the new stage's\nown header, which `wake_driver_invoke.sh:644` points at. The guard-wiring tests\n(`test_wake_guard_wiring.py`, `test_git_boundary_guard_wiring.py`) pass.\n\nCaveat: the bug's second acceptance bullet — \"`lint_engine_size_dupe.py` reports no oversized\nengine file\" — is not met on the RC as a whole. `team/scripts/lib/wake_task_state.sh` went from\n794 lines on `ai_main` to 907 on the RC (the `reconcile_terminal_worktrees` addition from\nCODER-20260920-018), and is now the file the lint names. This is a quality-class reading, not\nbreakage, and it is recorded under `## Lint Findings (non-blocking)` and filed as BUG-0359 (Path C-A — filed as BUG).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass-with-caveat",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0350-wake-driver-invoke-over-engine-ceiling."
+      },
+      "raw": {
+        "category": "pass-with-caveat"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 11,
+      "label": "11",
+      "title": "Engine-size check demoted to advisory; duplication half stays hard — pass",
+      "heading": "Finding 11: Engine-size check demoted to advisory; duplication half stays hard — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** bundled item BUG-0351-engine-size-heuristic-hard-gates-suite.\n\n`lint_engine_size_dupe.py`'s `main()` now splits its nonzero codes — `1` for a duplicate-function\ncollision (real damage, hard), `3` for a size-only violation (advisory, CONVERT) — and\n`docs/blocking-site-census.md` row 53 was updated to state that split. The test module's\ndocstring names the enforcement class it implements, its real-tree size test narrates instead\nof asserting, and its real-tree exit-code test accepts `0` or `3` while still rejecting `1`.\n\nExercised directly:\n\n| invocation | exit |\n|---|---|\n| `--scripts-dir team/tests/fixtures/engine_size_dupe/duplicate_function` | 1 (hard) |\n| `--scripts-dir team/tests/fixtures/engine_size_dupe/oversized_engine` | 3 (advisory) |\n| `--scripts-dir team/scripts` (the real tree, one file over the ceiling) | 3 |\n\nThe RC demonstrates the fix live rather than only in fixtures: a real engine file\n(`wake_task_state.sh`, 907 lines) is over the ceiling on this very RC, the lint recorded it as\na quality finding in both runners' findings files, and **both runners still exited 0** — exactly\nthe behaviour the bug asked for, and the behaviour that failed the suite at v2.24.7.\n`python3 team/scripts/lint_gate_census_compliance.py` exits 0 (`36 file(s) checked, 0 offenders`).",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "bundled item BUG-0351-engine-size-heuristic-hard-gates-suite."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 12,
+      "label": "12",
+      "title": "Governance budgets raised but the loader's Key Registry defaults were not",
+      "heading": "Finding 12: Governance budgets raised but the loader's Key Registry defaults were not",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (isolated to one config key pair)\n**Filed As:** BUG-0358 (Path C-A — filed as BUG: code defect / regression / test failure)\n**Traces to:** bundled item BUG-0352-governance-byte-budget-over-tester-cm.\n\nMet: the prose trim landed (`team/SOP-core.md`'s origin-boundary paragraphs collapse to one\nparagraph plus a pointer at `git_boundary_guard.sh`'s header; `roles/TESTER.md` Step 6.12's\nrating guidance collapses to a pointer at `docs/tester-verification-reference.md`), the trimmed\ntext is accurate against the implementation, Step 6.12 still names `git-boundary-guard.jsonl`\nas its evidence source concretely, and `kanban.cfg_example` carries the raised values with the\nreason in the inline comment. Measured:\n\n| role | assembled | main budget | RC budget |\n|---|---|---|---|\n| tester | 103415 | 102400 → **OVER** | 110592 → under |\n| cm | 86118 | 86016 → **OVER** | 94208 → under |\n\nNot met: `team/scripts/lib/config_loader.sh`'s Key Registry still documents\n`budget_bytes_tester 102400` and `budget_bytes_cm 86016`. The `doc_command_truth` key-parity\nlint fires twice on this exact disagreement (see `## Lint Findings`), and the practical\nconsequence is larger than the lint: an install whose `kanban.cfg` does not set the two keys\nresolves them from the loader's default, so the governance-budget lint would report `tester`\nand `cm` over budget again on that install. The bug's own acceptance bullet — \"No\n`governance_byte_budget` entry appears in either runner's findings file on the following\nrelease's verification run\" — holds on this run only because the operator's `kanban.cfg` has no\n`[governance]` section at all and every role therefore reports `unbudgeted`.",
+      "filed_as": "BUG-0358",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "traces_to": "bundled item BUG-0352-governance-byte-budget-over-tester-cm."
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (isolated to one config key pair)",
+        "filed_as": "BUG-0358 (Path C-A — filed as BUG: code defect / regression / test failure)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 13,
+      "label": "13",
+      "title": "The live-process guard the new worktree sweep depends on returned a false positive on every cycle it ran",
+      "heading": "Finding 13: The live-process guard the new worktree sweep depends on returned a false positive on every cycle it ran",
+      "level": 3,
+      "body": "**Category:** gap\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** medium (recurs on every cycle; the sweep it gates is the framework's own self-healing path)\n**Filed As:** BUG-0360 (Path C-A — filed as BUG)\n**Traces to:** bundled item BUG-0353's acceptance bullet 5 (\"leftovers from earlier cycles are\ncleaned up by the reconciliation sweep rather than requiring an operator to run\n`git worktree prune` by hand\"), and Step 6.11 \"state drift\".\n\n`reconcile_terminal_worktrees` skips any worktree whose `task_id` matches\n`pgrep -f \"$task_id\"`, mirroring `reconcile_stale_active`'s own guard. Observed live:\n\n- `CODER-20260920-018-task-worktree-teardown` has read `## State: DONE` since roughly\n  17:26 on 2026-09-20, yet its `coder_backlog.md` marker is still `[A]` and its worktree is\n  still registered in the dev tree.\n- `logs/cron-coder.log` carries **61** occurrences of\n  `stale-active: CODER-20260920-018-task-worktree-teardown has active process, keeping [A]`\n  and **zero** occurrences of the `no active process` branch, from 17:26 through 20:38.\n- No process matches that id now (checked from a script that does not itself contain the\n  literal, to avoid the self-match this very guard's own test module documents).\n- The match surface is wide by construction: `team/scripts/lib/provider_claude.sh:182` invokes\n  `claude … -p \"$prompt\"`, so the entire dispatch prompt — which embeds the task id and the\n  task's worktree path — sits in the provider process's `argv` and is visible to `pgrep -f`.\n\nThe two DONE tasks CODER-20260920-018's own status note predicted the new sweep would reclaim\n(`CODER-20260920-006`, `TESTER-20260920-008`) are still registered. The live install is v2.24.6\nand carries no sweep at all, so their survival is not itself evidence against the RC — but the\nguard that has been answering \"active process\" for a finished task on 61 consecutive cycles is\nthe same guard the new sweep inherits, and while it answers that way the sweep cannot reclaim\nthe exact leftover it was written for.",
+      "filed_as": "BUG-0360",
+      "filed_by": null,
+      "severity": null,
+      "category": "gap",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "medium",
+      "extra": {
+        "traces_to": "bundled item BUG-0353's acceptance bullet 5 (\"leftovers from earlier cycles are"
+      },
+      "raw": {
+        "category": "gap",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "medium (recurs on every cycle; the sweep it gates is the framework's own self-healing path)",
+        "filed_as": "BUG-0360 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 14,
+      "label": "14",
+      "title": "A shipped census row cites an internal bug identifier",
+      "heading": "Finding 14: A shipped census row cites an internal bug identifier",
+      "level": 3,
+      "body": "**Category:** bug\n**Fix Effort:** small (1-2 CODER tasks)\n**Systemic Risk:** low (one table cell in one document)\n**Filed As:** BUG-0361 (Path C-A — filed as BUG)\n**Traces to:** the `SOP-core.md` constraint \"Naming: describe behavior, not scaffolding or\nprovenance\" — \"let no internal bug identifier, task ID, RC, or framework-version citation reach\na shipped artifact\".\n\n`docs/blocking-site-census.md` row 63, added by this RC, opens its condition cell with\n`BUG-0354: a read-only leftover directory under …`. None of the three sanctioned exceptions\napplies: it is not a usage example where a bug-shaped value illustrates an interface, not a skip\nannotation citing an open follow-up, and not an external constraint. The same RC's\n`docs/OPERATIONS.md` change uses `BUG-0348 ✋` legitimately — there the identifier is an example\n*value* illustrating the card format.\n\nNo lint catches it: `lint_hygiene.py`'s prose surface defaults to `release-notes/` and does not\nscan `docs/`, which is why a clean provenance run coexists with this citation.",
+      "filed_as": "BUG-0361",
+      "filed_by": null,
+      "severity": null,
+      "category": "bug",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": "small",
+      "systemic_risk": "low",
+      "extra": {
+        "traces_to": "the `SOP-core.md` constraint \"Naming: describe behavior, not scaffolding or"
+      },
+      "raw": {
+        "category": "bug",
+        "fix_effort": "small (1-2 CODER tasks)",
+        "systemic_risk": "low (one table cell in one document)",
+        "filed_as": "BUG-0361 (Path C-A — filed as BUG)"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 15,
+      "label": "15",
+      "title": "Gated suites, coverage, and the remaining methodology steps — pass",
+      "heading": "Finding 15: Gated suites, coverage, and the remaining methodology steps — pass",
+      "level": 3,
+      "body": "**Category:** pass\n\n- **Pre-flight (Step 2).** All twelve prerequisite tasks read `## State: DONE`; every one of\n  their `ai_feature/…` branches is absent locally, the normal post-merge shape, so both\n  merge checks pass trivially. All twelve merge commits are present in\n  `git log ai_main..ai_rc/v2.24.8` (29 commits, single author).\n- **Working tree (Step 3).** `git rev-parse HEAD` = `git rev-parse ai_rc/v2.24.8` =\n  `e13cdbd32a6ed079752914f1090b8cd62335b4c2`; `git status --porcelain` empty;\n  `git stash list` empty.\n- **Step 5a.** `team/scripts/run-unit-tests.sh --coverage` → `UNIT_EXIT=0`\n  (4958 passed, 31 skipped, 838.84s). `team/scripts/run-integration-tests.sh --coverage` →\n  `INTEGRATION_EXIT=0` (537 passed, 1 skipped, 586.79s). Both runners also reported\n  `bare_tmp_cleanliness: OK`, `listener_cleanliness: OK`, `scratch_sweep: OK`.\n- **Step 6.1.** `release-state.md` holds all four fields; `## Active RC` is `v2.24.8`,\n  `## Last Released` is a well-formed `v2.24.7`, and `semver_gt v2.24.8 v2.24.7` (via\n  `team/scripts/lib/semver.sh` against `pp_last_released_version`) is true.\n- **Step 6.8.** Skipped with a note: the diff touches no release-lifecycle file\n  (`cm-release.sh`, `cm-open-rc.sh`, `cm-cancel-rc.sh`, `lib/project_paths.sh`, `scripts/cm/`).\n  `tests/integration/test_cm_release_synthetic.py` ran green in the integration suite regardless.\n- **Step 6.9.** No hardcoded credential shape in the added lines. The two new sourced libraries\n  carry no `set -euo pipefail`, which matches the house convention for sourced libs (72 of 79\n  files under `team/scripts/lib/` omit it); the new executable migration script has it.\n- **Step 6.10.** Prerequisite graph over the fourteen cycle tasks: no cycles, every referenced\n  task folder exists, no sequence-number collisions, bookends linked\n  (`CM-…-023-open-rc-2-24-8` → twelve work tasks → `TESTER-…-024-verify-2-24-8` →\n  `CM-…-026-release-2-24-8`, currently `[W]`).\n- **Step 6.13.** `team/scripts/lint_skip_bug_gate.sh` exits 0 —\n  `0 missing files`, no placeholder shapes, all skip annotations compliant. Independent greps\n  for `BUG-SKIP` and for skip-adjacent `BUG-NNNN` citations found only synthetic fixture IDs\n  inside the gate's own test modules.\n- **Step 6.14.** New script `migrate_v2.24.7_to_v2.24.8.sh` has a `--help` naming every\n  argument. The new shim-adjacent file `wake_guard_wiring.sh` is a sourced library with no\n  usage surface. No newly duplicated `lib/` implementation; no new hardcoded operational value.\n  The one coding-standards hit is Finding 14.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {},
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    },
+    {
+      "number": 16,
+      "label": "16",
+      "title": "The requirements document's own three acceptance criteria — pass",
+      "heading": "Finding 16: The requirements document's own three acceptance criteria — pass",
+      "level": 3,
+      "body": "**Category:** pass\n**Traces to:** `requirements/v2.24.8-bugfix-bundle-20260920.md` `## Acceptance Criteria`.\n\n- **\"Each bundled item is addressed in the implementation.\"** All twelve are. Nine are met\n  in full (Findings 2-9, 11); one is met with a caveat (Finding 10); two are addressed but\n  incompletely (Findings 1 and 12). Every bundled item's own work landed on the RC as a\n  `--no-ff` merge commit.\n- **\"All Python files compile cleanly.\"** All 17 changed `.py` files compile under\n  `python3 -m py_compile`.\n- **\"All bash files pass syntax check.\"** All 17 changed `.sh` files plus the extensionless\n  guard shim `team/scripts/wake/git-guard/git` pass `bash -n`.",
+      "filed_as": null,
+      "filed_by": null,
+      "severity": null,
+      "category": "pass",
+      "regression": null,
+      "integrity": null,
+      "fix_effort": null,
+      "systemic_risk": null,
+      "extra": {
+        "traces_to": "`requirements/v2.24.8-bugfix-bundle-20260920.md` `## Acceptance Criteria`."
+      },
+      "raw": {
+        "category": "pass"
+      },
+      "sub_findings": []
+    }
+  ],
+  "raw": {
+    "recommendation": "SHIP-WITH-CONCERNS",
+    "systemic_risk": "medium"
+  }
+}

@@ -33,6 +33,7 @@
 #   --kanban-root PATH Override the kanban root (default: $PGAI_AGENT_KANBAN_ROOT_PATH
 #                      or ~/pgai_agent_kanban).
 #   --no-color         Suppress ANSI color output (also honored via NO_COLOR env var).
+#   --help, -h         Print this usage and exit 0.
 #
 # Exit codes:
 #   0 — scan complete (zero or more stale files found; see output)
@@ -48,6 +49,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEAM_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=lib/header_help.sh
+source "${SCRIPT_DIR}/lib/header_help.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -59,7 +62,7 @@ USE_COLOR=true
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
-      sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      header_help_print "${BASH_SOURCE[0]}"
       exit 0
       ;;
     --project)
